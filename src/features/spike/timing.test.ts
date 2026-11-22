@@ -57,3 +57,19 @@ describe('countInClicks', () => {
     expect(countInClicks(fourFour120, 0, 1, 5)).toEqual({ clicks: [], downbeat: 5 });
   });
 });
+
+describe('countInClicks in compound and slow meters', () => {
+  it('clicks six eighth notes for one bar of 6/8', () => {
+    const { clicks, downbeat } = countInClicks({ beats: 6, beatValue: 8, tempo: 120 }, 1, 1, 0);
+    expect(clicks).toHaveLength(6);
+    expect(clicks[1]?.time).toBeCloseTo(0.25);
+    expect(clicks.filter((c) => c.accent)).toHaveLength(1);
+    expect(downbeat).toBeCloseTo(1.5);
+  });
+
+  it('downbeat matches one bar duration at 25% speed', () => {
+    const bar = { beats: 4, beatValue: 4, tempo: 120 };
+    const { downbeat } = countInClicks(bar, 1, 0.25, 0);
+    expect(downbeat * 1000).toBeCloseTo(barDurationMs(bar, 0.25));
+  });
+});

@@ -65,6 +65,7 @@ docs/
 - alphaTex: wrap metadata arguments in parentheses (`\tuning (E4 B3 G3 D3 A2 E2)`, `\ts (3 4)`). Unwrapped arguments can swallow a following `( ... )` chord. `npm run fixtures` fails on any alphaTex warning.
 - alphaTab settings: always pass `core.fontDirectory: '/font/'`. Without it, production builds look for the music font next to the lazy JS chunk (`/assets/font/`) and nothing renders; dev works, so it's easy to miss. `player.soundFont` has no default, so pass an absolute path such as `/soundfont/sonivox.sf2` (or load bytes with `api.loadSoundFont`). Load alphaTab only from lazily imported routes so it stays out of the main bundle.
 - Tests that read .gp files use the helpers in `tests/unit/score-helpers.ts` (`loadScoreFile`, `tempoAtBar`, `drumTrackIndex`). Tests over `tests/fixtures/real/` must skip cleanly when the folder is empty (see `tests/unit/real-fixtures.test.ts`).
+- Playwright specs that use DOM types inside `evaluate` start with `/// <reference lib="dom" />` (the node tsconfig has no DOM lib). alphaTab lazy-renders the score as it scrolls into view, so scroll the score container into view before asserting on notation (see `tests/e2e/spike.spec.ts`).
 
 ## Stage workflow
 

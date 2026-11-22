@@ -157,3 +157,44 @@ Nothing has been downloaded. To try a candidate, download it into `public/sf-can
 | FluidR3Mono GM        | `public/sf-candidates/FluidR3Mono_GM.sf3`    | MuseScore repo, `share/sound/FluidR3Mono_GM.sf3` (https://github.com/musescore/MuseScore)                     | MIT (verified, `FluidR3Mono_License.md`)                                                                                                                           | sf3    | Not confirmed (from memory, about 20 to 25 MB)                                          |
 
 Suggested order: MuseScore General sf3 first (license and size verified, includes the extra FluidR3 drum kits), then GeneralUser GS (known for its drum kits; verify its license). Any of them is 15 to 30 times the size of Sonivox, which matters for first load on a phone and for the offline cache. If one wins on drums, the drum-kit-only append approach under Soundfont may keep the size down.
+
+## Test
+
+**Summary.** Added a Playwright spec for `/spike` that runs on the phone, tablet and desktop projects, plus a few unit tests for edge cases in the pure spike modules. Fixed the reversed loop range bug from the Build note (a few lines). No audio is checked; the e2e only uses what the page shows (button text, header, diagnostics, event log, DOM sizes).
+
+**Files**
+
+- `tests/e2e/spike.spec.ts` (new, 12 tests x 3 projects):
+  - Default fixture loads: the header shows "Groove 120 · bar 1 of 16", notation SVG renders, Play is enabled once the soundfont is ready, and the drum track index is 0.
+  - Layout per width: the auto label says horizontal under 768 px and page from 768 px up. In horizontal layout the notation surface is wider than the score viewport and scrolls inside it. In page layout it fits the viewport. There's no page-level horizontal scroll at any size.
+  - The layout select switches between page and horizontal at every size, still with no page-level horizontal scroll.
+  - Play goes to Pause, Pause back to Play, and Stop returns to Play with a "(stopped)" log line. Start latency fills in.
+  - The speed slider spans 25 to 200. The header shows 25% · 30 BPM, 200% · 240 BPM and 100% · 120 BPM on the 120 BPM groove.
+  - Loop range: ticking Loop bars on bars 5 to 8 gives an expected pass of 8000 ms, 16000 ms at 50%, and 2000 ms for bars 5 to 5. Unticking clears it.
+  - A reversed range can't happen. Raising the start bar to 10 pushes the end bar to 10. Typing an end bar below the start clamps it. Bars clamp to the song length (99 becomes 16).
+  - Looping playback (bar 5 at 200%) logs "loop wrapped" and keeps playing.
+  - Speed, drum mute, metronome on/off and metronome volume change while playing with no new `state:` log lines, so playback didn't restart.
+  - Soundfont switch: picking `sonivox.sf3` loads it (the stat shows the path and a load time). Picking a candidate that isn't downloaded logs "Soundfont not found".
+  - The custom soundfont path accepts only same-origin `.sf2`/`.sf3` paths (Load stays disabled for a remote URL).
+  - Switching to the multi-track fixture loads it. "Render all tracks" makes the rendered score at least 1.5x taller. Switching to the waltz loads it.
+- `src/features/spike/barRange.test.ts`: empty tick cache, reversed range, bar lookup on a repeated bar's second playthrough, infinite speeds.
+- `src/features/spike/timing.test.ts`: 6/8 count-in (six eighth-note clicks, one accent), and the downbeat matches the bar duration at 25%.
+- `src/features/spike/soundfonts.test.ts`: the default font is a shipped option, and unshipped candidates live under `/sf-candidates/`.
+- `src/features/spike/SpikePage.tsx`: added `data-testid="now-playing"` to the header line (a `<header>` inside `<main>` has no banner role). Also the bug fix below.
+- `AGENTS.md`: two e2e notes (DOM lib reference, scrolling the score into view).
+
+**Bugs found**
+
+- **Fixed: a reversed loop range silently disabled the loop.** The End bar input had `min={startBarNumber}`, but raising Start above End left End where it was, so `barRangeToTicks` returned null and the loop turned off with no message. The Start bar change now also sets `endBarNumber` to `max(end, start)`. The e2e test failed against the unfixed code (End stayed at 8) and passes with the fix.
+- Not a bug, but worth knowing: alphaTab lazy-renders the score as it scrolls into view. On a phone the score sits below the controls, so nothing renders until it's scrolled to. The spec scrolls the viewport into view first. Unit 05 should keep the score near the top on phones, or accept that behavior.
+
+**Results**
+
+- `npm run check`: green, 66 unit tests (58 before this stage).
+- `npm run e2e`: green, 39 tests (12 spike tests x 3 projects, plus the smoke test x 3). `spike.spec.ts` also passed `--repeat-each=3` (108 of 108), so no flakiness was seen.
+
+**Not covered automatically**
+
+- Anything audible: drum sound, the loop seam, count-in timing, iOS unlock and the silent switch. These stay on the Human check list.
+- The count-in experiments and the iOS audioSession toggle. Both depend on audio timing or Safari, and Unit 07 replaces the experiments.
+- The local file picker on `/spike`. Unit 04 owns upload and tests it there.

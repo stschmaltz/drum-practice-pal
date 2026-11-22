@@ -67,3 +67,29 @@ describe('barIndexAtTick', () => {
     expect(barIndexAtTick(sixteenBars, 16 * 3840)).toBeNull();
   });
 });
+
+describe('edge cases', () => {
+  it('returns null for an empty tick cache (score not loaded yet)', () => {
+    expect(barRangeToTicks([], 1, 1)).toBeNull();
+    expect(barIndexAtTick([], 0)).toBeNull();
+  });
+
+  it('rejects a reversed range, which is what silently turned the spike loop off', () => {
+    expect(barRangeToTicks(sixteenBars, 8, 5)).toBeNull();
+  });
+
+  it('reports the repeated bar index on its second playthrough', () => {
+    const repeated: BarTicks[] = [0, 1, 0, 1, 2].map((barIndex, i) => ({
+      barIndex,
+      start: i * 100,
+      end: (i + 1) * 100,
+    }));
+    expect(barIndexAtTick(repeated, 250)).toBe(0);
+    expect(barIndexAtTick(repeated, 450)).toBe(2);
+  });
+
+  it('clamps infinite speeds to the bounds', () => {
+    expect(clampSpeedRatio(Number.POSITIVE_INFINITY)).toBe(2);
+    expect(clampSpeedRatio(Number.NEGATIVE_INFINITY)).toBe(0.25);
+  });
+});

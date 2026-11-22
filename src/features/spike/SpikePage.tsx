@@ -113,7 +113,7 @@ export function SpikePage() {
     <main className="mx-auto flex max-w-6xl flex-col gap-4 p-4">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="text-2xl font-semibold">alphaTab spike</h1>
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-neutral-400" data-testid="now-playing">
           {snapshot?.scoreTitle ?? 'Loading…'} · bar {snapshot?.currentBarNumber ?? '-'} of{' '}
           {barCount} · {Math.round(options.speedRatio * 100)}% · {bpm ?? '-'} BPM
         </p>
@@ -181,7 +181,14 @@ export function SpikePage() {
               value={options.startBarNumber}
               min={1}
               max={Math.max(1, barCount)}
-              onChange={(v) => set('startBarNumber', v)}
+              // Push the end bar along so the range never reverses (a reversed range disables the loop).
+              onChange={(v) =>
+                setOptions((prev) => ({
+                  ...prev,
+                  startBarNumber: v,
+                  endBarNumber: Math.max(prev.endBarNumber, v),
+                }))
+              }
             />
             to
             <NumberInput
