@@ -1,7 +1,8 @@
 import { screen } from '@testing-library/react';
 import { Route, useLocation } from 'react-router';
 import { loadingAuth, renderRoutes, RouteMarker, signedInAs, signedOut } from '@/test/render';
-import { RequireAuth, type LoginRedirectState } from './RequireAuth';
+import type { LoginRedirectState } from './loginRedirect';
+import { RequireAuth } from './RequireAuth';
 
 function LoginProbe() {
   const state = useLocation().state as LoginRedirectState | null;

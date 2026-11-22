@@ -2,11 +2,7 @@ import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router';
 import { useAuth } from '@/lib/auth';
 import { FullPageMessage } from '@/components/FullPageMessage';
-import { linkErrorFromHash, loginPathFor } from './nextPath';
-
-export interface LoginRedirectState {
-  linkError: string | null;
-}
+import { linkErrorFromHash, loginPathFor, type LoginRedirectState } from './loginRedirect';
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const auth = useAuth();

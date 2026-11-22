@@ -37,11 +37,11 @@ export function resolveSupabaseUrl(configuredUrl: string, pageHostname: string):
 export function readSupabaseConfig(env: SupabaseEnv, pageHostname: string): SupabaseConfig {
   const url = env.VITE_SUPABASE_URL?.trim();
   const publishableKey = env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
-  const missing = [
-    !url && 'VITE_SUPABASE_URL',
-    !publishableKey && 'VITE_SUPABASE_PUBLISHABLE_KEY',
-  ].filter(Boolean);
   if (!url || !publishableKey) {
+    const missing = [
+      !url && 'VITE_SUPABASE_URL',
+      !publishableKey && 'VITE_SUPABASE_PUBLISHABLE_KEY',
+    ].filter(Boolean);
     return { ok: false, error: `Missing ${missing.join(' and ')}.` };
   }
   try {

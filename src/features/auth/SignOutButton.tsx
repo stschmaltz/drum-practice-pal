@@ -1,3 +1,4 @@
+import { ErrorAlert } from '@/components/ErrorAlert';
 import { buttonClass } from '@/components/styles';
 import { useSignOut } from './useAuthActions';
 
@@ -14,11 +15,7 @@ export function SignOutButton({ className = buttonClass }: { className?: string 
       >
         {signOut.isPending ? 'Signing out…' : 'Sign out'}
       </button>
-      {signOut.error && (
-        <p role="alert" className="text-sm text-red-300">
-          Couldn't sign out: {signOut.error.message}
-        </p>
-      )}
+      {signOut.error && <ErrorAlert>Couldn't sign out: {signOut.error.message}</ErrorAlert>}
     </div>
   );
 }

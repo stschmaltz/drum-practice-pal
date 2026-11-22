@@ -156,3 +156,35 @@ No blocker or major issues.
 - In an installed iOS PWA later (Unit 11), confirm the code path works when links open in Safari.
 
 **Results:** `npm run check` green (21 files, 256 tests). `npm run e2e` 75 passed. Not committed.
+
+## Readability
+
+**Summary:** Clarity-only refactor of the Unit 03 code, with no behaviour change. The query-hook pattern in `src/features/settings/` and `src/lib/` was already clean, so its hooks and API module are unchanged. The work went into the two long pages, a repeated error paragraph, the duplicated nav markup, and a misnamed auth module.
+
+**Changes**
+
+- **`src/features/auth/nextPath.ts` is now `loginRedirect.ts`** (test renamed too). It held `linkErrorFromHash` as well as the `?next=` helpers, so the old name didn't fit. `LoginRedirectState` moved there from `RequireAuth.tsx`, so `LoginPage` no longer imports a type from a sibling component. `LOGIN_PATH` is no longer exported, because nothing outside the module used it.
+- **`src/components/ErrorAlert.tsx` (new):** the `<p role="alert" className="text-sm text-red-300">` that was repeated in `LoginPage` (3 times), `SignOutButton` and `SettingsPage`. The markup it renders is identical.
+- **`LoginPage.tsx`** is split into `EmailStep` and `CodeStep` in the same file. The code and the verify mutation now live in `CodeStep`, so "Use a different email" clears them by unmounting the step instead of resetting them by hand. The email field stays in `LoginPage`, so the address is still filled in when you go back, as before. The full-stop fix for GoTrue's messages is now a named helper, `withFullStop`.
+- **`SettingsPage.tsx`:** `SettingsForm` now renders `MetronomeFieldset`, `CountInFieldset` and `DrumsFieldset`. They share one `FieldsetProps` (`{ values, errors, edit }`). Changed fields are worked out once per render (`changes`), and `dirty` and submit both use that result instead of calling `changedSettings` twice. The draft check was redundant and is gone. Other changes: a `discard` handler, `countInOff` and `volumePercent` locals, and `COUNT_IN_LABELS` typed as `Record<CountInBars, string>`.
+- **`AppShell.tsx`:** one `NavLinks` component renders `NAV_ITEMS` for both the sidebar and the bottom tabs, and each nav passes its own `linkClass(isActive)`.
+- **`supabaseConfig.ts`:** the list of missing env names is only built when something is actually missing.
+- **`settingsForm.ts`:** the header comment now says why the module is pure: the API module, the page and node tests all import it.
+- **`AGENTS.md`:**
+  - The data-hook pattern now lists the pure `<feature>Form.ts` module (column list, select literal, row type, validation and diff), next to the Api and hook files.
+  - It names `loginRedirect.ts` for the redirect helpers.
+  - It adds `ErrorAlert` to the shared components.
+  - It notes that long pages split into one component per step or fieldset.
+
+**Left alone on purpose**
+
+- `useSettings.ts` and `settingsApi.ts` are short and read well, and each part maps to one step in AGENTS.md. A generic optimistic-mutation helper would be premature: loops and sessions in Units 08 and 09 cache lists, so their merge step will differ.
+- Field-level validation messages keep their plain `<p>` / `<span>` without `role="alert"`. Changing that would change what screen readers announce.
+- The earlier sections of this note still name `nextPath.ts`. They record what each stage did at the time.
+- QA issues 1 to 8 are unchanged, as none were in scope for a behaviour-neutral pass.
+
+**Results**
+
+- Before: `npm run check` green (21 files, 256 tests), `npm run e2e` 75 passed.
+- After: `npm run check` green (21 files, 256 tests), `npm run e2e` 75 passed. Local Supabase was running for e2e.
+- Not committed.

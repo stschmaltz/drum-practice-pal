@@ -1,6 +1,7 @@
 /**
  * The user_settings fields the Settings page edits, and their validation
- * against the DB limits mirrored in src/lib/schema.ts.
+ * against the DB limits mirrored in src/lib/schema.ts. No client import, so
+ * settingsApi.ts, the page and node tests all share it.
  */
 import type { Database } from '@/lib/database.types';
 import {

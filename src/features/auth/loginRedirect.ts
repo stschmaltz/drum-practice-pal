@@ -1,7 +1,15 @@
-/** Where /login sends you once you're signed in, carried as ?next=. */
+/**
+ * The round trip through /login: where to send a signed-out visitor, where to
+ * send them back to once signed in (`?next=`), and why a magic link failed.
+ */
 
-export const LOGIN_PATH = '/login';
+const LOGIN_PATH = '/login';
 const HOME_PATH = '/';
+
+/** Router state RequireAuth hands to /login along with the redirect. */
+export interface LoginRedirectState {
+  linkError: string | null;
+}
 
 /**
  * Only same-origin app paths are allowed, so a crafted login link can't bounce

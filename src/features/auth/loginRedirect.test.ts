@@ -1,4 +1,4 @@
-import { linkErrorFromHash, loginPathFor, safeNextPath } from './nextPath';
+import { linkErrorFromHash, loginPathFor, safeNextPath } from './loginRedirect';
 
 describe('safeNextPath', () => {
   it.each(['/', '/library', '/songs/abc', '/settings?tab=1', '/library#top'])(
