@@ -168,7 +168,7 @@ site_url = "http://localhost:5173"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 # Dev server on this machine and on the LAN (npm run dev binds to all interfaces), plus the
 # Playwright preview server.
-additional_redirect_urls = ["http://localhost:5173/**", "http://127.0.0.1:5173/**", "http://*:5173/**", "http://localhost:4173/**", "http://127.0.0.1:4173/**"]
+additional_redirect_urls = ["http://localhost:5173/**", "http://127.0.0.1:5173/**", "http://**:5173/**", "http://localhost:4173/**", "http://127.0.0.1:4173/**"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -254,6 +254,17 @@ otp_expiry = 3600
 # pass = "env(SENDGRID_API_KEY)"
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
+
+# Sign-in emails carry the 6-digit code as well as the link, so a phone on the LAN
+# (which can't open a link to 127.0.0.1) or an installed iOS PWA can sign in.
+# First-time addresses get the confirmation email, returning users the magic link.
+[auth.email.template.magic_link]
+subject = "Your Drum Practice Pal sign-in code"
+content_path = "./supabase/templates/sign_in.html"
+
+[auth.email.template.confirmation]
+subject = "Your Drum Practice Pal sign-in code"
+content_path = "./supabase/templates/sign_in.html"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]

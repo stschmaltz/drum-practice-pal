@@ -26,7 +26,7 @@ Drum Practice Pal: a tab-first drum practice PWA. Users upload Guitar Pro files,
 | ------------------ | ------------------------------------------------------------------------------ |
 | `npm run dev`      | Dev server, exposed on the LAN for device testing                              |
 | `npm run check`    | Typecheck, lint, format check, unit tests. Must pass at the end of every stage |
-| `npm run e2e`      | Playwright against a production build at phone, tablet, desktop                |
+| `npm run e2e`      | Playwright against a build at phone, tablet, desktop; needs `npm run db:start` |
 | `npm run fixtures` | Regenerate `tests/fixtures/gp/*.gp` from `tests/fixtures/sources.ts`           |
 | `npm run format`   | Prettier write                                                                 |
 | `npm run db:start` | Start local Supabase in Docker (`db:stop`, `db:status` likewise)               |
@@ -42,7 +42,7 @@ src/
   features/<feature>/   # one folder per feature: components, hooks, logic, tests together
   components/           # shared UI used by 2+ features
   lib/                  # framework glue: query client, supabase client, shared helpers
-  test/                 # test setup only
+  test/                 # test setup and shared test helpers (fake Supabase, render)
 supabase/               # config.toml and migrations/ (seed lives in scripts/seed.ts)
 tests/
   e2e/                  # Playwright specs
@@ -68,6 +68,7 @@ docs/
 - Bar numbers in the data model and UI are 1-based. alphaTab indexes are 0-based; convert at the boundary and name variables `barIndex` vs `barNumber` accordingly.
 - Comments explain why, not what.
 - Check every `error` that supabase-js (and any `{ data, error }` API) returns, and throw or handle it; never destructure only `data`. This holds in scripts and test helpers too, where a swallowed error leaves users, rows or files behind.
+- Never render text taken from a URL (query, fragment, `error_description`) as a message; map known codes to fixed copy. Strip the fragment from any `?next=`-style return path before using it as a redirect target.
 - List APIs return one page (`auth.admin.listUsers`, `storage.list` default 100, unranged `.select()`). Loop until exhausted wherever the code needs every item. In multi-step cleanup, stop at the first failed step.
 - Never commit files from `tests/fixtures/real/`.
 - alphaTex: wrap metadata arguments in parentheses (`\tuning (E4 B3 G3 D3 A2 E2)`, `\ts (3 4)`). Unwrapped arguments can swallow a following `( ... )` chord. `npm run fixtures` fails on any alphaTex warning.
@@ -85,6 +86,21 @@ docs/
 - Keys: the browser gets `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` only. `SUPABASE_SECRET_KEY` bypasses RLS and is for node scripts and tests; never prefix it with `VITE_`. `.env.local` is gitignored; `.env.example` lists the names. Scripts and `tests/db` fall back to `supabase status`, so they need no env locally.
 - Node-side clients and admin chores (`createAdminClient`, `createNodeClient`, `findUserIdsByEmail`, `removeUserFiles`) live in `scripts/supabase-admin.ts`, shared by the seed script and `tests/db`. Connection details come from `scripts/local-supabase.ts`.
 - Database tests sign users in with the real magic-link flow (`createTestUser` in `tests/db/helpers.ts`) and clean up after themselves. Build rows with `songRow`, `sessionRow`, `insertSong` and `insertLoop`, and assert error codes with `PG.*` from the same file rather than raw strings. Local magic-link emails land in Mailpit at http://127.0.0.1:54324. Seed users: `demo@drumpal.test` and `other@drumpal.test`.
+
+## App shell, auth and data hooks
+
+- Routes live in `src/App.tsx`. Signed-in screens are children of the `<RequireAuth><AppShell /></RequireAuth>` layout route; `/login` and the dev-only `/spike` sit outside it. Player routes are `lazy()` so alphaTab stays out of the main bundle.
+- Auth state comes from `useAuth()` (`src/lib/auth.ts`), fed by `AuthProvider` from `supabase.auth.onAuthStateChange`. Screens behind the guard call `useSignedInUser()` for the user. supabase-js refreshes tokens itself; a failed refresh arrives as `SIGNED_OUT`, which clears the query cache and the guard sends the user to `/login?next=...`. The redirect helpers (`loginPathFor`, `safeNextPath`, which rejects off-site targets, and `linkErrorFromHash`) live in `src/features/auth/loginRedirect.ts`.
+- Sign-in is passwordless: one email with a magic link and a 6-digit code (`supabase/templates/sign_in.html`). The code is for phones on the LAN and installed PWAs, where the link can't open the app.
+- One browser client: `supabase` from `src/lib/supabase.ts`, typed with `Database`. Env comes from the committed `.env.development` (local stack defaults) in dev and the e2e build; production builds need `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` set, or the app shows a config message. A loopback API URL is rewritten to the page's host so LAN devices reach the local stack.
+- **Data hook pattern** (copy `src/features/settings/`):
+  - `<feature>Form.ts` (or another pure module): the selected columns as a `const` list plus a matching select string literal (a test keeps them equal), the row type picked from `Database`, and pure validation and diff helpers. It imports no client, so the API module, components and node tests share it.
+  - `<feature>Api.ts`: plain async functions over `supabase` that return typed rows and throw on error via `unwrap(result, 'what')` or `throwIfError(result)` from `src/lib/supabaseResult.ts`. Select columns with a string literal (not a joined array) so supabase-js can type the row. Always scope by `user_id` as well as relying on RLS.
+  - `use<Feature>.ts`: a key factory (`settingsKeys.forUser(userId)`; every key includes the user id) plus `useQuery`/`useMutation` hooks that call the API functions. Mutations that the user sees immediately are optimistic: `cancelQueries`, `setQueryData`, roll back in `onError`, set the server row in `onSuccess`, `invalidateQueries` in `onSettled`.
+  - Components call only the hooks. Forms keep a local draft of only the fields the user touched (`Partial<Row> | null`), render `{ ...saved, ...draft }` so refetched values show through for every other field, and send only changed fields (`changedSettings`). A full-row draft would send stale values for fields another device changed.
+- Component and hook tests mock the client with `vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule)`, call `resetFakeSupabase()` in `beforeEach`, and script answers on `fakeSupabase.auth.*` or `queryResult` (inspect sent payloads with `opArgs`). Render with `renderRoutes` / `wrapperFor` from `src/test/render.tsx`, which supply a retry-free QueryClient, a fixed auth state (`signedInAs`, `signedOut`, `loadingAuth`) and a `location` test id for asserting redirects. TanStack Query notifies on a timer, so wait (`findBy`, `waitFor`) after `setQueryData` instead of asserting synchronously.
+- Shared UI: `src/components/` (`PageHeader`, `FullPageMessage`, `ErrorAlert` for inline `role="alert"` errors such as a failed mutation, class strings in `styles.ts`). Long pages split into one small component per step or fieldset in the same file (`LoginPage`'s `EmailStep` / `CodeStep`, `SettingsPage`'s fieldsets taking `{ values, errors, edit }`). Bottom tabs below 768 px (`md`), sidebar from 768 px; touch targets `min-h-11` (44 px) or more.
+- Signed-in e2e specs import `test` and `expect` from `tests/e2e/auth.ts`, whose `user` fixture creates a throwaway user and deletes it (files first) after the test; take `{ user }` in the test's arguments rather than a module-level `let` set in `beforeEach`, so a failed setup never tears down the previous test's user. Sign in with `signIn(page, user, path)` through the real magic-link redirect. A second `browser.newContext()` is a second device; close extra contexts in a `finally`. Specs that don't sign in (smoke, spike) need no Supabase.
 
 ## Stage workflow
 
