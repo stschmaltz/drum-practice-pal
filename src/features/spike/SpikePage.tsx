@@ -457,7 +457,7 @@ function NumberInput({
 }) {
   return (
     <label className="flex items-center gap-2 text-sm">
-      {label}
+      <span className="whitespace-nowrap">{label}</span>
       <input
         type="number"
         className={`${inputClass} w-20`}

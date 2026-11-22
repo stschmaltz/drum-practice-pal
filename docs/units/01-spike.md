@@ -198,3 +198,66 @@ Suggested order: MuseScore General sf3 first (license and size verified, include
 - Anything audible: drum sound, the loop seam, count-in timing, iOS unlock and the silent switch. These stay on the Human check list.
 - The count-in experiments and the iOS audioSession toggle. Both depend on audio timing or Safari, and Unit 07 replaces the experiments.
 - The local file picker on `/spike`. Unit 04 owns upload and tests it there.
+
+## QA
+
+**How it was run.** Playwright (Chromium, headless) at 390x844 (phone, touch), 820x1180 (tablet, touch) and 1440x900 (desktop). I ran it against the dev server and against a production build served by `vite preview`. Scripted walks covered every control, and the edge-case runs were checked by reading the header, diagnostics, event log, DOM sizes and console errors. Slow network was simulated with route delays, a missing soundfont with route 404 and abort, and offline with `context.setOffline`. Screenshots (67) are in `docs/units/01-shots/`, named `{dev|prod}-{phone|tablet|desktop}-NN-step.png`. Nothing was listened to.
+
+### Acceptance criteria
+
+| Criterion                                      | Result                         | Notes                                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Findings note says which soundfont             | Pass (provisional)             | Sonivox sf2 loads at every size, in dev and prod. sf3 also loads. Drum sound quality is a Human check.                                                                                                                                                                                                                                                            |
+| Findings note says which layout per breakpoint | Pass                           | Auto gives horizontal at 390 and page at 820 and 1440. At 1440, page layout fits 4 bars per system (the Build note hadn't checked 1440). The cursor follows: `scrollLeft` reaches 325 to 551 px in horizontal; in page layout `scrollTop` was 349 at 390 px. There's no page-level horizontal overflow at any size. Readability on a real phone is a Human check. |
+| Findings note lists iOS workarounds            | Not testable here              | The note lists them. The audioSession toggle shows "(unsupported here)" in Chromium as intended. Human check.                                                                                                                                                                                                                                                     |
+| Count-in can hook playback events              | Pass (event level)             | Both experiments run at all sizes. "Counting in…" shows. `play()` lands -1.3 to 9.3 ms from the scheduled downbeat. pause-on-wrap logs a rewind to before the range end (tick 18721 against range end 19200), matching the note. Whether it lands on the beat by ear is a Human check.                                                                            |
+| Go/no-go on alphaTab                           | Pass (provisional GO recorded) | Nothing found contradicts it.                                                                                                                                                                                                                                                                                                                                     |
+| Prod renders notation (font fix)               | Pass                           | Prod requests `/font/Bravura.woff2` (200, font/woff2), `document.fonts` reports alphaTab loaded, and the notation SVG has glyphs at all three sizes.                                                                                                                                                                                                              |
+
+### Controls at all three sizes (dev and prod)
+
+| Control                             | Result                                                                                                                                                                                                                                                     |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fixture select (all 4)              | Pass. Switching mid-play stops playback and loads the new score (expected for a spike). Three quick switches in a row end on the last pick.                                                                                                                |
+| Play / Pause / Stop                 | Pass. After 21 rapid taps the button and the last `state:` line agree, and playback still advances.                                                                                                                                                        |
+| Speed 25 to 200                     | Pass. The header shows 30 and 240 BPM, with no restart. Thrashing between 25 and 200 keeps playing. On the tempo-change fixture at 200%, the header goes from 240 BPM (bar 8) to 180 BPM (bar 9). A loop on bars 8 to 9 expects 4667 ms, which is correct. |
+| Loop bars, Start/End bar            | Pass, with minor issues 3 and 4. A single bar (5 to 5) expects 2000 ms. The last bar (16 to 16) at 200% wraps every 1010 ms (1000 expected). Start above End pushes End along. Start 99 clamps to 16.                                                      |
+| Metronome, volume, Mute drums       | Pass. 20 rapid toggles each leave a consistent state, and live changes add no `state:` lines.                                                                                                                                                              |
+| Count-in experiments, Count-in bars | Pass (event level). Count-in bars clamps 5 to 2. Turning the experiment off mid count-in finishes the count-in and keeps looping.                                                                                                                          |
+| Layout select                       | Pass. Switching page and horizontal mid-play keeps playing, and the cursor keeps scrolling.                                                                                                                                                                |
+| Render all tracks                   | Pass. Multi-track renders three staves.                                                                                                                                                                                                                    |
+| Soundfont select and custom path    | Pass, with minor issues 5 to 7.                                                                                                                                                                                                                            |
+| Local file picker                   | Pass for valid files. Minor issues 1 and 2 for bad files.                                                                                                                                                                                                  |
+| Diagnostics and event log           | Pass. The fields fill in at every size, and the long user agent wraps without overflow.                                                                                                                                                                    |
+
+### Issues
+
+No blocker or major issues for this unit. Items marked "for Unit NN" matter more when that unit builds the real feature.
+
+1. **Minor (major for Unit 04): random bytes parse as an empty score.** Repro: pick a 4 KB file of arbitrary bytes named `garbage.gp`. alphaTab accepts it, probably via its lenient alphaTex importer. The header shows an empty title and "bar 1 of 1", Tracks is "-", and Play is enabled and "plays". Unit 04 must reject scores with no tracks or no bars, not rely on `load()` failing.
+2. **Minor: bad files only show their error in the event log.** Repro: pick a text file named `.gp`, a `.mid`, an empty file or a truncated `.gp`. The log says "load() rejected the data" plus "error: No compatible importer…" or "Unexpected end of data…", and the previous score stays loaded and playable. There's no visible message near the picker. That's fine for a spike; Unit 04 owns the user-facing message.
+3. **Minor: number inputs clamp on every keystroke, so some values can't be typed.** Repro: Start bar 5, select the End bar text and type `12`. "1" clamps to 5, then "52" clamps to 16, so End ends at 16. Typing `-3` into Start gives 13. Unit 08 should clamp on blur or commit, not on each change.
+4. **Minor: the loop range isn't re-clamped when a shorter song loads.** Repro: set the loop to 14 to 16 on Groove 120, then switch to Multi-track (8 bars). The inputs still show 14 and 16 (with `max=8`), and the loop silently turns off ("Loop wraps" shows "-").
+5. **Minor: the Soundfont select can disagree with what's loaded.** Repro: pick "GeneralUser GS (sf2)" (not downloaded), or pick sf3 while offline. The select shows the new choice, but the Soundfont stat and the synth still use the previous font. The same happens with the Fixture select offline: it shows Waltz while Groove keeps playing. Also, soundfont loads aren't sequenced, so a slow earlier fetch that finishes after a fast later one would win. This wasn't reproduced (the delayed test happened to finish in order); it's from reading `loadSoundFont`.
+6. **Minor: a network failure on a soundfont or fixture fetch is an unhandled rejection with nothing logged.** Repro: block `/soundfont/sonivox.sf2` (or go offline and switch fixture or soundfont). You get `pageerror: Failed to fetch`, Play stays disabled forever with no reason shown, and the log has no line. A 404 is handled ("Soundfont not found…"). You can recover by picking sf3 once the network is back. Unit 05's `PlayerService` should catch and surface load failures.
+7. **Minor: switching soundfont mid-play stops playback and returns to bar 1** (`resetSoundFonts`). Expected for the spike; Unit 05 should decide whether a font switch is allowed while playing.
+8. **Fixed, cosmetic: number-input labels wrapped onto two lines** ("Start / bar", "End / bar", "Count-in / bars") at 390 and 1440 px. Added `whitespace-nowrap` to the label text in `NumberInput` (`SpikePage.tsx`). See `prod-phone-20-loop-labels-fixed.png` and `prod-phone-21-countin-labels-fixed.png`.
+
+Not issues, for the record:
+
+- Slow soundfont (6 s delay): Play stays disabled until the font arrives and then enables (6.4 s). There's no loading indicator besides the disabled button; Unit 05 should add one.
+- Offline mid-play: playback continues, since everything is already in memory. Reloading offline fails, because there's no service worker until Unit 11.
+- On a phone, alphaTab lazy-renders the score until it's scrolled into view, so full-page screenshots taken without scrolling show a blank score box (already noted by Test).
+- Dev and prod behave the same. Dev first-position latency is 246 to 282 ms against 58 to 63 ms in prod, consistent with the Build note.
+
+### Human check (Shane)
+
+Unchanged from the Build note's list: drum sound (sf2 vs sf3, then candidates), the loop seam at 50%, 100% and 200%, iOS first-tap sound, the ringer switch with the audioSession toggle off and on, lock and app switch mid-play, felt start latency, whether the count-in lands on the downbeat by ear (and pause-on-wrap audibly clipping bar 8), layout readability on a real phone in portrait and landscape, and memory and battery on a long loop.
+
+### Results
+
+- `npm run check`: green (66 unit tests).
+- `npm run e2e`: green (39 tests).
+- The only code change is the cosmetic label fix in `src/features/spike/SpikePage.tsx`. Nothing is committed.
+
+**Verdict: PASS.** No blocker or major issues for Unit 01. Issue 1 should be treated as major when Unit 04 builds upload validation.
