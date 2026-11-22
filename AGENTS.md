@@ -67,6 +67,8 @@ docs/
 - Speeds are stored as a ratio (`speed_ratio`, 1.0 = original). BPM is always derived from the tempo at the relevant bar; never store BPM.
 - Bar numbers in the data model and UI are 1-based. alphaTab indexes are 0-based; convert at the boundary and name variables `barIndex` vs `barNumber` accordingly.
 - Comments explain why, not what.
+- Check every `error` that supabase-js (and any `{ data, error }` API) returns, and throw or handle it; never destructure only `data`. This holds in scripts and test helpers too, where a swallowed error leaves users, rows or files behind.
+- List APIs return one page (`auth.admin.listUsers`, `storage.list` default 100, unranged `.select()`). Loop until exhausted wherever the code needs every item. In multi-step cleanup, stop at the first failed step.
 - Never commit files from `tests/fixtures/real/`.
 - alphaTex: wrap metadata arguments in parentheses (`\tuning (E4 B3 G3 D3 A2 E2)`, `\ts (3 4)`). Unwrapped arguments can swallow a following `( ... )` chord. `npm run fixtures` fails on any alphaTex warning.
 - alphaTab settings: always pass `core.fontDirectory: '/font/'`. Without it, production builds look for the music font next to the lazy JS chunk (`/assets/font/`) and nothing renders; dev works, so it's easy to miss. `player.soundFont` has no default, so pass an absolute path such as `/soundfont/sonivox.sf2` (or load bytes with `api.loadSoundFont`). Load alphaTab only from lazily imported routes so it stays out of the main bundle.
