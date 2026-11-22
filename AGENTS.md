@@ -18,6 +18,7 @@ Drum Practice Pal: a tab-first drum practice PWA. Users upload Guitar Pro files,
 - alphaTab (`@coderline/alphatab` 1.9) for parsing, rendering and playback, with its Vite plugin from the separate `@coderline/alphatab-vite` package (the old `@coderline/alphatab/vite` entry is deprecated). The plugin copies fonts and the soundfont into `public/font` and `public/soundfont` on every dev and build run; those folders are gitignored
 - Supabase (Postgres, auth, storage) from Unit 02
 - Vitest + Testing Library; Playwright for e2e
+- Hosting: Cloudflare Workers static assets via Workers Builds (`wrangler.jsonc`). Every branch and PR gets a preview URL. SPA routing is handled by `not_found_handling`, so don't add `_redirects`
 
 ## Commands
 
