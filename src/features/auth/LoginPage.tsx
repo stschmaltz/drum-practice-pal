@@ -44,7 +44,7 @@ export function LoginPage() {
 
       {linkError && !sentTo && (
         <p role="alert" className="rounded-md bg-red-950 p-3 text-sm text-red-200">
-          {withFullStop(linkError)} Send yourself a new one.
+          {linkError} Send yourself a new one.
         </p>
       )}
 
@@ -165,7 +165,16 @@ function CodeStep({
         )}
       </form>
       <div className="flex flex-wrap gap-2 text-sm">
-        <button type="button" className={buttonClass} disabled={sending} onClick={onSendAgain}>
+        <button
+          type="button"
+          className={buttonClass}
+          disabled={sending}
+          onClick={() => {
+            // A new email means a new code, so the last code's error no longer applies.
+            verifyCode.reset();
+            onSendAgain();
+          }}
+        >
           {sending ? 'Sending…' : 'Send again'}
         </button>
         {/* Unmounting this step clears the code and its error. */}
@@ -176,9 +185,4 @@ function CodeStep({
       {sendError}
     </div>
   );
-}
-
-/** GoTrue's error descriptions have no closing full stop. */
-function withFullStop(text: string): string {
-  return /[.!?]$/.test(text) ? text : `${text}.`;
 }

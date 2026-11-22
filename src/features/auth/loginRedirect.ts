@@ -22,9 +22,12 @@ export function safeNextPath(raw: string | null | undefined): string {
   // Control characters (tabs, newlines) are stripped by URL parsers and can hide a `//`.
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(raw)) return HOME_PATH;
-  const pathname = raw.split(/[?#]/)[0];
+  // A fragment would break the magic link: GoTrue appends `#access_token=...` to the
+  // redirect, and `/settings#frag#access_token=...` can't be parsed, so drop it.
+  const path = raw.split('#')[0] ?? '';
+  const pathname = path.split('?')[0];
   if (pathname === LOGIN_PATH || pathname?.startsWith(`${LOGIN_PATH}/`)) return HOME_PATH;
-  return raw;
+  return path;
 }
 
 /** The /login URL that returns to `path` after sign-in. */
@@ -33,12 +36,16 @@ export function loginPathFor(path: string): string {
   return next === HOME_PATH ? LOGIN_PATH : `${LOGIN_PATH}?next=${encodeURIComponent(next)}`;
 }
 
+export const EXPIRED_LINK_MESSAGE = 'That sign-in link is invalid or has expired.';
+export const FAILED_LINK_MESSAGE = 'That sign-in link did not work.';
+
 /**
- * An expired or reused magic link comes back as `#error=...&error_description=...`.
- * Returns the description so /login can say why the link didn't sign you in.
+ * An expired or reused magic link comes back as `#error=...&error_code=otp_expired`.
+ * Returns fixed copy for /login to show. The URL's own `error_description` is never
+ * shown, since anyone can craft a link that puts any sentence in the alert.
  */
 export function linkErrorFromHash(hash: string): string | null {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   if (!params.has('error') && !params.has('error_code')) return null;
-  return params.get('error_description') ?? 'That sign-in link did not work.';
+  return params.get('error_code') === 'otp_expired' ? EXPIRED_LINK_MESSAGE : FAILED_LINK_MESSAGE;
 }

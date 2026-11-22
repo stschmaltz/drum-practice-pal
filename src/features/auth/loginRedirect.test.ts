@@ -1,12 +1,24 @@
-import { linkErrorFromHash, loginPathFor, safeNextPath } from './loginRedirect';
+import {
+  EXPIRED_LINK_MESSAGE,
+  FAILED_LINK_MESSAGE,
+  linkErrorFromHash,
+  loginPathFor,
+  safeNextPath,
+} from './loginRedirect';
 
 describe('safeNextPath', () => {
-  it.each(['/', '/library', '/songs/abc', '/settings?tab=1', '/library#top'])(
-    'keeps the app path %s',
-    (path) => {
-      expect(safeNextPath(path)).toBe(path);
-    },
-  );
+  it.each(['/', '/library', '/songs/abc', '/settings?tab=1'])('keeps the app path %s', (path) => {
+    expect(safeNextPath(path)).toBe(path);
+  });
+
+  // GoTrue appends `#access_token=...` to the redirect; a second `#` breaks the sign-in.
+  it.each([
+    ['/library#top', '/library'],
+    ['/settings?tab=1#frag', '/settings?tab=1'],
+    ['/#', '/'],
+  ])('drops the fragment from %s', (raw, expected) => {
+    expect(safeNextPath(raw)).toBe(expected);
+  });
 
   it.each([
     null,
@@ -23,9 +35,12 @@ describe('safeNextPath', () => {
     expect(safeNextPath(raw)).toBe('/');
   });
 
-  it.each(['/login', '/login?next=/library', '/login/'])('never loops back to %s', (raw) => {
-    expect(safeNextPath(raw)).toBe('/');
-  });
+  it.each(['/login', '/login?next=/library', '/login/', '/login#x'])(
+    'never loops back to %s',
+    (raw) => {
+      expect(safeNextPath(raw)).toBe('/');
+    },
+  );
 });
 
 describe('loginPathFor', () => {
@@ -43,16 +58,21 @@ describe('loginPathFor', () => {
 });
 
 describe('linkErrorFromHash', () => {
-  it('reads the description of a failed magic link', () => {
+  it('explains an expired or reused magic link', () => {
     expect(
       linkErrorFromHash(
         '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired',
       ),
-    ).toBe('Email link is invalid or has expired');
+    ).toBe(EXPIRED_LINK_MESSAGE);
   });
 
-  it('has a fallback when there is no description', () => {
-    expect(linkErrorFromHash('#error_code=otp_expired')).toBe('That sign-in link did not work.');
+  it('never shows the description from the URL, which anyone can write', () => {
+    expect(
+      linkErrorFromHash('#error=access_denied&error_description=Call+0800+to+unlock+your+account'),
+    ).toBe(FAILED_LINK_MESSAGE);
+    expect(linkErrorFromHash('#error_code=otp_expired&error_description=Call+0800+to+unlock')).toBe(
+      EXPIRED_LINK_MESSAGE,
+    );
   });
 
   it.each(['', '#', '#top', '#access_token=abc'])('is null for %j', (hash) => {

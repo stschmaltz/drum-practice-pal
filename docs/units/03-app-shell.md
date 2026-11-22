@@ -188,3 +188,34 @@ No blocker or major issues.
 - Before: `npm run check` green (21 files, 256 tests), `npm run e2e` 75 passed.
 - After: `npm run check` green (21 files, 256 tests), `npm run e2e` 75 passed. Local Supabase was running for e2e.
 - Not committed.
+
+## Review
+
+**Scope:** every line of `git diff unit-02...HEAD` (app code, tests, helpers, CI, config, env). I checked every supabase-js call in the diff for `error` handling (`throwIfError` / `unwrap` in the app; `if (error) throw` in `tests/e2e/auth.ts`). There's no unpaginated list API in the diff; `removeUserFiles` (from Unit 02) already loops. Listeners are covered: `AuthProvider` unsubscribes on unmount, and its test proves it.
+
+**Findings, fixed**
+
+1. **`?next=` with a fragment broke the magic link** (QA issue 6), `src/features/auth/loginRedirect.ts` `safeNextPath`. `/settings#frag` became `redirect_to=.../settings#frag`, and GoTrue's `#access_token=...` was then appended after it. `safeNextPath` now drops everything from the first `#`, and the `/login` loop check runs on what's left (`/login#x` goes home). Tests: `loginRedirect.test.ts` (fragment cases; the old test that expected `/library#top` to be kept now expects `/library`) and `LoginPage.test.tsx` ("builds the magic link from ?next= without its fragment").
+2. **A crafted link could put any text in the login alert** (QA issue 7, unvalidated input across a trust boundary), `loginRedirect.ts` `linkErrorFromHash`. The URL's `error_description` was rendered verbatim, so anyone could send a link that shows a phishing sentence in a red alert on our origin. It now returns fixed copy: `EXPIRED_LINK_MESSAGE` for `error_code=otp_expired` (what GoTrue sends for expired and reused links) and `FAILED_LINK_MESSAGE` otherwise. `withFullStop` in `LoginPage.tsx` was then dead code and is removed. Tests: `loginRedirect.test.ts`, `RequireAuth.test.tsx` and `LoginPage.test.tsx` use the constants. The e2e "used magic link" spec still passes.
+3. **"Send again" left the last code's error on screen** (QA issue 5), `src/features/auth/LoginPage.tsx` `CodeStep`. The button now calls `verifyCode.reset()` before sending. Test: "clears a rejected code's error when the email is sent again".
+4. **e2e teardown could tear down the wrong user and hide the real failure**, `tests/e2e/auth.spec.ts` and `settings.spec.ts`. `user` was a module-level `let` set in `beforeEach`. If `createE2eUser` threw, `afterEach` deleted the previous test's (already deleted) user, and that "User not found" error replaced the real one. `tests/e2e/auth.ts` now exports `test` with a `user` fixture: it creates the user, runs the test, then deletes files and then the user. Teardown only runs for a user that was actually created, and a failed cleanup still fails the test. After the run, `auth.users` holds 0 `e2e-%` rows.
+5. **Leaked `console.error` spies**, `src/lib/AuthProvider.test.tsx`. Two `vi.spyOn(console, 'error')` calls were never restored, so console errors stayed silenced for the rest of the file. Added `afterEach(vi.restoreAllMocks)` in that `describe`. In Vitest 3 this only restores spies, not the `vi.fn`s in the fake client.
+
+**Checked, no change**
+
+- `.env.development` commits `sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH`. It matches `supabase status` here: it's the CLI's fixed local key, browser-safe, and no signing keys are configured. No secret key is committed, and `.env.*.local` is ignored.
+- CI e2e job: `supabase start` keeps Mailpit, Storage and Auth (needed for `removeUserFiles` and sign-in). The e2e build reads `.env.development`, whose key matches a fresh CLI stack. `tests/e2e/auth.ts` gets the secret key from `supabase status`. I can't run it on GitHub from here.
+- Sign-out cache: `SIGNED_OUT` calls `queryClient.clear()` (queries and mutations), and every key includes the user id.
+- Settings edit during a save: `edit()` calls `update.reset()`, which detaches the per-call `onSuccess`, so a mid-save edit isn't wiped. The hook-level `onError` / `onSuccess` / `onSettled` still run, and the draft keeps any field whose save failed. A second, overlapping save is possible. Rollback and the refetch in `onSettled` make the cache converge, so I left it.
+- `safeNextPath` and case: `/LOGIN` isn't caught by the loop check, but `/LOGIN` renders `LoginPage`, which sends a signed-in user to `/`. So it can't loop or leave the origin.
+
+**Open issues (not fixed in scope)**
+
+- QA issues 1 and 2 (offline sign-out and offline save stay on "Signing out…" / "Saving…"): Unit 11.
+- QA issue 3 (a bad-signature JWT with a future expiry leaves the shell showing a raw error): needs a global "sign out on 401 / PGRST301" policy in the query client. Better done once Unit 04 adds more data hooks.
+- QA issue 4 (a revoked session works until its JWT expires): Supabase's behaviour, informational.
+- Possible CI flake: `[auth.rate_limit] token_verifications = 30` and `sign_in_sign_ups = 30` per 5 minutes per IP. One e2e run does about 45 verifications across three projects, and CI retries add more. It passes locally, but if CI shows 429s on `/verify` or `/otp`, raise those local limits in `config.toml`.
+
+**AGENTS.md:** e2e specs take `{ user }` from the `tests/e2e/auth.ts` fixture rather than a module-level `let`. A new convention: never render URL-supplied text as a message, and strip fragments from return paths.
+
+**Results:** `npm run check` green (21 files, 261 tests, was 256). `npm run e2e` 75 passed. `npm run test:db` 123 passed. Not committed.

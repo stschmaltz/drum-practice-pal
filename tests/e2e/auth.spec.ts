@@ -1,26 +1,15 @@
-import { expect, test } from '@playwright/test';
-import { appUrl, createE2eUser, deleteE2eUser, signIn, signInEmailFor, type E2eUser } from './auth';
+import { appUrl, expect, signIn, signInEmailFor, test } from './auth';
 
 // Unit 03: auth guard, magic-link and code sign-in, sign-out, responsive nav.
 
-let user: E2eUser;
-
-test.beforeEach(async () => {
-  user = await createE2eUser('auth');
-});
-
-test.afterEach(async () => {
-  await deleteE2eUser(user);
-});
-
-test('a guarded deep link returns to itself after the magic link', async ({ page }) => {
+test('a guarded deep link returns to itself after the magic link', async ({ user, page }) => {
   await page.goto('/library');
   await expect(page).toHaveURL(/\/login\?next=%2Flibrary$/);
   await signIn(page, user, '/library');
   await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
 });
 
-test('signs in with the emailed code', async ({ page }) => {
+test('signs in with the emailed code', async ({ user, page }) => {
   await page.goto('/login?next=/settings');
   await page.getByLabel('Email').fill(user.email);
   await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
@@ -34,7 +23,7 @@ test('signs in with the emailed code', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
 });
 
-test('a wrong code shows an error and stays signed out', async ({ page }) => {
+test('a wrong code shows an error and stays signed out', async ({ user, page }) => {
   await page.goto('/login');
   await page.getByLabel('Email').fill(user.email);
   await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
@@ -44,7 +33,7 @@ test('a wrong code shows an error and stays signed out', async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/);
 });
 
-test('nav is bottom tabs on phone and a sidebar from 768 px', async ({ page, viewport }) => {
+test('nav is bottom tabs on phone and a sidebar from 768 px', async ({ user, page, viewport }) => {
   await signIn(page, user, '/');
   const nav = page.getByRole('navigation', { name: 'Main' });
   await expect(nav).toHaveCount(1);
@@ -66,7 +55,7 @@ test('nav is bottom tabs on phone and a sidebar from 768 px', async ({ page, vie
   await expect(page.getByRole('heading', { name: 'On the go' })).toBeVisible();
 });
 
-test('sign-out returns to login and guards the app again', async ({ page }) => {
+test('sign-out returns to login and guards the app again', async ({ user, page }) => {
   await signIn(page, user, '/settings');
   // Settings has a sign-out button at every size; the sidebar adds one from 768 px.
   await page.getByRole('main').getByRole('button', { name: 'Sign out' }).click();
@@ -75,7 +64,10 @@ test('sign-out returns to login and guards the app again', async ({ page }) => {
   await expect(page).toHaveURL(/\/login\?next=%2Fsettings$/);
 });
 
-test('the session survives a reload, and /login sends a signed-in user on', async ({ page }) => {
+test('the session survives a reload, and /login sends a signed-in user on', async ({
+  user,
+  page,
+}) => {
   await signIn(page, user, '/library');
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
@@ -84,7 +76,7 @@ test('the session survives a reload, and /login sends a signed-in user on', asyn
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
 });
 
-test('a used magic link explains itself on the login page', async ({ browser, page }) => {
+test('a used magic link explains itself on the login page', async ({ user, browser, page }) => {
   const { link } = await signInEmailFor(user.email, appUrl('/library'));
   await page.goto(link);
   await page.waitForURL((url) => url.pathname === '/library' && url.hash === '');
@@ -102,7 +94,7 @@ test('a used magic link explains itself on the login page', async ({ browser, pa
   }
 });
 
-test('signing out on one device leaves the other signed in', async ({ browser, page }) => {
+test('signing out on one device leaves the other signed in', async ({ user, browser, page }) => {
   const other = await browser.newContext();
   try {
     const phone = await other.newPage();
@@ -121,7 +113,7 @@ test('signing out on one device leaves the other signed in', async ({ browser, p
   }
 });
 
-test('an unknown address shows not found inside the shell', async ({ page }) => {
+test('an unknown address shows not found inside the shell', async ({ user, page }) => {
   await signIn(page, user, '/');
   await page.goto('/no-such-page');
   await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();

@@ -3,7 +3,8 @@
  * (npm run db:start). Each test makes its own throwaway user, so specs can run
  * in parallel across the phone, tablet and desktop projects.
  */
-import { test, type Page } from '@playwright/test';
+import path from 'node:path';
+import { test as base, type Page } from '@playwright/test';
 import { createAdminClient, removeUserFiles } from '../../scripts/supabase-admin.ts';
 
 const admin = createAdminClient();
@@ -44,6 +45,21 @@ export async function signInEmailFor(email: string, redirectTo: string) {
 }
 
 /**
+ * Playwright's `test` with a fresh `user` per test. As a fixture, teardown only
+ * runs for a user that was actually created, and a failed cleanup fails the test.
+ */
+export const test = base.extend<{ user: E2eUser }>({
+  // eslint-disable-next-line no-empty-pattern -- Playwright needs the destructuring even when empty
+  user: async ({}, provide, testInfo) => {
+    const user = await createE2eUser(path.basename(testInfo.file, '.spec.ts'));
+    await provide(user);
+    await deleteE2eUser(user);
+  },
+});
+
+export { expect } from '@playwright/test';
+
+/**
  * Signs `page` in through the real magic-link redirect and lands on `path`.
  * Each Playwright context has its own storage, so a second context is a second device.
  */
@@ -55,7 +71,7 @@ export async function signIn(page: Page, user: E2eUser, path = '/'): Promise<voi
 
 /** Absolute URL of an app path, from the project's baseURL in playwright.config.ts. */
 export function appUrl(path: string): string {
-  const baseURL = test.info().project.use.baseURL;
+  const baseURL = base.info().project.use.baseURL;
   if (!baseURL) throw new Error('playwright.config.ts sets no baseURL');
   return new URL(path, baseURL).toString();
 }

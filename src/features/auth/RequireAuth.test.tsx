@@ -1,7 +1,7 @@
 import { screen } from '@testing-library/react';
 import { Route, useLocation } from 'react-router';
 import { loadingAuth, renderRoutes, RouteMarker, signedInAs, signedOut } from '@/test/render';
-import type { LoginRedirectState } from './loginRedirect';
+import { EXPIRED_LINK_MESSAGE, type LoginRedirectState } from './loginRedirect';
 import { RequireAuth } from './RequireAuth';
 
 function LoginProbe() {
@@ -57,8 +57,6 @@ describe('RequireAuth', () => {
       },
       auth: signedOut,
     });
-    expect(
-      screen.getByText('Login, link error: Email link is invalid or has expired'),
-    ).toBeInTheDocument();
+    expect(screen.getByText(`Login, link error: ${EXPIRED_LINK_MESSAGE}`)).toBeInTheDocument();
   });
 });

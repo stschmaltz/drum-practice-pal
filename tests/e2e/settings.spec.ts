@@ -1,19 +1,8 @@
-import { expect, test } from '@playwright/test';
-import { createE2eUser, deleteE2eUser, signIn, type E2eUser } from './auth';
+import { expect, signIn, test } from './auth';
 
 // Unit 03 acceptance: change a setting on one device, see it on another after refresh.
 
-let user: E2eUser;
-
-test.beforeEach(async () => {
-  user = await createE2eUser('settings');
-});
-
-test.afterEach(async () => {
-  await deleteE2eUser(user);
-});
-
-test('a saved setting shows on a second device after refresh', async ({ browser }) => {
+test('a saved setting shows on a second device after refresh', async ({ user, browser }) => {
   // Two contexts have separate storage, so each is its own signed-in device.
   const laptopContext = await browser.newContext();
   const phoneContext = await browser.newContext();
@@ -44,7 +33,7 @@ test('a saved setting shows on a second device after refresh', async ({ browser 
   }
 });
 
-test('discarding edits restores the saved values', async ({ page }) => {
+test('discarding edits restores the saved values', async ({ user, page }) => {
   await signIn(page, user, '/settings');
   const metronome = page.getByLabel('Metronome on when playback starts');
   await expect(metronome).toBeChecked();
@@ -54,7 +43,7 @@ test('discarding edits restores the saved values', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Save settings' })).toBeDisabled();
 });
 
-test('saved settings come back after signing out and in again', async ({ page }) => {
+test('saved settings come back after signing out and in again', async ({ user, page }) => {
   await signIn(page, user, '/settings');
   await page.getByRole('radio', { name: '1 bar' }).check();
   await page.getByLabel('Metronome on when playback starts').uncheck();

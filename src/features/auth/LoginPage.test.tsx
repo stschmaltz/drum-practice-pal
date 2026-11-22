@@ -4,6 +4,7 @@ import { Route } from 'react-router';
 import { fakeSupabase, resetFakeSupabase } from '@/test/fakeSupabase';
 import { loadingAuth, renderRoutes, RouteMarker, signedInAs, signedOut } from '@/test/render';
 import { LoginPage } from './LoginPage';
+import { EXPIRED_LINK_MESSAGE } from './loginRedirect';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -123,6 +124,31 @@ describe('LoginPage', () => {
     );
   });
 
+  it("clears a rejected code's error when the email is sent again", async () => {
+    fakeSupabase.auth.verifyOtp.mockResolvedValue({ data: null, error: { message: 'Bad code' } });
+    const user = renderLogin();
+    await sendEmail(user, 'drummer@drumpal.test');
+    await user.type(await screen.findByLabelText('Code'), '000000');
+    await user.click(screen.getByRole('button', { name: 'Sign in with code' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent("That code didn't work");
+
+    await user.click(screen.getByRole('button', { name: 'Send again' }));
+    expect(fakeSupabase.auth.signInWithOtp).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('builds the magic link from ?next= without its fragment', async () => {
+    const user = renderLogin(`/login?next=${encodeURIComponent('/settings#frag')}`);
+    await sendEmail(user, 'drummer@drumpal.test');
+    expect(fakeSupabase.auth.signInWithOtp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          emailRedirectTo: `${window.location.origin}/settings`,
+        }) as unknown,
+      }),
+    );
+  });
+
   it('goes back to the email form, clearing the code and its error', async () => {
     fakeSupabase.auth.verifyOtp.mockResolvedValue({ data: null, error: { message: 'Bad code' } });
     const user = renderLogin();
@@ -147,11 +173,11 @@ describe('LoginPage', () => {
 
   it('explains an expired magic link handed over by the guard', () => {
     renderRoutes(routes, {
-      path: { pathname: '/login', state: { linkError: 'Email link is invalid or has expired' } },
+      path: { pathname: '/login', state: { linkError: EXPIRED_LINK_MESSAGE } },
       auth: signedOut,
     });
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Email link is invalid or has expired. Send yourself a new one.',
+      `${EXPIRED_LINK_MESSAGE} Send yourself a new one.`,
     );
   });
 });

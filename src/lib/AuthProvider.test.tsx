@@ -75,6 +75,11 @@ describe('AuthProvider', () => {
 });
 
 describe('auth hooks', () => {
+  // The console.error spies below would otherwise stay silenced for the rest of the file.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('useAuth throws outside AuthProvider', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => renderHook(() => useAuth())).toThrow('inside <AuthProvider>');
