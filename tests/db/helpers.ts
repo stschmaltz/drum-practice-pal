@@ -56,7 +56,8 @@ export async function createTestUser(label: string): Promise<TestUser> {
 export async function deleteTestUser(user: TestUser | undefined) {
   if (!user) return;
   await removeUserFiles(admin, user.id);
-  await admin.auth.admin.deleteUser(user.id);
+  const { error } = await admin.auth.admin.deleteUser(user.id);
+  if (error) throw error;
 }
 
 /** updated_at comes from now(), so wait before an update that should move it. */

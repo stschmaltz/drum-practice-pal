@@ -21,10 +21,16 @@ export function createAdminClient(): DbClient {
   return createNodeClient(env.url, env.secretKey);
 }
 
+const USERS_PER_PAGE = 1000;
+
 export async function findUserIdsByEmail(admin: DbClient, email: string): Promise<string[]> {
-  const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  if (error) throw error;
-  return data.users.filter((user) => user.email === email).map((user) => user.id);
+  const ids: string[] = [];
+  for (let page = 1; ; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: USERS_PER_PAGE });
+    if (error) throw error;
+    ids.push(...data.users.filter((user) => user.email === email).map((user) => user.id));
+    if (data.users.length < USERS_PER_PAGE) return ids;
+  }
 }
 
 /**
@@ -33,8 +39,14 @@ export async function findUserIdsByEmail(admin: DbClient, email: string): Promis
  */
 export async function removeUserFiles(admin: DbClient, userId: string): Promise<void> {
   const bucket = admin.storage.from(GP_FILES_BUCKET);
-  const { data: files } = await bucket.list(userId);
-  if (files && files.length > 0) {
-    await bucket.remove(files.map((file) => `${userId}/${file.name}`));
+  // list() returns one page, so remove the first page until the folder is empty.
+  for (;;) {
+    const { data: files, error: listError } = await bucket.list(userId);
+    if (listError) throw listError;
+    if (files.length === 0) return;
+    const { error: removeError } = await bucket.remove(
+      files.map((file) => `${userId}/${file.name}`),
+    );
+    if (removeError) throw removeError;
   }
 }
