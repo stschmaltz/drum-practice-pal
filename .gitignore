@@ -1,0 +1,18 @@
+node_modules
+dist
+coverage
+*.tsbuildinfo
+.env
+.env.local
+playwright-report
+test-results
+blob-report
+# Real Songsterr exports: local only, never committed
+tests/fixtures/real/*
+!tests/fixtures/real/.gitkeep
+# Supabase local state
+supabase/.branches
+supabase/.temp
+# Copied from node_modules by the alphaTab Vite plugin on every dev/build
+public/font
+public/soundfont

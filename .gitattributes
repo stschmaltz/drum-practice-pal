@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.gp binary
+*.gpx binary
+*.gp3 binary
+*.gp4 binary
+*.gp5 binary
+*.mid binary
+*.png binary
+*.ico binary
+*.sf2 binary
+*.sf3 binary
