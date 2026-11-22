@@ -1,0 +1,16 @@
+QA magic-link probe (local stack, Mailpit at :54324). POST /auth/v1/otp?redirect_to=<r> with the publishable key,
+then read the "Your sign-in link" email from the Mailpit API and print the redirect_to GoTrue put in the link.
+
+requested redirect_to             -> redirect_to in emailed link
+http://localhost:5173/            -> http://localhost:5173/
+http://127.0.0.1:5173/library     -> http://127.0.0.1:5173/library
+http://localhost:4173/            -> http://localhost:4173/
+http://mylaptop:5173/x            -> http://mylaptop:5173/x          (single-label host matches http://*:5173/**)
+http://192.168.1.20:5173/         -> http://localhost:5173           (dotted LAN IP does NOT match; falls back to site_url)
+http://evil.example:5173/steal    -> http://localhost:5173           (falls back to site_url)
+http://evil.example/steal         -> http://localhost:5173           (falls back to site_url)
+
+Following the 127.0.0.1:5173/library link:  303 -> http://127.0.0.1:5173/library#access_token=<redacted>&...&type=magiclink
+Following the same link again:              303 -> ...#error=access_denied&error_code=otp_expired (single use, as expected)
+
+Email links point at http://127.0.0.1:54321/auth/v1/verify (the local API URL), so a phone on the LAN can't open them either.

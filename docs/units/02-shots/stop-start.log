@@ -1,0 +1,11 @@
+
+> drum-practice-pal@0.0.0 db:stop
+> supabase stop
+
+{"project_id_filter":"drum-practice-pal","backup":true,"message":"Stopped supabase local development setup."}
+
+> drum-practice-pal@0.0.0 db:start
+> supabase start
+
+Starting database from backup...
+{"DB_URL":"postgresql://postgres:postgres@127.0.0.1:54322/postgres","API_URL":"http://127.0.0.1:54321","REST_URL":"http://127.0.0.1:54321/rest/v1","GRAPHQL_URL":"http://127.0.0.1:54321/graphql/v1","FUNCTIONS_URL":"http://127.0.0.1:54321/functions/v1","MCP_URL":"http://127.0.0.1:54321/mcp","STUDIO_URL":"http://127.0.0.1:54323","PUBLISHABLE_KEY":"sb_publishable_REDACTED","SECRET_KEY":"sb_secret_REDACTED","JWT_SECRET":"REDACTED","ANON_KEY":"<jwt REDACTED>","SERVICE_ROLE_KEY":"<jwt REDACTED>","MAILPIT_URL":"http://127.0.0.1:54324","STORAGE_S3_URL":"http://127.0.0.1:54321/storage/v1/s3","S3_PROTOCOL_ACCESS_KEY_ID":"REDACTED","S3_PROTOCOL_ACCESS_KEY_SECRET":"REDACTED","S3_PROTOCOL_REGION":"local","message":""}
