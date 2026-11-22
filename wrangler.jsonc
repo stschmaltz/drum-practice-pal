@@ -1,0 +1,13 @@
+// Cloudflare Workers static assets. Workers Builds runs `npm run build`, then
+// `npx wrangler deploy`, on every push; non-main branches get preview URLs.
+{
+  "name": "drum-practice-pal",
+  "compatibility_date": "2026-11-22",
+  "assets": {
+    "directory": "./dist",
+    // Client-side routes (/library, /songs/:id) serve index.html instead of 404.
+    "not_found_handling": "single-page-application",
+  },
+  // Required for `wrangler preview`, which Workers Builds runs on non-main branches.
+  "previews": {},
+}

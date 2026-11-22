@@ -85,5 +85,19 @@ Run on Windows 11, Node 22.15.0, npm 10.9.2, with network access. Everything abo
 **Still open**
 
 - `npm audit` reports 3 dev-only advisories: `tinypool` (critical) and `@vitest/mocker` (moderate), both via Vitest 3. The fix is Vitest 5, a breaking major, so it's left for a deliberate upgrade. Nothing shipped to users is affected.
-- Untested until CI runs: the CI workflow, the preview deploy, and a fresh-clone `npm ci`. All need the GitHub repo first.
-- The SPA fallback (`public/_redirects`) is still due in Unit 03.
+- Vitest 5 upgrade for the audit advisories above.
+
+## Deploy setup (verified)
+
+**GitHub.** Private repo `stschmaltz/drum-practice-pal`, `main` pushed. CI on `main` passed: the check job, and e2e 3/3 on Ubuntu from a fresh `npm ci`. PR 1 moves `actions/checkout`, `actions/setup-node` and `actions/upload-artifact` from v4 to v7, because v4 runs on Node 20, which GitHub has deprecated. CI passes on it.
+
+**Cloudflare: Workers, not Pages.** The dashboard's Git import now creates a Worker with Workers Builds, not a Pages project. That covers what the plan wanted from Pages: builds on push, a preview URL for every branch and PR, a free static SPA. So the project is the Worker `drum-practice-pal`:
+
+- Build command `npm run build`; deploy command `npx wrangler deploy`; Node 22 detected from `.nvmrc`.
+- Production URL: https://drum-practice-pal.stschmaltz.workers.dev. Branch and PR previews are served at `*-drum-practice-pal.stschmaltz.workers.dev`.
+- `wrangler.jsonc` is committed, so the deploy settings live in the repo and aren't guessed on each build: assets from `./dist`, and `not_found_handling: single-page-application`. Deep links serve `index.html`, so Unit 03 needs no `public/_redirects`. `docs/plan.md` has been updated to match.
+- Checked live: `/`, `/library` and an unknown path all return 200 with the app shell. The soundfont serves at `/soundfont/sonivox.sf2`.
+- Previews need `"previews": {}` in `wrangler.jsonc`. Without it, `wrangler preview` fails. Top-level `assets` settings apply to previews too.
+- Verified on PR 1: the "Workers Builds: drum-practice-pal" check passes, and the preview at `https://<branch>-drum-practice-pal.stschmaltz.workers.dev` renders the home page. The branch name is slugified, so `ci/node24-actions` becomes `ci-node24-actions`.
+- SPA mode serves `index.html` only to browser navigations (`Sec-Fetch-Mode: navigate`). A plain `curl` of `/library` returns 404, which is expected and keeps missing assets from coming back as HTML. To check a route with curl, send `-H "Sec-Fetch-Mode: navigate"`.
+- There's still no API token in the repo. Cloudflare's GitHub app handles the builds.

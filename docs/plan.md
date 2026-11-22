@@ -37,7 +37,7 @@ A tab-first drum practice tool: upload a Songsterr Guitar Pro export once, then 
 | Backend       | Supabase: Postgres, magic-link auth, Storage, RLS                                                                                    | Relational data fits; files and auth in one place; local CLI for tests  |
 | Offline       | vite-plugin-pwa (Workbox) + Dexie over IndexedDB                                                                                     | Cached .gp files, offline playback, queued session writes               |
 | Tests         | Vitest + Testing Library; Playwright with phone, tablet, desktop profiles                                                            | Unit, component and e2e across all three device sizes                   |
-| Hosting       | Cloudflare Pages                                                                                                                     | Free, fast, static SPA                                                  |
+| Hosting       | Cloudflare Workers (static assets)                                                                                                   | Free, fast, static SPA                                                  |
 | Speed model   | Store `speed_ratio`; derive BPM from the tempo at the loop's first bar                                                               | Songs can change tempo mid-song, so one BPM per song is wrong           |
 | Loop states   | `active` or `finished`, reopenable, history always kept                                                                              | Shows what's on the go and what you've done                             |
 | Layout        | alphaTab page layout at 768 px and up; horizontal scroll below                                                                       | A full page of drum notation doesn't fit a portrait phone               |
@@ -172,7 +172,7 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 - Folder structure per `AGENTS.md`
 - Fixture script: alphaTex sources exported to GP7 via alphaTab: a 16-bar 4/4 groove at 120 BPM; a tempo change (120 to 90 at bar 9); multi-track (drums, bass, guitar); a 3/4 song
 - `AGENTS.md`, `docs/plan.md`, `docs/units/`
-- GitHub Actions: typecheck, lint, unit tests, e2e on PRs. Cloudflare Pages preview deploy per PR
+- GitHub Actions: typecheck, lint, unit tests, e2e on PRs. Cloudflare Workers Builds preview deploy per PR (was Pages; see docs/units/00-scaffold.md)
 
 **Acceptance:** fresh clone runs with `npm i && npm run dev`; all scripts pass; a PR gets a preview URL; fixtures regenerate with one command.
 
@@ -208,7 +208,7 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 
 **Goal:** a signed-in shell to hang features on.
 
-- Routes: `/login`, `/` (On the go), `/library`, `/songs/:id`, `/settings`; SPA fallback `public/_redirects`
+- Routes: `/login`, `/` (On the go), `/library`, `/songs/:id`, `/settings`; SPA fallback already handled by `not_found_handling` in `wrangler.jsonc`
 - Magic-link login, sign-out, auth guard, session refresh
 - Responsive nav: bottom tabs on phone, sidebar on tablet and desktop
 - Typed Supabase client and a query-hook pattern in `src/lib` that later units copy; documented in `AGENTS.md`
@@ -333,7 +333,7 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 
 - Empty, loading and error states everywhere; touch targets 44 px+
 - Full e2e journey on all three profiles: sign in, upload, jam, save loop, practice, hit target, finish
-- Production Cloudflare Pages and Supabase; README
+- Production Cloudflare Workers and Supabase; README
 
 **Acceptance:** the journey passes in CI; a real-device pass finds nothing blocking.
 
