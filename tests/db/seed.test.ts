@@ -5,7 +5,11 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { GP_FILES_BUCKET } from '../../src/lib/schema.ts';
+import { findUserIdsByEmail } from '../../scripts/supabase-admin.ts';
 import { admin } from './helpers';
+
+const DEMO_EMAIL = 'demo@drumpal.test';
+const OTHER_EMAIL = 'other@drumpal.test';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const tsxCli = fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url));
@@ -17,14 +21,8 @@ function runSeed(): string {
   });
 }
 
-async function userIdsByEmail(email: string) {
-  const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  if (error) throw error;
-  return data.users.filter((user) => user.email === email).map((user) => user.id);
-}
-
 async function seededUser(email: string) {
-  const ids = await userIdsByEmail(email);
+  const ids = await findUserIdsByEmail(admin, email);
   expect(ids).toHaveLength(1);
   return ids[0]!;
 }
@@ -33,7 +31,7 @@ let firstDemoId: string;
 
 beforeAll(async () => {
   runSeed();
-  firstDemoId = await seededUser('demo@drumpal.test');
+  firstDemoId = await seededUser(DEMO_EMAIL);
   const output = runSeed();
   expect(output).toContain('seeded demo@drumpal.test: Groove 120, Tempo Change, Multi Track');
   expect(output).toContain('seeded other@drumpal.test: Waltz 3-4');
@@ -41,8 +39,8 @@ beforeAll(async () => {
 
 describe('seed script, run twice', () => {
   it('replaces the seed users instead of duplicating them', async () => {
-    const demoId = await seededUser('demo@drumpal.test');
-    await seededUser('other@drumpal.test');
+    const demoId = await seededUser(DEMO_EMAIL);
+    await seededUser(OTHER_EMAIL);
     expect(demoId).not.toBe(firstDemoId);
     const leftovers = await Promise.all(
       ['songs', 'loops', 'practice_sessions', 'user_settings'].map(async (table) => {
@@ -57,7 +55,7 @@ describe('seed script, run twice', () => {
   });
 
   it('gives each seed user one settings row with defaults', async () => {
-    for (const email of ['demo@drumpal.test', 'other@drumpal.test']) {
+    for (const email of [DEMO_EMAIL, OTHER_EMAIL]) {
       const id = await seededUser(email);
       const { data } = await admin.from('user_settings').select('*').eq('user_id', id);
       expect(data).toHaveLength(1);
@@ -66,7 +64,7 @@ describe('seed script, run twice', () => {
   });
 
   it('seeds the expected songs and loops for demo', async () => {
-    const demoId = await seededUser('demo@drumpal.test');
+    const demoId = await seededUser(DEMO_EMAIL);
     const songs = await admin
       .from('songs')
       .select('title, bar_count, drum_track_index, loops (name, start_bar, end_bar, status)')
@@ -86,7 +84,7 @@ describe('seed script, run twice', () => {
   });
 
   it('derives loop state from status and sessions', async () => {
-    const demoId = await seededUser('demo@drumpal.test');
+    const demoId = await seededUser(DEMO_EMAIL);
     const { data } = await admin
       .from('loops')
       .select('name, status, finished_at, last_practiced_at, practice_sessions (id)')
@@ -98,7 +96,7 @@ describe('seed script, run twice', () => {
   });
 
   it("stores each song's file at its file_path with a matching hash, and nothing else", async () => {
-    for (const email of ['demo@drumpal.test', 'other@drumpal.test']) {
+    for (const email of [DEMO_EMAIL, OTHER_EMAIL]) {
       const id = await seededUser(email);
       const { data: songs } = await admin
         .from('songs')

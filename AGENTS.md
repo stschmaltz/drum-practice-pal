@@ -76,11 +76,13 @@ docs/
 ## Supabase
 
 - Schema changes are new files in `supabase/migrations/` (`npx supabase migration new <name>`), never edits to applied ones. Then `npm run db:reset`, `npm run db:types`, and commit the regenerated types. CI fails if they drift.
-- Every table has `user_id` and owner-only RLS (`user_id = (select auth.uid())`). Child tables reference their parent by `(id, user_id)` so a row can't point at another user's parent. Grants are explicit per table; `anon` gets nothing.
+- Every table has `user_id` and owner-only RLS (`user_id = (select auth.uid())`). Child tables reference their parent by `(id, user_id)` so a row can't point at another user's parent.
+- Supabase's default privileges give `anon` and `authenticated` full access to every new public table and function. So every migration that creates one must, in the same file: enable RLS on the table, `revoke all ... from anon, authenticated`, then grant only what's needed (column-level `grant update (col, ...)` where only some columns are client-editable). For functions, `revoke execute ... from public, anon, authenticated` unless clients must call it. `anon` gets nothing. See the end of `20261122000000_schema.sql`.
 - Storage: private bucket `gp-files`, objects at `{user_id}/{song_id}.gp`. Build paths with `songFilePath()` from `src/lib/schema.ts`; policies reject any other shape.
 - `src/lib/schema.ts` mirrors DB limits (speed ratio 0.25 to 2.0, count-in bars, text lengths) for client-side validation; its test fails if they drift from the SQL.
 - Keys: the browser gets `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` only. `SUPABASE_SECRET_KEY` bypasses RLS and is for node scripts and tests; never prefix it with `VITE_`. `.env.local` is gitignored; `.env.example` lists the names. Scripts and `tests/db` fall back to `supabase status`, so they need no env locally.
-- Database tests sign users in with the real magic-link flow (`createTestUser` in `tests/db/helpers.ts`) and clean up after themselves. Local magic-link emails land in Mailpit at http://127.0.0.1:54324. Seed users: `demo@drumpal.test` and `other@drumpal.test`.
+- Node-side clients and admin chores (`createAdminClient`, `createNodeClient`, `findUserIdsByEmail`, `removeUserFiles`) live in `scripts/supabase-admin.ts`, shared by the seed script and `tests/db`. Connection details come from `scripts/local-supabase.ts`.
+- Database tests sign users in with the real magic-link flow (`createTestUser` in `tests/db/helpers.ts`) and clean up after themselves. Build rows with `songRow`, `sessionRow`, `insertSong` and `insertLoop`, and assert error codes with `PG.*` from the same file rather than raw strings. Local magic-link emails land in Mailpit at http://127.0.0.1:54324. Seed users: `demo@drumpal.test` and `other@drumpal.test`.
 
 ## Stage workflow
 

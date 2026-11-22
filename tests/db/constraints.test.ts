@@ -13,13 +13,12 @@ import {
   deleteTestUser,
   insertLoop,
   insertSong,
+  PG,
+  sessionRow,
   songRow,
+  waitForClockTick,
   type TestUser,
 } from './helpers';
-
-const CHECK_VIOLATION = '23514';
-const INVALID_ENUM = '22P02';
-const INSUFFICIENT_PRIVILEGE = '42501';
 
 let user: TestUser;
 let songId: string;
@@ -32,18 +31,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await deleteTestUser(user);
 });
-
-function session(loopId: string, overrides: Record<string, unknown> = {}) {
-  return {
-    id: crypto.randomUUID(),
-    user_id: user.id,
-    loop_id: loopId,
-    started_at: '2026-11-20T10:00:00.000Z',
-    duration_seconds: 60,
-    speed_ratio: 1,
-    ...overrides,
-  };
-}
 
 async function loopById(id: string) {
   const { data, error } = await user.client.from('loops').select('*').eq('id', id).single();
@@ -68,7 +55,7 @@ describe('songs edges', () => {
     ['file_hash', 'A'.repeat(64)],
   ])('rejects %s = %j', async (field, value) => {
     const { error } = await user.client.from('songs').insert(songRow(user.id, { [field]: value }));
-    expect(error?.code).toBe(CHECK_VIOLATION);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
   });
 
   it('defaults artist to an empty string', async () => {
@@ -85,7 +72,7 @@ describe('songs edges', () => {
     const { error } = await user.client
       .from('songs')
       .insert({ ...row, file_path: `${other}/${row.id}.gp` });
-    expect(error?.code).toBe(CHECK_VIOLATION);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
   });
 
   it.each([
@@ -99,13 +86,13 @@ describe('songs edges', () => {
       .from('songs')
       .update({ [field]: value } as TablesUpdate<'songs'>)
       .eq('id', id);
-    expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+    expect(error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
   });
 
   it('bumps updated_at when title changes', async () => {
     const id = await insertSong(user);
     const before = await user.client.from('songs').select('updated_at').eq('id', id).single();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitForClockTick();
     const after = await user.client
       .from('songs')
       .update({ title: 'Renamed' })
@@ -134,14 +121,14 @@ describe('loops edges', () => {
 
   it('rejects a loop that starts past the last bar', async () => {
     await expect(insertLoop(user, songId, { start_bar: 17, end_bar: 17 })).rejects.toMatchObject({
-      code: CHECK_VIOLATION,
+      code: PG.CHECK_VIOLATION,
     });
   });
 
   it('rejects an update that makes start_bar > end_bar', async () => {
     const id = await insertLoop(user, songId, { start_bar: 2, end_bar: 4 });
     const { error } = await user.client.from('loops').update({ start_bar: 5 }).eq('id', id);
-    expect(error?.code).toBe(CHECK_VIOLATION);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
     expect(await loopById(id)).toMatchObject({ start_bar: 2, end_bar: 4 });
   });
 
@@ -156,7 +143,7 @@ describe('loops edges', () => {
       .from('loops')
       .update({ [field]: value } as TablesUpdate<'loops'>)
       .eq('id', id);
-    expect(error?.code).toBe(CHECK_VIOLATION);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
   });
 
   it('accepts a name at the length limit and rejects one over it', async () => {
@@ -165,12 +152,12 @@ describe('loops edges', () => {
     ).resolves.toBeTruthy();
     await expect(
       insertLoop(user, songId, { name: 'n'.repeat(LOOP_NAME_MAX_LENGTH + 1) }),
-    ).rejects.toMatchObject({ code: CHECK_VIOLATION });
+    ).rejects.toMatchObject({ code: PG.CHECK_VIOLATION });
   });
 
   it('rejects a status outside the enum', async () => {
     await expect(insertLoop(user, songId, { status: 'paused' as never })).rejects.toMatchObject({
-      code: INVALID_ENUM,
+      code: PG.INVALID_TEXT_REPRESENTATION,
     });
   });
 
@@ -187,7 +174,7 @@ describe('loops edges', () => {
   it('editing a finished loop keeps its finished_at', async () => {
     const id = await insertLoop(user, songId, { status: 'finished' });
     const { finished_at } = await loopById(id);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitForClockTick();
     const { error } = await user.client.from('loops').update({ name: 'Renamed' }).eq('id', id);
     expect(error).toBeNull();
     expect((await loopById(id)).finished_at).toBe(finished_at);
@@ -195,8 +182,8 @@ describe('loops edges', () => {
 
   it('finish and reopen keep the session history', async () => {
     const id = await insertLoop(user, songId);
-    await user.client.from('practice_sessions').insert(session(id));
-    await user.client.from('practice_sessions').insert(session(id));
+    await user.client.from('practice_sessions').insert(sessionRow(user.id, id));
+    await user.client.from('practice_sessions').insert(sessionRow(user.id, id));
     for (const status of ['finished', 'active'] as const) {
       const { error } = await user.client.from('loops').update({ status }).eq('id', id);
       expect(error).toBeNull();
@@ -206,7 +193,9 @@ describe('loops edges', () => {
   });
 
   it("can't point a loop at a song that doesn't exist", async () => {
-    await expect(insertLoop(user, crypto.randomUUID())).rejects.toMatchObject({ code: '23503' });
+    await expect(insertLoop(user, crypto.randomUUID())).rejects.toMatchObject({
+      code: PG.FOREIGN_KEY_VIOLATION,
+    });
   });
 });
 
@@ -215,7 +204,7 @@ describe('practice_sessions edges', () => {
     const loopId = await insertLoop(user, songId);
     const { error } = await user.client
       .from('practice_sessions')
-      .insert(session(loopId, { speed_ratio: ratio }));
+      .insert(sessionRow(user.id, loopId, { speed_ratio: ratio }));
     expect(error).toBeNull();
   });
 
@@ -223,23 +212,23 @@ describe('practice_sessions edges', () => {
     const loopId = await insertLoop(user, songId);
     const { error } = await user.client
       .from('practice_sessions')
-      .insert(session(loopId, { speed_ratio: 0.2 }));
-    expect(error?.code).toBe(CHECK_VIOLATION);
+      .insert(sessionRow(user.id, loopId, { speed_ratio: 0.2 }));
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
   });
 
   it("can't be deleted directly", async () => {
     const loopId = await insertLoop(user, songId);
-    const row = session(loopId);
+    const row = sessionRow(user.id, loopId);
     await user.client.from('practice_sessions').insert(row);
     const { error } = await user.client.from('practice_sessions').delete().eq('id', row.id);
-    expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+    expect(error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
     const { data } = await user.client.from('practice_sessions').select('id').eq('id', row.id);
     expect(data).toHaveLength(1);
   });
 
   it('a retry with the same id but different values keeps the first write', async () => {
     const loopId = await insertLoop(user, songId);
-    const row = session(loopId, { repeats: 3 });
+    const row = sessionRow(user.id, loopId, { repeats: 3 });
     await user.client.from('practice_sessions').insert(row);
     const retry = await user.client
       .from('practice_sessions')
@@ -265,7 +254,7 @@ describe('user_settings edges', () => {
 
   it.each([{ count_in_bars: -1 }, { metronome_volume: -0.1 }])('rejects %j', async (change) => {
     const { error } = await user.client.from('user_settings').update(change).eq('user_id', user.id);
-    expect(error?.code).toBe(CHECK_VIOLATION);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
   });
 
   it.each([0, 1])('accepts metronome_volume = %j', async (volume) => {
@@ -281,12 +270,12 @@ describe('user_settings edges', () => {
       .from('user_settings')
       .update({ count_in_mode: 'sometimes' as never })
       .eq('user_id', user.id);
-    expect(error?.code).toBe(INVALID_ENUM);
+    expect(error?.code).toBe(PG.INVALID_TEXT_REPRESENTATION);
   });
 
   it('bumps updated_at on change', async () => {
     const before = await user.client.from('user_settings').select('updated_at').single();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitForClockTick();
     const after = await user.client
       .from('user_settings')
       .update({ drums_muted_default: true })
@@ -298,9 +287,9 @@ describe('user_settings edges', () => {
 
   it("can't be inserted or deleted by the user (one row, from signup)", async () => {
     const insert = await user.client.from('user_settings').insert({ user_id: user.id });
-    expect(insert.error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+    expect(insert.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
     const del = await user.client.from('user_settings').delete().eq('user_id', user.id);
-    expect(del.error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+    expect(del.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
     const { data } = await user.client.from('user_settings').select('user_id');
     expect(data).toEqual([{ user_id: user.id }]);
   });
@@ -310,8 +299,8 @@ describe('cascades', () => {
   it('deleting a loop removes only its sessions', async () => {
     const keep = await insertLoop(user, songId);
     const drop = await insertLoop(user, songId);
-    await user.client.from('practice_sessions').insert(session(keep));
-    await user.client.from('practice_sessions').insert(session(drop));
+    await user.client.from('practice_sessions').insert(sessionRow(user.id, keep));
+    await user.client.from('practice_sessions').insert(sessionRow(user.id, drop));
 
     const { error } = await user.client.from('loops').delete().eq('id', drop);
     expect(error).toBeNull();

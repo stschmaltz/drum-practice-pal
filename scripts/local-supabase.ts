@@ -34,6 +34,7 @@ export function parseStatusJson(output: string): LocalSupabaseEnv {
   };
 }
 
+/** All three variables or nothing: a partial env falls back to `supabase status`. */
 export function envFromProcess(env: NodeJS.ProcessEnv): LocalSupabaseEnv | null {
   const url = env.VITE_SUPABASE_URL;
   const publishableKey = env.VITE_SUPABASE_PUBLISHABLE_KEY;

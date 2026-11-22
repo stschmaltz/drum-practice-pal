@@ -5,7 +5,10 @@ import {
   deleteTestUser,
   insertLoop,
   insertSong,
+  PG,
+  sessionRow,
   songRow,
+  waitForClockTick,
   type TestUser,
 } from './helpers';
 
@@ -18,21 +21,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await deleteTestUser(user);
 });
-
-const CHECK_VIOLATION = '23514';
-
-function session(loopId: string, overrides: Record<string, unknown> = {}) {
-  return {
-    id: crypto.randomUUID(),
-    user_id: user.id,
-    loop_id: loopId,
-    started_at: '2026-11-20T10:00:00.000Z',
-    duration_seconds: 90,
-    speed_ratio: 0.8,
-    repeats: 5,
-    ...overrides,
-  };
-}
 
 describe('signup', () => {
   it('creates a user_settings row with defaults', async () => {
@@ -52,14 +40,14 @@ describe('songs constraints', () => {
     const hash = songRow(user.id).file_hash;
     await insertSong(user, { file_hash: hash });
     const { error } = await user.client.from('songs').insert(songRow(user.id, { file_hash: hash }));
-    expect(error?.code).toBe('23505');
+    expect(error?.code).toBe(PG.UNIQUE_VIOLATION);
   });
 
   it("rejects a file_path that isn't {user_id}/{id}.gp", async () => {
     const { error } = await user.client
       .from('songs')
       .insert(songRow(user.id, { file_path: `${user.id}/other.gp` }));
-    expect(error?.code).toBe(CHECK_VIOLATION);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
   });
 
   it.each([
@@ -69,7 +57,7 @@ describe('songs constraints', () => {
     ['title', ''],
   ])('rejects %s = %j', async (field, value) => {
     const { error } = await user.client.from('songs').insert(songRow(user.id, { [field]: value }));
-    expect(error?.code).toBe(CHECK_VIOLATION);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
   });
 
   it('allows a null drum_track_index', async () => {
@@ -84,7 +72,7 @@ describe('songs constraints', () => {
       .eq('id', id);
     expect(edit.error).toBeNull();
     const barCount = await user.client.from('songs').update({ bar_count: 99 }).eq('id', id);
-    expect(barCount.error?.code).toBe('42501');
+    expect(barCount.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
   });
 });
 
@@ -112,14 +100,14 @@ describe('loops constraints', () => {
     await expect(
       insertLoop(user, songId, { start_bar: start, end_bar: end }),
     ).rejects.toMatchObject({
-      code: CHECK_VIOLATION,
+      code: PG.CHECK_VIOLATION,
     });
   });
 
   it('rejects an update that moves end_bar past the song', async () => {
     const id = await insertLoop(user, songId);
     const { error } = await user.client.from('loops').update({ end_bar: 20 }).eq('id', id);
-    expect(error?.code).toBe(CHECK_VIOLATION);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
   });
 
   it.each([
@@ -130,7 +118,7 @@ describe('loops constraints', () => {
     ['name', ''],
   ])('rejects %s = %j', async (field, value) => {
     await expect(insertLoop(user, songId, { [field]: value })).rejects.toMatchObject({
-      code: CHECK_VIOLATION,
+      code: PG.CHECK_VIOLATION,
     });
   });
 
@@ -162,7 +150,7 @@ describe('loops constraints', () => {
   it('bumps updated_at on update', async () => {
     const id = await insertLoop(user, songId);
     const before = await user.client.from('loops').select('updated_at').eq('id', id).single();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitForClockTick();
     const after = await user.client
       .from('loops')
       .update({ speed_ratio: 0.9 })
@@ -177,11 +165,13 @@ describe('practice_sessions', () => {
   it('sets last_practiced_at to the latest session end', async () => {
     const songId = await insertSong(user);
     const loopId = await insertLoop(user, songId);
-    await user.client.from('practice_sessions').insert(session(loopId));
+    await user.client
+      .from('practice_sessions')
+      .insert(sessionRow(user.id, loopId, { duration_seconds: 90 }));
     // An older session arriving later (offline queue) must not move it back.
     await user.client
       .from('practice_sessions')
-      .insert(session(loopId, { started_at: '2026-11-01T10:00:00.000Z' }));
+      .insert(sessionRow(user.id, loopId, { started_at: '2026-11-01T10:00:00.000Z' }));
 
     const { data } = await user.client
       .from('loops')
@@ -194,7 +184,7 @@ describe('practice_sessions', () => {
   it('a retried insert with the same id is ignored', async () => {
     const songId = await insertSong(user);
     const loopId = await insertLoop(user, songId);
-    const row = session(loopId);
+    const row = sessionRow(user.id, loopId);
     for (let i = 0; i < 2; i++) {
       const { error } = await user.client
         .from('practice_sessions')
@@ -214,27 +204,27 @@ describe('practice_sessions', () => {
     const loopId = await insertLoop(user, songId);
     const { error } = await user.client
       .from('practice_sessions')
-      .insert(session(loopId, { [field]: value }));
-    expect(error?.code).toBe(CHECK_VIOLATION);
+      .insert(sessionRow(user.id, loopId, { [field]: value }));
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
   });
 
   it("can't be edited (append-only)", async () => {
     const songId = await insertSong(user);
     const loopId = await insertLoop(user, songId);
-    const row = session(loopId);
+    const row = sessionRow(user.id, loopId);
     await user.client.from('practice_sessions').insert(row);
     const { error } = await user.client
       .from('practice_sessions')
       .update({ repeats: 99 })
       .eq('id', row.id);
-    expect(error?.code).toBe('42501');
+    expect(error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
   });
 });
 
 describe('user_settings constraints', () => {
   it.each([{ count_in_bars: 3 }, { metronome_volume: 1.5 }])('rejects %j', async (change) => {
     const { error } = await user.client.from('user_settings').update(change).eq('user_id', user.id);
-    expect(error?.code).toBe(CHECK_VIOLATION);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
   });
 
   it('accepts a valid change', async () => {
@@ -252,7 +242,7 @@ describe('cascades', () => {
   it('deleting a song removes its loops and their sessions', async () => {
     const songId = await insertSong(user);
     const loopId = await insertLoop(user, songId);
-    await user.client.from('practice_sessions').insert(session(loopId));
+    await user.client.from('practice_sessions').insert(sessionRow(user.id, loopId));
 
     const { error } = await user.client.from('songs').delete().eq('id', songId);
     expect(error).toBeNull();

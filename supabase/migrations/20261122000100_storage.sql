@@ -1,5 +1,6 @@
 -- Unit 02: private bucket for uploaded Guitar Pro files.
 -- Objects live at {user_id}/{song_id}.gp; the first path segment is the owner.
+-- Files aren't tied to songs rows, so deleting a song must remove its file too.
 
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('gp-files', 'gp-files', false, 20 * 1024 * 1024)
@@ -13,7 +14,8 @@ create policy gp_files_select_own on storage.objects
   );
 
 -- Writes must also match the exact {user_id}/{uuid}.gp shape, so nothing else
--- (nested folders, other extensions) ends up in the bucket.
+-- (nested folders, other extensions) ends up in the bucket. The same pattern is
+-- repeated in the update policy below; change both together.
 create policy gp_files_insert_own on storage.objects
   for insert to authenticated
   with check (

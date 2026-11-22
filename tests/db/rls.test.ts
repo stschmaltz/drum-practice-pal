@@ -7,6 +7,8 @@ import {
   deleteTestUser,
   insertLoop,
   insertSong,
+  PG,
+  sessionRow,
   songRow,
   type TestUser,
 } from './helpers';
@@ -23,13 +25,7 @@ beforeAll(async () => {
   b = await createTestUser('rls-b');
   songA = await insertSong(a);
   loopA = await insertLoop(a, songA);
-  const session = await a.client.from('practice_sessions').insert({
-    loop_id: loopA,
-    user_id: a.id,
-    started_at: new Date().toISOString(),
-    duration_seconds: 60,
-    speed_ratio: 1,
-  });
+  const session = await a.client.from('practice_sessions').insert(sessionRow(a.id, loopA));
   if (session.error) throw session.error;
   filePathA = songFilePath(a.id, songA);
   const upload = await a.client.storage.from(GP_FILES_BUCKET).upload(filePathA, fileBytes);
@@ -95,23 +91,17 @@ describe('row-level security between two users', () => {
 
   it("B can't insert rows owned by A", async () => {
     const { error } = await b.client.from('songs').insert(songRow(a.id));
-    expect(error?.code).toBe('42501');
+    expect(error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
   });
 
   it("B can't attach a loop or session to A's song or loop", async () => {
     const loop = await b.client
       .from('loops')
       .insert({ user_id: b.id, song_id: songA, name: 'Sneaky', start_bar: 1, end_bar: 2 });
-    expect(loop.error?.code).toBe('23503');
+    expect(loop.error?.code).toBe(PG.FOREIGN_KEY_VIOLATION);
 
-    const session = await b.client.from('practice_sessions').insert({
-      user_id: b.id,
-      loop_id: loopA,
-      started_at: new Date().toISOString(),
-      duration_seconds: 30,
-      speed_ratio: 1,
-    });
-    expect(session.error?.code).toBe('23503');
+    const session = await b.client.from('practice_sessions').insert(sessionRow(b.id, loopA));
+    expect(session.error?.code).toBe(PG.FOREIGN_KEY_VIOLATION);
   });
 
   it("B can't move their own song to A", async () => {
@@ -120,7 +110,7 @@ describe('row-level security between two users', () => {
     expect(data).toHaveLength(1);
     // user_id isn't in the column grant, so this fails before RLS is even checked.
     const move = await b.client.from('songs').update({ user_id: a.id }).eq('id', songB);
-    expect(move.error?.code).toBe('42501');
+    expect(move.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
   });
 
   it('signed-out clients see nothing', async () => {
@@ -184,16 +174,10 @@ describe('cross-user writes that must fail', () => {
     const loop = await b.client
       .from('loops')
       .insert({ user_id: a.id, song_id: songA, name: 'Sneaky', start_bar: 1, end_bar: 2 });
-    expect(loop.error?.code).toBe('42501');
+    expect(loop.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
 
-    const session = await b.client.from('practice_sessions').insert({
-      user_id: a.id,
-      loop_id: loopA,
-      started_at: new Date().toISOString(),
-      duration_seconds: 30,
-      speed_ratio: 1,
-    });
-    expect(session.error?.code).toBe('42501');
+    const session = await b.client.from('practice_sessions').insert(sessionRow(a.id, loopA));
+    expect(session.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
     const { data } = await admin.from('practice_sessions').select('id').eq('loop_id', loopA);
     expect(data).toHaveLength(1);
   });
@@ -202,7 +186,7 @@ describe('cross-user writes that must fail', () => {
     const songB = await insertSong(b);
     const loopB = await insertLoop(b, songB);
     const toSong = await b.client.from('loops').update({ song_id: songA }).eq('id', loopB);
-    expect(toSong.error?.code).toBe('23503');
+    expect(toSong.error?.code).toBe(PG.FOREIGN_KEY_VIOLATION);
     const toUser = await b.client.from('loops').update({ user_id: a.id }).eq('id', loopB);
     expect(toUser.error).not.toBeNull();
     const { data } = await admin.from('loops').select('user_id, song_id').eq('id', loopB).single();

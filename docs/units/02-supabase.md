@@ -176,3 +176,39 @@ These aren't issues, but later units should know them. Storage accepts any `{uid
 **Cleanup:** QA's throwaway users and files were deleted through the admin API, so the DB holds only the two seed users and their 4 files. Running `npm run test:db` re-creates the seed users with new ids.
 
 **Verdict: PASS.** No blocker or major issues. Unit 03 should pick up issue 1, and Units 09 and 11, which own those flows, should pick up issues 3 to 5.
+
+## Readability
+
+**Summary:** Refactored the seed script and DB tests for clarity with no change to schema, policies, grants or app behavior. Duplicated node-side Supabase code moved into one shared module, the DB tests share their row builders and error codes, and the seed script is split into small steps. The SQL changed in comments only. AGENTS.md now states the revoke-and-grant rule from QA issue 7.
+
+**Changes**
+
+- New `scripts/supabase-admin.ts`: `createNodeClient` (no stored session), `createAdminClient`, `findUserIdsByEmail` and `removeUserFiles`. Before this, the seed script and `tests/db/helpers.ts` each built their own clients and each had a copy of "remove the user's Storage folder", and `seed.test.ts` had its own user lookup by email.
+- `scripts/seed.ts`: split `seedSong` into `seedSong` (file plus songs row) and `seedLoop` (loop plus its sessions), and added `createSeedUser`. Session fixtures are now named objects (`{ daysAgo, minutes, speedRatio, repeats }`) instead of four-number tuples with a comment explaining the order. The fixture folder path is built with one `new URL(...)`. The output and seeded data are the same.
+- `tests/db/helpers.ts`:
+  - `PG` holds the Postgres error codes the tests assert on. It replaces the `CHECK_VIOLATION`/`INVALID_ENUM`/`INSUFFICIENT_PRIVILEGE` constants each file declared and the raw `'23503'`/`'42501'`/`'23505'` strings.
+  - `sessionRow(userId, loopId, overrides)` replaces the two local `session()` builders and the three inline session literals in `rls.test.ts`.
+  - `waitForClockTick()` replaces the three inline `setTimeout(20)` waits before `updated_at` checks, and says why the wait is there.
+  - `songRow` now returns an `id: string` type, so `insertSong` no longer needs `as string`.
+- `tests/db/*.test.ts` use those helpers. `seed.test.ts` names the seed emails once (`DEMO_EMAIL`, `OTHER_EMAIL`). No assertions were added, removed or loosened. The `last_practiced_at` test passes `duration_seconds: 90` explicitly, because its expected end time depends on it. That value used to be hidden in the local builder's defaults.
+- `scripts/local-supabase.ts`: documented that `envFromProcess` needs all three variables, and that a partial env falls back to `supabase status`.
+- Migrations, comments only:
+  - The grants comment in the schema migration now explains why the revoke is needed: Supabase's default privileges.
+  - The storage migration notes that files aren't tied to song rows, and that the path regex is repeated in the insert and update policies.
+- `AGENTS.md` (Supabase section):
+  - New rule from QA issue 7: every migration that creates a public table or function enables RLS, revokes `anon`/`authenticated` (and `public` execute for functions), and grants only what's needed, column-level where only some columns are client-editable.
+  - Documented `scripts/supabase-admin.ts`, and the `tests/db/helpers.ts` row builders and `PG` codes for later DB tests to copy.
+
+**Left alone**
+
+- `src/lib/schema.ts`, `src/lib/schema.test.ts` and `vitest.db.config.ts` were already clear. `schema.test.ts` matches exact SQL strings, so the checks in the migrations weren't reformatted.
+- `src/lib/database.types.ts` is generated. `npm run db:types` still gives no diff.
+- QA issues 1 to 6 are logged for Units 03, 09, 11 and 12, and weren't fixed here.
+
+**Results (before → after)**
+
+- `npm run check`: 9 files, 96 tests → 9 files, 96 tests.
+- `npm run test:db`: 4 files, 123 tests → 4 files, 123 tests.
+- `npm run e2e`: 39 passed → 39 passed.
+- `npm run db:reset`: both migrations apply, and the seed prints both users.
+- `npm run db:types`: no diff.

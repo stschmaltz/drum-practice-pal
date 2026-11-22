@@ -1,23 +1,36 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Database, TablesInsert } from '../../src/lib/database.types.ts';
-import { GP_FILES_BUCKET, songFilePath } from '../../src/lib/schema.ts';
+import type { TablesInsert } from '../../src/lib/database.types.ts';
+import { songFilePath } from '../../src/lib/schema.ts';
 import { localSupabaseEnv } from '../../scripts/local-supabase.ts';
+import {
+  createAdminClient,
+  createNodeClient,
+  removeUserFiles,
+  type DbClient,
+} from '../../scripts/supabase-admin.ts';
 
-export type Client = SupabaseClient<Database>;
+/** Postgres error codes the DB tests assert on. */
+export const PG = {
+  CHECK_VIOLATION: '23514',
+  FOREIGN_KEY_VIOLATION: '23503',
+  UNIQUE_VIOLATION: '23505',
+  /** Also what an unknown enum value raises. */
+  INVALID_TEXT_REPRESENTATION: '22P02',
+  /** Missing grant, or a row rejected by an RLS `with check`. */
+  INSUFFICIENT_PRIVILEGE: '42501',
+} as const;
 
 const env = localSupabaseEnv();
-const noSession = { auth: { persistSession: false, autoRefreshToken: false } };
 
-export const admin: Client = createClient<Database>(env.url, env.secretKey, noSession);
+export const admin: DbClient = createAdminClient();
 
-export function anonClient(): Client {
-  return createClient<Database>(env.url, env.publishableKey, noSession);
+export function anonClient(): DbClient {
+  return createNodeClient(env.url, env.publishableKey);
 }
 
 export interface TestUser {
   id: string;
   email: string;
-  client: Client;
+  client: DbClient;
 }
 
 /**
@@ -42,23 +55,28 @@ export async function createTestUser(label: string): Promise<TestUser> {
 
 export async function deleteTestUser(user: TestUser | undefined) {
   if (!user) return;
-  const { data } = await admin.storage.from(GP_FILES_BUCKET).list(user.id);
-  if (data && data.length > 0) {
-    await admin.storage.from(GP_FILES_BUCKET).remove(data.map((f) => `${user.id}/${f.name}`));
-  }
+  await removeUserFiles(admin, user.id);
   await admin.auth.admin.deleteUser(user.id);
 }
 
+/** updated_at comes from now(), so wait before an update that should move it. */
+export function waitForClockTick() {
+  return new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+/** A random value in the shape the file_hash check requires: 64 lowercase hex chars. */
 export function fakeHash(): string {
   const hex = crypto.randomUUID().replaceAll('-', '');
   return hex.repeat(2);
 }
 
+type SongInsert = TablesInsert<'songs'> & { id: string };
+
 /** A valid songs insert for the given user; override fields to test constraints. */
 export function songRow(
   userId: string,
   overrides: Partial<TablesInsert<'songs'>> = {},
-): TablesInsert<'songs'> {
+): SongInsert {
   const id = overrides.id ?? crypto.randomUUID();
   return {
     id,
@@ -79,9 +97,10 @@ export async function insertSong(user: TestUser, overrides: Partial<TablesInsert
   const row = songRow(user.id, overrides);
   const { error } = await user.client.from('songs').insert(row);
   if (error) throw error;
-  return row.id as string;
+  return row.id;
 }
 
+/** Inserts a loop (bars 1 to 4 by default) as the user and returns its id. */
 export async function insertLoop(
   user: TestUser,
   songId: string,
@@ -99,4 +118,21 @@ export async function insertLoop(
   });
   if (error) throw error;
   return id;
+}
+
+/** A valid 60-second practice_sessions insert; override fields to test constraints. */
+export function sessionRow(
+  userId: string,
+  loopId: string,
+  overrides: Record<string, unknown> = {},
+): TablesInsert<'practice_sessions'> & { id: string } {
+  return {
+    id: crypto.randomUUID(),
+    user_id: userId,
+    loop_id: loopId,
+    started_at: '2026-11-20T10:00:00.000Z',
+    duration_seconds: 60,
+    speed_ratio: 1,
+    ...overrides,
+  };
 }

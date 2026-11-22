@@ -192,8 +192,9 @@ alter table public.loops enable row level security;
 alter table public.practice_sessions enable row level security;
 alter table public.user_settings enable row level security;
 
--- Explicit grants, so nothing depends on the platform's default privileges and
--- signed-out (anon) requests can't touch app tables at all.
+-- Supabase's default privileges give anon and authenticated full access to every
+-- new public table. Revoke them and grant per table, so signed-out (anon)
+-- requests can't touch app tables at all and each grant is a deliberate choice.
 revoke all on public.songs, public.loops, public.practice_sessions, public.user_settings
   from anon, authenticated;
 -- Song metadata other than title and artist comes from the file and is fixed.
