@@ -151,7 +151,7 @@ describe('LoginPage', () => {
       auth: signedOut,
     });
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Email link is invalid or has expired Send yourself a new one.',
+      'Email link is invalid or has expired. Send yourself a new one.',
     );
   });
 });

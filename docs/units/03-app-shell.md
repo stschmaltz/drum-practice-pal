@@ -90,3 +90,69 @@
 
 - jsdom has no CSS, so which nav shows at which width is only checked in e2e (`auth.spec.ts`, bounding boxes).
 - Not covered by automation: a revoked refresh token (the guard's reaction to `SIGNED_OUT` is unit tested, but the server side isn't), offline sign-out (known gap), and the refetch-on-focus path between two real devices. Building the session-expiry case needs a short `jwt_expiry` stack, so it's left to QA.
+
+## QA
+
+**Setup:** local Supabase from `npm run db:start`, production build (`--mode development`) on `vite preview` at :4173, driven by a throwaway Playwright suite (removed afterwards) at phone 390x844, tablet 820x1180 and desktop 1440x900, plus phone landscape 844x390. Screenshots are in `docs/units/03-shots/`, named `<size>-NN-<what>.png`. I checked one real sign-in email in Mailpit: it has the subject, link and code.
+
+**Acceptance criteria**
+
+| Criterion                                                              | Result | Evidence                                                                                                                                                                                                                                                                                                           |
+| ---------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Change a setting on one device, see it on another after refresh        | Pass   | Two browser contexts: B saves 2 bars and every repeat, A shows both after a reload (`*-16`). Concurrent edits to different fields on A and B both survive in the row. A focus refetch also picks up B's change, but only once the 30 s `staleTime` has passed                                                      |
+| Signed-out users land on `/login`                                      | Pass   | Every guarded route and an unknown path redirect with `?next=` (`*-01`). The case also holds after sign-out, a revoked session, and a corrupt or tampered stored session (below)                                                                                                                                   |
+| Routes `/login`, `/`, `/library`, `/songs/:id`, `/settings`, not found | Pass   | `*-01` to `*-07`                                                                                                                                                                                                                                                                                                   |
+| Magic-link login, sign-out, auth guard, session refresh                | Pass   | Link and code both sign in, `?next=` survives the round trip including a query string (`/songs/abc?bar=5`), and sign-out returns to `/login`. Sign-out in one tab also signs out a second tab of the same browser. Refresh: see expired sessions                                                                   |
+| Responsive nav                                                         | Pass   | Bottom tabs on phone (56 px tall, full width, content clears the bar at the bottom of Settings, `phone-08`). Sidebar on tablet and desktop (44 px links). Landscape phone gets the sidebar and still fits (`phone-40`). A long email truncates in the sidebar (`*-41`). There's no horizontal overflow at any size |
+| Settings page reads and writes `user_settings`                         | Pass   | `*-05`, `*-30` to `*-35`                                                                                                                                                                                                                                                                                           |
+
+**QA focus**
+
+- **Nav at all sizes:** pass, as above.
+- **Expired sessions:** pass.
+  - Revoked refresh token (admin `signOut(jwt, 'global')`) with an expired access token in storage: a reload lands on `/login?next=%2Fsettings` and storage is cleared (`*-11`).
+  - The same with the tab left open: with the clock fast-forwarded past the 1 h expiry, the auto-refresh fails and the open tab goes to `/login?next=%2Flibrary` with no reload (`*-12`).
+  - A garbage refresh token, or corrupt JSON in the storage key, lands on `/login`.
+  - See issues 3 and 4 for the two cases that don't.
+
+**Other checks**
+
+- **`?next=`:** `https://evil.example`, `//evil.example`, `/\evil.example`, `%2F%2Fevil.example`, `javascript:alert(1)`, `/\t/evil.example`, `/login`, `/login?next=...` and an empty value all go to `/`. `/%2F/evil.example`, `/ /evil.example`, `/library/../../settings` and a broken percent escape stay same-origin (not found or settings). Nothing ever left the origin.
+- **Login input:**
+  - Browser validation blocks an empty email, `foo`, `foo@`, `@bar.com` and `a b@c.com`.
+  - `a@b` and `x@localhost` are accepted, and GoTrue sends to them. That's harmless.
+  - A 300-character address shows "An email address is too long".
+  - Mixed case with surrounding spaces is normalised.
+  - Codes `12345`, `abcdef` and `1234567` are blocked by the input pattern. `000000` and a valid-shape wrong code show "That code didn't work". `12 34 56` is normalised before it's sent.
+- **Reused or invalid magic link:** a second device lands on `/login?next=%2Fsettings` with the expired-link message (`*-23`, and `desktop-23b` after the fix below). A tampered token does the same.
+- **Slow network, settings save (4 s PATCH delay):** shows "Saving…" with Save and Discard disabled (`*-30`). Editing during the save keeps the edit as a fresh draft, and Save is enabled again after (`*-31`). An aborted PATCH shows "Couldn't save your settings: TypeError: Failed to fetch" and keeps the draft (`*-32`). A slow load shows "Loading settings…" (`*-34`). A 500 on load shows the error and "Try again" (`*-35`).
+
+**Fixed (cosmetic)**
+
+- The expired-link alert read "Email link is invalid or has expired Send yourself a new one.", because GoTrue's description has no closing full stop. `LoginPage.tsx` now adds one when it's missing, and the `LoginPage.test.tsx` expectation is updated to match.
+
+**Issues**
+
+1. **Minor: offline sign-out hangs on "Signing out…" with no message.** This differs from the Build note, which expected an error. TanStack mutations default to `networkMode: 'online'`, so the mutation pauses while offline instead of failing. The button stays disabled on "Signing out…" until the connection is back, then the sign-out completes.
+   - Repro: sign in, open Settings, go offline (DevTools), click Sign out. It stays on "Signing out…" (`*-15`). Go online and it signs out.
+   - Suggest for Unit 11: sign out locally without the server call when offline (`signOut({ scope: 'local' })` still calls `/logout`), or set `networkMode: 'always'` and show the error.
+2. **Minor: an offline settings save also hangs on "Saving…" with no message,** for the same reason (`desktop-33`). The save goes through on reconnect. Belongs with Unit 11's offline queue, but some hint that it's waiting for the network would help.
+   - Repro: open Settings, change a field, go offline, click Save.
+3. **Minor: a stored access token with a bad signature but a future expiry leaves you in the shell with a raw error.** Settings shows "Couldn't load your settings: No suitable key or wrong key type", and "Try again" can't recover. supabase-js won't refresh a token that hasn't expired, and the app doesn't treat a 401 as signed out. It needs tampering, or a JWT signing-key rotation on the server, and it recovers after the hour is up or after signing out. Worth handling once more data hooks exist: sign out on a PostgREST 401 / `PGRST301`.
+   - Repro: sign in, edit the third segment of `access_token` in the `sb-127-auth-token` localStorage key, reload `/settings` (`*-14`).
+4. **Minor, informational: a session revoked server-side keeps working until its access token expires (up to 1 h).** After an admin global sign-out, a reload with the unexpired JWT still loads Settings (`*-10`). This is standard Supabase behaviour, since PostgREST checks only the JWT. Note it for "sign out everywhere" expectations.
+5. **Minor: "Send again" leaves the previous "That code didn't work" error showing,** next to the new send result.
+   - Repro: enter a wrong code, then click "Send again" (`phone-22`).
+   - Clicking "Send again" twice within a second shows GoTrue's rate-limit text, "you can only request this after 0 seconds" (same shot). The message is accurate but reads oddly.
+6. **Minor: a `next` containing `#` breaks the magic link.** `/login?next=%2Fsettings%23frag` sends `redirect_to=.../settings#frag`. The link then returns to `/settings#frag#access_token=...`, which supabase-js can't parse, so you land back on `/login` with no message (`*-26`). The app never builds such a `next` itself (`loginPathFor` drops the hash), so only a hand-made URL hits this. The fix is for `safeNextPath` to strip `#...`. The code path is unaffected.
+7. **Minor: the `error_description` from the URL fragment is shown verbatim on `/login`.** React escapes it, so there's no XSS: `<img onerror>` renders as text (`*-24`). But a crafted link can put any sentence in the red alert, and it survives a refresh through history state. Consider mapping known `error_code` values to fixed copy and using a generic message otherwise.
+8. **Minor, by design: a focus refetch within 30 s of the last fetch doesn't pick up another device's change** (the `staleTime` is 30 s). The acceptance criterion says "after refresh", which works. Just noting that switching devices quickly won't show the change on focus.
+
+No blocker or major issues.
+
+**Human check (from the plan):** Unit 03 lists none. Worth a quick look for Shane:
+
+- On a real phone over the LAN, type the 6-digit code from Mailpit and confirm the bottom tabs clear the iOS home indicator.
+- In an installed iOS PWA later (Unit 11), confirm the code path works when links open in Safari.
+
+**Results:** `npm run check` green (21 files, 256 tests). `npm run e2e` 75 passed. Not committed.

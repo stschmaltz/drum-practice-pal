@@ -53,7 +53,8 @@ export function LoginPage() {
 
       {linkError && !sentTo && (
         <p role="alert" className="rounded-md bg-red-950 p-3 text-sm text-red-200">
-          {linkError} Send yourself a new one.
+          {/* GoTrue's descriptions have no closing full stop. */}
+          {/[.!?]$/.test(linkError) ? linkError : `${linkError}.`} Send yourself a new one.
         </p>
       )}
 
