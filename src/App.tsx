@@ -1,4 +1,10 @@
+import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router';
+
+// Lazy so alphaTab stays out of the main bundle until a player screen opens.
+const SpikePage = lazy(() =>
+  import('./features/spike/SpikePage').then((m) => ({ default: m.SpikePage })),
+);
 
 function HomePage() {
   return (
@@ -13,6 +19,14 @@ export function App() {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
+      <Route
+        path="/spike"
+        element={
+          <Suspense fallback={<p className="p-6">Loading player…</p>}>
+            <SpikePage />
+          </Suspense>
+        }
+      />
     </Routes>
   );
 }

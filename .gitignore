@@ -16,3 +16,6 @@ supabase/.temp
 # Copied from node_modules by the alphaTab Vite plugin on every dev/build
 public/font
 public/soundfont
+# Candidate soundfonts for the Unit 01 spike, added by hand (see docs/units/01-spike.md)
+public/sf-candidates/*
+!public/sf-candidates/.gitkeep

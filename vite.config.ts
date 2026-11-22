@@ -14,6 +14,11 @@ export default defineConfig({
     // Lets phones and tablets on the same Wi-Fi reach the dev server.
     host: true,
   },
+  build: {
+    // alphaTab's core is ~1.3 MB minified (310 kB gzip). It's lazy-loaded with the player
+    // routes, so the default 500 kB warning only flags something we've already accepted.
+    chunkSizeWarningLimit: 1400,
+  },
   test: {
     globals: true,
     environment: 'jsdom',
