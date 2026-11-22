@@ -28,7 +28,9 @@ export function SettingsPage() {
       <PageHeader title="Settings" />
       {settings.isPending ? (
         <p className="text-neutral-400">Loading settings…</p>
-      ) : settings.isError ? (
+      ) : // Only a failed first load blocks the form. A failed background refetch
+      // keeps the cached row, and unmounting the form would drop unsaved edits.
+      settings.isLoadingError ? (
         <div role="alert" className="flex flex-col items-start gap-3">
           <p className="text-red-300">Couldn't load your settings: {settings.error.message}</p>
           <button type="button" className={buttonClass} onClick={() => void settings.refetch()}>

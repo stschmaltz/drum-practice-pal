@@ -44,9 +44,13 @@ export function readSupabaseConfig(env: SupabaseEnv, pageHostname: string): Supa
     ].filter(Boolean);
     return { ok: false, error: `Missing ${missing.join(' and ')}.` };
   }
+  const invalid = { ok: false, error: `VITE_SUPABASE_URL is not a valid URL: ${url}` } as const;
+  // createClient throws on anything but http(s), which would blank the page
+  // instead of showing the configuration message.
+  if (!/^https?:\/\//i.test(url)) return invalid;
   try {
     return { ok: true, url: resolveSupabaseUrl(url, pageHostname), publishableKey };
   } catch {
-    return { ok: false, error: `VITE_SUPABASE_URL is not a valid URL: ${url}` };
+    return invalid;
   }
 }

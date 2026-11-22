@@ -59,6 +59,17 @@ describe('readSupabaseConfig', () => {
     ).toEqual({ ok: false, error: 'Missing VITE_SUPABASE_PUBLISHABLE_KEY.' });
   });
 
+  it('rejects a URL that is not http or https', () => {
+    const config = readSupabaseConfig(
+      { ...env, VITE_SUPABASE_URL: 'ftp://localhost:54321' },
+      'localhost',
+    );
+    expect(config).toEqual({
+      ok: false,
+      error: 'VITE_SUPABASE_URL is not a valid URL: ftp://localhost:54321',
+    });
+  });
+
   it('rejects a URL that does not parse', () => {
     const config = readSupabaseConfig({ ...env, VITE_SUPABASE_URL: 'not a url' }, 'localhost');
     expect(config.ok).toBe(false);

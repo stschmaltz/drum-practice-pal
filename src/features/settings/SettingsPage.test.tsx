@@ -185,6 +185,23 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(writes()).toEqual([{ count_in_bars: 1 }]));
   });
 
+  it('keeps the form and your edits when a background refetch fails', async () => {
+    serveSettings(saved);
+    const { user, queryClient } = renderSettings();
+    await user.click(await screen.findByRole('radio', { name: '1 bar' }));
+
+    queryResult.mockResolvedValue({ data: null, error: { message: 'Failed to fetch' } });
+    const queryKey = settingsKeys.forUser('user-1');
+    await act(() => queryClient.refetchQueries({ queryKey }));
+    expect(queryClient.getQueryState(queryKey)?.status).toBe('error');
+    // TanStack Query notifies observers on a timer, so let the page re-render.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+
+    expect(screen.queryByText(/Couldn't load your settings/)).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '1 bar' })).toBeChecked();
+    expect(saveButton()).toBeEnabled();
+  });
+
   it('has a sign-out button', async () => {
     serveSettings(saved);
     renderSettings();

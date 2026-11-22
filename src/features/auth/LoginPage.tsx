@@ -6,7 +6,12 @@ import { FullPageMessage } from '@/components/FullPageMessage';
 import { buttonClass, inputClass, primaryButtonClass } from '@/components/styles';
 import { safeNextPath, type LoginRedirectState } from './loginRedirect';
 import { useSendSignInEmail, useVerifySignInCode } from './useAuthActions';
-import { normalizeEmail, normalizeSignInCode, SIGN_IN_CODE_LENGTH } from './signInInput';
+import {
+  normalizeEmail,
+  normalizeSignInCode,
+  SIGN_IN_CODE_LENGTH,
+  SIGN_IN_CODE_PATTERN,
+} from './signInInput';
 
 /** Step one asks for an email; once it's sent, step two takes the code from it. */
 export function LoginPage() {
@@ -151,7 +156,7 @@ function CodeStep({
             name="code"
             autoComplete="one-time-code"
             inputMode="numeric"
-            pattern={`[0-9 ]{${SIGN_IN_CODE_LENGTH},}`}
+            pattern={SIGN_IN_CODE_PATTERN}
             required
             value={code}
             onChange={(event) => setCode(event.target.value)}

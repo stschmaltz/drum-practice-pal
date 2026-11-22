@@ -7,6 +7,14 @@ export function normalizeEmail(raw: string): string | null {
   return /^[^\s@]+@[^\s@]+$/.test(email) ? email : null;
 }
 
+/**
+ * For the code input's `pattern`: exactly the code length in digits, with the
+ * spaces and hyphens `normalizeSignInCode` strips, so the browser's own
+ * validation rejects what the normalizer would. `\-` because browsers compile
+ * `pattern` with the `v` flag.
+ */
+export const SIGN_IN_CODE_PATTERN = String.raw`[\s\-]*(?:[0-9][\s\-]*){${SIGN_IN_CODE_LENGTH}}`;
+
 /** Digits only (codes get pasted with spaces), or null unless exactly the code length. */
 export function normalizeSignInCode(raw: string): string | null {
   const code = raw.replace(/[\s-]/g, '');
