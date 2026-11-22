@@ -32,7 +32,7 @@
 **Known gaps**
 
 - Nothing has been heard. Every audio-quality and real-device item is pending a Human check (list below).
-- The candidate soundfonts aren't downloaded (needs approval; see the end of this note). Choosing them in the select logs "not found" until the files are added.
+- The candidate soundfonts aren't downloaded (needs approval; see the end of this note). Choosing them in the select logs "not found" until the files are added. (Update from QA: MuseScore General sf3 has since been added locally; see Findings, Soundfont.)
 - Render time in the diagnostics is unreliable. alphaTab fires several `renderStarted`/`renderFinished` pairs per render (partial renders), so the value is the first pair only. The fixtures render with no visible delay.
 - The count-in experiments are crude. The first click comes 100 ms after the `finished` event, not on the beat grid. Unit 07 owns the real scheduler.
 - The end-bar input can be set below the start bar. The loop then silently turns off (`barRangeToTicks` returns null).
@@ -57,7 +57,11 @@ Desktop numbers below are from Windows 11 and Chromium (Playwright 1.65 headless
 
 - **Default: Sonivox, as it ships with alphaTab.** `sonivox.sf2` is 1,351,896 bytes (1.29 MB) and `sonivox.sf3` (Ogg-compressed) is 977,208 bytes. Both are Apache-2.0 (the `LICENSE` beside them in the package). The Unit 00 note said "5.8 MB"; the real total for the folder is about 2.3 MB.
 - Load cost in desktop Chromium (prod build): fetch 39 to 51 ms from localhost, then 28 to 42 ms from `loadSoundFont` to `soundFontLoaded`. The first load in dev, including worker startup, was 400 to 560 ms. alphaTab 1.9 decodes SF3 (it has a Vorbis decoder), so `sonivox.sf3` is selectable too. Its decode cost on a phone is **pending Human check**.
-- **Drum sound quality: pending Human check.** Sonivox is a small GM bank. An alternative with better drums is listed under "Needs approval: soundfont download". The spike switches to it with no code change once the file is in `public/sf-candidates/`.
+- **Drum sound quality: pending Human check.** Sonivox is a small GM bank.
+- **MuseScore General sf3 is present locally** at `public/sf-candidates/MuseScore_General.sf3` (39,900,972 bytes, 38.05 MB). It was downloaded with Shane's approval and is gitignored, so it isn't committed and isn't in a CI or Workers build. Pick "MuseScore General (sf3)" in the Soundfont select to compare it against Sonivox. QA measured it in Chromium (details in the QA section):
+  - From localhost: 68 to 73 ms fetch in dev and 682 to 735 ms in the prod preview, then 7 to 23 ms to `soundFontLoaded`.
+  - Throttled on a phone-size page: about 32 to 36 s at 9 Mbps (fast 4G) and about 3 to 3.3 minutes at 1.6 Mbps (slow 4G).
+  - The `soundFontLoaded` time is too fast for 38 MB of Vorbis to have been decoded, so alphaTab probably decodes samples lazily. The real cost may show up as a glitch on the first notes of each instrument. That's **pending Human check**, along with its drum sound. The other two candidates are still not downloaded.
 - **Pick: Sonivox sf2, provisionally,** until a candidate is heard against it. If a bigger font wins, budget for its size in first load and in the Unit 11 service-worker cache. A middle path to try: alphaTab can append a second soundfont (`loadSoundFont(data, true)`), so a small drum-kit-only font layered over Sonivox may beat a 30 to 40 MB full GM bank.
 
 ### Layout per breakpoint
@@ -148,7 +152,7 @@ On phone, tablet and laptop at `/spike`:
 
 ## Needs approval: soundfont download
 
-Nothing has been downloaded. To try a candidate, download it into `public/sf-candidates/` with the file name the spike expects, then pick it in the Soundfont select. You can also type any `/sf-candidates/<name>.sf2|sf3` path and press Load. Facts marked "verified" come from the project pages read on 2026-11-22. The rest is from memory and must be checked on the download page before downloading.
+Update from QA: MuseScore General sf3 has been downloaded (with approval) to `public/sf-candidates/MuseScore_General.sf3`. The other two haven't. To try a candidate, download it into `public/sf-candidates/` with the file name the spike expects, then pick it in the Soundfont select. You can also type any `/sf-candidates/<name>.sf2|sf3` path and press Load. Facts marked "verified" come from the project pages read on 2026-11-22. The rest is from memory and must be checked on the download page before downloading.
 
 | Candidate             | Expected file                                | Source                                                                                                        | License                                                                                                                                                            | Format | Size                                                                                    |
 | --------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | --------------------------------------------------------------------------------------- |
@@ -201,7 +205,7 @@ Suggested order: MuseScore General sf3 first (license and size verified, include
 
 ## QA
 
-**How it was run.** Playwright (Chromium, headless) at 390x844 (phone, touch), 820x1180 (tablet, touch) and 1440x900 (desktop). I ran it against the dev server and against a production build served by `vite preview`. Scripted walks covered every control, and the edge-case runs were checked by reading the header, diagnostics, event log, DOM sizes and console errors. Slow network was simulated with route delays, a missing soundfont with route 404 and abort, and offline with `context.setOffline`. Screenshots (67) are in `docs/units/01-shots/`, named `{dev|prod}-{phone|tablet|desktop}-NN-step.png`. Nothing was listened to.
+**How it was run.** Playwright (Chromium, headless) at 390x844 (phone, touch), 820x1180 (tablet, touch) and 1440x900 (desktop). I ran it against the dev server and against a production build served by `vite preview`. Scripted walks covered every control, and the edge-case runs were checked by reading the header, diagnostics, event log, DOM sizes and console errors. Slow network was simulated with route delays, a missing soundfont with route 404 and abort, and offline with `context.setOffline`. Screenshots are in `docs/units/01-shots/`, named `{dev|prod}-{phone|tablet|desktop}-NN-step.png`. Nothing was listened to.
 
 ### Acceptance criteria
 
@@ -250,14 +254,33 @@ Not issues, for the record:
 - On a phone, alphaTab lazy-renders the score until it's scrolled into view, so full-page screenshots taken without scrolling show a blank score box (already noted by Test).
 - Dev and prod behave the same. Dev first-position latency is 246 to 282 ms against 58 to 63 ms in prod, consistent with the Build note.
 
+### MuseScore General sf3 (added mid-QA)
+
+The coordinator asked for this once the 38 MB file was in `public/sf-candidates/`. I ran it at all three sizes in dev and in the prod preview (screenshots `*-22-musescore-playing.png` and `*-phone-23-musescore-throttled-*.png`).
+
+| Check                                  | Dev                                               | Prod preview                                   | Result                                                                     |
+| -------------------------------------- | ------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------- |
+| Select it while idle                   | 82 to 86 ms total (fetch 68 to 73, load 21 to 23) | 690 to 744 ms total (fetch 682 to 735, load 7) | Pass, no console errors at any size                                        |
+| Playback starts                        | First position 239 to 246 ms                      | First position 73 to 80 ms (Sonivox: 58 to 63) | Pass. The header advances and metronome events arrive                      |
+| Switch to Sonivox mid-play             | Loads in 22 to 24 ms                              | Loads in 11 to 26 ms                           | Pass, but playback stops and returns to bar 1 (issue 7). Play resumes fine |
+| Switch back to MuseScore mid-play      | Loads in 79 to 92 ms                              | Loads in 700 to 721 ms                         | Pass, same stop and return to bar 1                                        |
+| Throttled 9 Mbps, 60 ms RTT (phone)    | 35.9 s                                            | 32.2 s                                         | Loads, no errors                                                           |
+| Throttled 1.6 Mbps, 150 ms RTT (phone) | 200.6 s                                           | 179.2 s                                        | Loads, no errors                                                           |
+
+- The prod preview fetch is about 10 times slower than dev from localhost (about 700 ms against 70 ms for the same file). Both are local servers, so this says nothing about real hosting.
+- Main JS heap was 9.5 MB in prod with MuseScore loaded, the same as Sonivox. The font lives in the synth worker, which `performance.memory` doesn't see. Phone memory is still a Human check.
+- **Minor (new, issue 9): no progress while a big font downloads.** During a throttled MuseScore load, the select already shows MuseScore. Play stays enabled and plays the previous font (Sonivox) for the whole download, up to about 3 minutes on slow 4G. The Soundfont stat keeps showing the old font, and there's no progress or "loading" indication. Repro: throttle to slow 4G, then pick MuseScore General (sf3). This was observed in the stat and button state; the screenshot was taken after the load finished. If MuseScore wins on sound, Units 05 and 11 need a progress indicator, a decision on what plays meanwhile, and precaching.
+- **Note for deploys:** `vite build` copies `public/sf-candidates/` into `dist/`, so a local build now carries the 38 MB file. Workers Builds builds from git, where the file is gitignored, so previews are unaffected. A manual `wrangler deploy` from this machine would try to upload it, though, and Cloudflare's per-file asset limit (25 MiB, from memory) would likely reject it.
+- Drum sound against Sonivox, and any first-note glitch from lazy Vorbis decoding: **Human check**, not judged here.
+
 ### Human check (Shane)
 
-Unchanged from the Build note's list: drum sound (sf2 vs sf3, then candidates), the loop seam at 50%, 100% and 200%, iOS first-tap sound, the ringer switch with the audioSession toggle off and on, lock and app switch mid-play, felt start latency, whether the count-in lands on the downbeat by ear (and pause-on-wrap audibly clipping bar 8), layout readability on a real phone in portrait and landscape, and memory and battery on a long loop.
+Unchanged from the Build note's list, plus MuseScore General sf3 against Sonivox (drums especially, and any glitch on the first notes after it loads): drum sound (sf2 vs sf3, then candidates), the loop seam at 50%, 100% and 200%, iOS first-tap sound, the ringer switch with the audioSession toggle off and on, lock and app switch mid-play, felt start latency, whether the count-in lands on the downbeat by ear (and pause-on-wrap audibly clipping bar 8), layout readability on a real phone in portrait and landscape, and memory and battery on a long loop.
 
 ### Results
 
 - `npm run check`: green (66 unit tests).
 - `npm run e2e`: green (39 tests).
-- The only code change is the cosmetic label fix in `src/features/spike/SpikePage.tsx`. Nothing is committed.
+- The only code change is the cosmetic label fix in `src/features/spike/SpikePage.tsx`. Nothing is committed, and `public/sf-candidates/MuseScore_General.sf3` is gitignored.
 
 **Verdict: PASS.** No blocker or major issues for Unit 01. Issue 1 should be treated as major when Unit 04 builds upload validation.
