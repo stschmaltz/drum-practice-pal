@@ -76,3 +76,41 @@ Run on Windows 11 with Docker 28.1. Everything below actually ran: `supabase sta
 4. Studio at http://127.0.0.1:54323: Table Editor shows the four tables with RLS enabled; Storage shows `gp-files` with a folder per seed user; Authentication > Policies lists the owner policies.
 5. Magic link: `curl -X POST http://127.0.0.1:54321/auth/v1/otp -H "apikey: <PUBLISHABLE_KEY from npm run db:status>" -H "Content-Type: application/json" -d '{"email":"demo@drumpal.test"}'`, then open Mailpit at http://127.0.0.1:54324 and find "Your sign-in link".
 6. `npm run db:types` leaves `git status` clean.
+
+## Test
+
+**Summary:** Reviewed Build's 52 DB tests against the Data model rules and the unit's acceptance criteria, then added 71 more: boundary and edge cases for every constraint, the cross-user writes Build's suite didn't try, signed-out writes, more Storage policy cases, and a test that runs the real seed script twice. No app code changed. `npm run test:db` is now 4 files, 123 tests.
+
+**Added**
+
+- `tests/db/constraints.test.ts` (new, 50 tests)
+  - songs: single-bar song and 300-char title/artist accepted; 301 chars, tempo above 1000 or negative, short or uppercase `file_hash` rejected; `artist` defaults to `''`; a `file_path` in another user's folder rejected; `file_hash`, `file_path`, `original_tempo` and `drum_track_index` can't be changed after insert; `updated_at` bumps on rename.
+  - loops: `speed_ratio` and `target_ratio` accepted at exactly 0.25 and 2.0, `target_ratio` null accepted; updates outside the bounds rejected; last bar as a single-bar loop accepted, a loop starting past the last bar rejected; an update making `start_bar > end_bar` rejected and the row left unchanged; 100-char name accepted, 101 rejected; a status outside the enum rejected (22P02); a loop inserted as finished gets `finished_at`; a `finished_at` sent with an active loop is cleared; editing a finished loop keeps its original `finished_at`; finish then reopen keeps the session history; a loop on a song that doesn't exist fails the FK.
+  - practice_sessions: speed bounds 0.25 and 2.0 accepted, 0.2 rejected; can't be deleted directly; a retry with the same id and different values keeps the first write.
+  - user_settings: `count_in_bars` 0, 1, 2 accepted, -1 rejected; `metronome_volume` 0 and 1 accepted, -0.1 rejected; an unknown `count_in_mode` rejected (22P02); `updated_at` bumps; users can't insert a second row or delete theirs.
+  - cascades: deleting a loop removes only its own sessions and leaves the song and sibling loops; deleting a song leaves other songs' loops alone.
+- `tests/db/rls.test.ts` (15 tests appended)
+  - B can't insert a loop or session with `user_id` set to A (42501); B can't move their own loop onto A's song (23503) or reassign it to A; B can't hand their settings row to A; B gets nothing when selecting A's rows by id; two users can upload the same file (hash unique per user); A's rows are checked unchanged via the admin client after all of B's attempts.
+  - Signed-out: anon can't insert, update or delete in any table, or list or upload files.
+  - Storage: public URLs don't serve files (bucket is private); B can't create a signed URL for, move or copy A's file; B can't move their own file into A's folder; nested folders are rejected; the owner can replace (upsert) and delete their own file; uploads over 20 MiB are rejected.
+- `tests/db/seed.test.ts` (new, 6 tests): runs `scripts/seed.ts` twice through tsx, then checks that each seed user exists exactly once with a new id and the first run's rows and files are gone; each user has one default settings row; demo has the expected songs, loop counts and the one finished loop; `finished_at` matches status and `last_practiced_at` is set when a loop has sessions; each user's Storage folder holds exactly their songs' `file_path`s, and each file's SHA-256 matches `file_hash`.
+
+**Acceptance**
+
+- `supabase start` + migrations + seed run clean: `npm run db:reset` applied both migrations and seeded both users on a fresh database; `seed.test.ts` covers re-running the seed.
+- User A can't read or write user B's rows or files: covered for every table and for the bucket (select, insert, update, delete, reassigning ownership, attaching to another user's parent, storage download, list, upload, overwrite, move, copy, signed URL, delete), plus signed-out access.
+
+**Notes**
+
+- `seed.test.ts` replaces the seed users' data each run (new user ids). This matches `npm run db:seed`, but anything signed in as `demo@drumpal.test` needs to sign in again after `npm run test:db`.
+- The DB tests share one database and rely on `fileParallelism: false`; each file creates its own throwaway users.
+
+**Results**
+
+- `npm run check`: typecheck, lint and format clean; 9 files, 96 tests passed (unchanged; DB tests stay outside check).
+- `npm run test:db`: 4 files, 123 tests passed (52 from Build, 71 new), right after a fresh `npm run db:reset`.
+- `npm run e2e` not run: Unit 02 has no UI flows, and e2e covers real flows from Unit 03 on.
+
+**Bugs found**
+
+- None. Every constraint, trigger and policy behaved as the Build section describes.
