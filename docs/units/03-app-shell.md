@@ -56,3 +56,37 @@
 4. Change count-in to 2 bars and save. In a private window, sign in again and open Settings: it shows 2 bars. Back in the first window, refresh after changing something in the second.
 5. Resize below 768 px: the sidebar becomes bottom tabs. Sign out: you return to `/login`, and `/library` redirects there again.
 6. Phone on the same Wi-Fi: open `http://<laptop LAN IP>:5173`, send the email, and type the code from Mailpit on the laptop. Windows Firewall must allow ports 5173 and 54321.
+
+## Test
+
+**Summary:** Component and hook tests for every Unit 03 screen and the settings hook pattern, against a fake Supabase client, plus more e2e flows across phone, tablet and desktop. Fixed the e2e context teardown and one settings bug the new tests found.
+
+**Files**
+
+- Helpers: `src/test/fakeSupabase.ts` (fake `supabase` module: scripted auth calls, chainable `from().select/update/eq/single` recorded as `QueryCall`s, `emitAuthEvent`, `fakeSession`, `opArgs`), `src/test/render.tsx` (`renderRoutes`, `wrapperFor`, `testQueryClient`, `signedInAs` / `signedOut` / `loadingAuth`, `RouteMarker`, a `location` test id)
+- Component tests: `src/features/auth/LoginPage.test.tsx` (13), `RequireAuth.test.tsx` (5), `SignOutButton.test.tsx` (2), `src/features/settings/SettingsPage.test.tsx` (10), `src/features/shell/AppShell.test.tsx` (8), `src/lib/AuthProvider.test.tsx` (8, includes `useAuth` / `useSignedInUser`)
+- Hook tests: `src/features/settings/useSettings.test.tsx` (6)
+- `src/App.test.tsx`: now on the shared fake; signed-out redirects (including an unknown path), signed-in routes and not found inside the shell, `/login` forwarding to `?next=`, and `SIGNED_OUT` sending you back to login (12)
+- e2e: `tests/e2e/auth.spec.ts` adds session survives reload and `/login` forwards a signed-in user, a used magic link shows the expired-link message on a second device, signing out on one device leaves the other signed in, and not found inside the shell. `tests/e2e/settings.spec.ts` closes its extra contexts in `finally` and adds settings surviving sign-out and sign-in.
+- App code: `src/features/settings/SettingsPage.tsx` (bug fix below). `AGENTS.md`: the draft pattern, the fake-Supabase test pattern, `finally` for extra contexts, and the `src/test/` description.
+
+**Acceptance and focus coverage**
+
+- Signed-out users land on `/login`: `App.test.tsx`, `RequireAuth.test.tsx` (`?next=` keeps path and query, `/` gives plain `/login`, loading shows neither the page nor a redirect), `smoke.spec.ts`, `auth.spec.ts`.
+- Change a setting on one device, see it on another after refresh: `settings.spec.ts` with two contexts, plus sign-out and sign-in round trip. `SettingsPage.test.tsx` covers only changed fields being sent, Saved status, save errors keeping your edits, discard, count-in mode disabled while Off, load error with retry, and values from another device showing through.
+- Hook pattern: `useSettings.test.tsx` checks the key includes the user id, the read is scoped by `user_id`, errors become query errors, the optimistic value shows while the write is in flight, only the changed fields are sent, the server row ends up in the cache, it refetches afterwards, it rolls back on error (the test holds the refetch so the rollback itself is checked), and a refetch already in flight doesn't overwrite the optimistic value. I checked the rollback and cancel tests fail with `onError` and `cancelQueries` removed.
+- Auth guard and session: `AuthProvider.test.tsx` covers loading until `INITIAL_SESSION`, sign-in, refresh, `SIGNED_OUT` clearing the whole query cache (other events keep it), and unsubscribing on unmount. LoginPage covers the normalised email, `emailRedirectTo` = origin + `next`, unsafe `next` going home, code normalisation, wrong-length codes not sent, send and verify errors, send again, use a different email, and the expired-link message. Sign-out uses `scope: 'local'` (unit) and leaves the other device signed in (e2e).
+
+**Bugs found**
+
+1. **Fixed: a save overwrote fields another device had changed.** The settings draft held a full copy of the row taken at the first edit. If a refetch then brought in another device's change to a field you hadn't touched, `changedSettings(saved, draft)` saw your stale copy as a change and wrote the old value back. That breaks the Build note's claim that Save "doesn't overwrite fields another device changed". The fix is 8 lines in `SettingsPage.tsx`: the draft is now `Partial<Settings>` of the touched fields only, rendered as `{ ...saved, ...draft }`. Covered by "doesn't overwrite your edits with values refetched from another device", which fails on the Build version.
+
+**Results**
+
+- `npm run check`: green. 21 files, 256 tests (was 14 files, 197).
+- `npm run e2e`: 75 passed (was 60), 25 per project.
+
+**Notes for QA**
+
+- jsdom has no CSS, so which nav shows at which width is only checked in e2e (`auth.spec.ts`, bounding boxes).
+- Not covered by automation: a revoked refresh token (the guard's reaction to `SIGNED_OUT` is unit tested, but the server side isn't), offline sign-out (known gap), and the refetch-on-focus path between two real devices. Building the session-expiry case needs a short `jwt_expiry` stack, so it's left to QA.

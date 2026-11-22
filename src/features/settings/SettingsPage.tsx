@@ -48,14 +48,15 @@ export function SettingsPage() {
 function SettingsForm({ saved }: { saved: Settings }) {
   const update = useUpdateSettings();
   const volumeId = useId();
-  // null until the user edits, so refetched values (from another device) show through.
-  const [draft, setDraft] = useState<Settings | null>(null);
+  // Only the fields the user touched, so every other field keeps showing the
+  // latest saved value, including one just refetched from another device.
+  const [draft, setDraft] = useState<Partial<Settings> | null>(null);
   const [errors, setErrors] = useState<SettingsErrors>({});
-  const values = draft ?? saved;
-  const dirty = draft !== null && Object.keys(changedSettings(saved, draft)).length > 0;
+  const values: Settings = { ...saved, ...draft };
+  const dirty = draft !== null && Object.keys(changedSettings(saved, values)).length > 0;
 
   const edit = (changes: Partial<Settings>) => {
-    setDraft({ ...values, ...changes });
+    setDraft({ ...draft, ...changes });
     setErrors({});
     update.reset();
   };
@@ -63,10 +64,10 @@ function SettingsForm({ saved }: { saved: Settings }) {
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!draft) return;
-    const found = validateSettings(draft);
+    const found = validateSettings(values);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
-    const changes = changedSettings(saved, draft);
+    const changes = changedSettings(saved, values);
     if (Object.keys(changes).length === 0) {
       setDraft(null);
       return;

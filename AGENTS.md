@@ -42,7 +42,7 @@ src/
   features/<feature>/   # one folder per feature: components, hooks, logic, tests together
   components/           # shared UI used by 2+ features
   lib/                  # framework glue: query client, supabase client, shared helpers
-  test/                 # test setup only
+  test/                 # test setup and shared test helpers (fake Supabase, render)
 supabase/               # config.toml and migrations/ (seed lives in scripts/seed.ts)
 tests/
   e2e/                  # Playwright specs
@@ -95,9 +95,10 @@ docs/
 - **Data hook pattern** (copy `src/features/settings/`):
   - `<feature>Api.ts`: plain async functions over `supabase` that return typed rows and throw on error via `unwrap(result, 'what')` or `throwIfError(result)` from `src/lib/supabaseResult.ts`. Select columns with a string literal (not a joined array) so supabase-js can type the row. Always scope by `user_id` as well as relying on RLS.
   - `use<Feature>.ts`: a key factory (`settingsKeys.forUser(userId)`; every key includes the user id) plus `useQuery`/`useMutation` hooks that call the API functions. Mutations that the user sees immediately are optimistic: `cancelQueries`, `setQueryData`, roll back in `onError`, set the server row in `onSuccess`, `invalidateQueries` in `onSettled`.
-  - Components call only the hooks. Forms keep a local draft that is `null` until edited, so refetched data shows through, and send only changed fields (`changedSettings`).
+  - Components call only the hooks. Forms keep a local draft of only the fields the user touched (`Partial<Row> | null`), render `{ ...saved, ...draft }` so refetched values show through for every other field, and send only changed fields (`changedSettings`). A full-row draft would send stale values for fields another device changed.
+- Component and hook tests mock the client with `vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule)`, call `resetFakeSupabase()` in `beforeEach`, and script answers on `fakeSupabase.auth.*` or `queryResult` (inspect sent payloads with `opArgs`). Render with `renderRoutes` / `wrapperFor` from `src/test/render.tsx`, which supply a retry-free QueryClient, a fixed auth state (`signedInAs`, `signedOut`, `loadingAuth`) and a `location` test id for asserting redirects. TanStack Query notifies on a timer, so wait (`findBy`, `waitFor`) after `setQueryData` instead of asserting synchronously.
 - Shared UI: `src/components/` (`PageHeader`, `FullPageMessage`, class strings in `styles.ts`). Bottom tabs below 768 px (`md`), sidebar from 768 px; touch targets `min-h-11` (44 px) or more.
-- Signed-in e2e specs use `tests/e2e/auth.ts`: `createE2eUser` / `deleteE2eUser` in `beforeEach` / `afterEach`, and `signIn(page, user, path)` through the real magic-link redirect. A second `browser.newContext()` is a second device. Specs that don't sign in (smoke, spike) need no Supabase.
+- Signed-in e2e specs use `tests/e2e/auth.ts`: `createE2eUser` / `deleteE2eUser` in `beforeEach` / `afterEach`, and `signIn(page, user, path)` through the real magic-link redirect. A second `browser.newContext()` is a second device; close extra contexts in a `finally`. Specs that don't sign in (smoke, spike) need no Supabase.
 
 ## Stage workflow
 
