@@ -108,14 +108,15 @@ Four tables, all owned by `user_id` with row-level security. Files live in Stora
 
 ## Agent workflow
 
-Every unit runs through four agents in order, each starting cold and picking up from files in the repo, not chat history.
+Every unit runs through five agents in order, each starting cold and picking up from files in the repo, not chat history.
 
 1. **Build**: implements the unit to its acceptance criteria.
 2. **Test**: writes tests that prove each criterion.
 3. **QA**: runs the app at phone, tablet and desktop sizes and tries to break it.
 4. **Readability**: refactors for clarity with no behavior change.
+5. **Review**: reviews the full branch diff at PR-reviewer level (ignored errors, pagination, partial failures, test teardown) and fixes what it confirms.
 
-If QA finds a real bug, a Build agent fixes it from QA's notes, then Test and QA re-run on the affected area before Readability. Merge after Readability with all checks green.
+If QA finds a real bug, a Build agent fixes it from QA's notes, then Test and QA re-run on the affected area before Readability. Merge after Review with all checks green.
 
 **Repo conventions**
 

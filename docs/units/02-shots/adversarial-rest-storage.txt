@@ -1,0 +1,98 @@
+A fb25459a-7d4d-4d59-9a81-243afe205e90 B c4b8e54f-6997-44e6-9722-d6a3d2a95397
+A insert song -> 201 [{"id":"c6176ded-617b-4d13-b81a-860912fdfb1b","user_id":"fb25459a-7d4d-4d59-9a81-243afe205e90","title":"A song","artist":"","file_path":"fb25459a-7d4d-4d59-9a81-243afe205e90/c6176ded-617b-4d13-b81a-860912fdfb1b.gp","file
+loopA 72db18ee-3039-468c-a897-e6ffebb0ec0b
+A upload own file -> 200 {"Key":"gp-files/fb25459a-7d4d-4d59-9a81-243afe205e90/c6176ded-617b-4d13-b81a-860912fdfb1b.gp","Id":"3998172a-a19e-49f3-bee7-cdba5566be2b","version":"5b757abf-e763-43bf-8399-414c6b6eb5a7"}
+anon select songs -> 401 {"code":"42501","details":null,"hint":"Grant the required privileges to the current role with: GRANT SELECT ON public.songs TO anon;","message":"permission denied for table songs"}
+anon select loops -> 401 {"code":"42501","details":null,"hint":"Grant the required privileges to the current role with: GRANT SELECT ON public.loops TO anon;","message":"permission denied for table loops"}
+anon select practice_sessions -> 401 {"code":"42501","details":null,"hint":"Grant the required privileges to the current role with: GRANT SELECT ON public.practice_sessions TO anon;","message":"permission denied for table practice_sessions"}
+anon select user_settings -> 401 {"code":"42501","details":null,"hint":"Grant the required privileges to the current role with: GRANT SELECT ON public.user_settings TO anon;","message":"permission denied for table user_settings"}
+anon insert songs -> 401 {"code":"42501","details":null,"hint":"Grant the required privileges to the current role with: GRANT INSERT ON public.songs TO anon;","message":"permission denied for table songs"}
+anon rpc handle_new_user -> 404 {"code":"PGRST202","details":"Searched for the function public.handle_new_user without parameters or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.","hint":null,"message":"Coul
+B rpc handle_new_user -> 404 {"code":"PGRST202","details":"Searched for the function public.handle_new_user without parameters or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.","hint":null,"message":"Coul
+anon rpc set_updated_at -> 404 {"code":"PGRST202","details":"Searched for the function public.set_updated_at without parameters or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.","hint":null,"message":"Could
+B rpc set_updated_at -> 404 {"code":"PGRST202","details":"Searched for the function public.set_updated_at without parameters or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.","hint":null,"message":"Could
+anon rpc loops_before_write -> 404 {"code":"PGRST202","details":"Searched for the function public.loops_before_write without parameters or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.","hint":null,"message":"C
+B rpc loops_before_write -> 404 {"code":"PGRST202","details":"Searched for the function public.loops_before_write without parameters or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.","hint":null,"message":"C
+anon rpc practice_sessions_after_insert -> 404 {"code":"PGRST202","details":"Searched for the function public.practice_sessions_after_insert without parameters or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.","hint":null,
+B rpc practice_sessions_after_insert -> 404 {"code":"PGRST202","details":"Searched for the function public.practice_sessions_after_insert without parameters or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.","hint":null,
+anon openapi root -> 200 
+anon graphql songs -> 200 {"errors":[{"message":"pg_graphql extension is not enabled."}]}
+B graphql songs -> 200 {"errors":[{"message":"pg_graphql extension is not enabled."}]}
+B graphql update A loop -> 200 {"errors":[{"message":"pg_graphql extension is not enabled."}]}
+B select A song by id -> 200 []
+B patch A loop -> 200 []
+B delete A song -> 200 []
+B insert loop on A song (own user_id) -> 409 {"code":"23503","details":"Key is not present in table \"songs\".","hint":null,"message":"insert or update on table \"loops\" violates foreign key constraint \"loops_song_fkey\""}
+B insert loop on A song (A user_id) -> 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"loops\""}
+B insert session on A loop -> 409 {"code":"23503","details":"Key is not present in table \"loops\".","hint":null,"message":"insert or update on table \"practice_sessions\" violates foreign key constraint \"practice_sessions_loop_fkey\""}
+B upsert A loop id (on_conflict) -> 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy (USING expression) for table \"loops\""}
+B patch A settings -> 200 []
+B insert own song -> 201 
+B patch own song user_id -> 403 {"code":"42501","details":null,"hint":"Grant the required privileges to the current role with: GRANT UPDATE ON public.songs TO authenticated;","message":"permission denied for table songs"}
+B patch own song file_path -> 403 {"code":"42501","details":null,"hint":"Grant the required privileges to the current role with: GRANT UPDATE ON public.songs TO authenticated;","message":"permission denied for table songs"}
+B insert song pointing to A file -> 400 {"code":"23514","details":null,"hint":null,"message":"new row for relation \"songs\" violates check constraint \"songs_file_path_matches_owner\""}
+B patch own loop user_id->A -> 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"loops\""}
+B patch own loop song->A song -> 409 {"code":"23503","details":"Key is not present in table \"songs\".","hint":null,"message":"insert or update on table \"loops\" violates foreign key constraint \"loops_song_fkey\""}
+B patch own settings user_id->A -> 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"user_settings\""}
+B insert settings row -> 403 {"code":"42501","details":null,"hint":"Grant the required privileges to the current role with: GRANT INSERT ON public.user_settings TO authenticated;","message":"permission denied for table user_settings"}
+B loop speed NaN -> 400 {"code":"23514","details":null,"hint":null,"message":"new row for relation \"loops\" violates check constraint \"loops_speed_ratio_check\""}
+B loop speed Infinity -> 400 {"code":"23514","details":null,"hint":null,"message":"new row for relation \"loops\" violates check constraint \"loops_speed_ratio_check\""}
+B loop speed string -> 400 {"code":"22P02","details":null,"hint":null,"message":"invalid input syntax for type numeric: \"fast\""}
+B loop end_bar past song -> 400 {"code":"23514","details":null,"hint":null,"message":"end_bar 5 is past the last bar (4) of the song"}
+B loop start_bar 0 -> 400 {"code":"23514","details":null,"hint":null,"message":"new row for relation \"loops\" violates check constraint \"loops_bar_range\""}
+B loop end_bar huge int -> 400 {"code":"22003","details":null,"hint":null,"message":"value \"99999999999\" is out of range for type integer"}
+B loop name empty -> 400 {"code":"23514","details":null,"hint":null,"message":"new row for relation \"loops\" violates check constraint \"loops_name_check\""}
+B loop name whitespace -> 200 [{"id":"17bce885-9e35-40d9-bc58-68a1dc6c78d7","user_id":"c4b8e54f-6997-44e6-9722-d6a3d2a95397","song_id":"e14980ef-6445-4c54-ab30-36b836e609ef","name":"   ","start_bar":1,"end_bar":2,"speed_ratio":1,"target_ratio":null,"
+B loop status bogus -> 400 {"code":"22P02","details":null,"hint":null,"message":"invalid input value for enum loop_status: \"paused\""}
+B loop finished with custom finished_at -> 200 [{"id":"17bce885-9e35-40d9-bc58-68a1dc6c78d7","user_id":"c4b8e54f-6997-44e6-9722-d6a3d2a95397","song_id":"e14980ef-6445-4c54-ab30-36b836e609ef","name":"   ","start_bar":1,"end_bar":2,"speed_ratio":1,"target_ratio":null,"
+B loop last_practiced_at set directly -> 200 [{"id":"17bce885-9e35-40d9-bc58-68a1dc6c78d7","user_id":"c4b8e54f-6997-44e6-9722-d6a3d2a95397","song_id":"e14980ef-6445-4c54-ab30-36b836e609ef","name":"   ","start_bar":1,"end_bar":2,"speed_ratio":1,"target_ratio":null,"
+B loop created_at set -> 200 [{"id":"17bce885-9e35-40d9-bc58-68a1dc6c78d7","user_id":"c4b8e54f-6997-44e6-9722-d6a3d2a95397","song_id":"e14980ef-6445-4c54-ab30-36b836e609ef","name":"   ","start_bar":1,"end_bar":2,"speed_ratio":1,"target_ratio":null,"
+B song tempo NaN -> 400 {"code":"23514","details":null,"hint":null,"message":"new row for relation \"songs\" violates check constraint \"songs_file_path_matches_owner\""}
+B song title whitespace -> 200 [{"id":"e14980ef-6445-4c54-ab30-36b836e609ef","user_id":"c4b8e54f-6997-44e6-9722-d6a3d2a95397","title":"   ","artist":"","file_path":"c4b8e54f-6997-44e6-9722-d6a3d2a95397/e14980ef-6445-4c54-ab30-36b836e609ef.gp","file_ha
+B settings volume NaN -> 400 {"code":"23514","details":null,"hint":null,"message":"new row for relation \"user_settings\" violates check constraint \"user_settings_metronome_volume_check\""}
+B session huge duration -> 201 [{"id":"ba472392-42f2-437a-9b4e-1982b1a4f1dc","user_id":"c4b8e54f-6997-44e6-9722-d6a3d2a95397","loop_id":"17bce885-9e35-40d9-bc58-68a1dc6c78d7","started_at":"2026-11-22T21:55:27.92+00:00","duration_seconds":2147483647,"s
+B session future start -> 201 [{"id":"7983ff6d-b260-4a0f-97bb-b19afd0741c7","user_id":"c4b8e54f-6997-44e6-9722-d6a3d2a95397","loop_id":"17bce885-9e35-40d9-bc58-68a1dc6c78d7","started_at":"9999-12-31T00:00:00+00:00","duration_seconds":34560000,"speed_
+B loop after sessions -> 200 [{"last_practiced_at":"10001-02-03T00:00:00+00:00","updated_at":"2026-11-22T21:55:27.928992+00:00"}]
+B change own loop id -> 409 {"code":"23503","details":"Key is still referenced from table \"practice_sessions\".","hint":null,"message":"update or delete on table \"loops\" violates foreign key constraint \"practice_sessions_loop_fkey\" on table \"
+B download A file -> 400 {"statusCode":"404","error":"not_found","message":"Object not found","code":"NoSuchKey"}
+B download A via ../ -> 400 {"statusCode":"404","error":"not_found","message":"Object not found","code":"NoSuchKey"}
+B download A via %2e%2e -> 400 {"statusCode":"404","error":"not_found","message":"Object not found","code":"NoSuchKey"}
+B download A via %2F -> 400 {"statusCode":"404","error":"not_found","message":"Object not found","code":"NoSuchKey"}
+anon download A -> 400 {"statusCode":"404","error":"not_found","message":"Object not found","code":"NoSuchKey"}
+public URL A -> 400 {"statusCode":"404","error":"Bucket not found","message":"Bucket not found","code":"NoSuchBucket"}
+B list A folder -> 200 []
+B list root -> 200 []
+B upload to A folder -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B overwrite A file (upsert) -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B PUT A file -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B delete A file -> 400 {"statusCode":"403","error":"Unauthorized","message":"Access denied","code":"AccessDenied"}
+B bulk delete A file -> 200 []
+B sign A file -> 400 {"statusCode":"404","error":"not_found","message":"Object not found","code":"NoSuchKey"}
+B upload ../ into A -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B upload %2e%2e into A -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B upload uppercase uuid -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B upload uppercase own uid folder -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B upload .gp.exe -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B upload .GP -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B upload .gpx -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B upload double slash -> 200 {"Key":"gp-files/c4b8e54f-6997-44e6-9722-d6a3d2a95397/0d7bd062-ca65-4f71-9c9e-95d62229780b.gp","Id":"71cbbf06-eecd-4ad7-99e2-5a2ed6d8c0e1","version":"3abe948a-aea1-422a-b640-4bb62ff586d6"}
+B upload nested -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B upload trailing newline %0A -> 400 {"statusCode":"400","error":"InvalidKey","message":"Invalid key: c4b8e54f-6997-44e6-9722-d6a3d2a95397/d2f8135e-4061-4590-8c43-d07ce4b6c1fd.gp\n","code":"InvalidKey"}
+B upload other bucket -> 400 {"statusCode":"404","error":"Bucket not found","message":"Bucket not found","code":"NoSuchBucket"}
+B create bucket -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B update gp-files bucket public -> 400 {"statusCode":"404","error":"Bucket not found","message":"Bucket not found","code":"NoSuchBucket"}
+B list buckets -> 200 []
+B upload html as gp (mime spoof) -> 200 {"Key":"gp-files/c4b8e54f-6997-44e6-9722-d6a3d2a95397/e14980ef-6445-4c54-ab30-36b836e609ef.gp","Id":"b5ef0e1d-925c-477b-8dcb-2e1a3115b04f","version":"a846305b-59f7-40d8-8575-90d152806f4e"}
+B upload valid own -> 200 {"Key":"gp-files/c4b8e54f-6997-44e6-9722-d6a3d2a95397/ab0b5137-d0e1-488d-a530-21d400ef778e.gp","Id":"8cb42bda-6ba3-4cf7-8a14-2b6440737e0d","version":"09632472-48f6-46e1-b7eb-0854f124c5fe"}
+B move own file into A folder -> 400 {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy","code":"AccessDenied"}
+B copy A file to own -> 400 {"statusCode":"404","error":"not_found","message":"Object not found","code":"NoSuchKey"}
+B TUS create in A folder -> 403 new row violates row-level security policy
+A file still downloads -> 200 
+A loop unchanged -> 200 [{"name":"A loop","user_id":"fb25459a-7d4d-4d59-9a81-243afe205e90"}]
+A objects in folder -> 200 [{"name":"c6176ded-617b-4d13-b81a-860912fdfb1b.gp","version":"5b757abf-e763-43bf-8399-414c6b6eb5a7","id":"3998172a-a19e-49f3-bee7-cdba5566be2b","updated_at":"2026-11-22T21:55:27.766Z","created_at":"2026-11-22T21:55:27.76
+B logout -> 204 
+B refresh after logout -> 400 {"code":400,"error_code":"refresh_token_not_found","msg":"Invalid Refresh Token: Refresh Token Not Found"}
+B access token after logout (still valid JWT until expiry?) -> 200 [{"id":"e14980ef-6445-4c54-ab30-36b836e609ef"}]
+forged JWT (alg none) -> 401 {"code":"PGRST301","details":"JWT is unsecured but expected 'alg' was not 'none'","hint":null,"message":"Wrong or unsupported encoding algorithm"}
+password signup -> 200 {"has_access_token":true,"confirmed":"2026-11-22T21:55:28.176044137Z"}
+IDS {"A":"fb25459a-7d4d-4d59-9a81-243afe205e90","B":"c4b8e54f-6997-44e6-9722-d6a3d2a95397","pwEmail":"qa-pw-9b4de6fe-b31e-4f26-8975-b13857bb71bc@drumpal.test"}

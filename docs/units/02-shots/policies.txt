@@ -1,0 +1,114 @@
+== RLS enabled
+      relname      | relrowsecurity | relforcerowsecurity 
+-------------------+----------------+---------------------
+ songs             | t              | f
+ loops             | t              | f
+ practice_sessions | t              | f
+ user_settings     | t              | f
+(4 rows)
+
+== pg_policies public + storage
+ schemaname |     tablename     |          policyname          | permissive |      roles      |  cmd   |                                                    qual                                                    |                                                                                    with_check                                                                                    
+------------+-------------------+------------------------------+------------+-----------------+--------+------------------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ public     | loops             | loops_delete_own             | PERMISSIVE | {authenticated} | DELETE | (user_id = ( SELECT auth.uid() AS uid))                                                                    | 
+ public     | loops             | loops_insert_own             | PERMISSIVE | {authenticated} | INSERT |                                                                                                            | (user_id = ( SELECT auth.uid() AS uid))
+ public     | loops             | loops_select_own             | PERMISSIVE | {authenticated} | SELECT | (user_id = ( SELECT auth.uid() AS uid))                                                                    | 
+ public     | loops             | loops_update_own             | PERMISSIVE | {authenticated} | UPDATE | (user_id = ( SELECT auth.uid() AS uid))                                                                    | (user_id = ( SELECT auth.uid() AS uid))
+ public     | practice_sessions | practice_sessions_insert_own | PERMISSIVE | {authenticated} | INSERT |                                                                                                            | (user_id = ( SELECT auth.uid() AS uid))
+ public     | practice_sessions | practice_sessions_select_own | PERMISSIVE | {authenticated} | SELECT | (user_id = ( SELECT auth.uid() AS uid))                                                                    | 
+ public     | songs             | songs_delete_own             | PERMISSIVE | {authenticated} | DELETE | (user_id = ( SELECT auth.uid() AS uid))                                                                    | 
+ public     | songs             | songs_insert_own             | PERMISSIVE | {authenticated} | INSERT |                                                                                                            | (user_id = ( SELECT auth.uid() AS uid))
+ public     | songs             | songs_select_own             | PERMISSIVE | {authenticated} | SELECT | (user_id = ( SELECT auth.uid() AS uid))                                                                    | 
+ public     | songs             | songs_update_own             | PERMISSIVE | {authenticated} | UPDATE | (user_id = ( SELECT auth.uid() AS uid))                                                                    | (user_id = ( SELECT auth.uid() AS uid))
+ public     | user_settings     | user_settings_select_own     | PERMISSIVE | {authenticated} | SELECT | (user_id = ( SELECT auth.uid() AS uid))                                                                    | 
+ public     | user_settings     | user_settings_update_own     | PERMISSIVE | {authenticated} | UPDATE | (user_id = ( SELECT auth.uid() AS uid))                                                                    | (user_id = ( SELECT auth.uid() AS uid))
+ storage    | objects           | gp_files_delete_own          | PERMISSIVE | {authenticated} | DELETE | ((bucket_id = 'gp-files'::text) AND ((storage.foldername(name))[1] = (( SELECT auth.uid() AS uid))::text)) | 
+ storage    | objects           | gp_files_insert_own          | PERMISSIVE | {authenticated} | INSERT |                                                                                                            | ((bucket_id = 'gp-files'::text) AND (name ~ (('^'::text || (( SELECT auth.uid() AS uid))::text) || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.gp$'::text)))
+ storage    | objects           | gp_files_select_own          | PERMISSIVE | {authenticated} | SELECT | ((bucket_id = 'gp-files'::text) AND ((storage.foldername(name))[1] = (( SELECT auth.uid() AS uid))::text)) | 
+ storage    | objects           | gp_files_update_own          | PERMISSIVE | {authenticated} | UPDATE | ((bucket_id = 'gp-files'::text) AND ((storage.foldername(name))[1] = (( SELECT auth.uid() AS uid))::text)) | ((bucket_id = 'gp-files'::text) AND (name ~ (('^'::text || (( SELECT auth.uid() AS uid))::text) || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.gp$'::text)))
+(16 rows)
+
+== table grants to anon/authenticated/public
+    table_name     |    grantee    |         string_agg          
+-------------------+---------------+-----------------------------
+ loops             | authenticated | DELETE,INSERT,SELECT,UPDATE
+ practice_sessions | authenticated | INSERT,SELECT
+ songs             | authenticated | DELETE,INSERT,SELECT
+ user_settings     | authenticated | SELECT,UPDATE
+(4 rows)
+
+== column grants (update/insert) for authenticated on public
+    table_name     | privilege_type |                                                          string_agg                                                           
+-------------------+----------------+-------------------------------------------------------------------------------------------------------------------------------
+ loops             | INSERT         | created_at,end_bar,finished_at,id,last_practiced_at,name,song_id,speed_ratio,start_bar,status,target_ratio,updated_at,user_id
+ loops             | UPDATE         | created_at,end_bar,finished_at,id,last_practiced_at,name,song_id,speed_ratio,start_bar,status,target_ratio,updated_at,user_id
+ practice_sessions | INSERT         | created_at,duration_seconds,id,loop_id,repeats,speed_ratio,started_at,user_id
+ songs             | INSERT         | artist,bar_count,created_at,drum_track_index,file_hash,file_path,id,original_tempo,title,updated_at,user_id
+ songs             | UPDATE         | artist,title
+ user_settings     | UPDATE         | count_in_bars,count_in_mode,created_at,drums_muted_default,metronome_on,metronome_volume,updated_at,user_id
+(6 rows)
+
+== functions in public, secdef, config, execute privs
+            proname             | prosecdef |      proconfig       |   ret   | anon_exec | auth_exec 
+--------------------------------+-----------+----------------------+---------+-----------+-----------
+ handle_new_user                | t         | {"search_path=\"\""} | trigger | f         | f
+ loops_before_write             | f         | {"search_path=\"\""} | trigger | t         | t
+ practice_sessions_after_insert | f         | {"search_path=\"\""} | trigger | t         | t
+ set_updated_at                 | f         | {"search_path=\"\""} | trigger | t         | t
+(4 rows)
+
+== triggers
+ event_object_schema | event_object_table |          trigger_name          | action_timing | event_manipulation |                 action_statement                  
+---------------------+--------------------+--------------------------------+---------------+--------------------+---------------------------------------------------
+ public              | loops              | loops_before_write             | BEFORE        | INSERT             | EXECUTE FUNCTION loops_before_write()
+ public              | loops              | loops_before_write             | BEFORE        | UPDATE             | EXECUTE FUNCTION loops_before_write()
+ public              | practice_sessions  | practice_sessions_after_insert | AFTER         | INSERT             | EXECUTE FUNCTION practice_sessions_after_insert()
+ public              | songs              | songs_set_updated_at           | BEFORE        | UPDATE             | EXECUTE FUNCTION set_updated_at()
+ public              | user_settings      | user_settings_set_updated_at   | BEFORE        | UPDATE             | EXECUTE FUNCTION set_updated_at()
+ auth                | users              | on_auth_user_created           | AFTER         | INSERT             | EXECUTE FUNCTION handle_new_user()
+(6 rows)
+
+== bucket
+    id    | public | file_size_limit | allowed_mime_types 
+----------+--------+-----------------+--------------------
+ gp-files | f      |        20971520 | 
+(1 row)
+
+== policies on storage.buckets
+ count 
+-------
+     0
+(1 row)
+
+== default privileges in public
+   defaclrole   | defaclobjtype |                                                                 defaclacl                                                                  
+----------------+---------------+--------------------------------------------------------------------------------------------------------------------------------------------
+ postgres       | r             | {postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}
+ postgres       | f             | {postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+ postgres       | S             | {postgres=rwU/postgres,anon=rwU/postgres,authenticated=rwU/postgres,service_role=rwU/postgres}
+ supabase_admin | S             | {postgres=rwU/supabase_admin,anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,service_role=rwU/supabase_admin}
+ supabase_admin | r             | {postgres=arwdDxtm/supabase_admin,anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin}
+ supabase_admin | f             | {postgres=X/supabase_admin,anon=X/supabase_admin,authenticated=X/supabase_admin,service_role=X/supabase_admin}
+(6 rows)
+
+== sequences/types grants
+ nspname |    typname    | typacl 
+---------+---------------+--------
+ public  | loop_status   | 
+ public  | count_in_mode | 
+(2 rows)
+
+== seed counts
+ users | songs | loops | sessions | settings | objects 
+-------+-------+-------+----------+----------+---------
+     2 |     4 |     5 |        4 |        2 |       4
+(1 row)
+
+                                     name                                     
+------------------------------------------------------------------------------
+ 281e7652-06ce-41f8-8d37-f1175c6e4ccf/0522ddba-1ab5-49a7-bd54-c7445b85f7b7.gp
+ 281e7652-06ce-41f8-8d37-f1175c6e4ccf/35640673-04bb-4324-b45b-792ddb8bdbba.gp
+ 281e7652-06ce-41f8-8d37-f1175c6e4ccf/6d3002c7-4d18-4782-848e-be2031b7e33b.gp
+ 3429d1b6-d6d4-4ef6-83b1-823fcf349984/0537c6e6-95ed-4036-85c8-811987442bf1.gp
+(4 rows)
+
