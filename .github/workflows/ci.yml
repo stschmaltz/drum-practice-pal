@@ -31,6 +31,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      # Signed-in specs need Auth and REST; Mailpit catches the sign-in emails the login form sends.
+      - run: npx supabase start -x studio,imgproxy,edge-runtime,logflare,vector,realtime,supavisor
       - run: npm run e2e
       - uses: actions/upload-artifact@v7
         if: failure()

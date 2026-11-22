@@ -2,12 +2,18 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   COUNT_IN_BAR_OPTIONS,
+  COUNT_IN_MODES,
   GP_FILES_BUCKET,
+  METRONOME_VOLUME_MAX,
+  METRONOME_VOLUME_MIN,
   LOOP_NAME_MAX_LENGTH,
   SONG_TEXT_MAX_LENGTH,
   SPEED_RATIO_MAX,
   SPEED_RATIO_MIN,
+  isCountInBars,
+  isCountInMode,
   isValidBarRange,
+  isValidMetronomeVolume,
   isValidSpeedRatio,
   songFilePath,
 } from './schema';
@@ -52,6 +58,36 @@ describe('isValidBarRange', () => {
   });
 });
 
+describe('isValidMetronomeVolume', () => {
+  it.each([0, 0.5, 1])('accepts %s', (volume) => {
+    expect(isValidMetronomeVolume(volume)).toBe(true);
+  });
+
+  it.each([-0.01, 1.01, Number.NaN, Number.POSITIVE_INFINITY])('rejects %s', (volume) => {
+    expect(isValidMetronomeVolume(volume)).toBe(false);
+  });
+});
+
+describe('isCountInBars', () => {
+  it.each([0, 1, 2])('accepts %i', (bars) => {
+    expect(isCountInBars(bars)).toBe(true);
+  });
+
+  it.each([-1, 3, 1.5, Number.NaN])('rejects %s', (bars) => {
+    expect(isCountInBars(bars)).toBe(false);
+  });
+});
+
+describe('isCountInMode', () => {
+  it.each(['start', 'every_repeat'])('accepts %s', (mode) => {
+    expect(isCountInMode(mode)).toBe(true);
+  });
+
+  it.each(['', 'every', 'START'])('rejects %j', (mode) => {
+    expect(isCountInMode(mode)).toBe(false);
+  });
+});
+
 // The constants mirror SQL checks; these fail if one side changes without the other.
 describe('matches the migrations', () => {
   const schema = readMigration('20261122000000_schema.sql');
@@ -64,6 +100,17 @@ describe('matches the migrations', () => {
 
   it('count-in options', () => {
     expect(schema).toContain(`count_in_bars in (${COUNT_IN_BAR_OPTIONS.join(', ')})`);
+  });
+
+  it('metronome volume bounds', () => {
+    expect(schema).toContain(
+      `metronome_volume between ${METRONOME_VOLUME_MIN} and ${METRONOME_VOLUME_MAX}`,
+    );
+  });
+
+  it('count-in modes', () => {
+    const modes = COUNT_IN_MODES.map((mode) => `'${mode}'`).join(', ');
+    expect(schema).toContain(`create type public.count_in_mode as enum (${modes})`);
   });
 
   it('text lengths', () => {

@@ -26,7 +26,7 @@ Drum Practice Pal: a tab-first drum practice PWA. Users upload Guitar Pro files,
 | ------------------ | ------------------------------------------------------------------------------ |
 | `npm run dev`      | Dev server, exposed on the LAN for device testing                              |
 | `npm run check`    | Typecheck, lint, format check, unit tests. Must pass at the end of every stage |
-| `npm run e2e`      | Playwright against a production build at phone, tablet, desktop                |
+| `npm run e2e`      | Playwright against a build at phone, tablet, desktop; needs `npm run db:start` |
 | `npm run fixtures` | Regenerate `tests/fixtures/gp/*.gp` from `tests/fixtures/sources.ts`           |
 | `npm run format`   | Prettier write                                                                 |
 | `npm run db:start` | Start local Supabase in Docker (`db:stop`, `db:status` likewise)               |
@@ -85,6 +85,19 @@ docs/
 - Keys: the browser gets `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` only. `SUPABASE_SECRET_KEY` bypasses RLS and is for node scripts and tests; never prefix it with `VITE_`. `.env.local` is gitignored; `.env.example` lists the names. Scripts and `tests/db` fall back to `supabase status`, so they need no env locally.
 - Node-side clients and admin chores (`createAdminClient`, `createNodeClient`, `findUserIdsByEmail`, `removeUserFiles`) live in `scripts/supabase-admin.ts`, shared by the seed script and `tests/db`. Connection details come from `scripts/local-supabase.ts`.
 - Database tests sign users in with the real magic-link flow (`createTestUser` in `tests/db/helpers.ts`) and clean up after themselves. Build rows with `songRow`, `sessionRow`, `insertSong` and `insertLoop`, and assert error codes with `PG.*` from the same file rather than raw strings. Local magic-link emails land in Mailpit at http://127.0.0.1:54324. Seed users: `demo@drumpal.test` and `other@drumpal.test`.
+
+## App shell, auth and data hooks
+
+- Routes live in `src/App.tsx`. Signed-in screens are children of the `<RequireAuth><AppShell /></RequireAuth>` layout route; `/login` and the dev-only `/spike` sit outside it. Player routes are `lazy()` so alphaTab stays out of the main bundle.
+- Auth state comes from `useAuth()` (`src/lib/auth.ts`), fed by `AuthProvider` from `supabase.auth.onAuthStateChange`. Screens behind the guard call `useSignedInUser()` for the user. supabase-js refreshes tokens itself; a failed refresh arrives as `SIGNED_OUT`, which clears the query cache and the guard sends the user to `/login?next=...` (`safeNextPath` rejects off-site targets).
+- Sign-in is passwordless: one email with a magic link and a 6-digit code (`supabase/templates/sign_in.html`). The code is for phones on the LAN and installed PWAs, where the link can't open the app.
+- One browser client: `supabase` from `src/lib/supabase.ts`, typed with `Database`. Env comes from the committed `.env.development` (local stack defaults) in dev and the e2e build; production builds need `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` set, or the app shows a config message. A loopback API URL is rewritten to the page's host so LAN devices reach the local stack.
+- **Data hook pattern** (copy `src/features/settings/`):
+  - `<feature>Api.ts`: plain async functions over `supabase` that return typed rows and throw on error via `unwrap(result, 'what')` or `throwIfError(result)` from `src/lib/supabaseResult.ts`. Select columns with a string literal (not a joined array) so supabase-js can type the row. Always scope by `user_id` as well as relying on RLS.
+  - `use<Feature>.ts`: a key factory (`settingsKeys.forUser(userId)`; every key includes the user id) plus `useQuery`/`useMutation` hooks that call the API functions. Mutations that the user sees immediately are optimistic: `cancelQueries`, `setQueryData`, roll back in `onError`, set the server row in `onSuccess`, `invalidateQueries` in `onSettled`.
+  - Components call only the hooks. Forms keep a local draft that is `null` until edited, so refetched data shows through, and send only changed fields (`changedSettings`).
+- Shared UI: `src/components/` (`PageHeader`, `FullPageMessage`, class strings in `styles.ts`). Bottom tabs below 768 px (`md`), sidebar from 768 px; touch targets `min-h-11` (44 px) or more.
+- Signed-in e2e specs use `tests/e2e/auth.ts`: `createE2eUser` / `deleteE2eUser` in `beforeEach` / `afterEach`, and `signIn(page, user, path)` through the real magic-link redirect. A second `browser.newContext()` is a second device. Specs that don't sign in (smoke, spike) need no Supabase.
 
 ## Stage workflow
 

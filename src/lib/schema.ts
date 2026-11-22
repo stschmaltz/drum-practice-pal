@@ -2,7 +2,7 @@
  * App-side mirror of the limits and storage layout set in supabase/migrations.
  * The database is the source of truth; schema.test.ts fails if these drift.
  */
-import type { Database } from './database.types';
+import { Constants, type Database } from './database.types';
 
 export type LoopStatus = Database['public']['Enums']['loop_status'];
 export type CountInMode = Database['public']['Enums']['count_in_mode'];
@@ -13,6 +13,10 @@ export const SPEED_RATIO_MIN = 0.25;
 export const SPEED_RATIO_MAX = 2.0;
 export const COUNT_IN_BAR_OPTIONS = [0, 1, 2] as const;
 export type CountInBars = (typeof COUNT_IN_BAR_OPTIONS)[number];
+export const COUNT_IN_MODES = Constants.public.Enums.count_in_mode;
+
+export const METRONOME_VOLUME_MIN = 0;
+export const METRONOME_VOLUME_MAX = 1;
 
 export const SONG_TEXT_MAX_LENGTH = 300;
 export const LOOP_NAME_MAX_LENGTH = 100;
@@ -35,4 +39,18 @@ export function isValidBarRange(startBar: number, endBar: number, barCount: numb
     startBar <= endBar &&
     endBar <= barCount
   );
+}
+
+export function isValidMetronomeVolume(volume: number): boolean {
+  return (
+    Number.isFinite(volume) && volume >= METRONOME_VOLUME_MIN && volume <= METRONOME_VOLUME_MAX
+  );
+}
+
+export function isCountInBars(value: number): value is CountInBars {
+  return (COUNT_IN_BAR_OPTIONS as readonly number[]).includes(value);
+}
+
+export function isCountInMode(value: string): value is CountInMode {
+  return (COUNT_IN_MODES as readonly string[]).includes(value);
 }
