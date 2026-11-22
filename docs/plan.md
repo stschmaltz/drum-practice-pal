@@ -116,7 +116,7 @@ Every unit runs through five agents in order, each starting cold and picking up 
 4. **Readability**: refactors for clarity with no behavior change.
 5. **Review**: reviews the full branch diff at PR-reviewer level (ignored errors, pagination, partial failures, test teardown) and fixes what it confirms.
 
-If QA finds a real bug, a Build agent fixes it from QA's notes, then Test and QA re-run on the affected area before Readability. Merge after Readability with all checks green.
+If QA finds a real bug, a Build agent fixes it from QA's notes, then Test and QA re-run on the affected area before Readability. Merge after Review with all checks green.
 
 **Repo conventions**
 
