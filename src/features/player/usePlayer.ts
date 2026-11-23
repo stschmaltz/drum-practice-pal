@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { layoutForWidth, PAGE_LAYOUT_QUERY, type LayoutChoice } from './layout';
 import type { EngineFactory } from './playerEngine';
 import type { PlayerOptions } from './playerOptions';
 import { initialPlayerSnapshot, PlayerService, type PlayerSnapshot } from './PlayerService';
+import { useLayout } from './useLayout';
 
 export interface UsePlayerOptions {
   /** The Guitar Pro file. Read once, on mount: key the component by song to load another. */
@@ -78,13 +78,14 @@ export function usePlayer({
     player?.setLayout(layout);
   }, [player, layout]);
 
-  const [placeholder] = useState(() => initialPlayerSnapshot(drumTrackIndex, initialOptions));
+  // Stable objects, so useSyncExternalStore sees no change between renders.
+  const [loadingSnapshot] = useState(() => initialPlayerSnapshot(drumTrackIndex, initialOptions));
   const [failedSnapshot] = useState<PlayerSnapshot>(() => ({
-    ...placeholder,
+    ...loadingSnapshot,
     status: 'error',
     error: 'engine',
   }));
-  const fallback = engineFailed ? failedSnapshot : placeholder;
+  const fallback = engineFailed ? failedSnapshot : loadingSnapshot;
   const snapshot = useSyncExternalStore(
     player ? player.subscribe : subscribeToNothing,
     player ? player.getSnapshot : () => fallback,
@@ -93,24 +94,5 @@ export function usePlayer({
   return { scoreRef, scrollRef, player, snapshot, layout };
 }
 
+// The fallback only changes on a re-render (engineFailed), so there's nothing to listen to.
 const subscribeToNothing = () => () => {};
-
-/** Page layout from 768 px, horizontal below (docs/units/01-spike.md, Layout per breakpoint). */
-function useLayout(): LayoutChoice {
-  return useSyncExternalStore(subscribeToWidth, currentLayout);
-}
-
-function currentLayout(): LayoutChoice {
-  if (typeof window.matchMedia !== 'function') return layoutForWidth(window.innerWidth);
-  return window.matchMedia(PAGE_LAYOUT_QUERY).matches ? 'page' : 'horizontal';
-}
-
-function subscribeToWidth(onChange: () => void): () => void {
-  if (typeof window.matchMedia !== 'function') {
-    window.addEventListener('resize', onChange);
-    return () => window.removeEventListener('resize', onChange);
-  }
-  const query = window.matchMedia(PAGE_LAYOUT_QUERY);
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-}

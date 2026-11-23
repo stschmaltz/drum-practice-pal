@@ -223,20 +223,20 @@ export class PlayerService {
   setMetronomeOn(metronomeOn: boolean): void {
     if (this.disposed) return;
     this.update({ metronomeOn });
-    this.engine.setMetronomeVolume(effectiveMetronomeVolume(this.snapshot));
+    this.applyMetronome();
   }
 
   setMetronomeVolume(volume: number): void {
     if (this.disposed) return;
     this.update({ metronomeVolume: clampVolume(volume) });
-    this.engine.setMetronomeVolume(effectiveMetronomeVolume(this.snapshot));
+    this.applyMetronome();
   }
 
   setTrackMuted(trackIndex: number, muted: boolean): void {
     if (this.disposed) return;
     this.mutedTracks.set(trackIndex, muted);
     if (trackIndex === this.drumTrackIndex) this.update({ drumsMuted: muted });
-    if (trackIndex < this.trackCount) this.engine.setTrackMuted(trackIndex, muted);
+    this.applyTrackMute(trackIndex, muted);
   }
 
   /** A no-op for a song without a drum track. */
@@ -321,18 +321,26 @@ export class PlayerService {
     return this.snapshot.status === 'ready' || this.snapshot.status === 'playing';
   }
 
+  /** Pushes every option to the engine, for when alphaTab has (re)loaded and may have reset them. */
   private applyAll(): void {
     this.engine.setSpeed(this.snapshot.speedRatio);
-    this.engine.setMetronomeVolume(effectiveMetronomeVolume(this.snapshot));
+    this.applyMetronome();
     this.engine.setLooping(this.snapshot.looping);
     this.applyMutes();
     this.applyRange();
   }
 
+  private applyMetronome(): void {
+    this.engine.setMetronomeVolume(effectiveMetronomeVolume(this.snapshot));
+  }
+
   private applyMutes(): void {
-    for (const [trackIndex, muted] of this.mutedTracks) {
-      if (trackIndex < this.trackCount) this.engine.setTrackMuted(trackIndex, muted);
-    }
+    for (const [trackIndex, muted] of this.mutedTracks) this.applyTrackMute(trackIndex, muted);
+  }
+
+  /** Tracks the loaded score doesn't have yet are skipped; applyMutes sends them once it does. */
+  private applyTrackMute(trackIndex: number, muted: boolean): void {
+    if (trackIndex < this.trackCount) this.engine.setTrackMuted(trackIndex, muted);
   }
 
   private applyRange(): void {
@@ -344,12 +352,10 @@ export class PlayerService {
     this.engine.setPlaybackRange(ticks);
   }
 
+  /** Notifies subscribers only when a value really changed, so React doesn't re-render for nothing. */
   private update(patch: Partial<PlayerSnapshot>): void {
-    let changed = false;
-    for (const key of Object.keys(patch) as (keyof PlayerSnapshot)[]) {
-      if (this.snapshot[key] !== patch[key]) changed = true;
-    }
-    if (!changed) return;
+    const keys = Object.keys(patch) as (keyof PlayerSnapshot)[];
+    if (!keys.some((key) => this.snapshot[key] !== patch[key])) return;
     this.snapshot = { ...this.snapshot, ...patch };
     for (const listener of this.listeners) listener();
   }

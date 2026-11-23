@@ -208,3 +208,35 @@ These need ears. Nothing here was heard.
 - Files changed by QA: `src/features/song/SongPage.tsx`, `src/features/song/SongPage.test.tsx`, this note, and `docs/units/05-shots/` (52 screenshots). Nothing is committed.
 
 **Verdict: PASS.** Both acceptance criteria pass. No blocker or major issues. Issues 1 and 2 are minor and can go to Build before Readability, or be carried forward. Issue 1 is a one-class fix.
+
+## Readability
+
+**Summary.** Behaviour-preserving cleanup of the player feature, the song page and the player e2e spec. No public API, copy, markup, test id or class changed. QA's minor issues (the shell's `min-w-0`, a retry after a soundfont failure) were left alone on purpose, since both change behaviour.
+
+**Changes**
+
+- `PlayerService.ts`:
+  - `applyMetronome()` replaces three copies of `engine.setMetronomeVolume(effectiveMetronomeVolume(...))`.
+  - `applyTrackMute(trackIndex, muted)` holds the "skip tracks the score doesn't have yet" check once, for both `setTrackMuted` and `applyMutes`.
+  - `update()` uses `some` instead of a flag loop. It and `applyAll` now say why they exist.
+- `useLayout.ts` (new): the breakpoint watcher (`useLayout`, `matchMedia` with a `resize` fallback) moved out of `usePlayer.ts`. `usePlayer` now only handles the service lifecycle. The `placeholder` snapshot is now called `loadingSnapshot`, with a comment saying why it's kept in state (a stable reference for `useSyncExternalStore`).
+- `PlayerControls.tsx`:
+  - A `VolumeSlider` sits beside `SpeedSlider`, using `METRONOME_VOLUME_MIN` / `MAX` from `schema.ts` and `ratioToPercent` instead of literal `0`, `100` and `* 100`. That still gives a 0 to 100 range in steps of 5.
+  - `noPlayer` replaces four `player === null` checks.
+- `SongPage.tsx`:
+  - The `let body` branching moved into `SongBody`, with early returns. `SongScreen` is now just the header plus the body.
+  - The error-or-bar line is now `PlayerStatusLine`. The DOM, the query hooks and the order they're called in are unchanged.
+- `alphaTabEngine.ts`: the tick-cache mapping became `playedBars(api)`. A redundant parameter annotation (and its `TickRange` import) was dropped, since the interface already types it.
+- `audioSession.ts`: the inline default argument became `browserNavigator()`, matching `wakeLock.ts`'s `browserEnv()`.
+- `tests/e2e/player.spec.ts`: the helpers are grouped at the top. The two copies of the width-to-layout rule became one `layoutForWidth` helper, and the first test reuses `layoutShown` instead of its own width maths. The constant stays local, as in `spike.spec.ts`, so the node tsconfig never pulls in `src`.
+- `AGENTS.md`: the Player section now names `useLayout()`.
+
+**Looked at, left as is**
+
+- `songsApi.ts` / `useSongs.ts`: `fetchSong`, `downloadSongFile`, `useSong`, `useSongFile` and the key factories already follow the data-hook pattern.
+- `fakePlayerEngine.ts`, `emitter.ts`, `wakeLock.ts`, `barTicks.ts`, `speed.ts`, `playerOptions.ts`: these are clear already. `straightBars` stays exported for later units' tests.
+
+**Results**
+
+- Before: `npm run check` green (43 files, 546 tests); `npm run e2e` 126 passed.
+- After: `npm run check` green (43 files, 546 tests); `npm run e2e` 126 passed. Local Supabase was running. Nothing is committed.

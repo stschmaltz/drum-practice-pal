@@ -11,6 +11,7 @@ import {
   playerOptionsFromSettings,
   type PlayerOptions,
 } from '@/features/player/playerOptions';
+import type { PlayerSnapshot } from '@/features/player/PlayerService';
 import { usePlayer } from '@/features/player/usePlayer';
 import { useSettings } from '@/features/settings/useSettings';
 import { isUuid } from '@/lib/randomUuid';
@@ -34,45 +35,48 @@ export function SongPage() {
 }
 
 function SongScreen({ song }: { song: Song }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <PageHeader title={song.title}>{song.artist || null}</PageHeader>
+      <SongBody song={song} />
+    </div>
+  );
+}
+
+/** Waits for the file and settings, then opens the player. */
+function SongBody({ song }: { song: Song }) {
   const file = useSongFile(song.id);
   const settings = useSettings();
 
-  let body;
   if (file.isError) {
-    body = (
+    return (
       <LoadFailed
         message="Couldn't download this song's file. Check your connection and try again."
         onRetry={() => void file.refetch()}
       />
     );
-  } else if (file.isPending || settings.isPending) {
-    body = <p className="text-neutral-400">Downloading the song…</p>;
-  } else {
-    body = (
-      <>
-        {settings.isLoadingError && (
-          <p className="text-sm text-amber-300">
-            Couldn't load your settings, so the player is using the defaults.
-          </p>
-        )}
-        <SongPlayer
-          // A new song means a new player: usePlayer reads its inputs once.
-          key={song.id}
-          fileBytes={file.data}
-          drumTrackIndex={song.drum_track_index}
-          initialOptions={
-            settings.data ? playerOptionsFromSettings(settings.data) : DEFAULT_PLAYER_OPTIONS
-          }
-        />
-      </>
-    );
+  }
+  if (file.isPending || settings.isPending) {
+    return <p className="text-neutral-400">Downloading the song…</p>;
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <PageHeader title={song.title}>{song.artist || null}</PageHeader>
-      {body}
-    </div>
+    <>
+      {settings.isLoadingError && (
+        <p className="text-sm text-amber-300">
+          Couldn't load your settings, so the player is using the defaults.
+        </p>
+      )}
+      <SongPlayer
+        // A new song means a new player: usePlayer reads its inputs once.
+        key={song.id}
+        fileBytes={file.data}
+        drumTrackIndex={song.drum_track_index}
+        initialOptions={
+          settings.data ? playerOptionsFromSettings(settings.data) : DEFAULT_PLAYER_OPTIONS
+        }
+      />
+    </>
   );
 }
 
@@ -96,15 +100,7 @@ function SongPlayer({
   return (
     <div className="flex flex-col gap-3">
       <PlayerControls player={player} snapshot={snapshot} />
-      {snapshot.status === 'error' && snapshot.error ? (
-        <ErrorAlert>{PLAYER_ERROR_MESSAGES[snapshot.error]}</ErrorAlert>
-      ) : (
-        <p className="text-sm text-neutral-400" aria-live="polite" data-testid="player-status">
-          {snapshot.status === 'loading'
-            ? 'Loading the score and sounds…'
-            : `Bar ${snapshot.barNumber ?? 1} of ${snapshot.barCount ?? '?'}`}
-        </p>
-      )}
+      <PlayerStatusLine snapshot={snapshot} />
       {/* Both layouts scroll inside this box, so the cursor's auto-scroll is one code path. */}
       <div
         ref={scrollRef}
@@ -116,6 +112,20 @@ function SongPlayer({
         <div ref={scoreRef} />
       </div>
     </div>
+  );
+}
+
+/** The player's error as fixed copy, otherwise where playback is. */
+function PlayerStatusLine({ snapshot }: { snapshot: PlayerSnapshot }) {
+  if (snapshot.status === 'error' && snapshot.error) {
+    return <ErrorAlert>{PLAYER_ERROR_MESSAGES[snapshot.error]}</ErrorAlert>;
+  }
+  return (
+    <p className="text-sm text-neutral-400" aria-live="polite" data-testid="player-status">
+      {snapshot.status === 'loading'
+        ? 'Loading the score and sounds…'
+        : `Bar ${snapshot.barNumber ?? 1} of ${snapshot.barCount ?? '?'}`}
+    </p>
   );
 }
 

@@ -56,6 +56,20 @@ async function barNumber(page: Page): Promise<number> {
   return Number(match[1]);
 }
 
+/** The layout the app should pick at this width (layout.ts). */
+function layoutForWidth(width: number): 'page' | 'horizontal' {
+  return width >= PAGE_LAYOUT_MIN_WIDTH ? 'page' : 'horizontal';
+}
+
+/** Rendered notation width against the scroll box: page layout fits, horizontal overflows. */
+async function layoutShown(page: Page): Promise<'page' | 'horizontal'> {
+  const { surface, box } = await viewport(page).evaluate((el) => ({
+    surface: el.querySelector('.at-surface')?.getBoundingClientRect().width ?? 0,
+    box: el.clientWidth,
+  }));
+  return surface > box + 1 ? 'horizontal' : 'page';
+}
+
 test('opens a song in the player with notation in the layout for the width', async ({
   user,
   page,
@@ -64,16 +78,7 @@ test('opens a song in the player with notation in the layout for the width', asy
   await expect(status(page)).toHaveText('Bar 1 of 16');
   await expect(playButton(page)).toHaveText('Play');
 
-  const widths = await viewport(page).evaluate((el) => ({
-    surface: el.querySelector('.at-surface')?.getBoundingClientRect().width ?? 0,
-    viewport: el.clientWidth,
-  }));
-  const pageWidth = page.viewportSize()?.width ?? 0;
-  if (pageWidth >= PAGE_LAYOUT_MIN_WIDTH) {
-    expect(widths.surface).toBeLessThanOrEqual(widths.viewport + 1);
-  } else {
-    expect(widths.surface).toBeGreaterThan(widths.viewport);
-  }
+  expect(await layoutShown(page)).toBe(layoutForWidth(page.viewportSize()?.width ?? 0));
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
@@ -164,15 +169,6 @@ test('an unknown song id shows not found', async ({ user, page }) => {
   await expect(page.getByRole('heading', { level: 1, name: 'Song not found' })).toBeVisible();
 });
 
-/** Rendered notation width against the scroll box: page layout fits, horizontal overflows. */
-async function layoutShown(page: Page): Promise<'page' | 'horizontal'> {
-  const { surface, box } = await viewport(page).evaluate((el) => ({
-    surface: el.querySelector('.at-surface')?.getBoundingClientRect().width ?? 0,
-    box: el.clientWidth,
-  }));
-  return surface > box + 1 ? 'horizontal' : 'page';
-}
-
 test('pause and play resume from the same bar, not the start', async ({ user, page }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await controls(page).getByRole('slider', { name: 'Speed' }).fill('200');
@@ -196,7 +192,7 @@ test('crossing the layout breakpoint mid-play relayouts and keeps playing', asyn
   await openFixture(page, user, 'groove-120', 'Groove 120');
   const start = page.viewportSize();
   if (!start) throw new Error('No viewport');
-  const startLayout = start.width >= PAGE_LAYOUT_MIN_WIDTH ? 'page' : 'horizontal';
+  const startLayout = layoutForWidth(start.width);
   await expect.poll(() => layoutShown(page)).toBe(startLayout);
 
   await controls(page).getByRole('slider', { name: 'Speed' }).fill('200');

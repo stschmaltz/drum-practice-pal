@@ -10,11 +10,13 @@ export interface AudioSessionNavigator {
   audioSession?: { type: string };
 }
 
+function browserNavigator(): AudioSessionNavigator | undefined {
+  return typeof navigator === 'undefined' ? undefined : (navigator as AudioSessionNavigator);
+}
+
 /** Call from the play tap. A no-op where the API doesn't exist. */
 export function preferPlaybackAudioSession(
-  nav: AudioSessionNavigator | undefined = typeof navigator === 'undefined'
-    ? undefined
-    : (navigator as AudioSessionNavigator),
+  nav: AudioSessionNavigator | undefined = browserNavigator(),
 ): void {
   const session = nav?.audioSession;
   if (session && session.type !== 'playback') session.type = 'playback';

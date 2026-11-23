@@ -1,8 +1,15 @@
 import { useId, type ReactNode } from 'react';
 import { buttonClass, pressedButtonClass, primaryButtonClass } from '@/components/styles';
-import { SPEED_RATIO_MAX, SPEED_RATIO_MIN } from '@/lib/schema';
+import {
+  METRONOME_VOLUME_MAX,
+  METRONOME_VOLUME_MIN,
+  SPEED_RATIO_MAX,
+  SPEED_RATIO_MIN,
+} from '@/lib/schema';
 import type { PlayerService, PlayerSnapshot } from './PlayerService';
 import { percentToRatio, ratioToPercent, SPEED_STEP_PERCENT } from './speed';
+
+const VOLUME_STEP_PERCENT = 5;
 
 interface PlayerControlsProps {
   /** Null while alphaTab loads; the controls show the snapshot but do nothing. */
@@ -17,6 +24,8 @@ interface PlayerControlsProps {
 export function PlayerControls({ player, snapshot }: PlayerControlsProps) {
   const playing = snapshot.status === 'playing';
   const canPlay = player !== null && (snapshot.status === 'ready' || playing);
+  // Unlike Play, options work before the song is ready; they only wait for the player to exist.
+  const noPlayer = player === null;
 
   return (
     <section
@@ -45,32 +54,28 @@ export function PlayerControls({ player, snapshot }: PlayerControlsProps) {
 
       <SpeedSlider
         speedRatio={snapshot.speedRatio}
-        disabled={player === null}
+        disabled={noPlayer}
         onChange={(ratio) => player?.setSpeed(ratio)}
       />
 
       <div className="flex flex-wrap items-center gap-2">
         <ToggleButton
           pressed={snapshot.metronomeOn}
-          disabled={player === null}
+          disabled={noPlayer}
           onChange={(on) => player?.setMetronomeOn(on)}
         >
           Metronome
         </ToggleButton>
-        <PercentSlider
-          label="Metronome volume"
-          value={Math.round(snapshot.metronomeVolume * 100)}
-          min={0}
-          max={100}
-          step={5}
-          disabled={player === null}
-          onChange={(percent) => player?.setMetronomeVolume(percent / 100)}
+        <VolumeSlider
+          volume={snapshot.metronomeVolume}
+          disabled={noPlayer}
+          onChange={(volume) => player?.setMetronomeVolume(volume)}
         />
       </div>
 
       <ToggleButton
         pressed={snapshot.drumsMuted}
-        disabled={player === null || !snapshot.hasDrumTrack}
+        disabled={noPlayer || !snapshot.hasDrumTrack}
         onChange={(muted) => player?.setDrumsMuted(muted)}
         title={snapshot.hasDrumTrack ? undefined : 'This song has no drum track'}
       >
@@ -98,6 +103,28 @@ function SpeedSlider({
       step={SPEED_STEP_PERCENT}
       disabled={disabled}
       onChange={(percent) => onChange(percentToRatio(percent))}
+    />
+  );
+}
+
+function VolumeSlider({
+  volume,
+  disabled,
+  onChange,
+}: {
+  volume: number;
+  disabled: boolean;
+  onChange: (volume: number) => void;
+}) {
+  return (
+    <PercentSlider
+      label="Metronome volume"
+      value={ratioToPercent(volume)}
+      min={ratioToPercent(METRONOME_VOLUME_MIN)}
+      max={ratioToPercent(METRONOME_VOLUME_MAX)}
+      step={VOLUME_STEP_PERCENT}
+      disabled={disabled}
+      onChange={(percent) => onChange(percent / 100)}
     />
   );
 }

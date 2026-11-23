@@ -5,7 +5,7 @@
  * (so a failed fetch can be reported), one scroll container for both layouts.
  */
 import * as alphaTab from '@coderline/alphatab';
-import type { TickRange } from './barTicks';
+import type { BarTicks } from './barTicks';
 import type { LayoutChoice } from './layout';
 import type { EngineEvents, EngineMount, PlayerEngine } from './playerEngine';
 
@@ -80,7 +80,7 @@ export function createAlphaTabEngine({
       const track = api.score?.tracks[trackIndex];
       if (track) api.changeTrackMute([track], muted);
     },
-    setPlaybackRange(range: TickRange | null) {
+    setPlaybackRange(range) {
       api.playbackRange = range ? { startTick: range.startTick, endTick: range.endTick } : null;
     },
     setLooping(looping) {
@@ -106,15 +106,7 @@ function subscribe<K extends keyof EngineEvents>(
       );
       return;
     case 'ticksReady':
-      api.midiLoaded.on(() =>
-        emit({
-          bars: (api.tickCache?.masterBars ?? []).map((lookup) => ({
-            barIndex: lookup.masterBar.index,
-            start: lookup.start,
-            end: lookup.end,
-          })),
-        }),
-      );
+      api.midiLoaded.on(() => emit({ bars: playedBars(api) }));
       return;
     case 'readyForPlayback':
       // alphaTab's playerReady is the synth's readyForPlayback: soundfont and MIDI loaded.
@@ -135,6 +127,15 @@ function subscribe<K extends keyof EngineEvents>(
       api.error.on((error) => emit({ error }));
       return;
   }
+}
+
+/** alphaTab's tick cache as BarTicks, in play order. */
+function playedBars(api: alphaTab.AlphaTabApi): BarTicks[] {
+  return (api.tickCache?.masterBars ?? []).map((lookup) => ({
+    barIndex: lookup.masterBar.index,
+    start: lookup.start,
+    end: lookup.end,
+  }));
 }
 
 function toLayoutMode(layout: LayoutChoice): alphaTab.LayoutMode {
