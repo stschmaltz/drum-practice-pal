@@ -186,7 +186,8 @@ describe('cross-user writes that must fail', () => {
     const songB = await insertSong(b);
     const loopB = await insertLoop(b, songB);
     const toSong = await b.client.from('loops').update({ song_id: songA }).eq('id', loopB);
-    expect(toSong.error?.code).toBe(PG.FOREIGN_KEY_VIOLATION);
+    // Since Unit 08 a loop's song and owner aren't updatable columns at all.
+    expect(toSong.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
     const toUser = await b.client.from('loops').update({ user_id: a.id }).eq('id', loopB);
     expect(toUser.error).not.toBeNull();
     const { data } = await admin.from('loops').select('user_id, song_id').eq('id', loopB).single();

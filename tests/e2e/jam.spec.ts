@@ -6,12 +6,14 @@ import {
   barNumber,
   boxOf,
   expectedLayout,
+  nextBarPoint,
   openFixture,
   playButton,
   scoreBox,
   scrollScoreToStart,
   speedSlider,
   status,
+  tapAndWaitForBar,
   untilStill,
   viewport,
   windowScrollSettled,
@@ -31,26 +33,6 @@ const contains = (box: Box, { x, y }: Point) =>
 
 async function expectBarCursorOver(page: Page, point: Point) {
   await expect.poll(async () => contains(await barCursorBox(page), point)).toBe(true);
-}
-
-/** Taps a point in the window and waits for the status line to leave bar `from`. */
-async function tapAndWaitForBar(page: Page, point: Point, from: number): Promise<number> {
-  await page.mouse.click(point.x, point.y);
-  await expect.poll(() => barNumber(page)).not.toBe(from);
-  return barNumber(page);
-}
-
-/**
- * A point just inside the bar after the cursor's: to its right, or at the
- * start of the next line when the cursor's bar ends one (bar 1 is wide, with
- * the clef, and fills a line on a tablet).
- */
-async function nextBarPoint(page: Page): Promise<Point> {
-  const box = await barCursorBox(page);
-  const frame = await scoreBox(page);
-  const right = { x: box.x + box.width + 20, y: box.y + box.height / 2 };
-  if (right.x < frame.x + frame.width - 20) return right;
-  return { x: frame.x + 40, y: box.y + box.height * 1.5 };
 }
 
 /**

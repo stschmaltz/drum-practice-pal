@@ -14,6 +14,7 @@ import {
   barIndexAtTick,
   barRangeToTicks,
   startTickOfBar,
+  startTickOfBarWithin,
   type BarTicks,
 } from './barTicks';
 import { webClickOutput, type ClickOutput } from './clickOutput';
@@ -25,6 +26,7 @@ import type { PlayerEngine } from './playerEngine';
 import { clampVolume, effectiveMetronomeVolume, type PlayerOptions } from './playerOptions';
 import { PLAYER_SOUND_FONT_URL } from './soundFont';
 import { clampSpeedRatio } from './speed';
+import { orderedBars } from './tapGesture';
 import { tempoAtBar } from './tempo';
 import { screenWakeLock, type WakeLockControl } from './wakeLock';
 
@@ -38,6 +40,11 @@ export type PlayerStatus = 'loading' | 'ready' | 'countingIn' | 'playing' | 'err
 /** Play has been pressed and Pause undoes it: playing, or counting in to it. */
 export function isRunning(status: PlayerStatus): boolean {
   return status === 'playing' || status === 'countingIn';
+}
+
+/** The song can be played or is playing: Play, or anything else that starts playback, will work. */
+export function isLoaded(status: PlayerStatus): boolean {
+  return status === 'ready' || isRunning(status);
 }
 
 /** Where a running count-in is, for the on-screen counter. All 1-based. */
@@ -57,6 +64,12 @@ export interface BarRange {
   endBar: number;
 }
 
+/** Whether two ranges cover the same bars; two nulls are the same. */
+export function isSameBarRange(a: BarRange | null, b: BarRange | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.startBar === b.startBar && a.endBar === b.endBar;
+}
+
 export interface PlayerSnapshot extends PlayerOptions {
   status: PlayerStatus;
   error: PlayerError | null;
@@ -74,6 +87,8 @@ export interface PlayerSnapshot extends PlayerOptions {
   drumsOnly: boolean;
   range: BarRange | null;
   looping: boolean;
+  /** The bars marked on the score: a drawing only, set by the screen (see setHighlight). */
+  highlight: BarRange | null;
   /** The count-in beat sounding now; null outside a count-in and before its first click. */
   countIn: CountInBeat | null;
 }
@@ -90,7 +105,22 @@ export type PlayerEvents = {
   finished: undefined;
   /** The user tapped a bar in the score. Jam mode seeks there; nothing happens by itself. */
   barTapped: { barNumber: number };
+  /**
+   * The user dragged a mouse across bars (desktop only; a finger scrolls).
+   * 1-based and in ascending order whichever way the drag ran. Fires as the
+   * drag reaches each bar, and once more with `done` on release. No barTapped
+   * follows a drag. Like a tap, nothing happens by itself.
+   */
+  barsDragged: BarRange & { done: boolean };
 };
+
+/**
+ * How long a seek waits for the engine to report a position inside the bar it
+ * asked for. Positions from anywhere else in that time were posted by
+ * alphaTab's worker before the seek reached it, and would flick the current
+ * bar back for one update. Past this, whatever the engine reports is believed.
+ */
+export const SEEK_SETTLE_MS = 500;
 
 export interface PlayerServiceConfig {
   /** From songs.drum_track_index: the track that renders and that "Mute drums" mutes. */
@@ -125,6 +155,7 @@ export function initialPlayerSnapshot(
     drumsOnly: false,
     range: null,
     looping: false,
+    highlight: null,
     countIn: null,
   };
 }
@@ -151,6 +182,8 @@ export class PlayerService {
   private barMeters: Meter[] = [];
   /** Where playback is, from the engine's last position or a seek; null until one arrives. */
   private lastTick: number | null = null;
+  /** The bar a seek asked for, until the engine reports a position in it (see SEEK_SETTLE_MS). */
+  private pendingSeek: { bar: BarTicks; until: number } | null = null;
   /** Cancels the count-in that is clicking now; null once it has handed over to playback. */
   private cancelCountIn: (() => void) | null = null;
   /**
@@ -209,6 +242,7 @@ export class PlayerService {
     this.barTempos = [];
     this.barMeters = [];
     this.lastTick = null;
+    this.pendingSeek = null;
     this.trackCount = 0;
     this.update({
       status: 'loading',
@@ -269,23 +303,58 @@ export class PlayerService {
     if (this.disposed || !this.isLoaded()) return;
     this.abandonCountIn();
     if (this.snapshot.status === 'playing') this.haltRequested = true;
+    // The engine rewinds now, so a seek still settling no longer says where playback is.
+    this.pendingSeek = null;
     this.engine.stop();
   }
 
-  /** Moves playback to the start of a bar, playing or not. False when the bar doesn't exist (yet). */
+  /**
+   * Moves playback to the start of a bar, playing or not. False, and nothing
+   * moves, when the bar doesn't exist (yet) or lies outside the range that is set.
+   */
   seekToBar(barNumber: number): boolean {
     if (this.disposed) return false;
-    const tick = startTickOfBar(this.bars, barNumber);
+    const tick = this.seekTickOfBar(barNumber);
     if (tick === null) return false;
     // A count-in under way was for the old bar, which may differ in tempo or meter.
     const recount = this.cancelCountIn !== null;
     if (recount) this.stopCountInClicks();
     this.engine.seek(tick);
     this.lastTick = tick;
+    const bar = barAtTick(this.bars, tick);
+    this.pendingSeek = bar ? { bar, until: Date.now() + SEEK_SETTLE_MS } : null;
     // Shown at once: while paused, alphaTab's position echo arrives a moment later from its worker.
     this.moveToBar(barNumber);
     if (recount && !this.beginCountIn(barNumber)) this.engine.play();
     return true;
+  }
+
+  /**
+   * Where a seek to a bar goes: its first playthrough, or with a range set
+   * its first playthrough inside the range. Null for a bar outside the range:
+   * alphaTab clamps that seek in its worker but reports the bar asked for and
+   * then stops reporting positions, so the readout would sit on a bar that
+   * isn't playing.
+   */
+  private seekTickOfBar(barNumber: number): number | null {
+    const { range } = this.snapshot;
+    const rangeTicks = range ? barRangeToTicks(this.bars, range.startBar, range.endBar) : null;
+    return rangeTicks
+      ? startTickOfBarWithin(this.bars, barNumber, rangeTicks)
+      : startTickOfBar(this.bars, barNumber);
+  }
+
+  /**
+   * Scrolls the score box so a bar can be read, if it isn't all on show
+   * already. For a bar the user didn't pick on the score itself, such as a
+   * loop's first bar chosen from the panel: alphaTab follows its cursor only
+   * while it plays, so this does nothing then. seekToBar doesn't do it, since
+   * a tapped bar would move under the finger. Scrolling only.
+   */
+  showBar(barNumber: number): void {
+    if (this.disposed || !this.isLoaded() || this.snapshot.status === 'playing') return;
+    if (startTickOfBar(this.bars, barNumber) === null) return;
+    this.engine.scrollToBar(barNumber - 1);
   }
 
   /** The tempo a 1-based bar starts at, in the file's BPM; null before the score loads or for no such bar. */
@@ -312,6 +381,8 @@ export class PlayerService {
     }
     // Its downbeat would no longer be where playback starts; Play counts in again.
     this.callOffCountIn();
+    // alphaTab moves playback to the start of a new range itself.
+    if (range) this.pendingSeek = null;
     this.update({ range });
     this.applyRange();
   }
@@ -409,6 +480,20 @@ export class PlayerService {
     this.engine.setLayout(layout);
   }
 
+  /**
+   * Marks a range of bars on the score (1-based, inclusive), or clears the
+   * mark for null. A drawing only: what plays is setRange's business, and the
+   * two can differ, as while a new loop's bars are picked during another loop.
+   * Bars the song lacks are simply not drawn.
+   */
+  setHighlight(highlight: BarRange | null): void {
+    if (this.disposed) return;
+    // An equal range in a new object would otherwise redraw and re-render for nothing.
+    if (isSameBarRange(this.snapshot.highlight, highlight)) return;
+    this.update({ highlight });
+    this.applyHighlight();
+  }
+
   // --- Teardown ---
 
   /** Stops sound, releases the wake lock and alphaTab's worker and audio. Safe to call twice. */
@@ -459,7 +544,7 @@ export class PlayerService {
       this.wakeLock.setActive(playing);
     });
     engine.on('position', ({ tick }) => {
-      if (this.disposed) return;
+      if (this.disposed || this.isOutsideRange(tick) || this.isStaleAfterSeek(tick)) return;
       this.lastTick = tick;
       const barIndex = barIndexAtTick(this.bars, tick);
       const barNumber = barIndex === null ? this.snapshot.barNumber : barIndex + 1;
@@ -483,6 +568,38 @@ export class PlayerService {
       if (this.disposed || !this.isLoaded()) return;
       this.events.emit('barTapped', { barNumber: barIndex + 1 });
     });
+    engine.on('barsDragged', ({ fromBarIndex, toBarIndex, done }) => {
+      if (this.disposed || !this.isLoaded()) return;
+      const [startBar, endBar] = orderedBars(fromBarIndex + 1, toBarIndex + 1);
+      this.events.emit('barsDragged', { startBar, endBar, done });
+    });
+  }
+
+  /**
+   * Whether a position lies outside the range that is set. Nothing plays
+   * there: alphaTab reports the tick a range ends on, which is the start of
+   * the next bar, just before it wraps or stops, and positions posted before
+   * the range was set can still arrive after it.
+   */
+  private isOutsideRange(tick: number): boolean {
+    const { range } = this.snapshot;
+    const ticks = range ? barRangeToTicks(this.bars, range.startBar, range.endBar) : null;
+    return ticks !== null && (tick < ticks.startTick || tick >= ticks.endTick);
+  }
+
+  /**
+   * Whether a position is one alphaTab's worker posted before the last seek
+   * reached it. A tick alone can't say which side of a seek it is from, so
+   * until the engine reports one inside the bar that was asked for (or
+   * SEEK_SETTLE_MS passes), positions outside that bar are dropped.
+   */
+  private isStaleAfterSeek(tick: number): boolean {
+    const seek = this.pendingSeek;
+    if (!seek) return false;
+    const arrived = tick >= seek.bar.start && tick < seek.bar.end;
+    if (!arrived && Date.now() < seek.until) return true;
+    this.pendingSeek = null;
+    return false;
   }
 
   /** Updates the current bar and its tempo, and tells listeners when the bar changed. */
@@ -526,6 +643,9 @@ export class PlayerService {
     );
     if (!cancel) return false;
     this.cancelCountIn = cancel;
+    // The count-in is for reading the bar ahead, and the engine, not playing yet, won't scroll
+    // to it: the user may have scrolled away, or a repeat's pass ended lines below its start.
+    this.engine.scrollToBar(barNumber - 1);
     this.update({ status: 'countingIn', countIn: null });
     this.wakeLock.setActive(true);
     return true;
@@ -600,8 +720,7 @@ export class PlayerService {
   }
 
   private isLoaded(): boolean {
-    const { status } = this.snapshot;
-    return status === 'ready' || isRunning(status);
+    return isLoaded(this.snapshot.status);
   }
 
   /** Pushes every option to the engine, for when alphaTab has (re)loaded and may have reset them. */
@@ -611,6 +730,17 @@ export class PlayerService {
     this.applyLooping();
     this.applyMutes();
     this.applyRange();
+    this.applyHighlight();
+  }
+
+  private applyHighlight(): void {
+    const highlight = this.snapshot.highlight;
+    this.engine.setHighlight(
+      highlight && {
+        startBarIndex: highlight.startBar - 1,
+        endBarIndex: highlight.endBar - 1,
+      },
+    );
   }
 
   private applyMetronome(): void {

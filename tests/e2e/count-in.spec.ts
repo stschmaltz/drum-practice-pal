@@ -1,11 +1,13 @@
 /// <reference lib="dom" />
 import type { JSHandle, Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
+import { closeLoopPanel, saveNewLoop } from './loopsPage';
 import {
   barCursorBox,
   barNumber,
   boxOf,
-  controls,
+  countInModeSelect,
+  countInSelect,
   openFixture,
   playButton,
   scoreBox,
@@ -21,10 +23,6 @@ import {
 const countIn = (page: Page) => page.getByTestId('count-in');
 const countInBeat = (page: Page) => page.getByTestId('count-in-beat');
 const countInBar = (page: Page) => page.getByTestId('count-in-bar');
-const countInSelect = (page: Page) =>
-  controls(page).getByRole('combobox', { name: 'Count-in', exact: true });
-const countInModeSelect = (page: Page) =>
-  controls(page).getByRole('combobox', { name: 'When to count in' });
 
 interface Recording {
   statuses: string[];
@@ -41,9 +39,6 @@ interface Timing {
 interface DebugPlayer {
   subscribe(listener: () => void): () => void;
   getSnapshot(): { status: string; countIn: { bar: number; beat: number } | null };
-  setRange(range: { startBar: number; endBar: number } | null): void;
-  setLooping(looping: boolean): void;
-  setSpeed(ratio: number): void;
   seekToBar(barNumber: number): boolean;
 }
 
@@ -123,16 +118,15 @@ async function seekToBar(page: Page, bar: number): Promise<void> {
 }
 
 /**
- * Loops bar 5 at 200%: a one-second pass with a one-second count-in. The loop
- * UI is Unit 08's; until then a range is set on the player itself.
+ * Loops bar 5 at 200%: a one-second pass with a one-second count-in. Saved
+ * through the loop panel (Unit 08), which leaves the new loop as the one the
+ * player repeats; the panel is then closed, so the page is as these specs found it.
  */
 async function loopBarFiveAtDoubleSpeed(page: Page): Promise<void> {
-  const handle = await debugPlayer(page);
-  await handle.evaluate((player) => {
-    player.setRange({ startBar: 5, endBar: 5 });
-    player.setLooping(true);
-    player.setSpeed(2);
-  });
+  await speedSlider(page).fill('200');
+  await saveNewLoop(page, { name: 'Bar five', firstBar: 5, lastBar: 5 });
+  await closeLoopPanel(page);
+  await expect(status(page)).toHaveText('Bar 5 of 16');
 }
 
 /** How the most recent count-in ran, in milliseconds, for one of `beatCount` beats. */

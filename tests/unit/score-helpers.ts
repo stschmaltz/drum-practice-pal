@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import * as alphaTab from '@coderline/alphatab';
+import type { BarTicks } from '../../src/features/player/barTicks.ts';
 import { barStartTempos } from '../../src/features/player/tempo.ts';
 
 const settings = new alphaTab.Settings();
@@ -23,4 +24,19 @@ export function tempoAtBar(score: alphaTab.model.Score, barNumber: number): numb
 export function drumTrackIndex(score: alphaTab.model.Score): number | null {
   const index = score.tracks.findIndex((track) => track.staves[0]?.isPercussion);
   return index === -1 ? null : index;
+}
+
+/**
+ * The score's bars in play order with their MIDI ticks, as the player gets
+ * them from alphaTab's tick cache: a repeated bar is listed once per playthrough.
+ */
+export function playedBars(score: alphaTab.model.Score): BarTicks[] {
+  const handler = new alphaTab.midi.AlphaSynthMidiFileHandler(new alphaTab.midi.MidiFile());
+  const generator = new alphaTab.midi.MidiFileGenerator(score, settings, handler);
+  generator.generate();
+  return generator.tickLookup.masterBars.map((lookup) => ({
+    barIndex: lookup.masterBar.index,
+    start: lookup.start,
+    end: lookup.end,
+  }));
 }

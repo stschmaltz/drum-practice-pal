@@ -321,17 +321,6 @@ Handoff notes written before the Visual design unit was added call the release u
 
 **Test focus:** ratio and BPM helpers, range validation, loop hooks. **QA focus:** selecting on a phone, ranges across tempo changes, single-bar loops.
 
-**Carried forward**
-
-- Migration, loops grants: clients can write every loops column today, including `finished_at`, `last_practiced_at`, `created_at` and `updated_at`. Grant insert and update only on the columns the app writes, and set `created_at` and `updated_at` in the insert trigger. The session trigger that sets `last_practiced_at` runs as the signed-in user, so it needs `security definer` once that column is no longer writable. (02 QA issue 4)
-- Migration, names: `'   '` passes the length checks. Add `btrim(name) <> ''` on `loops.name` (and `songs.title`), and trim in the form. (02 QA issue 6)
-- A typed BPM rarely lands on a whole percent. Store the ratio it implies (within 0.25 to 2.0) and round only for display, or BPM will jump when the loop is reopened. The Unit 05 speed slider rounds to whole percent (`percentToRatio`).
-- Files with repeats: alphaTab's tick cache lists a repeated bar once per playthrough. `barRangeToTicks` runs from the first playthrough of the start bar to the next time the end bar plays, and the current bar revisits numbers. No fixture has a repeat; add one and test ranges, current bar and tap-to-seek on it. (01 Findings; not done in 06)
-- Taps: the service reports `barTapped` and the page decides. Jam mode seeks; range selection must take over the same event. A desktop mouse drag across the score ends in a `click`, so it counts as a tap today: ignore a click whose pointer moved since pointerdown. (06 Build, 06 Review)
-- A position event posted before a seek can arrive after it, moving `barNumber` back for one update with an extra `barChanged`. Loop logic that listens to `barChanged` needs a seek generation counter in the engine, or must tolerate it. (06 Review)
-- Move the score-tap e2e helpers (`barCursorBox`, `nextBarPoint`, `tapAndWaitForBar`) from `jam.spec.ts` into `tests/e2e/playerPage.ts` when range selection needs them. (06 Readability)
-- Loop caches follow the list pattern in `useSongs.ts`. Deleting a song must also drop that song's loop caches, as `useDeleteSong` drops its detail and file entries.
-
 ### 09 Practice sessions and progress
 
 **Goal:** remember what you practiced and what's on the go.
@@ -353,6 +342,12 @@ Handoff notes written before the Visual design unit was added call the release u
 - Insert sessions with a client id from `randomUuid()` and ignore a duplicate key, so a retry never logs twice.
 - Play time excludes count-ins and pauses. Repeats come from `loopWrapped`, which Unit 07 keeps firing in "every repeat" mode.
 - Only loop practice is logged. Jam-mode play time has no table, so the library's "recently practiced" sort reflects loops only. Accepted for the MVP.
+- Loop writes go through `useUpdateLoop`. To finish or reopen, add `status` to `LOOP_EDIT_FIELDS` (the grant already allows it; `finished_at` follows in the trigger). A logged session changes `last_practiced_at` on the server only, so invalidate `loopKeys.forUser` after one. (08 Build)
+- "One tap into practice" from On the go: the song page has no way to open on a loop yet. Add one (for example `?loop=<id>`, checked with `isUuid`) that calls `selectLoop`. It can't call `playLoop` on arrival: playback has to start inside a tap. (08 Build)
+- The session tracker needs to know which loop is playing: `useLoopPractice` has `activeLoop`. Speed at the end of a session is `snapshot.speedRatio`, which may differ from the loop's saved speed until "Save speed". The target prompt compares the saved `speed_ratio` with `target_ratio`. (08 Build)
+- Exit loop, deleting or re-ranging the playing loop during a count-in calls the count-in off and playback stops (`setRange` does that); while playing it carries on. Decide whether a session ends there. (08 Build)
+- "Restart loop" puts the speed back to the loop's saved speed with no message, so an unsaved nudge (+5%, then Restart) is lost. `playLoop` always calls `setSpeed(loop.speed_ratio)`; pressing it on the loop already playing could keep the speed playing now. Decide it with where a session's speed comes from. (08 QA issue 4)
+- Count loop passes from `loopWrapped`. Inside a range the service drops positions outside it, so `barChanged` no longer reports the bar after the loop at each wrap. (08 QA issue 7, fixed in 08 Review)
 
 ### 10 Keyboard shortcuts and pedals
 
@@ -368,6 +363,8 @@ Handoff notes written before the Visual design unit was added call the release u
 **Carried forward**
 
 - Seeking to a bar is tap and click only. Decide whether a key moves a bar back and forward in jam mode, where left and right have no loops to switch. (06 Build)
+- Previous and next loop follow the panel's order, `sortLoops` (by first bar), and switch with `playLoop`, which keeps playing when something already is. While the loop form is open its fields take the keys. (08 Build)
+- The loop panel drops focus to `<body>` when the form opens ("New loop", "Edit") and when it closes (save, cancel). Move focus into the form and back to the button that opened it. (08 QA issue 10)
 
 ### 11 PWA and offline
 
@@ -391,10 +388,14 @@ Handoff notes written before the Visual design unit was added call the release u
 - A soundfont that fails to load has no retry and doesn't recover when the connection returns. Cache it with the fonts and alphaTab's lazy chunks and worker files, and retry on `online`. (05 QA issue 2)
 - A cache miss for a file must never be answered with `index.html` (the Workers SPA fallback does this). `alphaTabEngine.loadSoundFont` already checks the content type; do the same for anything the service worker caches.
 - Lost responses on flaky Wi-Fi: an insert that commits but whose response is lost has its file removed, leaving a listed song with no file; an upload whose response is lost leaves an orphan file. Look the row up by id before rolling back. (04 Review open issues 1 and 2)
-- `updated_at` isn't yet fit for last-write-wins: logging a session bumps the loop's `updated_at`, and a client can send its own value on insert (unless Unit 08 closed that). Decide whether it means edited or touched. (02 QA issues 4 and 5)
+- `updated_at` isn't yet fit for last-write-wins: logging a session bumps the loop's `updated_at`. Decide whether it means edited or touched. (Unit 08 stopped clients sending their own `created_at` and `updated_at` for loops; a songs insert still accepts both.) (02 QA issues 4 and 5)
 - Add the component test for a failed background refetch of a song file (`isLoadingError`), once something refetches it. (05 Review)
+- `useUpdateSong`'s `onSuccess` merges the whole server row, as `useUpdateLoop` did. With two writes to one song pending, the first answer undoes the second's optimistic fields until it lands. Unreachable today (one locked form per song); a queue that flushes several edits makes it reachable. Do as `useUpdateLoop` does (`applySavedLoopEdit`). (08 Copilot review, comment 4)
 - Installed iOS PWA: sign-in links open in Safari, so the 6-digit code is the way in. Check it. (03 QA)
 - If Unit 01's Human check picks a bigger soundfont, budget its size in the first load and the cache. (01 Findings)
+- A loop is created with a client id, so a queued create can be replayed; a replay after a lost response gets a duplicate-key error (23505) that nothing handles yet. Treat it as saved, or look the row up by id. The form makes a new id at each press of "Save loop" (`LoopEditorForm`), so a user's own second press after a lost response inserts a second loop; keep one id for the form's lifetime once the duplicate key is handled. (08 Build, 08 Review)
+- Loop edits are optimistic and roll back on any error, a dropped connection included. Queued offline, "Save speed" must not roll back. (08 Build)
+- Offline today, loop writes pause like the others: "Save loop" sits on "Saving…" with Cancel disabled and "Save speed" goes disabled with no message, then both go through on reconnect. (08 QA issue 8)
 
 ### 12 Visual design
 
@@ -416,6 +417,12 @@ Handoff notes written before the Visual design unit was added call the release u
 
 - The on-phone controls bar is four rows. (05 Build)
 - From 06 QA: the volume readout overflows the controls box at 320 px and below; the sticky bar has no bottom edge; on a phone the score opens scrolled 47 px sideways, clipping the clef; double-tap on the score may zoom.
+- From 08 Build: on a tablet in portrait the open loop panel leaves the score about 230 px, one bar to a line (it starts closed there). The playing loop shows twice in the panel, as the card with the speed control and in the list. The controls bar's speed slider moves in 5% steps, so at a speed such as 71% its thumb sits at 70 while the readout says 71%. The controls bar was not regrouped.
+- What is left of 08 QA issue 2 (a loop chosen while paused, and every count-in, now scroll to their first bar): bars typed into the loop form are highlighted but not scrolled to, and after a rotation or a resize across 768 px the picked bars or the paused loop can be outside the score box. The score box only scrolls when a loop's range is applied while not playing (`player.showBar`) and at the start of a count-in. In QA alphaTab's own re-layout brought a paused loop back into the box after every rotation tried; the one miss was "Play loop" pressed within about 150 ms of crossing from page to horizontal layout, which counts in with the first bar 214 px off the left edge. (08 Build, QA fix round 1; 08 QA fix round 1, N5)
+- On a phone "Play loop" closes the loop sheet so the score and the count-in number show; the speed control is then one tap away behind the sheet's header, and focus is left on the hidden button. Decide where the loop's speed lives while practising on a phone. The reopened sheet keeps the scroll position it was closed at: from a cold start with one or two loops the speed control is on show (two taps to nudge, with the sheet over the lower score), but with three or more loops, or a loop already playing, it is above the visible part and has to be scrolled to. Scrolling the sheet's body to the top when it opens with a loop playing would help before the redesign. (08 Build, QA fix round 1; 08 Test, QA fix round 1, bug 1; 08 QA fix round 1, N4)
+- On a phone the count-in number is still behind the loop sheet when playback starts with the sheet open by any press other than "Play loop": Play in the sticky bar straight after saving a new loop (the sheet stays open), Play after reopening the sheet for the speed, and every repeat's count-in while the sheet is open. Close the sheet whenever a count-in starts on a phone (not only in `LoopPanel`'s `onPlayLoop`), or draw the counter in the part of the score the sheet leaves. A few lines; do it before the redesign if Shane finds it at the kit. (08 QA fix round 1, N1)
+- A count-in leaves its bar where it is when the bar is already on show (`scrollToShow`), and alphaTab then slides it to the start of the box over about 300 ms on the downbeat: up to 453 px on a tablet, 244 px on a laptop, 100 px on a phone. A count-in could always put its bar at the start of the box; a tap must keep leaving the score alone. In page layout, a loop in the last lines of the song can't reach the top of the box and sits under the count-in number, where it can't be read. (08 QA fix round 1, N2 and N3)
+- From 08 QA: the playing loop's card with the speed control is always at the top of the panel, thousands of pixels from the item pressed in a long list (issue 5). On a phone with the sheet open and nothing playing, about 85 px of the score shows (issue 6). A long unbroken loop name makes the "Looping" line up to 220 px tall (issue 13). A phone in landscape with the panel open leaves a 284 x 234 px score.
 
 ### 13 Polish and release
 
@@ -439,36 +446,43 @@ Handoff notes written before the Visual design unit was added call the release u
 - Speed, metronome and mute stay enabled after a player error. (05 QA issue 3)
 - Files in Storage with no songs row are possible (failed rollbacks, deleted users). Add a sweep script, or accept it. (02 QA, 04 Review)
 - A bar with a tempo change part-way through shows its starting tempo for the whole bar. No fixture has one. (06 Build)
+- Loops in a song with a repeat: a loop that starts on the repeat's last bar and runs past it plays the bar before it too (bars 4 to 5 of `repeats.gp` play 4, 3, 4, 5, and the status line says "Bar 3"). Keep it, or start such a loop from the last playthrough of its first bar; `tests/unit/loop-fixtures.test.ts` pins today's behaviour. (08 Test bug 1, 08 QA issue 3)
+- Loop failures show the server's own message ("Couldn't save the speed: …"), and with no connection the loop list says "Loading loops…" for about 24 s before its error. Every feature shows `error.message` this way (settings, library, sign-in), and React renders it as text, so do them together with the network copy above. A tap on a bar outside the playing loop does nothing and says nothing (`seekToBar` returns false there since 08 Review; a hint, or leaving the loop, is the open choice). (08 QA issues 9 and 12, 08 Review)
+- Before the loops migration (`20261123000000_loops_grants.sql`) is pushed to the hosted project, check for rows its new checks refuse: `select id from songs where title !~ '\S'` and the same for `loops.name`. One blank title makes the migration fail. (08 Review)
+- A loop deleted on another device: "Save speed" on it here drops it from the list with no message, and its open edit form says "This loop has been deleted" only after a refetch. (08 Build, 08 QA)
 
 ## Open human checks
 
 The handoff notes record none of these as done; delete a row once it is. Everything audible so far is unverified, and Unit 01's go on alphaTab is provisional until its list passes. Do that list before Unit 07.
 
-| From | Check                                                                                                                                                                                                                                      |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 01   | At `/spike` on phone, tablet and laptop: drum sound (Sonivox sf2 against sf3 and MuseScore General); the loop seam at 50%, 100% and 200%; whether "stop on finish" lands on the downbeat; start latency; memory and battery on a long loop |
-| 01   | iOS: the first tap makes sound; the ringer switch on silent; lock and app switch mid-play; page against horizontal layout in portrait and landscape                                                                                        |
-| 04   | iPhone and Android on the LAN dev server: `.gp` isn't greyed out in the picker, and an upload works (this runs the non-secure-context hash and id fallbacks). A real `.gp5` or `.gpx` if one is on hand                                    |
-| 05   | iPhone and iPad on a preview URL: sound on the first Play tap, and with the ringer on silent; the screen stays on while playing. Needs HTTPS for the wake lock, so Hosted setup comes first                                                |
-| 06   | Phone and tablet: a tap on a bar seeks there and a swipe never does; auto-scroll feels smooth on iOS; in an installed PWA the sticky bar sits below the status bar                                                                         |
-| 05   | Every device: speed, metronome and mute changes mid-play with no click, gap or restart; sound stops at once on leaving the page; rotating mid-play; 20 fast Play/Pause taps                                                                |
+| From | Check                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 01   | At `/spike` on phone, tablet and laptop: drum sound (Sonivox sf2 against sf3 and MuseScore General); the loop seam at 50%, 100% and 200%; whether "stop on finish" lands on the downbeat; start latency; memory and battery on a long loop                                                                                                                                              |
+| 01   | iOS: the first tap makes sound; the ringer switch on silent; lock and app switch mid-play; page against horizontal layout in portrait and landscape                                                                                                                                                                                                                                     |
+| 04   | iPhone and Android on the LAN dev server: `.gp` isn't greyed out in the picker, and an upload works (this runs the non-secure-context hash and id fallbacks). A real `.gp5` or `.gpx` if one is on hand                                                                                                                                                                                 |
+| 05   | iPhone and iPad on a preview URL: sound on the first Play tap, and with the ringer on silent; the screen stays on while playing. Needs HTTPS for the wake lock, so Hosted setup comes first                                                                                                                                                                                             |
+| 06   | Phone and tablet: a tap on a bar seeks there and a swipe never does; auto-scroll feels smooth on iOS; in an installed PWA the sticky bar sits below the status bar                                                                                                                                                                                                                      |
+| 05   | Every device: speed, metronome and mute changes mid-play with no click, gap or restart; sound stops at once on leaving the page; rotating mid-play; 20 fast Play/Pause taps                                                                                                                                                                                                             |
+| 08   | iPhone and iPad: "Play loop" makes sound on its first tap, with the count-in off and on; a saved loop's seam and its speed by ear at 50%, a typed BPM and 200%; switching loops mid-play has no gap or restart                                                                                                                                                                          |
+| 08   | Phone at the kit: picking a loop's two bars by tap with the sheet open (thumb reach, the sheet in the way, the keyboard over the form). Laptop with a mouse or trackpad: dragging across bars, across a line end too                                                                                                                                                                    |
+| 08   | Phone: "Play loop" with a 1-bar and a 2-bar count-in (is the number readable now the sheet closes, and does each repeat still land on the downbeat by ear); Play with the sheet open hides the number (N1); changing speed is two taps. Tablet and laptop: the score sliding on the downbeat (N2). `repeats.gp` bars 4 to 5 by ear. Safari and Firefox: everything ran on Chromium only |
 
 ## Risks and mitigations
 
-| Risk                                                               | Mitigation                                                          |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| iOS Safari Web Audio quirks (unlock, backgrounding, ringer switch) | Real-device spike in 01; tap-to-start; ringer hint in UI            |
-| Thin default drum soundfont, or a large better one                 | Pick in 01; service worker caches it                                |
-| alphaTab loop seam artifacts                                       | Listen in 01; report upstream if drums are affected                 |
-| Count-in drift                                                     | AudioContext scheduling; pure scheduler tests; human check          |
-| Songsterr export variation                                         | Test real exports locally in 04; null drum track handled            |
-| Agent drift from earlier patterns                                  | `AGENTS.md`, handoff notes, one PR per unit, Readability every unit |
-| Two devices edit one loop offline                                  | Last write wins on `updated_at`; sessions append-only               |
-| Copyrighted tabs committed                                         | Synthetic fixtures in git; real exports gitignored                  |
-| Repeats in a file (a bar plays more than once)                     | Repeat fixture in 06; ranges and current bar tested on it in 06, 08 |
-| Count-in needs alphaTab's private AudioContext                     | Decide in 07; pin the alphaTab version if the private field is used |
-| Open issues lost between units                                     | Carried forward lists per unit, kept by Review                      |
-| Hosted auth differs from the local stack                           | Settings listed in Hosted setup; a real sign-in on a preview URL    |
+| Risk                                                               | Mitigation                                                             |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| iOS Safari Web Audio quirks (unlock, backgrounding, ringer switch) | Real-device spike in 01; tap-to-start; ringer hint in UI               |
+| Thin default drum soundfont, or a large better one                 | Pick in 01; service worker caches it                                   |
+| alphaTab loop seam artifacts                                       | Listen in 01; report upstream if drums are affected                    |
+| Count-in drift                                                     | AudioContext scheduling; pure scheduler tests; human check             |
+| Songsterr export variation                                         | Test real exports locally in 04; null drum track handled               |
+| Agent drift from earlier patterns                                  | `AGENTS.md`, handoff notes, one PR per unit, Readability every unit    |
+| Two devices edit one loop offline                                  | Last write wins on `updated_at`; sessions append-only                  |
+| Copyrighted tabs committed                                         | Synthetic fixtures in git; real exports gitignored                     |
+| Repeats in a file (a bar plays more than once)                     | Repeat fixture (`repeats.gp`, 08); ranges and current bar tested on it |
+| Count-in needs alphaTab's private AudioContext                     | Decide in 07; pin the alphaTab version if the private field is used    |
+| Open issues lost between units                                     | Carried forward lists per unit, kept by Review                         |
+| Hosted auth differs from the local stack                           | Settings listed in Hosted setup; a real sign-in on a preview URL       |
 
 ## Post-MVP backlog
 

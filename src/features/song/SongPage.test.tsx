@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { Link, Outlet, Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
+import type { Loop } from '@/features/loops/loopForm';
 import type { EngineMount } from '@/features/player/playerEngine';
 import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
 import type { Settings } from '@/features/settings/settingsForm';
@@ -13,7 +14,13 @@ import {
   type FakeResult,
   type StorageCall,
 } from '@/test/fakeSupabase';
-import { FakePlayerEngine, TEMPO_CHANGE_BAR_TEMPOS, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
+import {
+  FakePlayerEngine,
+  startOfBar,
+  TEMPO_CHANGE_BAR_TEMPOS,
+  TICKS_PER_BAR,
+} from '@/test/fakePlayerEngine';
+import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { renderRoutes, RouteMarker } from '@/test/render';
 import { SongPage } from './SongPage';
 
@@ -59,13 +66,26 @@ const ok = (data: unknown): FakeResult => ({ data, error: null });
 const fail = (message: string): FakeResult => ({ data: null, error: { message } });
 const fileBytes = (id: string) => (id === SONG_A ? [1, 2, 3] : [4, 5]);
 
-/** Answers song and settings reads; `songs` maps an id to its row, or null for none. */
+/** A saved loop of song A. */
+const loopOfSongA = (id: string, overrides: Partial<Loop> = {}): Loop =>
+  loopRow(id, { song_id: SONG_A, ...overrides });
+
+/** The loops table as the fake client serves it; tests read it to see what was sent. */
+let loops: LoopTable = loopTable();
+
+/**
+ * Answers song, settings and loop queries; `songs` maps an id to its row, or
+ * null for none, and `loops` are the saved loops to start with.
+ */
 function serve({
   songs = { [SONG_A]: songRow(SONG_A), [SONG_B]: songRow(SONG_B) } as Record<string, Song | null>,
   settings = ok(settingsRow),
-}: { songs?: Record<string, Song | null>; settings?: FakeResult } = {}) {
+  loops: savedLoops = [],
+}: { songs?: Record<string, Song | null>; settings?: FakeResult; loops?: Loop[] } = {}) {
+  loops = loopTable(savedLoops);
   queryResult.mockImplementation(async (call) => {
     if (call.table === 'user_settings') return settings;
+    if (call.table === 'loops') return loops.answer(call);
     const id = call.ops.find((op) => op.method === 'eq' && op.args[0] === 'id')?.args[1];
     return ok(songs[id as string] ?? null);
   });
@@ -767,5 +787,427 @@ describe('SongPage count-in', () => {
     act(() => engine.fire('stateChanged', { playing: true }));
     expect(screen.queryByTestId('count-in')).not.toBeInTheDocument();
     expect(status()).not.toHaveTextContent('Counting in');
+  });
+});
+
+describe('SongPage loops', () => {
+  const panel = () => within(screen.getByTestId('loop-panel'));
+  const form = () => within(panel().getByRole('form'));
+  const speedReadout = () => screen.getByTestId('jam-speed');
+  const bpmReadout = () => screen.getByTestId('jam-bpm');
+
+  /** Bars 7 to 10 straddle the tempo change at bar 9: the first bar is at 120, the last at 90. */
+  const acrossTheChange = loopOfSongA('across', {
+    name: 'Across the change',
+    start_bar: 7,
+    end_bar: 10,
+    speed_ratio: 0.708333,
+    target_ratio: 1,
+  });
+
+  async function openSong(loops: Loop[] = []) {
+    serve({ loops });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    return { user, engine };
+  }
+
+  it('lists the saved loops in bar order, with speed as % and the BPM at each loop’s first bar', async () => {
+    await openSong([
+      loopOfSongA('late', { name: 'Late', start_bar: 9, end_bar: 12, speed_ratio: 0.5 }),
+      acrossTheChange,
+    ]);
+
+    const items = await panel().findAllByRole('listitem');
+    expect(items.map((item) => within(item).getByText(/Bars/).textContent)).toEqual([
+      // 85 BPM typed against 120: the exact ratio, shown as 71%.
+      'Bars 7 to 10 · 71% (85 BPM) · target 100% (120 BPM)',
+      // Bar 9 starts at 90 BPM, so half speed is 45.
+      'Bars 9 to 12 · 50% (45 BPM)',
+    ]);
+  });
+
+  it('says so when there are no loops yet', async () => {
+    await openSong();
+    expect(await panel().findByText(/No loops yet/)).toBeInTheDocument();
+  });
+
+  it('Play loop sets the range, looping and the saved speed, and starts playback', async () => {
+    const { user, engine } = await openSong([acrossTheChange]);
+
+    await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
+
+    expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+      startTick: startOfBar(7),
+      endTick: startOfBar(11),
+    });
+    expect(engine.setLooping).toHaveBeenLastCalledWith(true);
+    expect(engine.setSpeed).toHaveBeenLastCalledWith(0.708333);
+    expect(engine.seek).toHaveBeenLastCalledWith(startOfBar(7));
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(status()).toHaveTextContent('Bar 7 of 16');
+    expect(screen.getByTestId('active-loop')).toHaveTextContent(
+      'Looping Across the change · Bars 7 to 10',
+    );
+    expect(engine.setHighlight).toHaveBeenLastCalledWith({ startBarIndex: 6, endBarIndex: 9 });
+  });
+
+  it('shows BPM as the speed times the tempo at the loop’s first bar, wherever playback is in it', async () => {
+    const { user, engine } = await openSong([acrossTheChange]);
+    await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
+    act(() => engine.fire('stateChanged', { playing: true }));
+
+    expect(speedReadout()).toHaveTextContent('71%');
+    expect(bpmReadout()).toHaveTextContent('85');
+
+    // alphaTab's answer to the loop's seek comes first; then playback moves on.
+    act(() => engine.fire('position', { tick: startOfBar(7) }));
+    // Into bar 9, where the file's tempo drops to 90: the loop's BPM stays its first bar's.
+    act(() => engine.fire('position', { tick: startOfBar(9) + 10 }));
+    expect(status()).toHaveTextContent('Bar 9 of 16');
+    expect(bpmReadout()).toHaveTextContent('85');
+    expect(panel().getByLabelText('BPM')).toHaveValue('85');
+    expect(panel().getByLabelText('Speed %')).toHaveValue('71');
+  });
+
+  it('switching to another loop while playing keeps playing', async () => {
+    const { user, engine } = await openSong([
+      acrossTheChange,
+      loopOfSongA('late', { name: 'Late', start_bar: 13, end_bar: 16, speed_ratio: 0.9 }),
+    ]);
+    await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
+    act(() => engine.fire('stateChanged', { playing: true }));
+    const restartsBefore = engine.restartCalls();
+
+    await user.click(panel().getByRole('button', { name: 'Play loop Late' }));
+
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+      startTick: startOfBar(13),
+      endTick: startOfBar(17),
+    });
+    expect(engine.setSpeed).toHaveBeenLastCalledWith(0.9);
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(screen.getByTestId('active-loop')).toHaveTextContent('Late');
+  });
+
+  it('Exit loop goes back to the whole song without stopping, at the speed it was at', async () => {
+    const { user, engine } = await openSong([acrossTheChange]);
+    await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
+    act(() => engine.fire('stateChanged', { playing: true }));
+    const restartsBefore = engine.restartCalls();
+
+    await user.click(screen.getByRole('button', { name: 'Exit loop' }));
+
+    expect(engine.setPlaybackRange).toHaveBeenLastCalledWith(null);
+    expect(engine.setLooping).toHaveBeenLastCalledWith(false);
+    expect(engine.setHighlight).toHaveBeenLastCalledWith(null);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+    expect(speedReadout()).toHaveTextContent('71%');
+    // alphaTab's answer to the loop's seek comes first; then playback moves on.
+    act(() => engine.fire('position', { tick: startOfBar(7) }));
+    // Jam mode again: BPM follows the current bar.
+    act(() => engine.fire('position', { tick: startOfBar(9) + 10 }));
+    expect(bpmReadout()).toHaveTextContent('64'); // 90 x 0.708333
+  });
+
+  it('while the loop form is open, taps pick the bars and never seek; they are highlighted', async () => {
+    const { user, engine } = await openSong();
+    await user.click(await panel().findByRole('button', { name: 'New loop' }));
+    expect(screen.getByTestId('loop-bars-hint')).toHaveTextContent('Tap the first bar');
+
+    act(() => engine.fire('barTapped', { barIndex: 8 }));
+    expect(form().getByLabelText('First bar')).toHaveValue('9');
+    expect(form().getByLabelText('Last bar')).toHaveValue('9');
+    expect(screen.getByTestId('loop-bars-hint')).toHaveTextContent('Now tap the last bar');
+    expect(engine.setHighlight).toHaveBeenLastCalledWith({ startBarIndex: 8, endBarIndex: 8 });
+
+    // The last bar first works too: the range comes out in order.
+    act(() => engine.fire('barTapped', { barIndex: 4 }));
+    expect(form().getByLabelText('First bar')).toHaveValue('5');
+    expect(form().getByLabelText('Last bar')).toHaveValue('9');
+    expect(engine.setHighlight).toHaveBeenLastCalledWith({ startBarIndex: 4, endBarIndex: 8 });
+
+    expect(engine.seek).not.toHaveBeenCalled();
+    expect(status()).toHaveTextContent('Bar 1 of 16');
+
+    // Cancel: taps seek again, and the highlight is gone.
+    await user.click(form().getByRole('button', { name: 'Cancel' }));
+    expect(engine.setHighlight).toHaveBeenLastCalledWith(null);
+    act(() => engine.fire('barTapped', { barIndex: 2 }));
+    expect(engine.seek).toHaveBeenLastCalledWith(startOfBar(3));
+  });
+
+  it('typed bars are highlighted once they make a range in the song', async () => {
+    const { user, engine } = await openSong();
+    await user.click(await panel().findByRole('button', { name: 'New loop' }));
+
+    await user.type(form().getByLabelText('First bar'), '3');
+    expect(engine.setHighlight).toHaveBeenLastCalledWith(null);
+    await user.type(form().getByLabelText('Last bar'), '6');
+    expect(engine.setHighlight).toHaveBeenLastCalledWith({ startBarIndex: 2, endBarIndex: 5 });
+
+    await user.type(form().getByLabelText('Last bar'), '0'); // 60: past the last bar
+    expect(engine.setHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it('saves a new loop with its name, bars, target and the speed playing now, then loops it', async () => {
+    const { user, engine } = await openSong();
+    fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '80' } });
+    await user.click(await panel().findByRole('button', { name: 'New loop' }));
+    expect(screen.getByTestId('loop-new-speed')).toHaveTextContent('80%');
+
+    act(() => engine.fire('barTapped', { barIndex: 8 }));
+    act(() => engine.fire('barTapped', { barIndex: 11 }));
+    // The tempo is the first bar's, so the note reads in that bar's BPM.
+    expect(screen.getByTestId('loop-new-speed')).toHaveTextContent('80% (72 BPM)');
+    await user.type(form().getByLabelText('Name'), '  Second half  ');
+    await user.type(form().getByLabelText(/Target speed/), '100');
+    await user.click(form().getByRole('button', { name: 'Save loop' }));
+
+    await waitFor(() => expect(loops.sent('insert')).toHaveLength(1));
+    expect(loops.sent('insert')[0]).toMatchObject({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      song_id: SONG_A,
+      user_id: USER,
+      name: 'Second half',
+      start_bar: 9,
+      end_bar: 12,
+      speed_ratio: 0.8,
+      target_ratio: 1,
+    });
+
+    // The form closes and the new loop is the one playing, without Play being pressed.
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent(
+      'Second half · Bars 9 to 12',
+    );
+    expect(panel().queryByRole('form')).not.toBeInTheDocument();
+    expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+      startTick: startOfBar(9),
+      endTick: startOfBar(13),
+    });
+    expect(engine.setLooping).toHaveBeenLastCalledWith(true);
+    expect(engine.play).not.toHaveBeenCalled();
+    expect(speedReadout()).toHaveTextContent('80%');
+  });
+
+  it('refuses a form it cannot save, saying why, and sends nothing', async () => {
+    const { user } = await openSong();
+    await user.click(await panel().findByRole('button', { name: 'New loop' }));
+    await user.type(form().getByLabelText('Name'), '   ');
+    await user.type(form().getByLabelText('First bar'), '9');
+    await user.type(form().getByLabelText('Last bar'), '17');
+    await user.click(form().getByRole('button', { name: 'Save loop' }));
+
+    expect(form().getByText('Give the loop a name.')).toBeInTheDocument();
+    expect(form().getByText('Bars go from 1 to 16 in this song.')).toBeInTheDocument();
+    expect(loops.sent('insert')).toHaveLength(0);
+  });
+
+  it('a mouse drag across bars opens the form with those bars, on release', async () => {
+    const { engine } = await openSong();
+    await panel().findByText(/No loops yet/);
+
+    act(() => engine.fire('barsDragged', { fromBarIndex: 2, toBarIndex: 4, done: false }));
+    // Shown while dragging, but nothing opens under the pointer.
+    expect(engine.setHighlight).toHaveBeenLastCalledWith({ startBarIndex: 2, endBarIndex: 4 });
+    expect(panel().queryByRole('form')).not.toBeInTheDocument();
+
+    act(() => engine.fire('barsDragged', { fromBarIndex: 2, toBarIndex: 5, done: true }));
+    expect(form().getByLabelText('First bar')).toHaveValue('3');
+    expect(form().getByLabelText('Last bar')).toHaveValue('6');
+    expect(engine.seek).not.toHaveBeenCalled();
+  });
+
+  it('a drag that stays in one bar is not a new loop', async () => {
+    const { engine } = await openSong();
+    await panel().findByText(/No loops yet/);
+    act(() => engine.fire('barsDragged', { fromBarIndex: 2, toBarIndex: 2, done: true }));
+    expect(panel().queryByRole('form')).not.toBeInTheDocument();
+    expect(engine.setHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it('a typed BPM plays at once and Save speed stores the exact ratio it implies', async () => {
+    const { user, engine } = await openSong([acrossTheChange]);
+    await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
+    const save = panel().getByRole('button', { name: 'Save speed' });
+    expect(save).toBeDisabled();
+
+    const bpmField = panel().getByLabelText('BPM');
+    await user.clear(bpmField);
+    await user.type(bpmField, '100{Enter}');
+
+    // 100 of 120: 83.3333%, not 83%.
+    expect(engine.setSpeed).toHaveBeenLastCalledWith(0.833333);
+    expect(panel().getByLabelText('Speed %')).toHaveValue('83');
+    expect(bpmReadout()).toHaveTextContent('100');
+    expect(loops.sent('update')).toHaveLength(0);
+
+    await user.click(save);
+    await waitFor(() => expect(loops.sent('update')).toHaveLength(1));
+    expect(loops.sent('update')).toEqual([{ speed_ratio: 0.833333 }]);
+    await waitFor(() =>
+      expect(screen.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 83% (100 BPM)'),
+    );
+    expect(save).toBeDisabled();
+  });
+
+  it('nudges move the speed in whole percent from the percent on show', async () => {
+    const { user, engine } = await openSong([acrossTheChange]);
+    await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
+
+    await user.click(panel().getByRole('button', { name: 'Faster by 1%' }));
+    expect(engine.setSpeed).toHaveBeenLastCalledWith(0.72);
+    await user.click(panel().getByRole('button', { name: 'Slower by 5%' }));
+    expect(engine.setSpeed).toHaveBeenLastCalledWith(0.67);
+    expect(panel().getByLabelText('BPM')).toHaveValue('80'); // 120 x 0.67 = 80.4
+  });
+
+  it('editing the playing loop’s bars sends only what changed and moves the loop there', async () => {
+    const { user, engine } = await openSong([acrossTheChange]);
+    await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
+
+    await user.click(panel().getByRole('button', { name: 'Edit Across the change' }));
+    expect(form().getByLabelText('Name')).toHaveValue('Across the change');
+    expect(form().getByLabelText(/Target speed/)).toHaveValue('100');
+    const lastBar = form().getByLabelText('Last bar');
+    await user.clear(lastBar);
+    await user.type(lastBar, '12');
+    await user.click(form().getByRole('button', { name: 'Save loop' }));
+
+    await waitFor(() => expect(loops.sent('update')).toHaveLength(1));
+    expect(loops.sent('update')).toEqual([{ end_bar: 12 }]);
+    await waitFor(() =>
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(7),
+        endTick: startOfBar(13),
+      }),
+    );
+    expect(screen.getByTestId('active-loop')).toHaveTextContent('Bars 7 to 12');
+  });
+
+  it('deletes a loop only after the inline confirm; deleting the playing loop goes back to the whole song', async () => {
+    const { user, engine } = await openSong([acrossTheChange]);
+    await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
+
+    await user.click(panel().getByRole('button', { name: 'Delete Across the change' }));
+    const confirm = within(panel().getByRole('group', { name: 'Delete Across the change' }));
+    expect(loops.sent('delete')).toHaveLength(0);
+    await user.click(confirm.getByRole('button', { name: 'Keep it' }));
+    expect(panel().getByRole('button', { name: 'Delete Across the change' })).toBeInTheDocument();
+
+    await user.click(panel().getByRole('button', { name: 'Delete Across the change' }));
+    await user.click(
+      within(panel().getByRole('group', { name: 'Delete Across the change' })).getByRole('button', {
+        name: 'Delete loop',
+      }),
+    );
+
+    expect(await panel().findByText(/No loops yet/)).toBeInTheDocument();
+    expect(loops.sent('delete')).toHaveLength(1);
+    await waitFor(() => expect(engine.setPlaybackRange).toHaveBeenLastCalledWith(null));
+    expect(engine.setLooping).toHaveBeenLastCalledWith(false);
+    expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+  });
+
+  it('a failed loops load is retryable and leaves the player working', async () => {
+    serve();
+    let failing = true;
+    const answer = queryResult.getMockImplementation()!;
+    queryResult.mockImplementation(async (call) =>
+      call.table === 'loops' && failing ? fail('offline') : answer(call),
+    );
+    const user = renderSong(SONG_A);
+    await loadPlayer();
+
+    expect(await panel().findByText("Couldn't load this song's loops.")).toBeInTheDocument();
+    expect(playButton()).toBeEnabled();
+
+    failing = false;
+    await user.click(panel().getByRole('button', { name: 'Try again' }));
+    expect(await panel().findByText(/No loops yet/)).toBeInTheDocument();
+  });
+
+  it('a new song opens with no loop playing, and its own loops', async () => {
+    serve({
+      loops: [acrossTheChange, loopOfSongA('b-loop', { song_id: SONG_B, name: 'On song B' })],
+    });
+    const user = renderSong(SONG_A);
+    await loadPlayer(0);
+    await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
+    expect(screen.getByTestId('active-loop')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('link', { name: 'Song B' }));
+    await waitFor(() => expect(engines).toHaveLength(2));
+    const second = await loadPlayer(1);
+
+    expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+    expect(await panel().findByRole('button', { name: 'Play loop On song B' })).toBeEnabled();
+    expect(panel().queryByText('Across the change')).not.toBeInTheDocument();
+    expect(second.setPlaybackRange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ startTick: startOfBar(7) }),
+    );
+  });
+});
+
+// 08 QA fix round 1 (Test stage): what scrolls the score box on the page, and what must not.
+describe('SongPage scrolling the score to a bar', () => {
+  const panel = () => within(screen.getByTestId('loop-panel'));
+
+  it('a tap on the score seeks and never scrolls it, paused or playing', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    act(() => engine.fire('barTapped', { barIndex: 11 }));
+    expect(status()).toHaveTextContent('Bar 12 of 16');
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: true }));
+    act(() => engine.fire('barTapped', { barIndex: 2 }));
+    expect(status()).toHaveTextContent('Bar 3 of 16');
+
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('Play with a count-in scrolls to the bar it counts into, before playback starts', async () => {
+    serve({ settings: ok({ ...settingsRow, count_in_bars: 1 }) });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    act(() => engine.fire('barTapped', { barIndex: 6 }));
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+
+    await user.click(playButton());
+
+    expect(status()).toHaveTextContent('Bar 7 of 16 · Counting in…');
+    expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(6);
+    expect(engine.play).not.toHaveBeenCalled();
+    await user.click(playButton());
+  });
+
+  it('Play with the count-in off scrolls nothing: alphaTab follows its cursor', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    await user.click(playButton());
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('Play loop while paused scrolls to the loop’s first bar; Exit loop scrolls nowhere', async () => {
+    serve({ loops: [loopOfSongA('late', { name: 'Late', start_bar: 13, end_bar: 14 })] });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    await user.click(await panel().findByRole('button', { name: 'Play loop Late' }));
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+
+    engine.scrollToBar.mockClear();
+    await user.click(
+      within(screen.getByTestId('active-loop')).getByRole('button', { name: 'Exit loop' }),
+    );
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
   });
 });

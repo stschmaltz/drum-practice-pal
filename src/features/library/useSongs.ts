@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { loopKeys } from '@/features/loops/loopKeys';
 import { useSignedInUser } from '@/lib/auth';
 import {
   deleteSong,
@@ -162,6 +163,8 @@ export function useDeleteSong() {
       // row and bytes while the refetch that finds it gone is still on its way.
       queryClient.setQueryData<Song | null>(songKeys.detail(user.id, songId), null);
       queryClient.removeQueries({ queryKey: songFileKeys.forSong(user.id, songId) });
+      // Its loops went with it (cascade); a cached list would outlive them.
+      queryClient.removeQueries({ queryKey: loopKeys.forSong(user.id, songId) });
     },
     onSettled: () => invalidateWhenIdle(queryClient, user.id),
   });

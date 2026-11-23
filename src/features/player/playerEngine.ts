@@ -4,6 +4,7 @@
  * without alphaTab, a DOM renderer or Web Audio. Types only: importing this
  * file pulls in nothing.
  */
+import type { BarIndexRange } from './barHighlight';
 import type { BarTicks, TickRange } from './barTicks';
 import type { Meter } from './countIn';
 import type { LayoutChoice } from './layout';
@@ -31,6 +32,12 @@ export type EngineEvents = {
   error: { error: unknown };
   /** A tap or click landed on a rendered bar. The engine doesn't act on it; the service decides. */
   barTapped: { barIndex: number };
+  /**
+   * A mouse was pressed on one bar and dragged, so far or (with `done`) until
+   * released, to another. Either bar may come first. Touch never reports this:
+   * a finger dragging over the score scrolls it. No barTapped follows a drag.
+   */
+  barsDragged: { fromBarIndex: number; toBarIndex: number; done: boolean };
 };
 
 export interface PlayerEngine {
@@ -56,6 +63,18 @@ export interface PlayerEngine {
   setTrackMuted(trackIndex: number, muted: boolean): void;
   setPlaybackRange(range: TickRange | null): void;
   setLooping(looping: boolean): void;
+  /**
+   * Marks a range of bars on the score, or clears the mark for null. Only a
+   * drawing: playback is untouched. Kept across re-renders (resize, layout).
+   */
+  setHighlight(range: BarIndexRange | null): void;
+  /**
+   * Scrolls the score box so a bar (0-based) can be read, if it isn't all on
+   * show already. For when nothing is playing: alphaTab only follows the
+   * cursor during playback. Scrolling only; playback is untouched. Does
+   * nothing for a bar that isn't laid out.
+   */
+  scrollToBar(barIndex: number): void;
   destroy(): void;
 }
 
