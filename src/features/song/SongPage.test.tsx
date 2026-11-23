@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, Outlet, Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
@@ -13,7 +13,7 @@ import {
   type FakeResult,
   type StorageCall,
 } from '@/test/fakeSupabase';
-import { FakePlayerEngine } from '@/test/fakePlayerEngine';
+import { FakePlayerEngine, TEMPO_CHANGE_BAR_TEMPOS, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
 import { renderRoutes, RouteMarker } from '@/test/render';
 import { SongPage } from './SongPage';
 
@@ -104,10 +104,13 @@ const playButton = () => screen.getByRole('button', { name: /^(Play|Pause)$/ });
 const downloads = () => storageResult.mock.calls.filter(([call]) => call.method === 'download');
 
 /** Waits for the player to mount its engine, then finishes alphaTab's loading. */
-async function loadPlayer(index = 0, { barCount = 16 } = {}) {
+async function loadPlayer(
+  index = 0,
+  { barCount = 16, barTempos }: { barCount?: number; barTempos?: readonly number[] } = {},
+) {
   await waitFor(() => expect(engines[index]?.loadScore).toHaveBeenCalled());
   const engine = engines[index]!;
-  act(() => engine.finishLoading({ barCount, trackCount: 3 }));
+  act(() => engine.finishLoading({ barCount, trackCount: 3, barTempos }));
   await waitFor(() => expect(playButton()).toBeEnabled());
   return engine;
 }
@@ -344,5 +347,181 @@ describe('SongPage disposal on route change', () => {
     );
     expect(playButton()).toHaveTextContent('Play');
     expect(status()).toHaveTextContent('Bar 1 of 12');
+  });
+});
+
+describe('SongPage jam mode', () => {
+  const speedReadout = () => screen.getByTestId('jam-speed');
+  const bpmReadout = () => screen.getByTestId('jam-bpm');
+
+  it('shows speed and the BPM at the current bar, following tempo changes', async () => {
+    serve();
+    renderSong(SONG_A);
+    expect(await screen.findByTestId('jam-bpm')).toHaveTextContent('–');
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    expect(speedReadout()).toHaveTextContent('100%');
+    expect(bpmReadout()).toHaveTextContent('120');
+
+    act(() => engine.fire('position', { tick: 8 * TICKS_PER_BAR + 1 }));
+    expect(bpmReadout()).toHaveTextContent('90');
+    expect(status()).toHaveTextContent('Bar 9 of 16');
+  });
+
+  it('recomputes BPM from the speed slider', async () => {
+    serve();
+    renderSong(SONG_A);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    act(() => engine.fire('position', { tick: 8 * TICKS_PER_BAR + 1 }));
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '75' } });
+    expect(speedReadout()).toHaveTextContent('75%');
+    expect(bpmReadout()).toHaveTextContent('68'); // 90 x 0.75 = 67.5
+  });
+
+  it('seeks to a tapped bar, paused or playing, without restarting', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+
+    act(() => engine.fire('barTapped', { barIndex: 11 }));
+    expect(engine.seek).toHaveBeenLastCalledWith(11 * TICKS_PER_BAR);
+    expect(status()).toHaveTextContent('Bar 12 of 16');
+    expect(bpmReadout()).toHaveTextContent('90');
+
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: true }));
+    const restartsBefore = engine.restartCalls();
+    act(() => engine.fire('barTapped', { barIndex: 2 }));
+    expect(engine.seek).toHaveBeenLastCalledWith(2 * TICKS_PER_BAR);
+    expect(status()).toHaveTextContent('Bar 3 of 16');
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('opens every song at 100%, whatever speed the last one played at', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    await loadPlayer(0);
+    fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '200' } });
+    expect(speedReadout()).toHaveTextContent('200%');
+
+    await user.click(screen.getByRole('link', { name: 'Song B' }));
+    await waitFor(() => expect(engines).toHaveLength(2));
+    const second = await loadPlayer(1);
+    expect(speedReadout()).toHaveTextContent('100%');
+    expect(second.setSpeed).toHaveBeenLastCalledWith(1);
+  });
+
+  it('shows BPM for the tapped bar at the current speed, across the tempo change', async () => {
+    serve();
+    renderSong(SONG_A);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '150' } });
+    expect(bpmReadout()).toHaveTextContent('180'); // 120 x 1.5 at bar 1
+
+    act(() => engine.fire('barTapped', { barIndex: 8 })); // bar 9, the first at 90
+    expect(status()).toHaveTextContent('Bar 9 of 16');
+    expect(bpmReadout()).toHaveTextContent('135');
+    expect(speedReadout()).toHaveTextContent('150%');
+
+    act(() => engine.fire('barTapped', { barIndex: 7 })); // bar 8, the last at 120
+    expect(bpmReadout()).toHaveTextContent('180');
+    expect(engine.seek).toHaveBeenLastCalledWith(7 * TICKS_PER_BAR);
+  });
+
+  it('ignores a tap from the old song after switching songs', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const first = await loadPlayer(0);
+    await user.click(screen.getByRole('link', { name: 'Song B' }));
+    await waitFor(() => expect(engines).toHaveLength(2));
+    const second = await loadPlayer(1);
+
+    act(() => first.fire('barTapped', { barIndex: 5 }));
+    expect(first.seek).not.toHaveBeenCalled();
+    expect(second.seek).not.toHaveBeenCalled();
+    expect(status()).toHaveTextContent('Bar 1 of 16');
+  });
+
+  it('keeps Play/Pause beside the readout in the sticky bar, not in the controls box', async () => {
+    serve();
+    renderSong(SONG_A);
+    await loadPlayer();
+    const bar = screen.getByTestId('jam-bar');
+    expect(within(bar).getByRole('button', { name: 'Play' })).toBeEnabled();
+    expect(within(bar).getByTestId('jam-bpm')).toBeInTheDocument();
+    const controls = screen.getByRole('region', { name: 'Player controls' });
+    expect(within(controls).queryByRole('button', { name: /^(Play|Pause)$/ })).toBeNull();
+    expect(screen.getAllByRole('button', { name: /^(Play|Pause)$/ })).toHaveLength(1);
+  });
+
+  it('plays and pauses from the keyboard, keeping focus, with Play first in tab order', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    // Tab from the last nav link: Play/Pause is the page's first control, then Back to start.
+    screen.getByRole('link', { name: 'Song B' }).focus();
+    await user.tab();
+    expect(playButton()).toHaveFocus();
+    expect(playButton()).toHaveAccessibleName('Play');
+
+    await user.keyboard('{Enter}');
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    act(() => engine.fire('stateChanged', { playing: true }));
+    expect(playButton()).toHaveAccessibleName('Pause');
+    // The label changes in place, so a screen reader stays on the same button.
+    expect(playButton()).toHaveFocus();
+
+    await user.keyboard(' ');
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+    act(() => engine.fire('stateChanged', { playing: false }));
+    expect(playButton()).toHaveAccessibleName('Play');
+    expect(playButton()).toHaveFocus();
+
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Back to start' })).toHaveFocus();
+  });
+
+  describe('bringing the score on screen', () => {
+    const scrollIntoView = vi.fn();
+    beforeEach(() => {
+      scrollIntoView.mockReset();
+      // jsdom has no scrollIntoView; the page calls it only when it exists.
+      Element.prototype.scrollIntoView = scrollIntoView;
+    });
+    afterEach(() => {
+      // @ts-expect-error restoring jsdom's missing method
+      delete Element.prototype.scrollIntoView;
+    });
+
+    it('scrolls the score box into view once per start, never while playing or paused', async () => {
+      serve();
+      const user = renderSong(SONG_A);
+      const engine = await loadPlayer();
+      act(() => engine.fire('barTapped', { barIndex: 3 }));
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+      expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByTestId('score-viewport'));
+      expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'nearest' }));
+      // Clear of the sticky bar (jsdom measures it at 0 px, leaving the gap).
+      expect(screen.getByTestId('score-viewport').style.scrollMarginTop).toBe('8px');
+
+      // Bar changes and taps while playing leave the page where the user put it.
+      act(() => engine.fire('position', { tick: 6 * TICKS_PER_BAR + 1 }));
+      act(() => engine.fire('barTapped', { barIndex: 10 }));
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: false }));
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
+    });
   });
 });

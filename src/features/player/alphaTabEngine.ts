@@ -6,9 +6,15 @@
  */
 import * as alphaTab from '@coderline/alphatab';
 import { loadGuitarPro } from '@/features/library/parseScore';
+import { barIndexAtPoint } from './barHitTest';
 import type { BarTicks } from './barTicks';
+import { createEmitter, type Emitter } from './emitter';
 import type { LayoutChoice } from './layout';
 import type { EngineEvents, EngineMount, PlayerEngine } from './playerEngine';
+import { barStartTempos } from './tempo';
+
+/** Engine events the engine raises itself rather than forwarding from alphaTab. */
+type TapEvents = Pick<EngineEvents, 'barTapped'>;
 
 export function createAlphaTabEngine({
   element,
@@ -17,6 +23,8 @@ export function createAlphaTabEngine({
 }: EngineMount): PlayerEngine {
   // destroy() aborts it, so leaving mid-load stops the download and never feeds a destroyed api.
   const soundFontDownload = new AbortController();
+  // alphaTab's own click handling is off (below), so taps are hit-tested here.
+  const taps = createEmitter<TapEvents>();
   const api = new alphaTab.AlphaTabApi(element, {
     // Without this, production builds look for fonts next to the lazy chunk
     // (/assets/font/) and nothing renders. The Vite plugin copies them to public/font.
@@ -28,15 +36,33 @@ export function createAlphaTabEngine({
       soundFont: null,
       scrollElement,
       enableCursor: true,
-      // Clicking the score would seek and select ranges behind PlayerService's
-      // back. Seeking by tap arrives with jam mode (Unit 06).
+      // Keeps the playing bar in view: page layout brings its line to the top
+      // of the scroll box, horizontal layout brings the bar to the left edge.
+      scrollMode: alphaTab.ScrollMode.Continuous,
+      // alphaTab's click handling seeks and selects ranges on mousedown, behind
+      // PlayerService's back and on the first touch of a scroll. Taps come
+      // through onScoreClick instead, as the barTapped event.
       enableUserInteraction: false,
     },
   });
 
+  // click, not pointerdown: browsers don't fire it after a pan, so scrolling the score never seeks.
+  const onScoreClick = (event: MouseEvent) => {
+    const surface = element.querySelector('.at-surface');
+    if (!surface) return;
+    const origin = surface.getBoundingClientRect();
+    const barIndex = barIndexAtPoint(
+      api.boundsLookup?.staffSystems ?? [],
+      event.clientX - origin.left,
+      event.clientY - origin.top,
+    );
+    if (barIndex !== null) taps.emit('barTapped', { barIndex });
+  };
+  element.addEventListener('click', onScoreClick);
+
   return {
     on(event, handler) {
-      subscribe(api, event, handler);
+      subscribe(api, taps, event, handler);
     },
 
     loadScore(bytes, trackIndexes) {
@@ -98,6 +124,8 @@ export function createAlphaTabEngine({
       api.isLooping = looping;
     },
     destroy() {
+      element.removeEventListener('click', onScoreClick);
+      taps.clear();
       soundFontDownload.abort();
       api.destroy();
     },
@@ -106,6 +134,7 @@ export function createAlphaTabEngine({
 
 function subscribe<K extends keyof EngineEvents>(
   api: alphaTab.AlphaTabApi,
+  taps: Emitter<TapEvents>,
   event: K,
   handler: (payload: EngineEvents[K]) => void,
 ): void {
@@ -114,7 +143,11 @@ function subscribe<K extends keyof EngineEvents>(
   switch (event) {
     case 'scoreLoaded':
       api.scoreLoaded.on((score) =>
-        emit({ barCount: score.masterBars.length, trackCount: score.tracks.length }),
+        emit({
+          barCount: score.masterBars.length,
+          trackCount: score.tracks.length,
+          barTempos: barStartTempos(score),
+        }),
       );
       return;
     case 'ticksReady':
@@ -137,6 +170,9 @@ function subscribe<K extends keyof EngineEvents>(
       return;
     case 'error':
       api.error.on((error) => emit({ error }));
+      return;
+    case 'barTapped':
+      taps.on('barTapped', emit);
       return;
   }
 }

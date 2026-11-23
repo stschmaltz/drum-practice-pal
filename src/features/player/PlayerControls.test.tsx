@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useSyncExternalStore } from 'react';
 import { FakePlayerEngine } from '@/test/fakePlayerEngine';
-import { PlayerControls } from './PlayerControls';
+import { PlayerControls, PlayPauseButton } from './PlayerControls';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
 import { initialPlayerSnapshot, PlayerService } from './PlayerService';
 
@@ -191,5 +191,42 @@ describe('PlayerControls live changes', () => {
     expect(muteDrums()).toBeDisabled();
     expect(muteDrums()).toHaveAttribute('title', 'This song has no drum track');
     expect(muteDrums()).toHaveAttribute('aria-pressed', 'false');
+  });
+});
+
+describe('PlayerControls without its Play button', () => {
+  it('leaves Play/Pause to the screen and keeps the rest', () => {
+    render(
+      <PlayerControls
+        player={null}
+        snapshot={initialPlayerSnapshot(DRUMS, DEFAULT_PLAYER_OPTIONS)}
+        showPlayButton={false}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /^(Play|Pause)$/ })).toBeNull();
+    expect(backToStart()).toBeInTheDocument();
+    expect(speed()).toBeInTheDocument();
+  });
+});
+
+describe('PlayPauseButton', () => {
+  it('plays and pauses the player on its own', async () => {
+    const engine = new FakePlayerEngine();
+    const player = new PlayerService(engine, {
+      drumTrackIndex: DRUMS,
+      options: DEFAULT_PLAYER_OPTIONS,
+      wakeLock: { setActive: vi.fn(), dispose: vi.fn() },
+      unlockAudio: vi.fn(),
+    });
+    player.load(new Uint8Array([1]));
+    function Solo() {
+      const snapshot = useSyncExternalStore(player.subscribe, player.getSnapshot);
+      return <PlayPauseButton player={player} snapshot={snapshot} />;
+    }
+    render(<Solo />);
+    expect(playButton()).toBeDisabled();
+    act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+    await startPlaying(engine, userEvent.setup());
+    expect(engine.play).toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { FakePlayerEngine, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
+import { FakePlayerEngine, TEMPO_CHANGE_BAR_TEMPOS, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
 import { PlayerService, type PlayerServiceConfig } from './PlayerService';
 import type { WakeLockControl } from './wakeLock';
@@ -57,7 +57,11 @@ describe('PlayerService loading', () => {
   it('becomes ready once the engine is ready for playback, with the bar count', () => {
     const { engine, service } = setup();
     service.load(bytes);
-    engine.fire('scoreLoaded', { barCount: 16, trackCount: 3 });
+    engine.fire('scoreLoaded', {
+      barCount: 16,
+      trackCount: 3,
+      barTempos: Array<number>(16).fill(120),
+    });
     expect(service.getSnapshot()).toMatchObject({ status: 'loading', barCount: 16, barNumber: 1 });
 
     engine.finishLoading();
@@ -193,6 +197,26 @@ describe('PlayerService transport', () => {
     const { engine, service } = playing();
     expect(service.seekToBar(5)).toBe(true);
     expect(engine.seek).toHaveBeenCalledWith(4 * TICKS_PER_BAR);
+  });
+
+  it('shows the sought bar at once, playing or paused, without restarting', () => {
+    const { engine, service } = playing();
+    const bars = vi.fn();
+    service.on('barChanged', bars);
+
+    service.seekToBar(9);
+    expect(service.getSnapshot()).toMatchObject({ status: 'playing', barNumber: 9 });
+    expect(bars).toHaveBeenCalledWith({ barNumber: 9 });
+
+    service.pause();
+    engine.fire('stateChanged', { playing: false });
+    service.seekToBar(3);
+    expect(service.getSnapshot()).toMatchObject({ status: 'ready', barNumber: 3 });
+    // The position echo for the same bar changes nothing.
+    engine.fire('position', { tick: 2 * TICKS_PER_BAR });
+    expect(bars).toHaveBeenCalledTimes(2);
+    expect(engine.play).not.toHaveBeenCalled();
+    expect(engine.stop).not.toHaveBeenCalled();
   });
 
   it('refuses to seek to a bar the song does not have', () => {
@@ -397,6 +421,87 @@ describe('PlayerService events', () => {
     expect(service.getSnapshot().status).toBe('error');
     expect(engine.stop).toHaveBeenCalled();
     expect(wakeLock.setActive).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe('PlayerService tempo per bar', () => {
+  function loaded() {
+    const ctx = setup();
+    ctx.service.load(bytes);
+    ctx.engine.finishLoading({ barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    return ctx;
+  }
+
+  it('has no tempo until the score loads', () => {
+    const { service } = setup();
+    service.load(bytes);
+    expect(service.getSnapshot().barTempo).toBeNull();
+    expect(service.tempoAtBar(1)).toBeNull();
+  });
+
+  it('follows the bar playing through a tempo change', () => {
+    const { engine, service } = loaded();
+    expect(service.getSnapshot().barTempo).toBe(120);
+
+    engine.fire('position', { tick: 7 * TICKS_PER_BAR + 5 });
+    expect(service.getSnapshot()).toMatchObject({ barNumber: 8, barTempo: 120 });
+    engine.fire('position', { tick: 8 * TICKS_PER_BAR + 5 });
+    expect(service.getSnapshot()).toMatchObject({ barNumber: 9, barTempo: 90 });
+  });
+
+  it('follows a seek, and leaves speed out of it', () => {
+    const { service } = loaded();
+    service.setSpeed(0.5);
+    service.seekToBar(12);
+    expect(service.getSnapshot()).toMatchObject({ barNumber: 12, barTempo: 90, speedRatio: 0.5 });
+    service.seekToBar(2);
+    expect(service.getSnapshot().barTempo).toBe(120);
+  });
+
+  it('answers the tempo of any bar, null for bars the song lacks', () => {
+    const { service } = loaded();
+    expect(service.tempoAtBar(8)).toBe(120);
+    expect(service.tempoAtBar(9)).toBe(90);
+    expect(service.tempoAtBar(17)).toBeNull();
+  });
+
+  it("forgets the old song's tempos on a new load", () => {
+    const { engine, service } = loaded();
+    service.load(bytes);
+    expect(service.getSnapshot().barTempo).toBeNull();
+    engine.finishLoading({ barCount: 4, barTempos: [60, 60, 60, 60] });
+    expect(service.getSnapshot().barTempo).toBe(60);
+    expect(service.tempoAtBar(9)).toBeNull();
+  });
+});
+
+describe('PlayerService bar taps', () => {
+  it('reports a tapped bar as a 1-based bar number and does not seek by itself', () => {
+    const { engine, service } = playing();
+    const tapped = vi.fn();
+    service.on('barTapped', tapped);
+
+    engine.fire('barTapped', { barIndex: 4 });
+
+    expect(tapped).toHaveBeenCalledWith({ barNumber: 5 });
+    expect(engine.seek).not.toHaveBeenCalled();
+    expect(service.getSnapshot().barNumber).toBe(1);
+  });
+
+  it('ignores taps before the song is ready, after an error and after dispose', () => {
+    const { engine, service } = setup();
+    const tapped = vi.fn();
+    service.on('barTapped', tapped);
+    service.load(bytes);
+    engine.fire('barTapped', { barIndex: 0 });
+
+    engine.finishLoading();
+    engine.fire('error', { error: new Error('render failed') });
+    engine.fire('barTapped', { barIndex: 0 });
+
+    service.dispose();
+    engine.fire('barTapped', { barIndex: 0 });
+    expect(tapped).not.toHaveBeenCalled();
   });
 });
 
