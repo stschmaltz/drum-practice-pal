@@ -3,14 +3,10 @@ import { Route, Routes } from 'react-router';
 import { FullPageMessage } from '@/components/FullPageMessage';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { RequireAuth } from '@/features/auth/RequireAuth';
+import { LibraryPage } from '@/features/library/LibraryPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { AppShell } from '@/features/shell/AppShell';
-import {
-  LibraryPage,
-  NotFoundPage,
-  OnTheGoPage,
-  SongPage,
-} from '@/features/shell/PlaceholderPages';
+import { NotFoundPage, OnTheGoPage, SongPage } from '@/features/shell/PlaceholderPages';
 import { supabaseConfigError } from '@/lib/supabase';
 
 // Lazy so alphaTab stays out of the main bundle until a player screen opens.

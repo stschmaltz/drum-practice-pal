@@ -8,6 +8,8 @@ export type LoopStatus = Database['public']['Enums']['loop_status'];
 export type CountInMode = Database['public']['Enums']['count_in_mode'];
 
 export const GP_FILES_BUCKET = 'gp-files';
+/** The bucket's file_size_limit. */
+export const GP_FILE_MAX_BYTES = 20 * 1024 * 1024;
 
 export const SPEED_RATIO_MIN = 0.25;
 export const SPEED_RATIO_MAX = 2.0;
@@ -19,6 +21,8 @@ export const METRONOME_VOLUME_MIN = 0;
 export const METRONOME_VOLUME_MAX = 1;
 
 export const SONG_TEXT_MAX_LENGTH = 300;
+/** songs.original_tempo must be above 0 and at most this. */
+export const SONG_TEMPO_MAX = 1000;
 export const LOOP_NAME_MAX_LENGTH = 100;
 
 /** Object path inside the gp-files bucket. Storage policies only accept this shape. */
