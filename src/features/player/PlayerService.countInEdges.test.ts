@@ -23,7 +23,7 @@ import {
 import { TEMPO_CHANGE_BAR_TEMPOS, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
 import { SPEED_RATIO_MAX, SPEED_RATIO_MIN, type CountInBars } from '@/lib/schema';
 import type { Meter } from './countIn';
-import type { PlayerService, PlayerSnapshot } from './PlayerService';
+import type { BarRange, PlayerService, PlayerSnapshot } from './PlayerService';
 
 /** Four bars whose meter and tempo change: 4/4 at 120, then 7/8 and 3/4 at 100. */
 const MIXED_METERS = {
@@ -849,6 +849,64 @@ describe('review: races and partial failures', () => {
       expect(vi.getTimerCount()).toBe(0);
     },
   );
+
+  it.each<[string, (service: PlayerService) => void]>([
+    ['Pause', (service) => service.pause()],
+    ['Back to start', (service) => service.stop()],
+  ])(
+    '%s answered by the engine before the pass end arrives: still no count-in starts over it',
+    (_name, halt) => {
+      const { engine, service, clicks, wakeLock } = loopingBars5To8(EVERY_REPEAT);
+
+      halt(service);
+      engine.fire('stateChanged', { playing: false });
+      expect(service.getSnapshot().status).toBe('ready');
+      // The pass end was posted before the worker saw the pause, and lands after its answer.
+      engine.fire('finished', undefined);
+
+      expect(service.getSnapshot()).toMatchObject({ status: 'ready', countIn: null });
+      expect(clicks.scheduled).toHaveLength(0);
+      expect(wakeLock.setActive).toHaveBeenLastCalledWith(false);
+      vi.advanceTimersByTime(10_000);
+      expect(engine.play).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each<[string, BarRange | null]>([
+    ['another range', { startBar: 9, endBar: 12 }],
+    ['no range', null],
+  ])(
+    'setRange to %s after the downbeat, before the engine reports playing, pauses the engine',
+    (_name, range) => {
+      const { engine, service, wakeLock } = loopingBars5To8(START_ONLY);
+      service.pause();
+      engine.fire('stateChanged', { playing: false });
+      engine.pause.mockClear();
+      service.play();
+      vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      expect(service.getSnapshot().status).toBe('countingIn');
+
+      service.setRange(range);
+
+      // Otherwise the play already sent would start the song under "ready".
+      expect(engine.pause).toHaveBeenCalledTimes(1);
+      expect(service.getSnapshot()).toMatchObject({ status: 'ready', countIn: null, range });
+      expect(wakeLock.setActive).toHaveBeenLastCalledWith(false);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it('setRange during the clicks leaves the engine alone: it was never started', () => {
+    const { engine, service } = setupCountIn();
+    service.play();
+    vi.advanceTimersByTime(START_DELAY_MS + 700);
+    service.setRange({ startBar: 9, endBar: 12 });
+    expect(service.getSnapshot().status).toBe('ready');
+    expect(engine.pause).not.toHaveBeenCalled();
+    expect(engine.play).not.toHaveBeenCalled();
+  });
 
   it('a Pause that was answered doesn’t stop later repeats from counting in', () => {
     const { engine, service, clicks } = loopingBars5To8(EVERY_REPEAT);

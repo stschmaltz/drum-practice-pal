@@ -297,3 +297,11 @@ Every repeat was reached through `window.__drumPalPlayer` (`setRange`, `setLoopi
 
 - `npm run typecheck`, `npm run lint`: clean. `npm test`: 54 files, 2341 tests passing (2334 before; one table row removed, eight tests added). `npm run format:check` fails only on `.claude/worktrees/project-pass/public/soundfont/README.md`, the untracked folder outside the branch, so `npm run check` stops there; `npx prettier --check . '!.claude/**'` is clean.
 - `npm run e2e`: 198 tests; 191 passed, 7 skipped (the device-only skips in `jam.spec.ts`), 0 failed.
+
+### After the PR (Copilot review)
+
+- **Merged `main`** (PR 8 landed after the branch was cut) and sent `barMeters` in `PlayerService.guards.test.ts`, which CI's typecheck of the merged tree needed.
+- **High. `haltRequested` was cleared by the engine's "stopped", so a `finished` landing after it still started a count-in over a Pause or Back to start.** It now stays set until `play()` or `load()`. Tests cover the stopped-before-finished order for both actions.
+- **Medium. `setRange()` after the downbeat but before the engine reported `playing` went to `ready` with the play still pending.** `setRange()` and `pause()` now share `callOffCountIn()`, which pauses the engine in that interval. Tests cover a replacement range, `setRange(null)`, and a range change during the clicks (engine untouched).
+- `npm test`: 56 files, 2363 tests passing. Typecheck, lint and format clean.
+- The revised plan on `main` adds a Drums only toggle to this unit; it is not built here.

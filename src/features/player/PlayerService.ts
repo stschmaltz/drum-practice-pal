@@ -144,9 +144,10 @@ export class PlayerService {
   /** Cancels the count-in that is clicking now; null once it has handed over to playback. */
   private cancelCountIn: (() => void) | null = null;
   /**
-   * Pause or stop was sent to a playing engine that hasn't answered yet. A pass
-   * end already on its way from alphaTab's worker must not start the next
-   * count-in over the user's Pause.
+   * Pause or stop was sent to a playing engine, and nothing has asked for
+   * playback since. A pass end already on its way from alphaTab's worker must
+   * not start the next count-in over the user's Pause, whether it lands before
+   * or after the engine's "stopped", so only play() and load() clear this.
    */
   private haltRequested = false;
   private trackCount = 0;
@@ -237,10 +238,7 @@ export class PlayerService {
   pause(): void {
     if (this.disposed) return;
     if (this.snapshot.status === 'countingIn') {
-      // Past the downbeat the engine has been told to play but hasn't said so yet.
-      const handedOver = this.cancelCountIn === null;
-      this.abandonCountIn();
-      if (handedOver) this.engine.pause();
+      this.callOffCountIn();
       return;
     }
     if (this.snapshot.status === 'playing') {
@@ -301,7 +299,7 @@ export class PlayerService {
       throw new RangeError(`Bars ${range.startBar} to ${range.endBar} aren't in this song`);
     }
     // Its downbeat would no longer be where playback starts; Play counts in again.
-    this.abandonCountIn();
+    this.callOffCountIn();
     this.update({ range });
     this.applyRange();
   }
@@ -414,7 +412,6 @@ export class PlayerService {
     });
     engine.on('stateChanged', ({ playing }) => {
       if (this.disposed) return;
-      this.haltRequested = false;
       if (this.snapshot.status === 'error') return;
       if (this.snapshot.status === 'loading' && !playing) return;
       // Before a repeat's count-in alphaTab stops at the end of the pass; that isn't a pause.
@@ -520,6 +517,17 @@ export class PlayerService {
     if (this.snapshot.status !== 'countingIn') return;
     this.update({ status: 'ready', countIn: null });
     this.wakeLock.setActive(false);
+  }
+
+  /**
+   * Calls off a count-in and whatever it has already set going: past the
+   * downbeat the engine has been told to play but hasn't said so yet, and
+   * would otherwise start under a status of ready.
+   */
+  private callOffCountIn(): void {
+    const handedOver = this.snapshot.status === 'countingIn' && this.cancelCountIn === null;
+    this.abandonCountIn();
+    if (handedOver) this.engine.pause();
   }
 
   /**
