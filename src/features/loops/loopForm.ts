@@ -23,24 +23,30 @@ export const LOOP_FIELDS = [
   'speed_ratio',
   'target_ratio',
   'status',
+  'finished_at',
   'last_practiced_at',
   'created_at',
 ] as const satisfies readonly (keyof LoopRow)[];
 
 /** A literal, so supabase-js can type the selected row. Tested against LOOP_FIELDS. */
 export const LOOP_SELECT =
-  'id, song_id, name, start_bar, end_bar, speed_ratio, target_ratio, status, last_practiced_at, created_at';
+  'id, song_id, name, start_bar, end_bar, speed_ratio, target_ratio, status, finished_at, last_practiced_at, created_at';
 
 export type LoopField = (typeof LOOP_FIELDS)[number];
 export type Loop = Pick<LoopRow, LoopField>;
 
-/** The columns this unit's UI writes after a loop exists. Mirrors the loops update grant, minus status (Unit 09). */
+/**
+ * The columns the app writes after a loop exists: the loops update grant.
+ * `status` is flipped by "Mark finished" and "Reopen" (Unit 09); finished_at
+ * follows it in a trigger and can't be sent.
+ */
 export const LOOP_EDIT_FIELDS = [
   'name',
   'start_bar',
   'end_bar',
   'speed_ratio',
   'target_ratio',
+  'status',
 ] as const satisfies readonly LoopField[];
 
 export type LoopEdit = Pick<Loop, (typeof LOOP_EDIT_FIELDS)[number]>;
@@ -48,8 +54,11 @@ export type LoopEdit = Pick<Loop, (typeof LOOP_EDIT_FIELDS)[number]>;
 /** What the form decides; the speed is saved from the player ("Save speed"), not typed here. */
 export type LoopDetails = Pick<Loop, 'name' | 'start_bar' | 'end_bar' | 'target_ratio'>;
 
-/** A new loop as the client sends it: the id is chosen here so a retry can't insert twice. */
-export type NewLoop = LoopEdit & Pick<Loop, 'id' | 'song_id'>;
+/**
+ * A new loop as the client sends it: the id is chosen here so a retry can't
+ * insert twice. No status: a loop starts active, the column's default.
+ */
+export type NewLoop = Omit<LoopEdit, 'status'> & Pick<Loop, 'id' | 'song_id'>;
 
 /** The form's fields as typed: text, so a half-typed number can be shown as is. */
 export interface LoopFormValues {
@@ -236,4 +245,18 @@ export function sortLoops<T extends Pick<Loop, 'start_bar' | 'end_bar' | 'create
 /** "Bar 5" or "Bars 5 to 8". */
 export function barsLabel(startBar: number, endBar: number): string {
   return startBar === endBar ? `Bar ${startBar}` : `Bars ${startBar} to ${endBar}`;
+}
+
+/**
+ * The loop's saved speed has reached its target, so the app asks "Mark
+ * finished?". It only asks: a loop is never finished for the user. Compares
+ * the saved speed, not the one playing, so a nudge past the target that was
+ * never saved doesn't count.
+ */
+export function hasReachedTarget(
+  loop: Pick<Loop, 'status' | 'speed_ratio' | 'target_ratio'>,
+): boolean {
+  return (
+    loop.status === 'active' && loop.target_ratio !== null && loop.speed_ratio >= loop.target_ratio
+  );
 }

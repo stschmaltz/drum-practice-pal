@@ -57,6 +57,7 @@ function queryBuilder(table: string) {
   const builder = {
     select: chain('select'),
     insert: chain('insert'),
+    upsert: chain('upsert'),
     update: chain('update'),
     delete: chain('delete'),
     eq: chain('eq'),
@@ -103,7 +104,14 @@ export const fakeSupabase = {
   storage: { from: vi.fn(storageBucket) },
 };
 
-export const fakeSupabaseModule = { supabase: fakeSupabase, supabaseConfigError: null };
+/** What keepalive requests are built from; a test stubs `fetch` to see them. */
+export const FAKE_REST_CONFIG = { url: 'http://supabase.test', publishableKey: 'publishable-key' };
+
+export const fakeSupabaseModule = {
+  supabase: fakeSupabase,
+  supabaseConfigError: null,
+  supabaseRestConfig: FAKE_REST_CONFIG,
+};
 
 /** Sends an auth event to every AuthProvider subscribed to the fake client. */
 export function emitAuthEvent(event: string, session: Session | null): void {

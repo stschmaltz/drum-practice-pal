@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { enginePlays } from '@/test/countInPlayer';
-import { resetFakeSupabase } from '@/test/fakeSupabase';
+import { queryResult, resetFakeSupabase } from '@/test/fakeSupabase';
 import { startOfBar, straightBars, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable, type LoopTable } from '@/test/loopTable';
 import { testQueryClient, wrapperFor } from '@/test/render';
 import { PAGE_LAYOUT_QUERY } from '@/features/player/layout';
 import type { PlayerService } from '@/features/player/PlayerService';
+import type { PracticeSession } from '@/features/practice/sessions';
 import type { Loop } from './loopForm';
 import { loopKeys } from './loopKeys';
 import { LoopPanel } from './LoopPanel';
@@ -304,7 +305,7 @@ describe('LoopPanel playing a loop', () => {
     expect(view.play('Intro')).toBeInTheDocument();
   });
 
-  it('Restart loop goes back to the first bar at the saved speed, without stopping', async () => {
+  it('Restart loop goes back to the first bar at the speed playing now, without stopping', async () => {
     const view = renderPanel();
     await view.press('Play loop Late');
     act(() => {
@@ -321,7 +322,8 @@ describe('LoopPanel playing a loop', () => {
     expect(view.player.getSnapshot()).toMatchObject({
       status: 'playing',
       barNumber: 9,
-      speedRatio: 0.5,
+      // Not back to the saved 50%: the nudge hasn't been saved, and Restart must not lose it.
+      speedRatio: 0.55,
     });
     expect(view.engine.pause.mock.calls.length + view.engine.stop.mock.calls.length).toBe(
       pausesAndStops,
@@ -767,5 +769,279 @@ describe('LoopPanel deleting a loop', () => {
     await view.press('Delete Intro');
     await view.user.click(confirmFor(view, 'Intro').getByRole('button', { name: 'Delete loop' }));
     expect(await view.panel.findByText(/No loops yet/)).toBeInTheDocument();
+  });
+});
+
+describe('LoopPanel finishing a loop', () => {
+  const atTarget = loopRow('late', {
+    name: 'Late',
+    start_bar: 9,
+    end_bar: 12,
+    speed_ratio: 1,
+    target_ratio: 1,
+  });
+  const prompt = (view: ReturnType<typeof renderPanel>) =>
+    within(view.panel.getByRole('group', { name: 'Mark finished?' }));
+  const finishedNames = (view: ReturnType<typeof renderPanel>) =>
+    within(view.panel.getByRole('region', { name: 'Finished loops' }))
+      .getAllByRole('listitem')
+      .map((li) => li.querySelector('p')?.textContent ?? '');
+
+  it('does not ask while the saved speed is under the target, however fast it is playing', async () => {
+    const view = renderPanel();
+    await view.press('Play loop Late');
+    view.enginePlays();
+
+    await view.press('Faster by 5%');
+    act(() => view.player.setSpeed(1.2));
+
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+  });
+
+  it('asks once the saved speed reaches the target, and finishes nothing by itself', async () => {
+    const view = renderPanel();
+    await view.press('Play loop Late');
+    view.enginePlays();
+    act(() => view.player.setSpeed(1));
+
+    await view.press('Save speed');
+
+    expect(await view.panel.findByTestId('finish-prompt')).toHaveTextContent(
+      "You've reached your target of 100%. Mark this loop finished?",
+    );
+    expect(view.table.sent('update')).toEqual([{ speed_ratio: 1 }]);
+    expect(view.table.rows().find((row) => row.id === 'late')?.status).toBe('active');
+    // Still playing: the question interrupts nothing.
+    expect(view.player.getSnapshot().status).toBe('playing');
+  });
+
+  it('"Not yet" takes the question away until a faster speed is saved', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+
+    await view.user.click(prompt(view).getByRole('button', { name: 'Not yet' }));
+
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+    expect(view.table.sent('update')).toEqual([]);
+    // Opening and closing the form doesn't bring it back.
+    await view.press('Edit Intro');
+    await view.press('Cancel');
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+
+    await view.press('Faster by 5%');
+    await view.press('Save speed');
+    expect(await view.panel.findByTestId('finish-prompt')).toBeInTheDocument();
+  });
+
+  it('"Mark finished" moves the loop under Finished, keeps it playing, and stops asking', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+
+    await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
+
+    await waitFor(() => expect(finishedNames(view)).toEqual(['Late']));
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+    expect(view.panel.getByRole('heading', { name: 'Finished (1)' })).toBeInTheDocument();
+    expect(view.player.getSnapshot()).toMatchObject({
+      status: 'playing',
+      range: { startBar: 9, endBar: 12 },
+    });
+  });
+
+  it('finishes and reopens from the list, without touching playback', async () => {
+    const view = renderPanel();
+    expect(view.panel.queryByRole('region', { name: 'Finished loops' })).not.toBeInTheDocument();
+
+    await view.press('Mark finished Intro');
+
+    await waitFor(() => expect(finishedNames(view)).toEqual(['Intro']));
+    expect(view.names()).toEqual(['Late', 'Intro']);
+    expect(view.engine.play).not.toHaveBeenCalled();
+
+    await view.press('Reopen Intro');
+
+    await waitFor(() =>
+      expect(view.panel.queryByRole('region', { name: 'Finished loops' })).not.toBeInTheDocument(),
+    );
+    expect(view.names()).toEqual(['Intro', 'Late']);
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }, { status: 'active' }]);
+  });
+
+  it('a finished loop can still be played', async () => {
+    const view = renderPanel({
+      loops: [
+        loopRow('intro', { ...intro, status: 'finished', finished_at: '2026-11-20T10:00:00Z' }),
+      ],
+    });
+    expect(await view.panel.findByText('Every loop of this song is finished.')).toBeInTheDocument();
+
+    await view.press('Play loop Intro');
+
+    expect(view.engine.play).toHaveBeenCalledTimes(1);
+    expect(view.player.getSnapshot().range).toEqual({ startBar: 1, endBar: 4 });
+  });
+
+  it('locks the button while the change is on its way, and says so when it is refused', async () => {
+    const view = renderPanel();
+    const release = view.table.holdNext('update');
+    await view.press('Mark finished Intro');
+
+    const reopen = await view.panel.findByRole('button', { name: 'Reopen Intro' });
+    expect(reopen).toBeDisabled();
+    release();
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Reopen Intro' })).toBeEnabled(),
+    );
+
+    // Held, so the loop is seen to move back among the active ones before the refusal:
+    // the button that was pressed is gone by then, and the one that returns must say why.
+    const refuse = view.table.holdNext('update');
+    view.table.failNext('update', 'nope');
+    await view.press('Reopen Intro');
+    await waitFor(() =>
+      expect(view.panel.queryByRole('region', { name: 'Finished loops' })).not.toBeInTheDocument(),
+    );
+    refuse();
+
+    await waitFor(() => expect(finishedNames(view)).toEqual(['Intro']));
+    expect(await view.item('Intro').findByRole('alert')).toHaveTextContent(
+      "Couldn't change the loop: nope",
+    );
+  });
+
+  it('a refused "Mark finished" from the prompt brings the prompt back with the reason', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+    const refuse = view.table.holdNext('update');
+    view.table.failNext('update', 'nope');
+
+    await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
+    await waitFor(() => expect(finishedNames(view)).toEqual(['Late']));
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+    refuse();
+
+    expect(await view.panel.findByTestId('finish-prompt')).toHaveTextContent(
+      "Couldn't mark the loop finished: nope",
+    );
+    expect(view.table.rows().find((row) => row.id === 'late')?.status).toBe('active');
+  });
+});
+
+describe('LoopPanel history', () => {
+  const session = (id: string, overrides: Partial<PracticeSession> = {}): PracticeSession => ({
+    id,
+    loop_id: 'late',
+    started_at: '2026-11-20T19:42:00.000Z',
+    duration_seconds: 65,
+    speed_ratio: 0.5,
+    repeats: 9,
+    ...overrides,
+  });
+
+  /** Serves the loops table as before, and `sessions` (or a failure) for the history. */
+  function withSessions(sessions: PracticeSession[] | 'fail') {
+    return (table: LoopTable) => {
+      queryResult.mockImplementation(async (call) => {
+        if (call.table === 'loops') return table.answer(call);
+        if (sessions === 'fail') return { data: null, error: { message: 'internal detail' } };
+        const loopId = call.ops.find((op) => op.method === 'eq' && op.args[0] === 'loop_id');
+        return {
+          data: sessions.filter((row) => row.loop_id === loopId?.args[1]),
+          error: null,
+        };
+      });
+    };
+  }
+  const history = (view: ReturnType<typeof renderPanel>, name: string) =>
+    within(view.panel.getByRole('region', { name: `History of ${name}` }));
+
+  it('is fetched only when opened, and lists each session newest first with a total', async () => {
+    const view = renderPanel({
+      prepare: withSessions([
+        session('older', { started_at: '2026-11-18T10:00:00.000Z', duration_seconds: 300 }),
+        session('newer', { speed_ratio: 0.708333, repeats: 1 }),
+        session('other-loop', { loop_id: 'intro' }),
+      ]),
+    });
+    await view.panel.findByRole('button', { name: 'History Late' });
+    const sessionQueries = () =>
+      queryResult.mock.calls.filter(([call]) => call.table === 'practice_sessions');
+    expect(sessionQueries()).toHaveLength(0);
+
+    await view.press('History Late');
+
+    const list = history(view, 'Late');
+    expect(await list.findByTestId('loop-history-summary')).toHaveTextContent(
+      '2 sessions · 6 min 5 s in all',
+    );
+    const rows = list.getAllByRole('listitem').map((li) => li.textContent ?? '');
+    expect(rows).toHaveLength(2);
+    // BPM from the tempo at the loop's first bar (90 from bar 9).
+    expect(rows[0]).toMatch(/· 1 min 5 s · 71% \(64 BPM\) · 1 pass$/);
+    expect(rows[1]).toMatch(/· 5 min · 50% \(45 BPM\) · 9 passes$/);
+    expect(view.panel.getByRole('button', { name: 'History Late' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+
+    await view.press('History Late');
+    expect(view.panel.queryByRole('region', { name: 'History of Late' })).not.toBeInTheDocument();
+  });
+
+  it('says when nothing has been logged yet, and when a session counts', async () => {
+    const view = renderPanel({ prepare: withSessions([]) });
+
+    await view.press('History Intro');
+
+    expect(
+      await view.panel.findByText(
+        /No practice logged yet\. A session is logged once .* 30 seconds\./,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows ten sessions and the rest on request', async () => {
+    const sessions = Array.from({ length: 12 }, (_, i) =>
+      session(`s${i}`, { started_at: new Date(Date.UTC(2026, 10, 1 + i)).toISOString() }),
+    );
+    const view = renderPanel({ prepare: withSessions(sessions) });
+    await view.press('History Late');
+
+    const list = history(view, 'Late');
+    await waitFor(() => expect(list.getAllByRole('listitem')).toHaveLength(10));
+
+    await view.user.click(list.getByRole('button', { name: 'Show all 12 sessions' }));
+
+    expect(list.getAllByRole('listitem')).toHaveLength(12);
+  });
+
+  it("a history that won't load says so in fixed words, with a way to try again", async () => {
+    const view = renderPanel({ prepare: withSessions('fail') });
+
+    await view.press('History Late');
+
+    const alert = await view.item('Late').findByRole('alert');
+    expect(alert).toHaveTextContent("Couldn't load this loop's history.");
+    expect(alert).not.toHaveTextContent('internal');
+    expect(within(alert).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('says when each loop was last practiced', async () => {
+    const view = renderPanel({
+      loops: [intro, loopRow('late', { ...late, last_practiced_at: new Date().toISOString() })],
+    });
+
+    await view.panel.findByRole('button', { name: 'History Late' });
+
+    expect(view.item('Late').getByTestId('loop-last-practiced')).toHaveTextContent(
+      'Last practiced today',
+    );
+    expect(view.item('Intro').getByTestId('loop-last-practiced')).toHaveTextContent(
+      'Not practiced yet',
+    );
   });
 });

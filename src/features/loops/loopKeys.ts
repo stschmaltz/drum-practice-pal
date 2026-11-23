@@ -11,4 +11,6 @@ export const loopKeys = {
   /** One song's loops: the list the song page shows. */
   forSong: (userId: string, songId: string) =>
     [...loopKeys.forUser(userId), 'song', songId] as const,
+  /** Every loop with its song's name: the On the go and Finished lists. */
+  practice: (userId: string) => [...loopKeys.forUser(userId), 'practice'] as const,
 };

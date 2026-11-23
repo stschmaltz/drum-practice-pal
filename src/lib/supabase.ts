@@ -13,6 +13,15 @@ const config = readSupabaseConfig(import.meta.env, window.location.hostname);
 /** Set when the build has no Supabase env; App shows it instead of the app. */
 export const supabaseConfigError: string | null = config.ok ? null : config.error;
 
+/**
+ * Where the REST API is and the key that goes with every request to it. For
+ * the one kind of request supabase-js can't make: a `keepalive` insert as the
+ * page goes away (src/lib/keepaliveInsert.ts). Null without configuration.
+ */
+export const supabaseRestConfig: { url: string; publishableKey: string } | null = config.ok
+  ? { url: config.url, publishableKey: config.publishableKey }
+  : null;
+
 // createClient throws on an empty URL, which would leave a blank page. A client
 // pointed at an unroutable host keeps the module importable; App never renders
 // anything that uses it while supabaseConfigError is set.

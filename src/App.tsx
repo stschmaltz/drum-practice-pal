@@ -6,7 +6,8 @@ import { RequireAuth } from '@/features/auth/RequireAuth';
 import { LibraryPage } from '@/features/library/LibraryPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { AppShell } from '@/features/shell/AppShell';
-import { NotFoundPage, OnTheGoPage } from '@/features/shell/PlaceholderPages';
+import { OnTheGoPage } from '@/features/practice/OnTheGoPage';
+import { NotFoundPage } from '@/features/shell/PlaceholderPages';
 import { supabaseConfigError } from '@/lib/supabase';
 
 // Lazy so alphaTab stays out of the main bundle until a player screen opens.

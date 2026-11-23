@@ -4,7 +4,17 @@ import { LOOP_SONG_ID, loopRow } from '@/test/loopTable';
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import type { Loop } from './loopForm';
 import { loopKeys } from './loopKeys';
-import { useCreateLoop, useDeleteLoop, useLoops, useUpdateLoop } from './useLoops';
+import { sessionKeys } from '@/features/practice/sessionKeys';
+import type { PracticeLoop } from './practiceList';
+import {
+  isStatusWriteOf,
+  useCreateLoop,
+  useDeleteLoop,
+  useLoops,
+  usePracticeLoops,
+  useSetLoopStatus,
+  useUpdateLoop,
+} from './useLoops';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -429,5 +439,229 @@ describe('loop writes alongside each other', () => {
     expect(queryClient.getQueryData<Loop[]>(otherKey)?.map((l) => l.id)).toEqual(['z']);
     // Under loopKeys.forUser, so the same invalidation marks it stale.
     await waitFor(() => expect(queryClient.getQueryState(otherKey)?.isInvalidated).toBe(true));
+  });
+});
+
+const withSong = (loop: Loop): PracticeLoop => ({
+  ...loop,
+  song: { title: 'Groove 120', artist: 'Fixture Band' },
+});
+
+describe('the home page list (usePracticeLoops)', () => {
+  it("reads every loop with its song's name under the user's loops key", async () => {
+    queryResult.mockResolvedValueOnce(ok([withSong(loopRow('a'))]));
+    const queryClient = testQueryClient();
+    const { result } = renderHook(() => usePracticeLoops(), {
+      wrapper: wrapperFor(queryClient, signedInAs('user-1')),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(result.current.data).toEqual([withSong(loopRow('a'))]);
+    const key = loopKeys.practice('user-1');
+    expect(key.slice(0, 2)).toEqual([...loopKeys.forUser('user-1')]);
+    expect(queryClient.getQueryData(key)).toEqual([withSong(loopRow('a'))]);
+  });
+
+  it('an edit shows in the home page list too, keeps the song, and rolls back there on failure', async () => {
+    const view = await renderLoaded([loopRow('a')]);
+    const practiceKey = loopKeys.practice('user-1');
+    view.queryClient.setQueryData<PracticeLoop[]>(practiceKey, [withSong(loopRow('a'))]);
+    const pending = deferred();
+    queryResult.mockReturnValueOnce(pending.promise);
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { status: 'finished' } }));
+
+    await waitFor(() =>
+      expect(view.queryClient.getQueryData<PracticeLoop[]>(practiceKey)?.[0]).toMatchObject({
+        status: 'finished',
+        song: { title: 'Groove 120' },
+      }),
+    );
+    expect(view.cached()?.[0]?.status).toBe('finished');
+
+    queryResult.mockResolvedValue(ok([loopRow('a')]));
+    await act(async () => pending.resolve(fail('nope')));
+    await waitFor(() => expect(view.result.current.update.isError).toBe(true));
+    expect(view.queryClient.getQueryData<PracticeLoop[]>(practiceKey)?.[0]?.status).toBe('active');
+  });
+
+  it('an edit from the home page alone, with no song list cached, is optimistic and rolls back', async () => {
+    const queryClient = testQueryClient();
+    const practiceKey = loopKeys.practice('user-1');
+    queryClient.setQueryData<PracticeLoop[]>(practiceKey, [withSong(loopRow('a'))]);
+    const { result } = renderHook(() => useUpdateLoop(SONG), {
+      wrapper: wrapperFor(queryClient, signedInAs('user-1')),
+    });
+    const pending = deferred();
+    queryResult.mockReturnValueOnce(pending.promise);
+    queryResult.mockResolvedValue(ok([withSong(loopRow('a'))]));
+
+    act(() => result.current.mutate({ loopId: 'a', changes: { status: 'finished' } }));
+    await waitFor(() =>
+      expect(queryClient.getQueryData<PracticeLoop[]>(practiceKey)?.[0]?.status).toBe('finished'),
+    );
+
+    await act(async () => pending.resolve(fail('nope')));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(queryClient.getQueryData<PracticeLoop[]>(practiceKey)?.[0]?.status).toBe('active');
+    // Never a song list made up from the home page's rows.
+    expect(queryClient.getQueryData(loopKeys.forSong('user-1', SONG))).toBeUndefined();
+  });
+
+  it("takes the server's row on success, finished_at included", async () => {
+    const view = await renderLoaded([loopRow('a')]);
+    const practiceKey = loopKeys.practice('user-1');
+    view.queryClient.setQueryData<PracticeLoop[]>(practiceKey, [withSong(loopRow('a'))]);
+    const saved = loopRow('a', { status: 'finished', finished_at: '2026-11-23T18:00:00Z' });
+    queryResult.mockResolvedValueOnce(ok(saved));
+    queryResult.mockResolvedValue(ok([saved]));
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { status: 'finished' } }));
+    await waitFor(() => expect(view.result.current.update.isSuccess).toBe(true));
+
+    expect(view.queryClient.getQueryData<PracticeLoop[]>(practiceKey)?.[0]).toEqual(
+      withSong(saved),
+    );
+    expect(view.cached()?.[0]).toEqual(saved);
+  });
+
+  it("a deleted loop leaves the home page list, and its history's cache goes with it", async () => {
+    const view = await renderLoaded([loopRow('a'), loopRow('b')]);
+    const practiceKey = loopKeys.practice('user-1');
+    view.queryClient.setQueryData<PracticeLoop[]>(practiceKey, [
+      withSong(loopRow('a')),
+      withSong(loopRow('b')),
+    ]);
+    view.queryClient.setQueryData(sessionKeys.forLoop('user-1', 'a'), []);
+    view.queryClient.setQueryData(sessionKeys.forLoop('user-1', 'b'), []);
+    queryResult.mockResolvedValueOnce(ok(null));
+    queryResult.mockResolvedValue(ok([loopRow('b')]));
+
+    act(() => view.result.current.remove.mutate('a'));
+    await waitFor(() => expect(view.result.current.remove.isSuccess).toBe(true));
+
+    expect(
+      view.queryClient.getQueryData<PracticeLoop[]>(practiceKey)?.map((loop) => loop.id),
+    ).toEqual(['b']);
+    expect(view.queryClient.getQueryData(sessionKeys.forLoop('user-1', 'a'))).toBeUndefined();
+    expect(view.queryClient.getQueryData(sessionKeys.forLoop('user-1', 'b'))).toEqual([]);
+  });
+});
+
+describe('isStatusWriteOf', () => {
+  it.each([
+    [{ loopId: 'a', changes: { status: 'finished' } }, true],
+    [{ loopId: 'a', changes: { status: 'active', name: 'x' } }, true],
+    [{ loopId: 'b', changes: { status: 'finished' } }, false],
+    [{ loopId: 'a', changes: { speed_ratio: 1 } }, false],
+    [{ loopId: 'a' }, false],
+    ['a', false],
+    [null, false],
+    [undefined, false],
+  ])('%j for loop a: %s', (variables, expected) => {
+    expect(isStatusWriteOf(variables, 'a')).toBe(expected);
+  });
+});
+
+describe('useSetLoopStatus', () => {
+  function renderStatus(queryClient = testQueryClient()) {
+    queryClient.setQueryData<Loop[]>(loopKeys.forSong('user-1', SONG), [
+      loopRow('a'),
+      loopRow('b'),
+    ]);
+    // Two controls for loop a (the list's button and the prompt's), and one for loop b.
+    return renderHook(
+      () => ({
+        first: useSetLoopStatus(SONG, 'a'),
+        second: useSetLoopStatus(SONG, 'a'),
+        other: useSetLoopStatus(SONG, 'b'),
+        update: useUpdateLoop(SONG),
+      }),
+      { wrapper: wrapperFor(queryClient, signedInAs('user-1')) },
+    );
+  }
+  const statusWrites = () =>
+    queryResult.mock.calls
+      .map(([call]) => opArgs(call, 'update')?.[0] as Partial<Loop> | undefined)
+      .filter((changes) => changes !== undefined);
+
+  it('sends the status alone', async () => {
+    const { result } = renderStatus();
+    queryResult.mockResolvedValueOnce(ok(loopRow('a', { status: 'finished' })));
+    queryResult.mockResolvedValue(ok([]));
+
+    act(() => result.current.first.setStatus('finished'));
+
+    await waitFor(() => expect(statusWrites()).toEqual([{ status: 'finished' }]));
+  });
+
+  it('is pending for every control of that loop, and ignores a press on any of them meanwhile', async () => {
+    const { result } = renderStatus();
+    const pending = deferred();
+    queryResult.mockReturnValueOnce(pending.promise);
+    queryResult.mockResolvedValue(ok([]));
+
+    act(() => result.current.first.setStatus('finished'));
+    await waitFor(() => expect(result.current.second.isPending).toBe(true));
+    expect(result.current.first.isPending).toBe(true);
+    expect(result.current.other.isPending).toBe(false);
+
+    // The other control now reads "Reopen": a press would race the finish to the server.
+    act(() => result.current.second.setStatus('active'));
+    act(() => result.current.first.setStatus('active'));
+    expect(statusWrites()).toEqual([{ status: 'finished' }]);
+
+    await act(async () => pending.resolve(ok(loopRow('a', { status: 'finished' }))));
+    await waitFor(() => expect(result.current.second.isPending).toBe(false));
+    act(() => result.current.second.setStatus('active'));
+    await waitFor(() => expect(statusWrites()).toHaveLength(2));
+  });
+
+  it('is not held up by another kind of write to the same loop', async () => {
+    const { result } = renderStatus();
+    queryResult.mockReturnValueOnce(deferred().promise);
+    queryResult.mockResolvedValue(ok(loopRow('a', { status: 'finished' })));
+
+    act(() => result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    await waitFor(() => expect(result.current.update.isPending).toBe(true));
+
+    expect(result.current.first.isPending).toBe(false);
+    act(() => result.current.first.setStatus('finished'));
+    await waitFor(() => expect(statusWrites()).toContainEqual({ status: 'finished' }));
+  });
+
+  it('reports a failure on every control of that loop, until its next status write', async () => {
+    const { result } = renderStatus();
+    queryResult.mockResolvedValueOnce(fail('nope'));
+    queryResult.mockResolvedValue(ok([loopRow('a'), loopRow('b')]));
+
+    act(() => result.current.first.setStatus('finished'));
+
+    await waitFor(() => expect(result.current.first.error?.message).toBe('nope'));
+    // The pressed control may have unmounted with the optimistic move; another one says it.
+    expect(result.current.second.error?.message).toBe('nope');
+    expect(result.current.other.error).toBeNull();
+
+    queryResult.mockResolvedValueOnce(ok(loopRow('a', { status: 'finished' })));
+    act(() => result.current.second.setStatus('finished'));
+    await waitFor(() => expect(result.current.first.error).toBeNull());
+  });
+
+  it('a control mounted after the failure still reports it', async () => {
+    const queryClient = testQueryClient();
+    const first = renderStatus(queryClient);
+    queryResult.mockResolvedValueOnce(fail('nope'));
+    queryResult.mockResolvedValue(ok([loopRow('a'), loopRow('b')]));
+    act(() => first.result.current.first.setStatus('finished'));
+    await waitFor(() => expect(first.result.current.first.error?.message).toBe('nope'));
+    first.unmount();
+
+    const later = renderHook(() => useSetLoopStatus(SONG, 'a'), {
+      wrapper: wrapperFor(queryClient, signedInAs('user-1')),
+    });
+
+    expect(later.result.current.error?.message).toBe('nope');
+    expect(later.result.current.isPending).toBe(false);
   });
 });

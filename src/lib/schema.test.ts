@@ -8,6 +8,7 @@ import {
   METRONOME_VOLUME_MAX,
   METRONOME_VOLUME_MIN,
   LOOP_NAME_MAX_LENGTH,
+  SESSION_MAX_DURATION_SECONDS,
   SONG_TEMPO_MAX,
   SONG_TEXT_MAX_LENGTH,
   SPEED_RATIO_MAX,
@@ -124,6 +125,12 @@ describe('matches the migrations', () => {
     expect(storage).toContain(`values ('${GP_FILES_BUCKET}', '${GP_FILES_BUCKET}'`);
     const megabytes = /false, (\d+) \* 1024 \* 1024\)/.exec(storage)?.[1];
     expect(Number(megabytes) * 1024 * 1024).toBe(GP_FILE_MAX_BYTES);
+  });
+
+  it('session duration bound', () => {
+    expect(readMigration('20261123010000_session_sanity.sql')).toContain(
+      `check (duration_seconds <= ${SESSION_MAX_DURATION_SECONDS})`,
+    );
   });
 
   it('song tempo bound', () => {

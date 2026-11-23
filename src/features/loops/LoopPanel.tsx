@@ -7,12 +7,16 @@ import {
   primaryButtonClass,
 } from '@/components/styles';
 import { isLoaded, type PlayerService, type PlayerSnapshot } from '@/features/player/PlayerService';
-import { barsLabel, sortLoops, type Loop } from './loopForm';
+import { ratioToPercent } from '@/features/player/speed';
+import { LoopHistory } from '@/features/practice/LoopHistory';
+import { lastPracticedLabel } from '@/features/practice/sessions';
+import { barsLabel, hasReachedTarget, sortLoops, type Loop } from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';
 import { speedLabel } from './loopLabels';
 import { LoopSpeedControl } from './LoopSpeedControl';
+import { LoopStatusButton } from './LoopStatusButton';
 import { loopPanelIsSheet, playLoopClosesPanel } from './useLoopPanelOpen';
-import { useDeleteLoop, useLoops } from './useLoops';
+import { useDeleteLoop, useLoops, useSetLoopStatus } from './useLoops';
 import type { LoopPractice } from './useLoopPractice';
 
 interface LoopPanelProps {
@@ -113,6 +117,9 @@ function LoopPanelBody({
   const { editor, editedLoop, activeLoop } = practice;
   // Loops need the score: its bar count checks a range, and a loop can't play before it.
   const { barCount } = snapshot;
+  // "Not yet" to "Mark finished?", for the loop at the speed it was asked about:
+  // saving a faster speed asks again. Here, not in the card, which the form replaces.
+  const [declinedFinish, setDeclinedFinish] = useState<string | null>(null);
 
   if (editor && barCount !== null) {
     if (editor.loopId !== null && !editedLoop) {
@@ -160,6 +167,10 @@ function LoopPanelBody({
           player={player}
           snapshot={snapshot}
           onExit={practice.exitLoop}
+          askToFinish={
+            hasReachedTarget(activeLoop) && declinedFinish !== finishQuestionKey(activeLoop)
+          }
+          onDeclineFinish={() => setDeclinedFinish(finishQuestionKey(activeLoop))}
         />
       )}
       <LoopList
@@ -173,6 +184,9 @@ function LoopPanelBody({
     </div>
   );
 }
+
+/** One asking of "Mark finished?": a loop at a saved speed. */
+const finishQuestionKey = (loop: Loop) => `${loop.id}:${loop.speed_ratio}`;
 
 /** In place of the edit form when another device deleted the loop it was opened for. */
 function DeletedLoopNotice({ onBack }: { onBack: () => void }) {
@@ -193,7 +207,15 @@ function ActiveLoopCard({
   player,
   snapshot,
   onExit,
-}: Pick<LoopPanelProps, 'songId' | 'player' | 'snapshot'> & { loop: Loop; onExit: () => void }) {
+  askToFinish,
+  onDeclineFinish,
+}: Pick<LoopPanelProps, 'songId' | 'player' | 'snapshot'> & {
+  loop: Loop;
+  onExit: () => void;
+  /** The saved speed has reached the target, and the user hasn't said "Not yet" to it. */
+  askToFinish: boolean;
+  onDeclineFinish: () => void;
+}) {
   return (
     <section
       aria-label={`Practicing ${loop.name}`}
@@ -206,10 +228,56 @@ function ActiveLoopCard({
         </p>
       </div>
       <LoopSpeedControl songId={songId} loop={loop} player={player} snapshot={snapshot} />
+      {askToFinish && <FinishPrompt songId={songId} loop={loop} onDecline={onDeclineFinish} />}
       <button type="button" className={buttonClass} onClick={onExit}>
         Back to whole song
       </button>
     </section>
+  );
+}
+
+/**
+ * Asks whether a loop that has reached its target speed is done. It only
+ * asks: a loop is never finished for the user, and "Not yet" leaves it as it is.
+ */
+function FinishPrompt({
+  songId,
+  loop,
+  onDecline,
+}: {
+  songId: string;
+  loop: Loop;
+  onDecline: () => void;
+}) {
+  const status = useSetLoopStatus(songId, loop.id);
+  return (
+    <div
+      role="group"
+      aria-label="Mark finished?"
+      data-testid="finish-prompt"
+      className="flex flex-col gap-2 rounded-md border border-emerald-800 bg-emerald-950/40 p-3"
+    >
+      <p className="text-sm text-neutral-100">
+        You've reached your target of {ratioToPercent(loop.target_ratio ?? loop.speed_ratio)}%. Mark
+        this loop finished?
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className={primaryButtonClass}
+          disabled={status.isPending}
+          onClick={() => status.setStatus('finished')}
+        >
+          Mark finished
+        </button>
+        <button type="button" className={buttonClass} onClick={onDecline}>
+          Not yet
+        </button>
+      </div>
+      {status.error && (
+        <ErrorAlert>Couldn't mark the loop finished: {status.error.message}</ErrorAlert>
+      )}
+    </div>
   );
 }
 
@@ -233,9 +301,12 @@ function LoopList({ songId, player, snapshot, practice, loops, onPlayLoop }: Loo
       </p>
     );
   }
-  return (
+  const sorted = sortLoops(loops.data);
+  const active = sorted.filter((loop) => loop.status === 'active');
+  const finished = sorted.filter((loop) => loop.status === 'finished');
+  const items = (listed: Loop[]) => (
     <ul className="flex flex-col gap-3">
-      {sortLoops(loops.data).map((loop) => (
+      {listed.map((loop) => (
         <LoopListItem
           key={loop.id}
           songId={songId}
@@ -251,6 +322,22 @@ function LoopList({ songId, player, snapshot, practice, loops, onPlayLoop }: Loo
         />
       ))}
     </ul>
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      {active.length > 0 ? (
+        items(active)
+      ) : (
+        <p className="text-neutral-400">Every loop of this song is finished.</p>
+      )}
+      {finished.length > 0 && (
+        <section aria-label="Finished loops" className="flex flex-col gap-3">
+          <h3 className="font-semibold text-neutral-300">Finished ({finished.length})</h3>
+          {items(finished)}
+        </section>
+      )}
+    </div>
   );
 }
 
@@ -273,6 +360,7 @@ function LoopListItem({
   onEdit: () => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [showingHistory, setShowingHistory] = useState(false);
   const named = <span className="sr-only"> {loop.name}</span>;
 
   return (
@@ -286,6 +374,9 @@ function LoopListItem({
         <p className="text-sm text-neutral-400">
           {barsLabel(loop.start_bar, loop.end_bar)} · {speedLabel(loop.speed_ratio, tempo)}
           {loop.target_ratio !== null && ` · target ${speedLabel(loop.target_ratio, tempo)}`}
+        </p>
+        <p className="text-sm text-neutral-400" data-testid="loop-last-practiced">
+          {lastPracticedLabel(loop.last_practiced_at, new Date())}
         </p>
       </div>
       {confirmingDelete ? (
@@ -305,11 +396,21 @@ function LoopListItem({
           <button type="button" className={buttonClass} onClick={onEdit}>
             Edit{named}
           </button>
+          <button
+            type="button"
+            className={showingHistory ? pressedButtonClass : buttonClass}
+            aria-expanded={showingHistory}
+            onClick={() => setShowingHistory((showing) => !showing)}
+          >
+            History{named}
+          </button>
+          <LoopStatusButton loop={loop} />
           <button type="button" className={buttonClass} onClick={() => setConfirmingDelete(true)}>
             Delete{named}
           </button>
         </div>
       )}
+      {showingHistory && <LoopHistory loopId={loop.id} loopName={loop.name} tempo={tempo} />}
     </li>
   );
 }

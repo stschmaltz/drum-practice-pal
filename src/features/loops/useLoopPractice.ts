@@ -68,8 +68,10 @@ function applyLoopRange(player: PlayerService, range: BarRange | null): void {
  * playing, and the loop form's bars as they are picked on the score.
  *
  * - `playLoop` sets the range, looping and the loop's saved speed, and starts
- *   playback. `selectLoop` does the same without touching speed or playback
- *   (a loop just saved from what was playing). `exitLoop` goes back to the
+ *   playback (on the loop already playing it restarts it at the speed playing
+ *   now). `selectLoop` does the same without touching speed or playback (a
+ *   loop just saved from what was playing), `openLoop` with the saved speed
+ *   but no playback (a link from the home page). `exitLoop` goes back to the
  *   whole song.
  * - While the form is open (`editor`), taps on the score pick bars instead of
  *   seeking; the screen turns jam mode's seek off for as long (`editor !== null`).
@@ -121,13 +123,28 @@ export function useLoopPractice(
       setActiveLoopId(loop.id);
       // All inside the tap, with nothing awaited: iOS only starts audio in the gesture.
       applyLoopRange(player, rangeOf(loop));
-      player.setSpeed(loop.speed_ratio);
+      // "Restart loop" keeps the speed playing now. Going back to the saved speed
+      // would throw away a nudge that hasn't been saved, without a word.
+      if (loop.id !== activeLoopId) player.setSpeed(loop.speed_ratio);
       player.play();
     },
-    [player, barCount],
+    [player, barCount, activeLoopId],
   );
 
   const selectLoop = useCallback((loopId: string) => setActiveLoopId(loopId), []);
+
+  /**
+   * Arriving at a loop from outside the page (the home page's link): the loop
+   * and its saved speed, ready for Play. It can't start playback: that has to
+   * happen inside a tap. The effect above sets the range and shows its bars.
+   */
+  const openLoop = useCallback(
+    (loop: Loop) => {
+      setActiveLoopId(loop.id);
+      player?.setSpeed(loop.speed_ratio);
+    },
+    [player],
+  );
   const exitLoop = useCallback(() => setActiveLoopId(null), []);
 
   // --- The loop form's bars ---
@@ -214,6 +231,7 @@ export function useLoopPractice(
     editedLoop,
     playLoop,
     selectLoop,
+    openLoop,
     exitLoop,
     openEditor,
     closeEditor,

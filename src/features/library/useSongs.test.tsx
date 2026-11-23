@@ -7,6 +7,7 @@ import {
   type FakeResult,
 } from '@/test/fakeSupabase';
 import { loopKeys } from '@/features/loops/loopKeys';
+import { sessionKeys } from '@/features/practice/sessionKeys';
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import type { ParseResult } from './parseScore';
 import type { LibrarySong, Song } from './songForm';
@@ -330,6 +331,24 @@ describe('useDeleteSong', () => {
     await waitFor(() => expect(view.result.current.remove.isSuccess).toBe(true));
     expect(view.queryClient.getQueryData(loopsKey)).toBeUndefined();
     expect(view.queryClient.getQueryData(otherLoopsKey)).toEqual([{ id: 'loop-b' }]);
+  });
+
+  it("takes the deleted song's loops off the home page list, and drops cached practice histories", async () => {
+    const view = await renderLoaded([song('a'), song('b')]);
+    const practiceKey = loopKeys.practice('user-1');
+    const historyKey = sessionKeys.forLoop('user-1', 'loop-a');
+    view.queryClient.setQueryData(practiceKey, [
+      { id: 'loop-a', song_id: 'a' },
+      { id: 'loop-b', song_id: 'b' },
+    ]);
+    view.queryClient.setQueryData(historyKey, [{ id: 'session-1' }]);
+    queryResult.mockResolvedValueOnce(ok(null));
+    queryResult.mockResolvedValue(ok([listRow(song('b'))]));
+
+    act(() => view.result.current.remove.mutate('a'));
+    await waitFor(() => expect(view.result.current.remove.isSuccess).toBe(true));
+    expect(view.queryClient.getQueryData(practiceKey)).toEqual([{ id: 'loop-b', song_id: 'b' }]);
+    expect(view.queryClient.getQueryData(historyKey)).toBeUndefined();
   });
 
   it('keeps the loops of a song whose delete fails', async () => {

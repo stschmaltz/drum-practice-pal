@@ -20,7 +20,7 @@ import {
 // The app's own select (LOOP_SELECT in src/features/loops/loopForm.ts), written out: that
 // module imports through the `@/` alias, which the database test config doesn't have.
 const LOOP_SELECT =
-  'id, song_id, name, start_bar, end_bar, speed_ratio, target_ratio, status, last_practiced_at, created_at';
+  'id, song_id, name, start_bar, end_bar, speed_ratio, target_ratio, status, finished_at, last_practiced_at, created_at';
 
 let a: TestUser;
 let b: TestUser;
