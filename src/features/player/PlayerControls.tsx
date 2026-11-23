@@ -11,10 +11,13 @@ import { percentToRatio, ratioToPercent, SPEED_STEP_PERCENT } from './speed';
 
 const VOLUME_STEP_PERCENT = 5;
 
-interface PlayerControlsProps {
+interface PlayerViewProps {
   /** Null while alphaTab loads; the controls show the snapshot but do nothing. */
   player: PlayerService | null;
   snapshot: PlayerSnapshot;
+}
+
+interface PlayerControlsProps extends PlayerViewProps {
   /**
    * False when the screen shows `PlayPauseButton` elsewhere, such as a sticky
    * bar that stays on screen while the page scrolls to the score.
@@ -28,7 +31,7 @@ function canPlay(player: PlayerService | null, snapshot: PlayerSnapshot): boolea
 }
 
 /** Play/Pause. Part of `PlayerControls` unless the screen places it itself. */
-export function PlayPauseButton({ player, snapshot }: Omit<PlayerControlsProps, 'showPlayButton'>) {
+export function PlayPauseButton({ player, snapshot }: PlayerViewProps) {
   return (
     <button
       type="button"
@@ -43,8 +46,9 @@ export function PlayPauseButton({ player, snapshot }: Omit<PlayerControlsProps, 
 }
 
 /**
- * The shared controls bar: play/pause, back to start, speed, metronome and
- * drum mute. Every change is live; none restarts playback.
+ * The shared controls bar: play/pause (unless `showPlayButton` is false),
+ * back to start, speed, metronome and drum mute. Every change is live; none
+ * restarts playback.
  */
 export function PlayerControls({ player, snapshot, showPlayButton = true }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist.

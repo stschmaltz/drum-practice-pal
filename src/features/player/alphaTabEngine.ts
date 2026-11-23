@@ -13,6 +13,9 @@ import type { LayoutChoice } from './layout';
 import type { EngineEvents, EngineMount, PlayerEngine } from './playerEngine';
 import { barStartTempos } from './tempo';
 
+/** Engine events the engine raises itself rather than forwarding from alphaTab. */
+type TapEvents = Pick<EngineEvents, 'barTapped'>;
+
 export function createAlphaTabEngine({
   element,
   scrollElement,
@@ -21,7 +24,7 @@ export function createAlphaTabEngine({
   // destroy() aborts it, so leaving mid-load stops the download and never feeds a destroyed api.
   const soundFontDownload = new AbortController();
   // alphaTab's own click handling is off (below), so taps are hit-tested here.
-  const taps = createEmitter<Pick<EngineEvents, 'barTapped'>>();
+  const taps = createEmitter<TapEvents>();
   const api = new alphaTab.AlphaTabApi(element, {
     // Without this, production builds look for fonts next to the lazy chunk
     // (/assets/font/) and nothing renders. The Vite plugin copies them to public/font.
@@ -131,7 +134,7 @@ export function createAlphaTabEngine({
 
 function subscribe<K extends keyof EngineEvents>(
   api: alphaTab.AlphaTabApi,
-  taps: Emitter<Pick<EngineEvents, 'barTapped'>>,
+  taps: Emitter<TapEvents>,
   event: K,
   handler: (payload: EngineEvents[K]) => void,
 ): void {

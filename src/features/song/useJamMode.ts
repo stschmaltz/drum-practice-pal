@@ -14,22 +14,32 @@ interface JamModeRefs {
 /**
  * Jam mode's behaviour on top of the player: a tapped bar is where playback
  * goes next (playing or paused), and the score box comes on screen when
- * playback starts. alphaTab keeps the cursor in view inside the box
- * (scrollElement); this makes sure the box itself is in the window, which on
- * a short screen it may not be, without sliding it under the sticky bar.
+ * playback starts.
  */
 export function useJamMode(
   player: PlayerService | null,
-  { scrollRef, stickyBarRef }: JamModeRefs,
+  refs: JamModeRefs,
   playing: boolean,
 ): void {
+  useSeekOnTap(player);
+  useScoreOnScreenOnPlay(refs, playing);
+}
+
+function useSeekOnTap(player: PlayerService | null): void {
   useEffect(() => {
     if (!player) return;
     return player.on('barTapped', ({ barNumber }) => {
       player.seekToBar(barNumber);
     });
   }, [player]);
+}
 
+/**
+ * alphaTab keeps the cursor in view inside the box (scrollElement); this makes
+ * sure the box itself is in the window, which on a short screen it may not
+ * be, without sliding it under the sticky bar.
+ */
+function useScoreOnScreenOnPlay({ scrollRef, stickyBarRef }: JamModeRefs, playing: boolean): void {
   useEffect(() => {
     if (!playing) return;
     const box = scrollRef.current;

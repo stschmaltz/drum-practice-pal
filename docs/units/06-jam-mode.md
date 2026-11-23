@@ -403,3 +403,37 @@ Issues 2 and 3 from the first QA round are unchanged and still minor: the phone 
 - The sticky bar held up to scrolling, rotation, wrapping, taps at its edge and the tab bar.
 - All four acceptance criteria pass.
 - Carried forward: one minor overflow at 320 px and below (it predates this fix) and two cosmetic notes.
+
+## Readability
+
+**Summary.** Small clarity refactors over this unit's code and tests. No behaviour change: no copy, classes, test ids, timings or assertions changed.
+
+**Changes**
+
+- `src/features/player/PlayerControls.tsx`: a named `PlayerViewProps` (`player`, `snapshot`) shared by `PlayPauseButton` and `PlayerControlsProps`, instead of `Omit<PlayerControlsProps, 'showPlayButton'>`. The `PlayerControls` doc now says Play/Pause is left out when `showPlayButton` is false.
+- `src/features/song/SongPage.tsx`: the sticky bar is its own `JamBar` component (React 19 `ref` prop), with the why-sticky comment as its doc. `SongPlayer` now reads as bar, controls, status, score.
+- `src/features/song/useJamMode.ts`: its two jobs are named hooks in the same file, `useSeekOnTap` and `useScoreOnScreenOnPlay`; `useJamMode` composes them. Same effects, same dependencies.
+- `src/features/player/alphaTabEngine.ts`: `type TapEvents` names the tap emitter's event map, used twice.
+- `src/test/fakePlayerEngine.ts`: `TEMPO_CHANGE_BAR_TEMPOS` replaces the identical `tempoChange` arrays in `PlayerService.test.ts` and `SongPage.test.tsx`. `finishLoading` takes `readonly number[]` and sends a copy, so a test can't share one mutable array with the service.
+- `tests/e2e/playerPage.ts`: `layoutForWidth` (moved from `player.spec.ts`) and `expectedLayout(page)`. `jam.spec.ts` used two inline `768` checks; both now use it.
+- `tests/e2e/jam.spec.ts`:
+  - All helpers sit at the top instead of between tests.
+  - Tap helpers take a `Point` (`tapAndWaitForBar(page, point, from)`, `contains(box, point)`), and `expectBarCursorOver(page, point)` replaces four copies of the same poll.
+  - `boxOf(locator, what)` / `scoreBox(page)` replace five "boundingBox or throw" blocks.
+  - One `visibleBottom(page)` (the phone tab bar's top, else the window's bottom) replaces the tab-bar lookup that `beatCursorOnScreen` and `onScreen` each carried.
+  - `untilStill(read)` is the one "poll until two reads agree" loop. `scoreScrollSettled` and `windowScrollSettled` (which returns `scrollY`) are built on it, and the portrait/landscape test uses that instead of its inline copy.
+  - `scrollScoreToStart` and `scrollWindowToTop` name the repeated `scrollTo` calls.
+
+**Left alone**
+
+- QA's open minor and cosmetic issues (320 px volume row overflow, no bottom edge on the sticky bar, the 47 px sideways offset on a phone, double-tap zoom). They are logged above.
+- Unit 05's inline Speed slider locators in `player.spec.ts`, outside this unit's changes.
+- The score-tap helpers stay in `jam.spec.ts`. Unit 08 (loop range selection) will likely need `barCursorBox`, `nextBarPoint` and `tapAndWaitForBar`; move them into `playerPage.ts` then.
+
+**AGENTS.md**: the Player section names `TEMPO_CHANGE_BAR_TEMPOS`, and the e2e bullet names `layoutForWidth` / `expectedLayout` in `playerPage.ts`.
+
+**Results**
+
+- Before: `npm run check` green, 46 files, 596 tests. `npm run e2e` 161 passed, 7 skipped.
+- After: `npm run check` green, 46 files, 596 tests. `npm run e2e` 161 passed, 7 skipped.
+- Nothing committed.

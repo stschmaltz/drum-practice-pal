@@ -23,6 +23,12 @@ export function straightBars(count: number): BarTicks[] {
   }));
 }
 
+/** `barTempos` like the tempo-change fixture: 16 bars, 120 BPM for bars 1 to 8, 90 from bar 9. */
+export const TEMPO_CHANGE_BAR_TEMPOS: readonly number[] = Array.from(
+  { length: 16 },
+  (_, barIndex) => (barIndex < 8 ? 120 : 90),
+);
+
 export class FakePlayerEngine implements PlayerEngine {
   private readonly emitter = createEmitter<EngineEvents>();
   mount: EngineMount | null = null;
@@ -59,8 +65,8 @@ export class FakePlayerEngine implements PlayerEngine {
     barCount = 16,
     trackCount = 3,
     barTempos = Array.from({ length: barCount }, () => 120),
-  }: { barCount?: number; trackCount?: number; barTempos?: number[] } = {}): void {
-    this.fire('scoreLoaded', { barCount, trackCount, barTempos });
+  }: { barCount?: number; trackCount?: number; barTempos?: readonly number[] } = {}): void {
+    this.fire('scoreLoaded', { barCount, trackCount, barTempos: [...barTempos] });
     this.fire('ticksReady', { bars: straightBars(barCount) });
     this.fire('readyForPlayback', undefined);
   }

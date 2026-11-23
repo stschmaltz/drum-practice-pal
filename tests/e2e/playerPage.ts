@@ -7,6 +7,17 @@ import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { expect, signIn, type E2eUser } from './auth';
 
+/** Mirrors layout.ts: page layout from this width, horizontal below. */
+const PAGE_LAYOUT_MIN_WIDTH = 768;
+
+/** The layout the app should pick at this width (layout.ts). */
+export function layoutForWidth(width: number): 'page' | 'horizontal' {
+  return width >= PAGE_LAYOUT_MIN_WIDTH ? 'page' : 'horizontal';
+}
+
+/** The layout the app should pick at the page's current viewport. */
+export const expectedLayout = (page: Page) => layoutForWidth(page.viewportSize()?.width ?? 0);
+
 export const fixture = (name: string) =>
   join(process.cwd(), 'tests', 'fixtures', 'gp', `${name}.gp`);
 

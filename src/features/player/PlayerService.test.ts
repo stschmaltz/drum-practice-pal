@@ -1,4 +1,4 @@
-import { FakePlayerEngine, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
+import { FakePlayerEngine, TEMPO_CHANGE_BAR_TEMPOS, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
 import { PlayerService, type PlayerServiceConfig } from './PlayerService';
 import type { WakeLockControl } from './wakeLock';
@@ -425,13 +425,10 @@ describe('PlayerService events', () => {
 });
 
 describe('PlayerService tempo per bar', () => {
-  /** 16 bars: 120 BPM for bars 1 to 8, 90 from bar 9, like the tempo-change fixture. */
-  const tempoChange = Array.from({ length: 16 }, (_, barIndex) => (barIndex < 8 ? 120 : 90));
-
   function loaded() {
     const ctx = setup();
     ctx.service.load(bytes);
-    ctx.engine.finishLoading({ barTempos: tempoChange });
+    ctx.engine.finishLoading({ barTempos: TEMPO_CHANGE_BAR_TEMPOS });
     return ctx;
   }
 

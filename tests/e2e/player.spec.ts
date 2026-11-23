@@ -5,7 +5,9 @@ import { expect, signIn, test } from './auth';
 import {
   barNumber,
   controls,
+  expectedLayout,
   fixture,
+  layoutForWidth,
   openFixture,
   playButton,
   status,
@@ -15,7 +17,6 @@ import {
 // Unit 05: the song page's player. Nothing here listens to audio; sound is a Human check.
 
 const admin = createAdminClient();
-const PAGE_LAYOUT_MIN_WIDTH = 768;
 
 /** Counts AudioContexts the page creates and reports their states, to see alphaTab let go of audio. */
 async function trackAudioContexts(page: Page) {
@@ -36,11 +37,6 @@ async function audioContextStates(page: Page): Promise<string[]> {
   return page.evaluate(() =>
     (window as unknown as { __audioContexts: AudioContext[] }).__audioContexts.map((c) => c.state),
   );
-}
-
-/** The layout the app should pick at this width (layout.ts). */
-function layoutForWidth(width: number): 'page' | 'horizontal' {
-  return width >= PAGE_LAYOUT_MIN_WIDTH ? 'page' : 'horizontal';
 }
 
 /** Rendered notation width against the scroll box: page layout fits, horizontal overflows. */
@@ -67,7 +63,7 @@ test('opens a song in the player with notation in the layout for the width', asy
   await expect(status(page)).toHaveText('Bar 1 of 16');
   await expect(playButton(page)).toHaveText('Play');
 
-  expect(await layoutShown(page)).toBe(layoutForWidth(page.viewportSize()?.width ?? 0));
+  expect(await layoutShown(page)).toBe(expectedLayout(page));
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
   // The inputs themselves, not just their row, must be 44 px tall to be easy to grab.

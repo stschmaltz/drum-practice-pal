@@ -1,20 +1,43 @@
 /// <reference lib="dom" />
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './auth';
-import { barNumber, openFixture, playButton, speedSlider, status, viewport } from './playerPage';
+import {
+  barNumber,
+  expectedLayout,
+  openFixture,
+  playButton,
+  speedSlider,
+  status,
+  viewport,
+} from './playerPage';
 
 // Unit 06: jam mode. Song page with a following cursor, tap a bar to seek,
 // and speed plus BPM at the current bar in the header.
 
 const bpm = (page: Page) => page.getByTestId('jam-bpm');
 const speed = (page: Page) => page.getByTestId('jam-speed');
+const jamBar = (page: Page) => page.getByTestId('jam-bar');
 
-interface Box {
+interface Point {
   x: number;
   y: number;
+}
+
+interface Box extends Point {
   width: number;
   height: number;
 }
+
+const contains = (box: Box, { x, y }: Point) =>
+  x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+
+async function boxOf(locator: Locator, what: string): Promise<Box> {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error(`No ${what}`);
+  return box;
+}
+
+const scoreBox = (page: Page) => boxOf(viewport(page), 'score box');
 
 /** alphaTab's bar cursor: the highlighted box over the current bar. */
 async function barCursorBox(page: Page): Promise<Box> {
@@ -23,12 +46,13 @@ async function barCursorBox(page: Page): Promise<Box> {
   return box;
 }
 
-const contains = (box: Box, x: number, y: number) =>
-  x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+async function expectBarCursorOver(page: Page, point: Point) {
+  await expect.poll(async () => contains(await barCursorBox(page), point)).toBe(true);
+}
 
-/** Taps a point in the window and waits for the status line to leave `from`. */
-async function tapAndWaitForBar(page: Page, x: number, y: number, from: number): Promise<number> {
-  await page.mouse.click(x, y);
+/** Taps a point in the window and waits for the status line to leave bar `from`. */
+async function tapAndWaitForBar(page: Page, point: Point, from: number): Promise<number> {
+  await page.mouse.click(point.x, point.y);
   await expect.poll(() => barNumber(page)).not.toBe(from);
   return barNumber(page);
 }
@@ -38,36 +62,97 @@ async function tapAndWaitForBar(page: Page, x: number, y: number, from: number):
  * start of the next line when the cursor's bar ends one (bar 1 is wide, with
  * the clef, and fills a line on a tablet).
  */
-async function nextBarPoint(page: Page) {
+async function nextBarPoint(page: Page): Promise<Point> {
   const box = await barCursorBox(page);
-  const frame = await viewport(page).boundingBox();
-  if (!frame) throw new Error('No score box');
+  const frame = await scoreBox(page);
   const right = { x: box.x + box.width + 20, y: box.y + box.height / 2 };
   if (right.x < frame.x + frame.width - 20) return right;
   return { x: frame.x + 40, y: box.y + box.height * 1.5 };
 }
 
 /**
- * Whether the beat cursor is on screen: inside the score box and the window,
- * above the phone's fixed tab bar.
+ * Taps the bar after the cursor's and waits for both the status line and the
+ * cursor to move there. The cursor's line is first brought to the middle of
+ * the box (and its bar to the left edge in horizontal layout), so the next bar
+ * or line is on screen.
  */
-async function beatCursorOnScreen(page: Page): Promise<boolean> {
-  return viewport(page).evaluate((box) => {
-    const cursor = box.querySelector('.at-cursor-beat')?.getBoundingClientRect();
-    if (!cursor || cursor.height === 0) return false;
+async function tapNextBar(page: Page): Promise<number> {
+  const from = await barNumber(page);
+  await viewport(page).evaluate((box) => {
+    box
+      .querySelector('.at-cursor-bar')
+      ?.scrollIntoView({ block: 'center', inline: 'start', behavior: 'instant' });
+  });
+  const point = await nextBarPoint(page);
+  const landed = await tapAndWaitForBar(page, point, from);
+  await expectBarCursorOver(page, point);
+  return landed;
+}
+
+/** The bottom of the visible window: the top of the phone's fixed tab bar, or the window's bottom. */
+async function visibleBottom(page: Page): Promise<number> {
+  return page.evaluate(() => {
     const tabBar = Array.from(document.querySelectorAll('nav[aria-label="Main"]'))
       .filter((nav) => getComputedStyle(nav).position === 'fixed')
       .map((nav) => nav.getBoundingClientRect())
       .find((rect) => rect.height > 0);
-    const frame = box.getBoundingClientRect();
-    const top = Math.max(frame.top, 0);
-    const bottom = Math.min(frame.bottom, tabBar?.top ?? window.innerHeight);
-    const left = Math.max(frame.left, 0);
-    const right = Math.min(frame.right, window.innerWidth);
-    const midY = cursor.top + cursor.height / 2;
-    return cursor.left >= left && cursor.right <= right && midY >= top && midY <= bottom;
+    return tabBar?.top ?? window.innerHeight;
   });
 }
+
+/** Whether the beat cursor is on screen: inside the score box and the visible window. */
+async function beatCursorOnScreen(page: Page): Promise<boolean> {
+  return viewport(page).evaluate(
+    (box, windowBottom) => {
+      const cursor = box.querySelector('.at-cursor-beat')?.getBoundingClientRect();
+      if (!cursor || cursor.height === 0) return false;
+      const frame = box.getBoundingClientRect();
+      const top = Math.max(frame.top, 0);
+      const bottom = Math.min(frame.bottom, windowBottom);
+      const left = Math.max(frame.left, 0);
+      const right = Math.min(frame.right, window.innerWidth);
+      const midY = cursor.top + cursor.height / 2;
+      return cursor.left >= left && cursor.right <= right && midY >= top && midY <= bottom;
+    },
+    await visibleBottom(page),
+  );
+}
+
+/** Whether the element is wholly inside the visible window. */
+async function onScreen(locator: Locator): Promise<boolean> {
+  return locator.evaluate(
+    (element, windowBottom) => {
+      const rect = element.getBoundingClientRect();
+      return rect.height > 0 && rect.top >= 0 && rect.bottom <= windowBottom;
+    },
+    await visibleBottom(locator.page()),
+  );
+}
+
+/** Polls `read` until it gives the same value twice running, and returns that value. */
+async function untilStill<T>(read: () => Promise<T>): Promise<T> {
+  const reads: T[] = [];
+  await expect
+    .poll(async () => {
+      reads.push(await read());
+      return reads.length > 1 && reads.at(-1) === reads.at(-2);
+    })
+    .toBe(true);
+  return reads.at(-1) as T;
+}
+
+/** Waits until the score box stops scrolling (a swipe's fling has ended). */
+const scoreScrollSettled = (page: Page) =>
+  untilStill(() => viewport(page).evaluate((box) => `${box.scrollLeft},${box.scrollTop}`));
+
+/** Waits until the window stops scrolling (Play's smooth scroll has ended); returns `scrollY`. */
+const windowScrollSettled = (page: Page) => untilStill(() => page.evaluate(() => window.scrollY));
+
+const scrollScoreToStart = (page: Page) =>
+  viewport(page).evaluate((box) => box.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
+
+const scrollWindowToTop = (page: Page) =>
+  page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
 
 test('the header shows speed and the BPM it gives at the current bar', async ({ user, page }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
@@ -85,26 +170,24 @@ test('tapping a bar moves playback and the cursor to that bar', async ({ user, p
 
   // The neighbouring bar: lands exactly on the bar under the tap.
   const next = await nextBarPoint(page);
-  expect(await tapAndWaitForBar(page, next.x, next.y, 1)).toBe(2);
-  await expect.poll(async () => contains(await barCursorBox(page), next.x, next.y)).toBe(true);
+  expect(await tapAndWaitForBar(page, next, 1)).toBe(2);
+  await expectBarCursorOver(page, next);
 
   // A bar further on: scroll the score along (down in page layout, sideways in
   // horizontal) and tap the middle of the box. The cursor goes to the bar tapped.
   await viewport(page).evaluate((box) => {
     box.scrollBy({ left: box.clientWidth * 2, top: box.clientHeight / 2, behavior: 'instant' });
   });
-  const frame = await viewport(page).boundingBox();
-  if (!frame) throw new Error('No score box');
+  const frame = await scoreBox(page);
   // Horizontal layout is one line, so stay at the cursor's height there.
   const cursor = await barCursorBox(page);
-  const pageLayout = (page.viewportSize()?.width ?? 0) >= 768;
   const far = {
     x: frame.x + frame.width / 2,
-    y: pageLayout ? frame.y + frame.height / 2 : cursor.y + cursor.height / 2,
+    y: expectedLayout(page) === 'page' ? frame.y + frame.height / 2 : cursor.y + cursor.height / 2,
   };
-  const landed = await tapAndWaitForBar(page, far.x, far.y, 2);
+  const landed = await tapAndWaitForBar(page, far, 2);
   expect(landed).toBeGreaterThan(2);
-  await expect.poll(async () => contains(await barCursorBox(page), far.x, far.y)).toBe(true);
+  await expectBarCursorOver(page, far);
 
   // Playback starts from the tapped bar, not from bar 1.
   const tappedBar = await barNumber(page);
@@ -122,7 +205,7 @@ test('tapping a bar while playing seeks there and keeps playing', async ({ user,
 
   const point = await nextBarPoint(page);
   // At 50% a bar lasts 4 s, so the cursor is still on bar 1 here.
-  const landed = await tapAndWaitForBar(page, point.x, point.y, 1);
+  const landed = await tapAndWaitForBar(page, point, 1);
   expect(landed).toBe(2);
   await expect(playButton(page)).toHaveText('Pause');
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBe(3);
@@ -176,38 +259,6 @@ test('every song opens at 100%', async ({ user, page }) => {
   await expect(speedSlider(page)).toHaveValue('100');
 });
 
-/**
- * Taps the bar after the cursor's and waits for both the status line and the
- * cursor to move there. The cursor's line is first brought to the middle of
- * the box (and its bar to the left edge in horizontal layout), so the next bar
- * or line is on screen.
- */
-async function tapNextBar(page: Page): Promise<number> {
-  const from = await barNumber(page);
-  await viewport(page).evaluate((box) => {
-    box
-      .querySelector('.at-cursor-bar')
-      ?.scrollIntoView({ block: 'center', inline: 'start', behavior: 'instant' });
-  });
-  const point = await nextBarPoint(page);
-  const landed = await tapAndWaitForBar(page, point.x, point.y, from);
-  await expect.poll(async () => contains(await barCursorBox(page), point.x, point.y)).toBe(true);
-  return landed;
-}
-
-/** Waits until the score box stops scrolling (a swipe's fling has ended). */
-async function scrollSettled(page: Page) {
-  let last = '';
-  await expect
-    .poll(async () => {
-      const now = await viewport(page).evaluate((box) => `${box.scrollLeft},${box.scrollTop}`);
-      const settled = now === last;
-      last = now;
-      return settled;
-    })
-    .toBe(true);
-}
-
 test('each tap lands on the bar tapped, through the tempo change, and BPM follows', async ({
   user,
   page,
@@ -239,9 +290,8 @@ test('a tap outside the bars, on the score margin, does not seek', async ({ user
   await openFixture(page, user, 'groove-120', 'Groove 120');
   expect(await tapNextBar(page)).toBe(2);
 
-  await viewport(page).evaluate((box) => box.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
-  const frame = await viewport(page).boundingBox();
-  if (!frame) throw new Error('No score box');
+  await scrollScoreToStart(page);
+  const frame = await scoreBox(page);
   // The top edge of the score is margin above the first line of music.
   await page.mouse.click(frame.x + frame.width / 2, frame.y + 4);
   await page.waitForTimeout(500);
@@ -255,27 +305,24 @@ test('a touch tap seeks; a touch swipe scrolls the score without seeking', async
   test.skip(testInfo.project.name === 'desktop', 'touch devices only');
   await openFixture(page, user, 'groove-120', 'Groove 120');
   const cdp = await page.context().newCDPSession(page);
-  const touch = (
-    type: 'touchStart' | 'touchMove' | 'touchEnd',
-    touchPoints: { x: number; y: number }[],
-  ) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', touchPoints: Point[]) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
 
   // A touch tap (no movement) on a bar seeks, the same as a click.
   const next = await nextBarPoint(page);
   await touch('touchStart', [next]);
   await touch('touchEnd', []);
   await expect.poll(() => barNumber(page)).toBe(2);
-  await expect.poll(async () => contains(await barCursorBox(page), next.x, next.y)).toBe(true);
+  await expectBarCursorOver(page, next);
 
   // Swipe sideways on a phone (one long line), up on a tablet (page layout),
   // starting on a bar. (A tap during the fling that follows only stops it, as
   // on a real phone, so the tap comes first.)
-  await viewport(page).evaluate((box) => box.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
-  await scrollSettled(page);
-  const frame = await viewport(page).boundingBox();
-  if (!frame) throw new Error('No score box');
+  await scrollScoreToStart(page);
+  await scoreScrollSettled(page);
+  const frame = await scoreBox(page);
   const cursor = await barCursorBox(page);
-  const horizontal = (page.viewportSize()?.width ?? 0) < 768;
+  const horizontal = expectedLayout(page) === 'horizontal';
   const start = horizontal
     ? { x: frame.x + frame.width - 30, y: cursor.y + cursor.height / 2 }
     : { x: frame.x + frame.width / 2, y: frame.y + frame.height - 40 };
@@ -289,22 +336,9 @@ test('a touch tap seeks; a touch swipe scrolls the score without seeking', async
   await expect
     .poll(() => viewport(page).evaluate((box) => box.scrollLeft + box.scrollTop))
     .toBeGreaterThan(50);
-  await scrollSettled(page);
+  await scoreScrollSettled(page);
   await expect(status(page)).toHaveText('Bar 2 of 16');
 });
-
-/** Whether the element is wholly inside the window, above the phone's fixed tab bar. */
-async function onScreen(locator: Locator): Promise<boolean> {
-  return locator.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    const tabBar = Array.from(document.querySelectorAll('nav[aria-label="Main"]'))
-      .filter((nav) => getComputedStyle(nav).position === 'fixed')
-      .map((nav) => nav.getBoundingClientRect())
-      .find((nav) => nav.height > 0);
-    const bottom = tabBar?.top ?? window.innerHeight;
-    return rect.height > 0 && rect.top >= 0 && rect.bottom <= bottom;
-  });
-}
 
 // QA issue 1: Play used to scroll the readout and Pause off the top of a phone.
 for (const size of [
@@ -319,22 +353,13 @@ for (const size of [
     await page.setViewportSize({ width: size.width, height: size.height });
     await openFixture(page, user, 'groove-120', 'Groove 120');
     // From the top of the page, as when the song has just opened.
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    await scrollWindowToTop(page);
 
     await playButton(page).click();
     await expect(playButton(page)).toHaveText('Pause');
-    // Play scrolls the score box into view (smoothly): wait for the window to settle.
-    let lastY = -1;
-    await expect
-      .poll(async () => {
-        const y = await page.evaluate(() => window.scrollY);
-        const settled = y === lastY;
-        lastY = y;
-        return settled;
-      })
-      .toBe(true);
-    // Neither size fits the header, controls and score, so the window did scroll.
-    expect(lastY).toBeGreaterThan(0);
+    // Play scrolls the score box into view (smoothly). Neither size fits the
+    // header, controls and score, so the window did scroll.
+    expect(await windowScrollSettled(page)).toBeGreaterThan(0);
 
     for (let sample = 0; sample < 12; sample++) {
       await page.waitForTimeout(250);
@@ -348,21 +373,6 @@ for (const size of [
   });
 }
 
-const jamBar = (page: Page) => page.getByTestId('jam-bar');
-
-/** Waits until the window stops scrolling (Play's smooth scroll has ended). */
-async function windowSettled(page: Page) {
-  let lastY = -1;
-  await expect
-    .poll(async () => {
-      const y = await page.evaluate(() => window.scrollY);
-      const settled = y === lastY;
-      lastY = y;
-      return settled;
-    })
-    .toBe(true);
-}
-
 // Fix round 1: the sticky bar must never sit over the score, swallow a tap
 // meant for a bar, or pass its own taps through to the score.
 for (const size of [null, { name: 'landscape phone', width: 844, height: 390 }]) {
@@ -373,30 +383,28 @@ for (const size of [null, { name: 'landscape phone', width: 844, height: 390 }])
     test.skip(size !== null && testInfo.project.name !== 'phone', 'phone project only');
     if (size) await page.setViewportSize({ width: size.width, height: size.height });
     await openFixture(page, user, 'groove-120', 'Groove 120');
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    await scrollWindowToTop(page);
     // At 50% a bar lasts 4 s, so the cursor is still on bar 1 for the taps.
     await speedSlider(page).fill('50');
     await playButton(page).click();
     await expect(playButton(page)).toHaveText('Pause');
-    await windowSettled(page);
+    await windowScrollSettled(page);
     // As far down as the page goes: the score at its closest to the sticky bar.
     await page.evaluate(() =>
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }),
     );
-    await windowSettled(page);
+    await windowScrollSettled(page);
 
-    const bar = await jamBar(page).boundingBox();
-    const frame = await viewport(page).boundingBox();
+    const bar = await boxOf(jamBar(page), 'sticky bar');
+    const frame = await scoreBox(page);
     const cursor = await barCursorBox(page);
-    if (!bar || !frame) throw new Error('No sticky bar or score box');
     const barBottom = bar.y + bar.height;
     expect(frame.y).toBeGreaterThanOrEqual(barBottom);
     expect(cursor.y).toBeGreaterThanOrEqual(barBottom);
     expect(await beatCursorOnScreen(page)).toBe(true);
 
     // A tap on the sticky bar's readout is the bar's: no seek, playback goes on.
-    const readout = await bpm(page).boundingBox();
-    if (!readout) throw new Error('No BPM readout');
+    const readout = await boxOf(bpm(page), 'BPM readout');
     await page.mouse.click(readout.x + readout.width / 2, readout.y + readout.height / 2);
     await page.waitForTimeout(500);
     await expect(status(page)).toHaveText('Bar 1 of 16');
@@ -406,7 +414,7 @@ for (const size of [null, { name: 'landscape phone', width: 844, height: 390 }])
     const next = await nextBarPoint(page);
     expect(next.y).toBeGreaterThan(barBottom);
     // Exactly the bar tapped. (While playing, alphaTab then scrolls its line into view.)
-    expect(await tapAndWaitForBar(page, next.x, next.y, 1)).toBe(2);
+    expect(await tapAndWaitForBar(page, next, 1)).toBe(2);
     await expect(playButton(page)).toHaveText('Pause');
     expect(await onScreen(playButton(page))).toBe(true);
     expect(await onScreen(bpm(page))).toBe(true);

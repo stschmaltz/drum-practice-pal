@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react';
+import { useRef, type ReactNode, type Ref } from 'react';
 import { Link, useParams } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
@@ -12,7 +12,7 @@ import {
   playerOptionsFromSettings,
   type PlayerOptions,
 } from '@/features/player/playerOptions';
-import type { PlayerSnapshot } from '@/features/player/PlayerService';
+import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { ratioToPercent } from '@/features/player/speed';
 import { bpmAtSpeed } from '@/features/player/tempo';
 import { usePlayer } from '@/features/player/usePlayer';
@@ -109,16 +109,7 @@ function SongPlayer({
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Sticky, so Pause and the readout stay on screen when the page scrolls
-          to the score: on a phone the header, controls and score don't all fit. */}
-      <div
-        ref={stickyBarRef}
-        data-testid="jam-bar"
-        className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-neutral-950 px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:-mx-8 md:px-8"
-      >
-        <JamReadout snapshot={snapshot} />
-        <PlayPauseButton player={player} snapshot={snapshot} />
-      </div>
+      <JamBar ref={stickyBarRef} player={player} snapshot={snapshot} />
       <PlayerControls player={player} snapshot={snapshot} showPlayButton={false} />
       <PlayerStatusLine snapshot={snapshot} />
       {/* Both layouts scroll inside this box, so the cursor's auto-scroll is one code path. */}
@@ -134,6 +125,32 @@ function SongPlayer({
       >
         <div ref={scoreRef} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * The readout and Play/Pause, sticky at the top of the window so both stay on
+ * screen when Play scrolls the page to the score: on a phone the header,
+ * controls and score don't all fit. Full-bleed over the page gutter.
+ */
+function JamBar({
+  ref,
+  player,
+  snapshot,
+}: {
+  ref: Ref<HTMLDivElement>;
+  player: PlayerService | null;
+  snapshot: PlayerSnapshot;
+}) {
+  return (
+    <div
+      ref={ref}
+      data-testid="jam-bar"
+      className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-neutral-950 px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:-mx-8 md:px-8"
+    >
+      <JamReadout snapshot={snapshot} />
+      <PlayPauseButton player={player} snapshot={snapshot} />
     </div>
   );
 }

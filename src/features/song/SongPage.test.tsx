@@ -13,7 +13,7 @@ import {
   type FakeResult,
   type StorageCall,
 } from '@/test/fakeSupabase';
-import { FakePlayerEngine, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
+import { FakePlayerEngine, TEMPO_CHANGE_BAR_TEMPOS, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
 import { renderRoutes, RouteMarker } from '@/test/render';
 import { SongPage } from './SongPage';
 
@@ -106,7 +106,7 @@ const downloads = () => storageResult.mock.calls.filter(([call]) => call.method 
 /** Waits for the player to mount its engine, then finishes alphaTab's loading. */
 async function loadPlayer(
   index = 0,
-  { barCount = 16, barTempos }: { barCount?: number; barTempos?: number[] } = {},
+  { barCount = 16, barTempos }: { barCount?: number; barTempos?: readonly number[] } = {},
 ) {
   await waitFor(() => expect(engines[index]?.loadScore).toHaveBeenCalled());
   const engine = engines[index]!;
@@ -351,8 +351,6 @@ describe('SongPage disposal on route change', () => {
 });
 
 describe('SongPage jam mode', () => {
-  /** Like the tempo-change fixture: 120 BPM for bars 1 to 8, 90 from bar 9. */
-  const tempoChange = Array.from({ length: 16 }, (_, barIndex) => (barIndex < 8 ? 120 : 90));
   const speedReadout = () => screen.getByTestId('jam-speed');
   const bpmReadout = () => screen.getByTestId('jam-bpm');
 
@@ -360,7 +358,7 @@ describe('SongPage jam mode', () => {
     serve();
     renderSong(SONG_A);
     expect(await screen.findByTestId('jam-bpm')).toHaveTextContent('–');
-    const engine = await loadPlayer(0, { barTempos: tempoChange });
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
     expect(speedReadout()).toHaveTextContent('100%');
     expect(bpmReadout()).toHaveTextContent('120');
 
@@ -372,7 +370,7 @@ describe('SongPage jam mode', () => {
   it('recomputes BPM from the speed slider', async () => {
     serve();
     renderSong(SONG_A);
-    const engine = await loadPlayer(0, { barTempos: tempoChange });
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
     act(() => engine.fire('position', { tick: 8 * TICKS_PER_BAR + 1 }));
 
     fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '75' } });
@@ -383,7 +381,7 @@ describe('SongPage jam mode', () => {
   it('seeks to a tapped bar, paused or playing, without restarting', async () => {
     serve();
     const user = renderSong(SONG_A);
-    const engine = await loadPlayer(0, { barTempos: tempoChange });
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
 
     act(() => engine.fire('barTapped', { barIndex: 11 }));
     expect(engine.seek).toHaveBeenLastCalledWith(11 * TICKS_PER_BAR);
@@ -417,7 +415,7 @@ describe('SongPage jam mode', () => {
   it('shows BPM for the tapped bar at the current speed, across the tempo change', async () => {
     serve();
     renderSong(SONG_A);
-    const engine = await loadPlayer(0, { barTempos: tempoChange });
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
     fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '150' } });
     expect(bpmReadout()).toHaveTextContent('180'); // 120 x 1.5 at bar 1
 
