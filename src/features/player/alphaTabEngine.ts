@@ -150,6 +150,7 @@ export function createAlphaTabEngine({
     },
     destroy() {
       stopWatchingPointer();
+      highlight.remove();
       taps.clear();
       soundFontDownload.abort();
       api.destroy();
@@ -252,7 +253,7 @@ function watchScorePointer(
  * alphaTab's own selection markers follow the playback range and end a beat
  * late, and the range on show isn't always the one playing (a selection
  * being made while another loop plays), so this layer is drawn here.
- * `draw` redraws the current range after a layout.
+ * `draw` redraws the current range after a layout; `remove` ends it.
  */
 function createHighlightLayer(element: HTMLElement, staffSystems: StaffSystems) {
   const layer = document.createElement('div');
@@ -281,6 +282,11 @@ function createHighlightLayer(element: HTMLElement, staffSystems: StaffSystems) 
     show(next: BarIndexRange | null) {
       range = next;
       draw();
+    },
+    /** For destroy(): a render that finishes afterwards must find nothing to draw or put back. */
+    remove() {
+      range = null;
+      layer.remove();
     },
   };
 }

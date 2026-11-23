@@ -49,3 +49,19 @@ export function barIndexAtTick(bars: readonly BarTicks[], tick: number): number 
 export function startTickOfBar(bars: readonly BarTicks[], barNumber: number): number | null {
   return bars.find((bar) => bar.barIndex === barNumber - 1)?.start ?? null;
 }
+
+/**
+ * Tick where 1-based `barNumber` starts inside a tick range: its first
+ * playthrough there, which for a repeated bar may not be its first in the
+ * song. Null when the bar doesn't play inside the range.
+ */
+export function startTickOfBarWithin(
+  bars: readonly BarTicks[],
+  barNumber: number,
+  { startTick, endTick }: TickRange,
+): number | null {
+  const played = bars.find(
+    (bar) => bar.barIndex === barNumber - 1 && bar.start >= startTick && bar.start < endTick,
+  );
+  return played?.start ?? null;
+}

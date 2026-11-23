@@ -174,6 +174,108 @@ describe('barsDragged', () => {
   });
 });
 
+describe('seeking while a range is set', () => {
+  // alphaTab clamps such a seek in its worker but reports the bar that was asked for, and
+  // then stops reporting positions: the bar readout sat on a bar that wasn't playing.
+  it.each([
+    ['after', 12],
+    ['before', 2],
+    ['just after', 9],
+    ['just before', 4],
+  ])('refuses a bar %s the range, playing or paused, and moves nothing', (_where, barNumber) => {
+    const { engine, service } = setup();
+    service.setRange({ startBar: 5, endBar: 8 });
+    service.setLooping(true);
+    service.seekToBar(5);
+    // The engine's echo of that seek, so nothing is left settling.
+    engine.fire('position', { tick: startOfBar(5) });
+    engine.seek.mockClear();
+    const barChanged = vi.fn();
+    service.on('barChanged', barChanged);
+
+    expect(service.seekToBar(barNumber)).toBe(false);
+    service.play();
+    engine.fire('stateChanged', { playing: true });
+    expect(service.seekToBar(barNumber)).toBe(false);
+
+    expect(engine.seek).not.toHaveBeenCalled();
+    expect(barChanged).not.toHaveBeenCalled();
+    expect(service.getSnapshot().barNumber).toBe(5);
+    // A refused seek leaves nothing settling either: the next position is believed at once.
+    engine.fire('position', { tick: startOfBar(6) + 10 });
+    expect(service.getSnapshot().barNumber).toBe(6);
+  });
+
+  // alphaTab reports the end of the range, which is the start of the next bar, before it
+  // wraps: a loop of bar 5 showed "Bar 6" for a frame at every wrap (08 QA issue 7).
+  it.each([
+    ['the tick the range ends on', startOfBar(9)],
+    ['a tick past the range', startOfBar(12) + 10],
+    ['a tick before the range', startOfBar(2) + 10],
+  ])('takes no bar from a position at %s', (_what, tick) => {
+    const { engine, service } = setup();
+    service.setRange({ startBar: 5, endBar: 8 });
+    service.setLooping(true);
+    engine.fire('position', { tick: startOfBar(8) + 10 });
+    const barChanged = vi.fn();
+    const position = vi.fn();
+    service.on('barChanged', barChanged);
+    service.on('position', position);
+
+    engine.fire('position', { tick });
+
+    expect(service.getSnapshot().barNumber).toBe(8);
+    expect(barChanged).not.toHaveBeenCalled();
+    expect(position).not.toHaveBeenCalled();
+    // The wrap itself is believed.
+    engine.fire('position', { tick: startOfBar(5) });
+    expect(service.getSnapshot().barNumber).toBe(5);
+  });
+
+  it('believes every position again once the range is cleared', () => {
+    const { engine, service } = setup();
+    service.setRange({ startBar: 5, endBar: 8 });
+    service.setRange(null);
+    engine.fire('position', { tick: startOfBar(9) });
+    expect(service.getSnapshot().barNumber).toBe(9);
+  });
+
+  it.each([5, 6, 8])('still seeks to bar %i, inside the range', (barNumber) => {
+    const { engine, service } = setup();
+    service.setRange({ startBar: 5, endBar: 8 });
+    expect(service.seekToBar(barNumber)).toBe(true);
+    expect(engine.seek).toHaveBeenLastCalledWith(startOfBar(barNumber));
+    expect(service.getSnapshot().barNumber).toBe(barNumber);
+  });
+
+  it('seeks anywhere again once the range is cleared', () => {
+    const { engine, service } = setup();
+    service.setRange({ startBar: 5, endBar: 8 });
+    service.setRange(null);
+    expect(service.seekToBar(12)).toBe(true);
+    expect(engine.seek).toHaveBeenLastCalledWith(startOfBar(12));
+  });
+
+  it('does not start a count-in over for a refused bar', () => {
+    vi.useFakeTimers();
+    try {
+      const { engine, service } = setup();
+      service.setCountInBars(1);
+      service.setRange({ startBar: 5, endBar: 8 });
+      service.seekToBar(5);
+      service.play();
+      expect(service.getSnapshot().status).toBe('countingIn');
+      engine.seek.mockClear();
+
+      expect(service.seekToBar(12)).toBe(false);
+      expect(engine.seek).not.toHaveBeenCalled();
+      expect(service.getSnapshot()).toMatchObject({ status: 'countingIn', barNumber: 5 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('a song with a repeat (bars 3 and 4 play twice)', () => {
   const PLAY_ORDER = [1, 2, 3, 4, 3, 4, 5, 6, 7, 8];
   /** Start tick of the `position`-th bar played, 0-based. */
@@ -231,6 +333,18 @@ describe('a song with a repeat (bars 3 and 4 play twice)', () => {
     service.setLooping(true);
     expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({ startTick, endTick });
     expect(service.getSnapshot()).toMatchObject({ range, looping: true });
+  });
+
+  it('inside a range, seeks a bar to the playthrough the range plays', () => {
+    const { engine, service } = withRepeat();
+    // Bars 4 to 5 play 4, 3, 4, 5: bar 3 is in the loop only on its second time round.
+    service.setRange({ startBar: 4, endBar: 5 });
+    expect(service.seekToBar(3)).toBe(true);
+    expect(engine.seek).toHaveBeenLastCalledWith(played(4));
+    expect(service.seekToBar(4)).toBe(true);
+    expect(engine.seek).toHaveBeenLastCalledWith(played(3));
+    expect(service.seekToBar(2)).toBe(false);
+    expect(service.seekToBar(6)).toBe(false);
   });
 
   it('refuses a range the song lacks', () => {

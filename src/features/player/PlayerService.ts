@@ -14,6 +14,7 @@ import {
   barIndexAtTick,
   barRangeToTicks,
   startTickOfBar,
+  startTickOfBarWithin,
   type BarTicks,
 } from './barTicks';
 import { webClickOutput, type ClickOutput } from './clickOutput';
@@ -302,10 +303,13 @@ export class PlayerService {
     this.engine.stop();
   }
 
-  /** Moves playback to the start of a bar, playing or not. False when the bar doesn't exist (yet). */
+  /**
+   * Moves playback to the start of a bar, playing or not. False, and nothing
+   * moves, when the bar doesn't exist (yet) or lies outside the range that is set.
+   */
   seekToBar(barNumber: number): boolean {
     if (this.disposed) return false;
-    const tick = startTickOfBar(this.bars, barNumber);
+    const tick = this.seekTickOfBar(barNumber);
     if (tick === null) return false;
     // A count-in under way was for the old bar, which may differ in tempo or meter.
     const recount = this.cancelCountIn !== null;
@@ -318,6 +322,21 @@ export class PlayerService {
     this.moveToBar(barNumber);
     if (recount && !this.beginCountIn(barNumber)) this.engine.play();
     return true;
+  }
+
+  /**
+   * Where a seek to a bar goes: its first playthrough, or with a range set
+   * its first playthrough inside the range. Null for a bar outside the range:
+   * alphaTab clamps that seek in its worker but reports the bar asked for and
+   * then stops reporting positions, so the readout would sit on a bar that
+   * isn't playing.
+   */
+  private seekTickOfBar(barNumber: number): number | null {
+    const { range } = this.snapshot;
+    const rangeTicks = range ? barRangeToTicks(this.bars, range.startBar, range.endBar) : null;
+    return rangeTicks
+      ? startTickOfBarWithin(this.bars, barNumber, rangeTicks)
+      : startTickOfBar(this.bars, barNumber);
   }
 
   /**
@@ -520,7 +539,7 @@ export class PlayerService {
       this.wakeLock.setActive(playing);
     });
     engine.on('position', ({ tick }) => {
-      if (this.disposed || this.isStaleAfterSeek(tick)) return;
+      if (this.disposed || this.isOutsideRange(tick) || this.isStaleAfterSeek(tick)) return;
       this.lastTick = tick;
       const barIndex = barIndexAtTick(this.bars, tick);
       const barNumber = barIndex === null ? this.snapshot.barNumber : barIndex + 1;
@@ -549,6 +568,18 @@ export class PlayerService {
       const [startBar, endBar] = orderedBars(fromBarIndex + 1, toBarIndex + 1);
       this.events.emit('barsDragged', { startBar, endBar, done });
     });
+  }
+
+  /**
+   * Whether a position lies outside the range that is set. Nothing plays
+   * there: alphaTab reports the tick a range ends on, which is the start of
+   * the next bar, just before it wraps or stops, and positions posted before
+   * the range was set can still arrive after it.
+   */
+  private isOutsideRange(tick: number): boolean {
+    const { range } = this.snapshot;
+    const ticks = range ? barRangeToTicks(this.bars, range.startBar, range.endBar) : null;
+    return ticks !== null && (tick < ticks.startTick || tick >= ticks.endTick);
   }
 
   /**

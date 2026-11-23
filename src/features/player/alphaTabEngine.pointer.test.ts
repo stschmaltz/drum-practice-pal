@@ -381,6 +381,18 @@ describe('after destroy', () => {
     release(middleOf(1));
     expect(drags).toEqual([{ fromBarIndex: 0, toBarIndex: 1, done: false }]);
   });
+
+  it('takes the highlight layer with it, and a render that lands late draws nothing', () => {
+    const { engine, api, element } = mounted();
+    engine.setHighlight({ startBarIndex: 0, endBarIndex: 1 });
+    expect(element.querySelector('.bar-highlight')).not.toBeNull();
+
+    engine.destroy();
+    expect(element.querySelector('.bar-highlight')).toBeNull();
+    api.postRenderFinished.fire();
+    api.renderer.partialRenderFinished.fire();
+    expect(element.querySelector('.bar-highlight')).toBeNull();
+  });
 });
 
 describe('the highlight layer', () => {

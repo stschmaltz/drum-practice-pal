@@ -176,10 +176,11 @@ describe('what a client cannot write', () => {
       end_bar: 2,
     });
     expect(insert.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
+    // anon has no grant on loops at all, so these are refused outright, not filtered by RLS.
     const update = await anon.from('loops').update({ name: 'Anon' }).eq('id', id).select();
-    expect(update.data ?? []).toEqual([]);
+    expect(update.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
     const del = await anon.from('loops').delete().eq('id', id).select();
-    expect(del.data ?? []).toEqual([]);
+    expect(del.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
     expect(await loopAsAdmin(id)).toMatchObject({ name: 'Test loop' });
   });
 });
@@ -289,6 +290,7 @@ describe('row-level security on loops is still owner-only', () => {
     expect(byId.error).toBeNull();
     expect(byId.data).toEqual([]);
     const bySong = await b.client.from('loops').select('id').eq('song_id', songA);
+    expect(bySong.error).toBeNull();
     expect(bySong.data).toEqual([]);
   });
 
@@ -315,8 +317,10 @@ describe('row-level security on loops is still owner-only', () => {
 
   it("B can't delete A's loop", async () => {
     const id = await insertLoop(a, songA);
-    const { data } = await b.client.from('loops').delete().eq('id', id).select('id');
-    expect(data ?? []).toEqual([]);
+    const { data, error } = await b.client.from('loops').delete().eq('id', id).select('id');
+    // Not refused, which would also leave the row: RLS hides it, so there is nothing to delete.
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
     expect(await loopAsAdmin(id)).not.toBeNull();
   });
 
@@ -336,6 +340,8 @@ describe('row-level security on loops is still owner-only', () => {
     const theirs = await insertLoop(b, songB, { name: 'Only B sees this' });
     const seenByA = await a.client.from('loops').select('id').in('id', [mine, theirs]);
     const seenByB = await b.client.from('loops').select('id').in('id', [mine, theirs]);
+    expect(seenByA.error).toBeNull();
+    expect(seenByB.error).toBeNull();
     expect(seenByA.data).toEqual([{ id: mine }]);
     expect(seenByB.data).toEqual([{ id: theirs }]);
   });
@@ -349,10 +355,16 @@ describe('blank names and titles', () => {
   it('refuses renaming a song to a blank title, and keeps the old one', async () => {
     const { error } = await a.client.from('songs').update({ title: ' \t ' }).eq('id', songA);
     expect(error?.code).toBe(PG.CHECK_VIOLATION);
-    const { data } = await a.client.from('songs').select('title').eq('id', songA).single();
+    const { data, error: readError } = await a.client
+      .from('songs')
+      .select('title')
+      .eq('id', songA)
+      .single();
+    expect(readError).toBeNull();
     expect(data?.title).toBe('Test Song');
   });
 
+  // Loop names of spaces, tabs and newlines are in constraints.test.ts ("rejects a blank name").
   it('refuses an empty loop name', async () => {
     await expect(insertLoop(a, songA, { name: '' })).rejects.toMatchObject({
       code: PG.CHECK_VIOLATION,

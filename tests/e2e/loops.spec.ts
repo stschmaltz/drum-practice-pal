@@ -111,6 +111,13 @@ const barAndBpm = (page: Page) =>
     return { bar: Number(bar), bpm: text('jam-bpm') };
   });
 
+interface TapWindow {
+  __drumPalPlayer?: {
+    on(event: 'barTapped', handler: (tap: { barNumber: number }) => void): () => void;
+  };
+  __taps?: number[];
+}
+
 test('tap the first bar, then the last: the bars are highlighted and saved as a loop', async ({
   user,
   page,
@@ -157,7 +164,7 @@ test('tap the first bar, then the last: the bars are highlighted and saved as a 
   await expect(activeLoopLine(page)).toContainText('Bars 2 to 3');
   expect((await highlightBoxes(page)).length).toBeGreaterThan(0);
 
-  // A tap seeks again now that the form is closed.
+  // Saved, not just shown: it is there after a reload.
   await page.reload();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await openLoopPanel(page);
@@ -415,6 +422,55 @@ test('Exit loop goes back to the whole song without stopping playback', async ({
 
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Play');
+});
+
+test('a tap on a bar outside the playing loop moves nothing, paused or playing', async ({
+  user,
+  page,
+}, testInfo) => {
+  const touch = testInfo.project.use.hasTouch === true;
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Bar two', firstBar: 2, lastBar: 2 });
+  await expect(status(page)).toHaveText('Bar 2 of 16');
+  // Only the phone's sheet is in the way of the score; the side panel stays as it is.
+  if (expectedLayout(page) === 'horizontal') await closeLoopPanel(page);
+  await expect.poll(async () => (await barCursorBox(page)).width).toBeGreaterThan(2);
+  await scrollScoreToCursor(page);
+  const bar3 = await nextBarPoint(page);
+  // Every bar the service hears tapped, so "nothing moved" can't pass on a tap that missed.
+  await page.evaluate(() => {
+    const debug = window as unknown as TapWindow;
+    if (!debug.__drumPalPlayer) throw new Error('No player on window.__drumPalPlayer');
+    const taps: number[] = [];
+    debug.__taps = taps;
+    debug.__drumPalPlayer.on('barTapped', ({ barNumber }) => taps.push(barNumber));
+  });
+  const tappedBars = () => page.evaluate(() => (window as unknown as TapWindow).__taps ?? []);
+
+  // Paused: alphaTab would report bar 3 for a seek it then clamps back into the loop.
+  await tapScore(page, bar3, touch);
+  await expect.poll(tappedBars).toEqual([3]);
+  await page.waitForTimeout(700);
+  await expect(status(page)).toHaveText('Bar 2 of 16');
+
+  // Playing: the readout stays in the loop and goes on following it.
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await tapScore(page, bar3, touch);
+  await expect.poll(tappedBars).toEqual([3, 3]);
+  expect([...(await barsPlayedFor(page, 2500))]).toEqual([2]);
+  await expect(playButton(page)).toHaveText('Pause');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+
+  // Out of the loop the bar after the cursor's, found the same way, is one a tap seeks to.
+  // (Measured again: the "Looping" line has gone, and the score moved up with it.)
+  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
+  await expect(activeLoopLine(page)).toHaveCount(0);
+  await expect(status(page)).toHaveText('Bar 2 of 16');
+  await scrollScoreToCursor(page);
+  await tapScore(page, await nextBarPoint(page), touch);
+  await expect(status(page)).toHaveText('Bar 3 of 16');
 });
 
 test('in a song with a repeat, a loop inside the repeat plays just its bars', async ({

@@ -3,6 +3,7 @@ import {
   barIndexAtTick,
   barRangeToTicks,
   startTickOfBar,
+  startTickOfBarWithin,
   type BarTicks,
 } from './barTicks';
 
@@ -119,5 +120,37 @@ describe('startTickOfBar', () => {
   it('returns null for a bar that does not exist', () => {
     expect(startTickOfBar(sixteenBars, 0)).toBeNull();
     expect(startTickOfBar(sixteenBars, 17)).toBeNull();
+  });
+});
+
+describe('startTickOfBarWithin', () => {
+  // Bars 1, 2, 3, 4, 3, 4, 5 as they play: bars 3 and 4 repeat once.
+  const repeated: BarTicks[] = [0, 1, 2, 3, 2, 3, 4].map((barIndex, i) => ({
+    barIndex,
+    start: i * 100,
+    end: (i + 1) * 100,
+  }));
+
+  it("finds a bar inside the range, at the range's first and last bars too", () => {
+    const range = { startTick: 4 * 3840, endTick: 8 * 3840 };
+    expect(startTickOfBarWithin(sixteenBars, 5, range)).toBe(startTickOfBar(sixteenBars, 5));
+    expect(startTickOfBarWithin(sixteenBars, 8, range)).toBe(startTickOfBar(sixteenBars, 8));
+  });
+
+  it('returns null for a bar before or after the range, and for no such bar', () => {
+    const range = { startTick: 4 * 3840, endTick: 8 * 3840 };
+    expect(startTickOfBarWithin(sixteenBars, 4, range)).toBeNull();
+    expect(startTickOfBarWithin(sixteenBars, 9, range)).toBeNull();
+    expect(startTickOfBarWithin(sixteenBars, 0, range)).toBeNull();
+    expect(startTickOfBarWithin(sixteenBars, 17, range)).toBeNull();
+  });
+
+  it('takes the playthrough the range plays, not the first in the song', () => {
+    // Bars 4 to 5: the first bar 4, then 3, 4, 5.
+    const range = { startTick: 300, endTick: 700 };
+    expect(startTickOfBarWithin(repeated, 3, range)).toBe(400);
+    expect(startTickOfBarWithin(repeated, 4, range)).toBe(300);
+    expect(startTickOfBarWithin(repeated, 5, range)).toBe(600);
+    expect(startTickOfBarWithin(repeated, 2, range)).toBeNull();
   });
 });

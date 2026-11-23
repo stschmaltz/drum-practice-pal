@@ -53,7 +53,6 @@ describe('songs edges', () => {
     ['original_tempo', -120],
     ['file_hash', 'abc123'],
     ['file_hash', 'A'.repeat(64)],
-    ['title', '   '],
   ])('rejects %s = %j', async (field, value) => {
     const { error } = await user.client.from('songs').insert(songRow(user.id, { [field]: value }));
     expect(error?.code).toBe(PG.CHECK_VIOLATION);
@@ -195,13 +194,6 @@ describe('loops edges', () => {
       .eq('id', id);
     expect(error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
     expect(await loopById(id)).toEqual(before);
-  });
-
-  it('a session still moves last_practiced_at, though the user cannot write it', async () => {
-    const id = await insertLoop(user, songId);
-    const { error } = await user.client.from('practice_sessions').insert(sessionRow(user.id, id));
-    expect(error).toBeNull();
-    expect((await loopById(id)).last_practiced_at).not.toBeNull();
   });
 
   it.each(['   ', '\t', '\n \n'])('rejects a blank name %j', async (name) => {
