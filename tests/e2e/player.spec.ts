@@ -1,19 +1,22 @@
 /// <reference lib="dom" />
-import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
-import { expect, signIn, test, type E2eUser } from './auth';
+import { expect, signIn, test } from './auth';
+import {
+  barNumber,
+  controls,
+  expectedLayout,
+  fixture,
+  layoutForWidth,
+  openFixture,
+  playButton,
+  status,
+  viewport,
+} from './playerPage';
 
 // Unit 05: the song page's player. Nothing here listens to audio; sound is a Human check.
 
 const admin = createAdminClient();
-const PAGE_LAYOUT_MIN_WIDTH = 768;
-const fixture = (name: string) => join(process.cwd(), 'tests', 'fixtures', 'gp', `${name}.gp`);
-
-const controls = (page: Page) => page.getByRole('region', { name: 'Player controls' });
-const playButton = (page: Page) => controls(page).getByRole('button', { name: /^(Play|Pause)$/ });
-const status = (page: Page) => page.getByTestId('player-status');
-const viewport = (page: Page) => page.getByTestId('score-viewport');
 
 /** Counts AudioContexts the page creates and reports their states, to see alphaTab let go of audio. */
 async function trackAudioContexts(page: Page) {
@@ -34,31 +37,6 @@ async function audioContextStates(page: Page): Promise<string[]> {
   return page.evaluate(() =>
     (window as unknown as { __audioContexts: AudioContext[] }).__audioContexts.map((c) => c.state),
   );
-}
-
-/** Uploads a fixture through the library and opens its song page. */
-async function openFixture(page: Page, user: E2eUser, name: string, title: string) {
-  await signIn(page, user, '/library');
-  await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture(name));
-  await expect(page.getByRole('status').filter({ hasText: `Added “${title}”.` })).toBeVisible();
-  await page.getByRole('list').getByRole('link', { name: title }).click();
-  await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
-  // Enabled once the score, MIDI and soundfont are all in.
-  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
-  await viewport(page).scrollIntoViewIfNeeded();
-  await expect(viewport(page).locator('svg').first()).toBeVisible();
-}
-
-async function barNumber(page: Page): Promise<number> {
-  const text = (await status(page).textContent()) ?? '';
-  const match = /Bar (\d+) of/.exec(text);
-  if (!match?.[1]) throw new Error(`No bar in "${text}"`);
-  return Number(match[1]);
-}
-
-/** The layout the app should pick at this width (layout.ts). */
-function layoutForWidth(width: number): 'page' | 'horizontal' {
-  return width >= PAGE_LAYOUT_MIN_WIDTH ? 'page' : 'horizontal';
 }
 
 /** Rendered notation width against the scroll box: page layout fits, horizontal overflows. */
@@ -85,7 +63,7 @@ test('opens a song in the player with notation in the layout for the width', asy
   await expect(status(page)).toHaveText('Bar 1 of 16');
   await expect(playButton(page)).toHaveText('Play');
 
-  expect(await layoutShown(page)).toBe(layoutForWidth(page.viewportSize()?.width ?? 0));
+  expect(await layoutShown(page)).toBe(expectedLayout(page));
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
   // The inputs themselves, not just their row, must be 44 px tall to be easy to grab.

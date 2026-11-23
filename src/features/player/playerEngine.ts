@@ -9,7 +9,12 @@ import type { LayoutChoice } from './layout';
 
 export type EngineEvents = {
   /** The score parsed. Fires once per load. */
-  scoreLoaded: { barCount: number; trackCount: number };
+  scoreLoaded: {
+    barCount: number;
+    trackCount: number;
+    /** The tempo each bar starts at, by 0-based bar index (see tempo.ts). */
+    barTempos: number[];
+  };
   /** The MIDI was generated, so ticks can be mapped to bars. May repeat. */
   ticksReady: { bars: BarTicks[] };
   /** Soundfont and MIDI are both loaded. alphaTab fires this more than once. */
@@ -21,6 +26,8 @@ export type EngineEvents = {
   /** The end of the song or range was reached. With looping on, once per pass. */
   finished: undefined;
   error: { error: unknown };
+  /** A tap or click landed on a rendered bar. The engine doesn't act on it; the service decides. */
+  barTapped: { barIndex: number };
 };
 
 export interface PlayerEngine {
