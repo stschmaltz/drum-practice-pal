@@ -15,7 +15,7 @@ A tab-first drum practice tool: upload a Songsterr Guitar Pro export once, then 
 - Speed shown as both % and BPM, editable either way
 - Session log per loop, so progress has a history
 - Loop states: active and finished, reopenable, history kept either way
-- Playback controls in both modes: metronome with volume, mute drums, count-in (off / 1 bar / 2 bars, at start only or before every repeat)
+- Playback controls in both modes: metronome with volume, mute drums, drums only (mute every other track), count-in (off / 1 bar / 2 bars, at start only or before every repeat)
 - Keyboard shortcuts, which also gives Bluetooth page-turner pedal support
 - Installable PWA with offline playback of cached songs
 
@@ -151,7 +151,9 @@ REVIEW: You are the Review agent for Unit NN: <name>. Read AGENTS.md and the han
 
 ## Units of work
 
-Thirteen units, run in order. Each is sized for one Build agent session. Unit 01 proves the audio stack on real devices before anything is built on it.
+Fourteen units, run in order. Each is sized for one Build agent session. Unit 01 proves the audio stack on real devices before anything is built on it.
+
+Handoff notes written before the Visual design unit was added call the release unit "Unit 12". It is Unit 13 now.
 
 | #   | Unit                                       | Depends on |
 | --- | ------------------------------------------ | ---------- |
@@ -168,7 +170,8 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 | 09  | Practice sessions and progress             | 08         |
 | 10  | Keyboard shortcuts and pedals              | 09         |
 | 11  | PWA and offline                            | 09         |
-| 12  | Polish and release                         | all        |
+| 12  | Visual design                              | 11         |
+| 13  | Polish and release                         | all        |
 
 ### 00 Scaffold, conventions, CI, preview deploys
 
@@ -268,7 +271,7 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 
 ### Hosted setup (before Unit 07)
 
-**Goal:** the app runs on an HTTPS preview URL against a hosted Supabase project, so the iOS audio checks can happen before count-in is built on that audio. Moved here from Unit 12. It is configuration, not a unit: no Build, Test, QA pipeline. Creating the project and entering its settings need Shane's Supabase and Cloudflare accounts; an agent can prepare the values and verify the result.
+**Goal:** the app runs on an HTTPS preview URL against a hosted Supabase project, so the iOS audio checks can happen before count-in is built on that audio. Moved here from the release unit. It is configuration, not a unit: no Build, Test, QA pipeline. Creating the project and entering its settings need Shane's Supabase and Cloudflare accounts; an agent can prepare the values and verify the result.
 
 - Production Cloudflare Workers: `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as Workers Builds variables. Until then every preview shows the "not connected" message. Decide whether previews share the production project
 - Hosted Supabase project: apply the migrations, and settle how later migrations reach it (by hand with `supabase db push`, or from CI on merge)
@@ -286,8 +289,9 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 - Scheduled on the AudioContext clock; playback resumes on the downbeat
 - Big visual beat counter, readable from the throne
 - `user_settings` defaults, overridable from the controls bar
+- Drums only: a toggle beside Mute drums that mutes every track except the drum track, to hear the part on its own. `PlayerService.setTrackMuted` already mutes any track, so this is a service method and a button. The two toggles exclude each other, it is off on open, it is disabled for a song with no drum track, and it changes live like the other options
 
-**Acceptance:** count-in matches meter and speed, including 3/4 and after a tempo change; "every repeat" pauses at loop end, counts in, resumes on the downbeat.
+**Acceptance:** count-in matches meter and speed, including 3/4 and after a tempo change; "every repeat" pauses at loop end, counts in, resumes on the downbeat. With Drums only on, the multi-track fixture plays the drum track alone, and turning it off restores the other tracks without restarting playback.
 
 **Test focus:** pure scheduler function (tempo, meter, ratio, bars to click times), tested exhaustively. **QA focus:** toggling mid-loop, extreme speeds. **Human check:** by ear.
 
@@ -354,7 +358,7 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 
 **Goal:** hands-free-ish control from a laptop or page-turner pedal.
 
-- Space play/pause; up/down speed +/-5%; left/right and PageUp/PageDown previous/next loop; M metronome; D drums mute; C cycle count-in; ? overlay
+- Space play/pause; up/down speed +/-5%; left/right and PageUp/PageDown previous/next loop; M metronome; D drums mute; S drums only; C cycle count-in; ? overlay
 - Ignored while typing in inputs
 
 **Acceptance:** every shortcut works in jam and loop modes; a pedal sending PageUp/PageDown or arrows switches loops.
@@ -392,11 +396,32 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 - Installed iOS PWA: sign-in links open in Safari, so the 6-digit code is the way in. Check it. (03 QA)
 - If Unit 01's Human check picks a bigger soundfont, budget its size in the first load and the cache. (01 Findings)
 
-### 12 Polish and release
+### 12 Visual design
+
+**Goal:** make it look and feel like a finished app. Until here every unit has used plain neutral styling; this unit changes how things look and nothing about what they do.
+
+- Design tokens in the Tailwind theme (colour, type scale, spacing, radius, shadow), replacing the ad hoc classes in `src/components/styles.ts` and the pages
+- Identity: name treatment, app icon and theme colour, shared with the PWA manifest from Unit 11
+- Every screen redrawn on the tokens: login, On the go, library, song page (jam header, controls bar, loop panel, count-in counter), settings, the shortcut overlay
+- Controls bar: icons with labels, and a layout that fits a phone without four rows
+- The score: alphaTab's colours, cursor and bar highlight matched to the theme, and a notation size readable from the throne
+- Empty, loading and error states designed, not just present; motion kept small and off under `prefers-reduced-motion`
+- Kept from earlier units: WCAG AA contrast, 44 px touch targets, visible focus rings
+
+**Acceptance:** every screen and state at all three sizes uses the tokens, with no one-off colours; e2e passes with no change to behaviour; Shane signs off on the screenshots.
+
+**Test focus:** e2e stays green; contrast checks on the token pairs. **QA focus:** before and after screenshots of every screen and state at all three sizes. **Human check:** look and feel on the phone at the kit, in a dim room and a bright one.
+
+**Carried forward**
+
+- The on-phone controls bar is four rows. (05 Build)
+- From 06 QA: the volume readout overflows the controls box at 320 px and below; the sticky bar has no bottom edge; on a phone the score opens scrolled 47 px sideways, clipping the clef; double-tap on the score may zoom.
+
+### 13 Polish and release
 
 **Goal:** ship it to yourself.
 
-- Empty, loading and error states everywhere; touch targets 44 px+
+- Check that no screen lacks an empty, loading or error state, and that touch targets are 44 px+ (designed in Unit 12)
 - Full e2e journey on all three profiles: sign in, upload, jam, save loop, practice, hit target, finish
 - Production release on the hosted project from the Hosted setup step; re-check its auth settings against `supabase/config.toml`
 - README
@@ -413,8 +438,6 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 - Link inline form errors to their inputs with `aria-describedby`. (04 QA issue 6)
 - Speed, metronome and mute stay enabled after a player error. (05 QA issue 3)
 - Files in Storage with no songs row are possible (failed rollbacks, deleted users). Add a sweep script, or accept it. (02 QA, 04 Review)
-- The on-phone controls bar is four rows. (05 Build)
-- From 06 QA: the volume readout overflows the controls box at 320 px and below; the sticky bar has no bottom edge; on a phone the score opens scrolled 47 px sideways, clipping the clef; double-tap on the score may zoom.
 - A bar with a tempo change part-way through shows its starting tempo for the whole bar. No fixture has one. (06 Build)
 
 ## Open human checks
