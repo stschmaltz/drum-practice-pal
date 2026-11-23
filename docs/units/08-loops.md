@@ -305,3 +305,68 @@ No other bugs. No app code was touched.
 - `npm run check`: green. 73 test files, 2943 tests.
 - `npm run test:db`: green. 5 files, 185 tests.
 - `npm run e2e`: green. 261 tests: 251 passed, 10 skipped (the same size-specific skips as the Test stage).
+
+## Build (QA fix round 1)
+
+Fixes QA issue 1 (major) only. Nothing else in the QA list was worked on.
+
+**What was wrong.** Two separate causes behind the one symptom.
+
+1. The phone's loop sheet is the only place "Play loop" can be pressed, and nothing closed it. It lies over the lower part of the window, which is where the score box and the count-in number over it are.
+2. Nothing scrolled the score to a loop's first bar until playback started. alphaTab follows its cursor only while it plays; `seekToBar` moved the cursor and the status line, and the score box stayed where it was. So the count-in ran over whatever bars were on screen (bar 1 in the repro), at every size.
+
+**The fix**
+
+- **The sheet closes on "Play loop" on a phone**, when the press starts playback (the player is paused or already counting in). Its header goes on reading "Loop: name". It stays open when a loop is switched or restarted while already playing: no count-in follows then, and the sheet is open for its speed control. From 768 px the panel is beside the score and is left alone. The rule is `playLoopClosesPanel(isSheet, status)` and the breakpoint check `loopPanelIsSheet()`, both in `useLoopPanelOpen.ts`; `LoopPanel` applies them in the same tap that calls `playLoop`.
+- **The loop's first bar is scrolled into the score box** whenever a loop's range is applied while not playing, and at the start of every count-in. Engine interface first: `PlayerEngine.scrollToBar(barIndex)`; then the service: a public `showBar(barNumber)` (a no-op while playing, before load and for a bar the song lacks), and `beginCountIn` scrolls to the bar it counts into. `applyLoopRange` in `useLoopPractice.ts` calls `showBar` after its seek, which covers `playLoop`, `selectLoop` and the effect that follows an edited range.
+- The scroll is worked out in a new pure module, `barScroll.ts`: `barBounds(systems, barIndex)` and `scrollToShow(rect, view)`. A bar that is all on show is left alone. One that isn't goes to the start of the box on the axis that needs it (left edge in horizontal layout, top in page layout), which is where alphaTab puts the playing bar. It is instant, not animated: a count-in can be a second long.
+- It only scrolls. No seek, play, pause, stop or reload is added anywhere (`PlayerService.showBar.test.ts` asserts `restartCalls()`).
+
+**Decisions**
+
+- **`seekToBar` itself does not scroll.** The first version did, while not playing. On a phone the bar after the cursor is usually only partly on show, so a tap on it in jam mode slid it to the left edge under the finger, and 12 phone e2e tests that tap bars failed. Scrolling is asked for by the caller that moves to a bar the user didn't pick on the score (`showBar`), and tap-to-seek is unchanged.
+- **Every count-in scrolls, the repeats' included.** With a count-in before every repeat the engine stops and rewinds at the end of a pass without scrolling back, which is the same fault (07 QA noted it; the 08 Build listed it as unchanged). `beginCountIn` is the one place all count-ins start, so the scroll is there rather than only in the loop flow. Play pressed after the user scrolled away from the cursor now also brings the bar back for the count-in. This goes a little past the repro; it is the same line of code.
+- **The sheet closes rather than the counter moving.** With the sheet open about 85 px of the score shows on a phone, so a counter moved clear of it would still count over a score that can't be read.
+
+**QA issue 2 (a loop selected while paused isn't scrolled into view): resolved in its main form, not all of it.** A loop saved from typed bars, or chosen from the panel while paused, now scrolls to its first bar (`phone-40`'s case), and so does the count-in. Not covered: bars typed into the open form are highlighted but not scrolled to, and after a rotation or a resize across 768 px the picked bars or the paused loop can be outside the box (`phone-90`, `tablet-90`). The Unit 12 Carried forward line was rewritten to say only that.
+
+**Carried forward** (`docs/plan.md`)
+
+- Unit 09: QA issue 4, "Restart loop" discards an unsaved speed. New line; the code is untouched.
+- Unit 12: what is left of issue 2 (above), replacing the 08 Build line about it.
+- Unit 12: on a phone the speed control is behind the closed sheet's header after "Play loop", and focus is left on the hidden button. New line, a cost of this fix.
+
+**Files**
+
+- `src/features/player/barScroll.ts` (new) + `barScroll.test.ts` (new, 18 tests).
+- `src/features/player/playerEngine.ts`: `scrollToBar`. `alphaTabEngine.ts`: its implementation over `boundsLookup`. `alphaTabEngine.pointer.test.ts`: +9 tests on the stubbed engine.
+- `src/features/player/PlayerService.ts`: `showBar`, and the scroll in `beginCountIn`. `PlayerService.showBar.test.ts` (new, 15 tests).
+- `src/features/loops/useLoopPractice.ts`: `applyLoopRange` calls `showBar`. `useLoopPractice.test.tsx`: +7 tests.
+- `src/features/loops/useLoopPanelOpen.ts`: `loopPanelIsSheet`, `playLoopClosesPanel`. `useLoopPanelOpen.test.ts` (new, 14 tests).
+- `src/features/loops/LoopPanel.tsx`: `onPlayLoop`. `LoopPanel.test.tsx`: +5 tests.
+- `src/test/fakePlayerEngine.ts`: `scrollToBar`.
+- `tests/e2e/loops.spec.ts`: one new test (x 3 sizes), the QA repro: bars 13 to 14, a two-bar count-in, back to the start, "Play loop". During the count-in it checks that the whole number is in the window and the loop panel doesn't overlap it, that the sheet is closed on the phone, and that the start of the loop's highlight is inside the score box, in the window and clear of the panel. It fails at all three sizes without the fix. Four existing tests reopen the panel after "Play loop" before using its speed fields, since the phone sheet now closes.
+- `AGENTS.md`: two lines in the Loops section and `showBar` in the service API line. `docs/plan.md`: Carried forward, above.
+
+**Not done, not sure**
+
+- Nothing was looked at by eye or on a device; the geometry is asserted in Chromium only. Worth retaking in QA: `phone-120`, `phone-123` and `tablet-120`.
+- When the first bar was only partly on show, the box scrolls to put it at the edge; when playback then starts, alphaTab applies its own alignment. They should agree (the same edge), but a small shift on the downbeat is possible and was not measured.
+- "Play loop" on a phone while a loop already plays leaves the sheet open. That is deliberate but a judgement call; closing it always would be a one-line change in `playLoopClosesPanel`.
+- The scroll is instant. If Unit 12 animates it, it must stay shorter than a one-bar count-in at 200%.
+
+**How to verify**
+
+1. `npm run dev` against local Supabase, phone size (390x844). Open a song, save a loop on bars 13 to 14, set Count-in to 2 bars, Exit loop, Back to start.
+2. Open the Loops sheet, press "Play loop". The sheet closes, its header reads "Loop: name", the big number is fully visible over the score, and the score shows bar 13 highlighted while it counts.
+3. Open the sheet again while it plays and press "Play loop" on another loop, or "Restart loop": the sheet stays open and playback doesn't stop.
+4. At 820 and 1440 wide: the panel stays open, and the score is on the loop's first bar during the count-in.
+5. Paused, in jam mode, tap a bar that is half off the edge of the score: it becomes the current bar and the score does not move.
+6. Paused, save a new loop from typed bars far from the cursor: the score scrolls to its first bar.
+7. Count-in "Before every loop repeat" on a loop of several lines (bars 1 to 12 at 1440 wide): each repeat's count-in shows the loop's first line again.
+
+**Results**
+
+- `npm run check`: green. 76 test files, 3011 tests.
+- `npm run e2e`: green. 264 tests: 254 passed, 10 skipped (the same size-specific skips as before). The new test also ran three more times at each size (`--repeat-each 3`): 9 passed.
+- `npm run test:db`: not run; nothing in the database or `tests/db` changed.

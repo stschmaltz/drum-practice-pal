@@ -28,6 +28,7 @@ import {
   barCursorBox,
   barNumber,
   boxOf,
+  controls,
   cursorBarPoint,
   expectedLayout,
   nextBarPoint,
@@ -35,6 +36,7 @@ import {
   playButton,
   scoreBox,
   scrollScoreToCursor,
+  scrollScoreToStart,
   speedSlider,
   status,
   tapAndWaitForBar,
@@ -222,6 +224,8 @@ test('a saved loop opens on another device at the same range and speed, with BPM
 
     // The same range, the same speed, and the BPM the first device typed.
     await expect(playButton(other)).toHaveText('Pause');
+    // On a phone the press closed the sheet, to show the score; the speed fields are inside it.
+    await openLoopPanel(other);
     await expect(activeLoopLine(other)).toContainText('Bars 9 to 12');
     await expect(speed(other)).toHaveText('86%');
     await expect(bpm(other)).toHaveText('77');
@@ -296,6 +300,7 @@ test('the loop speed shows % and BPM, each editable, with nudges; Save speed kee
   await openLoopPanel(page);
   await playLoopButton(page, 'Verse').click();
   await expect(playButton(page)).toHaveText('Pause');
+  await openLoopPanel(page);
   await expect(loopBpmField(page)).toHaveValue('85');
   await expect(bpm(page)).toHaveText('85');
   await expect(status(page)).toContainText(/Bar [5-8] of 16/);
@@ -547,6 +552,7 @@ test('a loop across the tempo change opens on another device with BPM from its f
 
     await playLoopButton(other, 'Across the change').click();
     await expect(playButton(other)).toHaveText('Pause');
+    await openLoopPanel(other);
     await expect(activeLoopLine(other)).toContainText('Across the change · Bars 7 to 10');
     await expect(speed(other)).toHaveText('71%');
     await expect(bpm(other)).toHaveText('85');
@@ -731,6 +737,8 @@ test('switching, editing and deleting the playing loop never stop playback', asy
 
   await playLoopButton(page, 'First').click();
   await expect(playButton(page)).toHaveText('Pause');
+  // On a phone the press that starts playback closes the sheet; one that switches loops doesn't.
+  await openLoopPanel(page);
   await expect.poll(async () => (await barAndBpm(page)).bar).toBeLessThanOrEqual(2);
   await recordStatuses(page);
   // The loop's speed fields are live: no restart for a new speed.
@@ -863,4 +871,65 @@ test('a finger dragged across the score scrolls it: it picks no bars and never s
   await expect(lastBarField(page)).toHaveValue('');
   expect(await highlightBoxes(page)).toEqual([]);
   await expect(status(page)).toHaveText('Bar 2 of 16');
+});
+
+// 08 QA issue 1: the phone's sheet used to stay open over the counter, and at
+// every size the score stayed on bar 1 until the downbeat.
+test('Play loop with a count-in: the counter is in the clear and the loop’s first bar is on screen', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  // Half speed, so the two-bar count-in lasts eight seconds: time to measure during it.
+  await speedSlider(page).fill('50');
+  await saveNewLoop(page, { name: 'Late fill', firstBar: 13, lastBar: 14 });
+  await controls(page)
+    .getByRole('combobox', { name: 'Count-in', exact: true })
+    .selectOption('2 bars');
+
+  // Back to the top of the song, as a user who has just been playing something else.
+  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
+  await page.getByRole('button', { name: 'Back to start' }).click();
+  await expect(status(page)).toHaveText('Bar 1 of 16');
+  await scrollScoreToStart(page);
+
+  await openLoopPanel(page);
+  await playLoopButton(page, 'Late fill').click();
+  await expect(status(page)).toHaveText('Bar 13 of 16 · Counting in…');
+  const beat = page.getByTestId('count-in-beat');
+  await expect(beat).toBeVisible();
+  await windowScrollSettled(page);
+
+  const overlaps = (a: Box, b: Box) =>
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+  // The whole number is in the window, and the loop panel is not over any of it.
+  await expect(beat).toBeInViewport({ ratio: 1 });
+  const panel = await boxOf(loopPanel(page), 'loop panel');
+  expect(overlaps(await boxOf(beat, 'count-in number'), panel)).toBe(false);
+  if (expectedLayout(page) === 'horizontal') {
+    // The sheet closed itself, and its header says which loop is coming.
+    await expect(loopPanel(page).locator('button[aria-controls]')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    await expect(loopPanel(page)).toContainText('Loop: Late fill');
+  }
+
+  // The loop's first bar is there to be read during the count-in: the start of the
+  // highlight is inside the score box, in the window, and clear of the panel.
+  const frame = await scoreBox(page);
+  const [first] = await highlightBoxes(page);
+  if (!first) throw new Error('No highlight');
+  const firstBarStart = { x: first.x + 20, y: first.y + first.height / 2 };
+  expect(contains(frame, firstBarStart)).toBe(true);
+  expect(contains(panel, firstBarStart)).toBe(false);
+  const size = page.viewportSize();
+  if (!size) throw new Error('No viewport size');
+  expect(contains({ x: 0, y: 0, ...size }, firstBarStart)).toBe(true);
+  // Still counting: all of that was measured before the downbeat.
+  await expect(status(page)).toContainText('Counting in');
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
 });

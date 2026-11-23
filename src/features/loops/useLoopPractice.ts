@@ -43,8 +43,11 @@ const barFieldsOf = ({ startBar, endBar }: BarRange): BarFields => ({
 function applyLoopRange(player: PlayerService, range: BarRange | null): void {
   player.setRange(range);
   player.setLooping(range !== null);
+  if (!range) return;
   // alphaTab moves to the range start itself; this shows the bar at once and re-counts a count-in.
-  if (range) player.seekToBar(range.startBar);
+  player.seekToBar(range.startBar);
+  // The loop came from the panel, not from a tap on the score: its bars may be off screen.
+  player.showBar(range.startBar);
 }
 
 /**

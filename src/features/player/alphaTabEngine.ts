@@ -8,6 +8,7 @@ import * as alphaTab from '@coderline/alphatab';
 import { loadGuitarPro } from '@/features/library/parseScore';
 import { highlightRects, type BarIndexRange } from './barHighlight';
 import { barIndexAtPoint } from './barHitTest';
+import { barBounds, scrollToShow } from './barScroll';
 import { barMeters } from './countIn';
 import type { BarTicks } from './barTicks';
 import { createEmitter, type Emitter } from './emitter';
@@ -240,6 +241,38 @@ export function createAlphaTabEngine({
     setHighlight(range) {
       highlight = range;
       drawHighlight();
+    },
+    scrollToBar(barIndex) {
+      const surface = element.querySelector('.at-surface');
+      const bar = barBounds(api.boundsLookup?.staffSystems ?? [], barIndex);
+      if (!surface || !bar) return;
+      const view = {
+        left: scrollElement.scrollLeft,
+        top: scrollElement.scrollTop,
+        width: scrollElement.clientWidth,
+        height: scrollElement.clientHeight,
+      };
+      // Bounds are relative to the surface; the box scrolls in its own content's coordinates.
+      const surfaceRect = surface.getBoundingClientRect();
+      const boxRect = scrollElement.getBoundingClientRect();
+      const target = scrollToShow(
+        {
+          x: bar.x + surfaceRect.left - boxRect.left - scrollElement.clientLeft + view.left,
+          y: bar.y + surfaceRect.top - boxRect.top - scrollElement.clientTop + view.top,
+          w: bar.w,
+          h: bar.h,
+        },
+        view,
+      );
+      if (!target) return;
+      // At once, not animated: a count-in may be a second long, and the bar is to be read during it.
+      if (typeof scrollElement.scrollTo === 'function') {
+        scrollElement.scrollTo({ ...target, behavior: 'instant' });
+      } else {
+        // jsdom has no Element.scrollTo.
+        scrollElement.scrollLeft = target.left;
+        scrollElement.scrollTop = target.top;
+      }
     },
     destroy() {
       element.removeEventListener('pointerdown', onPointerDown);

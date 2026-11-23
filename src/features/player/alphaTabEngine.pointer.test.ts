@@ -502,3 +502,77 @@ describe('the highlight layer', () => {
     expect(highlightBlocks()).toEqual([]);
   });
 });
+
+// 08 QA issues 1 and 2: alphaTab only scrolls to its cursor while playing.
+describe('scrolling a bar into view', () => {
+  const BOX = { x: 50, y: 60, width: 200, height: 100 };
+
+  /**
+   * A 200 x 100 score box at (50, 60) in the window, scrolled to (left, top),
+   * with alphaTab's surface `inset` px inside its content.
+   */
+  function scrolledTo(left: number, top: number, inset = { x: 0, y: 0 }) {
+    const view = mounted();
+    const box = view.element.parentElement!;
+    Object.defineProperty(box, 'clientWidth', { value: BOX.width });
+    Object.defineProperty(box, 'clientHeight', { value: BOX.height });
+    box.getBoundingClientRect = () => new DOMRect(BOX.x, BOX.y, BOX.width, BOX.height);
+    // Where the surface is in the window follows the box's scroll position, as in a browser.
+    view.surface.getBoundingClientRect = () =>
+      new DOMRect(BOX.x + inset.x - box.scrollLeft, BOX.y + inset.y - box.scrollTop, 320, 200);
+    box.scrollLeft = left;
+    box.scrollTop = top;
+    const scroll = () => ({ left: box.scrollLeft, top: box.scrollTop });
+    return { ...view, scroll };
+  }
+
+  it('leaves the box alone for a bar that is all on show', () => {
+    const { engine, scroll } = scrolledTo(0, 0);
+    engine.scrollToBar(0);
+    expect(scroll()).toEqual({ left: 0, top: 0 });
+  });
+
+  it.each([
+    [2, { left: 210, top: 0 }],
+    [3, { left: 0, top: 100 }],
+    [5, { left: 210, top: 100 }],
+  ])('brings bar index %i, off screen, to the start of the box', (barIndex, expected) => {
+    const { engine, scroll } = scrolledTo(0, 0);
+    engine.scrollToBar(barIndex);
+    expect(scroll()).toEqual(expected);
+  });
+
+  it('scrolls back for an earlier bar', () => {
+    const { engine, scroll } = scrolledTo(210, 100);
+    engine.scrollToBar(0);
+    expect(scroll()).toEqual({ left: 10, top: 20 });
+  });
+
+  it('is settled after one call: the bar it showed stays where it is', () => {
+    const { engine, scroll } = scrolledTo(0, 0);
+    engine.scrollToBar(5);
+    engine.scrollToBar(5);
+    expect(scroll()).toEqual({ left: 210, top: 100 });
+  });
+
+  it('allows for the surface starting inside the box’s content', () => {
+    const { engine, scroll } = scrolledTo(0, 0, { x: 4, y: 30 });
+    engine.scrollToBar(3);
+    expect(scroll()).toEqual({ left: 0, top: 130 });
+  });
+
+  it('does nothing for a bar the score lacks, or before the score has rendered', () => {
+    const { engine, api, scroll } = scrolledTo(40, 10);
+    engine.scrollToBar(20);
+    api.boundsLookup = null;
+    engine.scrollToBar(3);
+    expect(scroll()).toEqual({ left: 40, top: 10 });
+  });
+
+  it('reports no tap or drag', () => {
+    const { engine, taps, drags } = scrolledTo(0, 0);
+    engine.scrollToBar(5);
+    expect(taps).toEqual([]);
+    expect(drags).toEqual([]);
+  });
+});

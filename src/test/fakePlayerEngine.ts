@@ -60,6 +60,7 @@ export class FakePlayerEngine implements PlayerEngine {
   setPlaybackRange = vi.fn();
   setLooping = vi.fn();
   setHighlight = vi.fn();
+  scrollToBar = vi.fn();
   destroy = vi.fn();
 
   on<K extends keyof EngineEvents>(event: K, handler: (payload: EngineEvents[K]) => void): void {

@@ -320,6 +320,19 @@ export class PlayerService {
     return true;
   }
 
+  /**
+   * Scrolls the score box so a bar can be read, if it isn't all on show
+   * already. For a bar the user didn't pick on the score itself, such as a
+   * loop's first bar chosen from the panel: alphaTab follows its cursor only
+   * while it plays, so this does nothing then. seekToBar doesn't do it, since
+   * a tapped bar would move under the finger. Scrolling only.
+   */
+  showBar(barNumber: number): void {
+    if (this.disposed || !this.isLoaded() || this.snapshot.status === 'playing') return;
+    if (startTickOfBar(this.bars, barNumber) === null) return;
+    this.engine.scrollToBar(barNumber - 1);
+  }
+
   /** The tempo a 1-based bar starts at, in the file's BPM; null before the score loads or for no such bar. */
   tempoAtBar(barNumber: number): number | null {
     return tempoAtBar(this.barTempos, barNumber);
@@ -594,6 +607,9 @@ export class PlayerService {
     );
     if (!cancel) return false;
     this.cancelCountIn = cancel;
+    // The count-in is for reading the bar ahead, and the engine, not playing yet, won't scroll
+    // to it: the user may have scrolled away, or a repeat's pass ended lines below its start.
+    this.engine.scrollToBar(barNumber - 1);
     this.update({ status: 'countingIn', countIn: null });
     this.wakeLock.setActive(true);
     return true;

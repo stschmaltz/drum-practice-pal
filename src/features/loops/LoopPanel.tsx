@@ -11,6 +11,7 @@ import { barsLabel, sortLoops, type Loop } from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';
 import { speedLabel } from './loopLabels';
 import { LoopSpeedControl } from './LoopSpeedControl';
+import { loopPanelIsSheet, playLoopClosesPanel } from './useLoopPanelOpen';
 import { useDeleteLoop, useLoops } from './useLoops';
 import type { LoopPractice } from './useLoopPractice';
 
@@ -79,11 +80,25 @@ export function LoopPanel({
           snapshot={snapshot}
           practice={practice}
           loops={loops}
+          onPlayLoop={(loop) => {
+            // The sheet lies over the score and the count-in number; the press that starts
+            // a loop gives them back. Its header goes on naming the loop.
+            if (playLoopClosesPanel(loopPanelIsSheet(), snapshot.status)) onOpenChange(false);
+            practice.playLoop(loop);
+          }}
         />
       </div>
     </aside>
   );
 }
+
+type LoopPanelBodyProps = Pick<
+  LoopPanelProps,
+  'songId' | 'player' | 'snapshot' | 'practice' | 'loops'
+> & {
+  /** "Play loop" or "Restart loop" was pressed. Runs inside the tap: iOS only starts audio there. */
+  onPlayLoop: (loop: Loop) => void;
+};
 
 function LoopPanelBody({
   songId,
@@ -91,7 +106,8 @@ function LoopPanelBody({
   snapshot,
   practice,
   loops,
-}: Pick<LoopPanelProps, 'songId' | 'player' | 'snapshot' | 'practice' | 'loops'>) {
+  onPlayLoop,
+}: LoopPanelBodyProps) {
   const { editor, editedLoop, activeLoop } = practice;
   // Loops need the score: its bar count checks a range, and a loop can't play before it.
   const { barCount } = snapshot;
@@ -164,18 +180,13 @@ function LoopPanelBody({
         snapshot={snapshot}
         practice={practice}
         loops={loops}
+        onPlayLoop={onPlayLoop}
       />
     </div>
   );
 }
 
-function LoopList({
-  songId,
-  player,
-  snapshot,
-  practice,
-  loops,
-}: Pick<LoopPanelProps, 'songId' | 'player' | 'snapshot' | 'practice' | 'loops'>) {
+function LoopList({ songId, player, snapshot, practice, loops, onPlayLoop }: LoopPanelBodyProps) {
   if (loops.isPending) return <p className="text-neutral-400">Loading loops…</p>;
   // isLoadingError, not isError: a failed background refetch keeps the list (and a playing loop).
   if (loops.isLoadingError) {
@@ -206,7 +217,7 @@ function LoopList({
           // Null until the score loads: the item then shows the percent alone.
           tempo={player?.tempoAtBar(loop.start_bar) ?? null}
           canPlay={player !== null && snapshot.barCount !== null && snapshot.status !== 'error'}
-          onPlay={() => practice.playLoop(loop)}
+          onPlay={() => onPlayLoop(loop)}
           onEdit={() => practice.openEditor(loop)}
         />
       ))}

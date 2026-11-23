@@ -169,6 +169,67 @@ describe('playing a loop', () => {
   });
 });
 
+// 08 QA issues 1 and 2: alphaTab only scrolls to its cursor while playing.
+describe('bringing a loop’s first bar on screen', () => {
+  it('playLoop while paused scrolls to the first bar before playback starts', async () => {
+    const { engine, practice } = await renderPractice();
+    act(() => practice().playLoop(outro));
+    expect(engine.scrollToBar).toHaveBeenCalledWith(12);
+    const scrolled = engine.scrollToBar.mock.invocationCallOrder[0] ?? Infinity;
+    expect(scrolled).toBeLessThan(engine.play.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it('playLoop with a count-in has the first bar on screen while it counts', async () => {
+    const { engine, practice, player } = await renderPractice();
+    act(() => player.setCountInBars(2));
+    act(() => practice().playLoop(outro));
+    expect(player.getSnapshot()).toMatchObject({ status: 'countingIn', barNumber: 13 });
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    expect(engine.play).not.toHaveBeenCalled();
+    act(() => player.pause());
+  });
+
+  it('selectLoop while paused scrolls to the first bar', async () => {
+    const { engine, practice } = await renderPractice();
+    act(() => practice().selectLoop(outro.id));
+    expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it('a paused loop whose bars another device moved scrolls to its new first bar', async () => {
+    const { engine, practice, listBecomes } = await renderPractice();
+    act(() => practice().selectLoop(verse.id));
+    await listBecomes([{ ...verse, start_bar: 9, end_bar: 10 }, outro]);
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(8);
+  });
+
+  it('while playing, switching loops leaves the scrolling to alphaTab', async () => {
+    const { engine, practice } = await renderPractice();
+    act(() => practice().playLoop(verse));
+    act(() => engine.fire('stateChanged', { playing: true }));
+    engine.scrollToBar.mockClear();
+
+    act(() => practice().playLoop(outro));
+
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('exitLoop scrolls nowhere', async () => {
+    const { engine, practice } = await renderPractice();
+    act(() => practice().selectLoop(verse.id));
+    engine.scrollToBar.mockClear();
+    act(() => practice().exitLoop());
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('a tap that seeks in jam mode does not scroll', async () => {
+    const { engine, player } = await renderPractice();
+    act(() => void player.seekToBar(13));
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+});
+
 describe('selecting and leaving a loop', () => {
   it('selectLoop loops the bars without touching speed or starting playback', async () => {
     const { engine, practice, player } = await renderPractice();

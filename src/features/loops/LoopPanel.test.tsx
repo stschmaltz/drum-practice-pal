@@ -11,6 +11,7 @@ import {
   usePlayerSnapshot,
 } from '@/test/loopPlayer';
 import { testQueryClient, wrapperFor } from '@/test/render';
+import { PAGE_LAYOUT_QUERY } from '@/features/player/layout';
 import type { PlayerService } from '@/features/player/PlayerService';
 import type { Loop } from './loopForm';
 import { loopKeys } from './loopKeys';
@@ -272,6 +273,86 @@ describe('LoopPanel playing a loop', () => {
     expect(view.panel.queryByRole('region', { name: /Practicing/ })).not.toBeInTheDocument();
     expect(view.player.getSnapshot()).toMatchObject({ range: null, looping: false });
     expect(view.play('Intro')).toBeInTheDocument();
+  });
+});
+
+// 08 QA issue 1: the sheet lies over the score and the count-in number.
+describe('LoopPanel Play loop and the phone sheet', () => {
+  /** Below or from the 768 px breakpoint, as the browser would answer the layout query. */
+  const atWidth = (kind: 'phone' | 'wide') =>
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: kind === 'wide' && query === PAGE_LAYOUT_QUERY,
+    }));
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('on a phone, Play loop closes the sheet and starts the loop, named in the header', async () => {
+    atWidth('phone');
+    const view = renderPanel();
+    await view.user.click(await view.panel.findByRole('button', { name: 'Play loop Late' }));
+
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById(BODY_ID)).not.toBeVisible();
+    expect(view.header()).toHaveTextContent('Loop: Late');
+    expect(view.engine.play).toHaveBeenCalledTimes(1);
+    expect(view.player.getSnapshot()).toMatchObject({
+      range: { startBar: 9, endBar: 12 },
+      looping: true,
+      speedRatio: 0.5,
+    });
+  });
+
+  it('on a phone, Play loop with a count-in closes the sheet for the counter', async () => {
+    atWidth('phone');
+    const view = renderPanel();
+    act(() => view.player.setCountInBars(1));
+    await view.user.click(await view.panel.findByRole('button', { name: 'Play loop Late' }));
+
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+    // The loop's first bar is brought on screen for the count-in.
+    expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(8);
+  });
+
+  it('on a phone, choosing another loop during a count-in closes the sheet again', async () => {
+    atWidth('phone');
+    const view = renderPanel();
+    act(() => view.player.setCountInBars(2));
+    await view.user.click(await view.panel.findByRole('button', { name: 'Play loop Late' }));
+    await view.user.click(view.header());
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    await view.user.click(view.play('Intro'));
+
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'countingIn', barNumber: 1 });
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('on a phone, the sheet stays open when a loop is switched or restarted while playing', async () => {
+    atWidth('phone');
+    const view = renderPanel();
+    await view.user.click(await view.panel.findByRole('button', { name: 'Play loop Late' }));
+    act(() => view.engine.fire('stateChanged', { playing: true }));
+    await view.user.click(view.header());
+
+    await view.user.click(view.play('Intro'));
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'playing', barNumber: 1 });
+
+    await view.user.click(view.panel.getByRole('button', { name: 'Restart loop Intro' }));
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.panel.getByRole('group', { name: 'Loop speed' })).toBeVisible();
+  });
+
+  it('from 768 px the panel is beside the score and Play loop leaves it open', async () => {
+    atWidth('wide');
+    const view = renderPanel();
+    act(() => view.player.setCountInBars(1));
+    await view.user.click(await view.panel.findByRole('button', { name: 'Play loop Late' }));
+
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.panel.getByRole('region', { name: 'Practicing Late' })).toBeVisible();
   });
 });
 

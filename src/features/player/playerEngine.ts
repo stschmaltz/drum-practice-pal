@@ -68,6 +68,13 @@ export interface PlayerEngine {
    * drawing: playback is untouched. Kept across re-renders (resize, layout).
    */
   setHighlight(range: BarIndexRange | null): void;
+  /**
+   * Scrolls the score box so a bar (0-based) can be read, if it isn't all on
+   * show already. For when nothing is playing: alphaTab only follows the
+   * cursor during playback. Scrolling only; playback is untouched. Does
+   * nothing for a bar that isn't laid out.
+   */
+  scrollToBar(barIndex: number): void;
   destroy(): void;
 }
 
