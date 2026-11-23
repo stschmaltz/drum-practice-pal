@@ -27,7 +27,7 @@ describe('PlayerService out-of-turn engine events', () => {
   it('stays loading when the engine reports "stopped" before the song is ready', () => {
     const { engine, service, wakeLock } = setup();
     service.load(bytes);
-    engine.fire('scoreLoaded', { barCount: 16, trackCount: 3 });
+    engine.fire('scoreLoaded', { barCount: 16, trackCount: 3, barTempos: Array(16).fill(120) });
     wakeLock.setActive.mockClear();
 
     // alphaTab reports its idle state while the soundfont is still on its way.

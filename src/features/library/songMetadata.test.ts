@@ -7,8 +7,8 @@ import {
   type ScoreLike,
 } from './songMetadata';
 
-const bar = (tempo?: number) => ({
-  tempoAutomations: tempo === undefined ? [] : [{ value: tempo }],
+const bar = (tempo?: number, ratioPosition = 0) => ({
+  tempoAutomations: tempo === undefined ? [] : [{ value: tempo, ratioPosition }],
 });
 const drums = { staves: [{ isPercussion: true }] };
 const guitar = { staves: [{ isPercussion: false }] };
@@ -84,6 +84,10 @@ describe('tempoAtFirstBar', () => {
 
   it('prefers an automation on bar 1', () => {
     expect(tempoAtFirstBar(score({ masterBars: [bar(155), bar(163)] }))).toBe(155);
+  });
+
+  it('keeps the score tempo when bar 1 only changes tempo part-way through', () => {
+    expect(tempoAtFirstBar(score({ masterBars: [bar(90, 0.5), bar()] }))).toBe(120);
   });
 });
 

@@ -266,14 +266,6 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 
 **Test focus:** BPM-at-bar helper against the tempo-change fixture; seek. **QA focus:** long songs, scroll fighting the cursor, landscape phone.
 
-**Carried forward**
-
-- Tap-to-seek needs a bar hit-test added to the `PlayerEngine` interface first. alphaTab's own click handling is off (`enableUserInteraction: false`) so it can't seek or select behind the service. (05 Build)
-- One tempo-per-bar helper for the whole app. A tempo change part-way through a bar counts from the next bar. `songs.original_tempo` (`tempoAtFirstBar` in `songMetadata.ts`) and the seed's `tempoAtBar` (`tests/unit/score-helpers.ts`) each have their own simpler version today; move both onto the shared helper so upload, seed and header can't disagree.
-- Files with repeats: alphaTab's tick cache lists a repeated bar once per playthrough, and the service maps ticks to the bar's number, so the header and cursor revisit bar numbers. No fixture has a repeat yet; add one and check current bar, seek and auto-scroll on it. (01 Findings)
-- Score height on short viewports. On a 390x844 phone the controls take about 290 px before the score; in landscape about 170 px of score shows. (05 QA issue 5)
-- Check BPM against the real export in `tests/fixtures/real/` (155 BPM, 163 from bar 11), skipping when the folder is empty. (00)
-
 ### Hosted setup (before Unit 07)
 
 **Goal:** the app runs on an HTTPS preview URL against a hosted Supabase project, so the iOS audio checks can happen before count-in is built on that audio. Moved here from Unit 12. It is configuration, not a unit: no Build, Test, QA pipeline. Creating the project and entering its settings need Shane's Supabase and Cloudflare accounts; an agent can prepare the values and verify the result.
@@ -330,7 +322,10 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 - Migration, loops grants: clients can write every loops column today, including `finished_at`, `last_practiced_at`, `created_at` and `updated_at`. Grant insert and update only on the columns the app writes, and set `created_at` and `updated_at` in the insert trigger. The session trigger that sets `last_practiced_at` runs as the signed-in user, so it needs `security definer` once that column is no longer writable. (02 QA issue 4)
 - Migration, names: `'   '` passes the length checks. Add `btrim(name) <> ''` on `loops.name` (and `songs.title`), and trim in the form. (02 QA issue 6)
 - A typed BPM rarely lands on a whole percent. Store the ratio it implies (within 0.25 to 2.0) and round only for display, or BPM will jump when the loop is reopened. The Unit 05 speed slider rounds to whole percent (`percentToRatio`).
-- Ranges on files with repeats: `barRangeToTicks` runs from the first playthrough of the start bar to the next time the end bar plays. Test it on the repeat fixture from Unit 06. (01 Findings)
+- Files with repeats: alphaTab's tick cache lists a repeated bar once per playthrough. `barRangeToTicks` runs from the first playthrough of the start bar to the next time the end bar plays, and the current bar revisits numbers. No fixture has a repeat; add one and test ranges, current bar and tap-to-seek on it. (01 Findings; not done in 06)
+- Taps: the service reports `barTapped` and the page decides. Jam mode seeks; range selection must take over the same event. A desktop mouse drag across the score ends in a `click`, so it counts as a tap today: ignore a click whose pointer moved since pointerdown. (06 Build, 06 Review)
+- A position event posted before a seek can arrive after it, moving `barNumber` back for one update with an extra `barChanged`. Loop logic that listens to `barChanged` needs a seek generation counter in the engine, or must tolerate it. (06 Review)
+- Move the score-tap e2e helpers (`barCursorBox`, `nextBarPoint`, `tapAndWaitForBar`) from `jam.spec.ts` into `tests/e2e/playerPage.ts` when range selection needs them. (06 Readability)
 - Loop caches follow the list pattern in `useSongs.ts`. Deleting a song must also drop that song's loop caches, as `useDeleteSong` drops its detail and file entries.
 
 ### 09 Practice sessions and progress
@@ -365,6 +360,10 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 **Acceptance:** every shortcut works in jam and loop modes; a pedal sending PageUp/PageDown or arrows switches loops.
 
 **Test focus:** key mapping and input guard. **QA focus:** focus traps, open modals. **Human check:** a real pedal.
+
+**Carried forward**
+
+- Seeking to a bar is tap and click only. Decide whether a key moves a bar back and forward in jam mode, where left and right have no loops to switch. (06 Build)
 
 ### 11 PWA and offline
 
@@ -415,6 +414,8 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 - Speed, metronome and mute stay enabled after a player error. (05 QA issue 3)
 - Files in Storage with no songs row are possible (failed rollbacks, deleted users). Add a sweep script, or accept it. (02 QA, 04 Review)
 - The on-phone controls bar is four rows. (05 Build)
+- From 06 QA: the volume readout overflows the controls box at 320 px and below; the sticky bar has no bottom edge; on a phone the score opens scrolled 47 px sideways, clipping the clef; double-tap on the score may zoom.
+- A bar with a tempo change part-way through shows its starting tempo for the whole bar. No fixture has one. (06 Build)
 
 ## Open human checks
 
@@ -426,6 +427,7 @@ The handoff notes record none of these as done; delete a row once it is. Everyth
 | 01   | iOS: the first tap makes sound; the ringer switch on silent; lock and app switch mid-play; page against horizontal layout in portrait and landscape                                                                                        |
 | 04   | iPhone and Android on the LAN dev server: `.gp` isn't greyed out in the picker, and an upload works (this runs the non-secure-context hash and id fallbacks). A real `.gp5` or `.gpx` if one is on hand                                    |
 | 05   | iPhone and iPad on a preview URL: sound on the first Play tap, and with the ringer on silent; the screen stays on while playing. Needs HTTPS for the wake lock, so Hosted setup comes first                                                |
+| 06   | Phone and tablet: a tap on a bar seeks there and a swipe never does; auto-scroll feels smooth on iOS; in an installed PWA the sticky bar sits below the status bar                                                                         |
 | 05   | Every device: speed, metronome and mute changes mid-play with no click, gap or restart; sound stops at once on leaving the page; rotating mid-play; 20 fast Play/Pause taps                                                                |
 
 ## Risks and mitigations
