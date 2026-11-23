@@ -52,4 +52,10 @@ export interface EngineMount {
   layout: LayoutChoice;
 }
 
-export type EngineFactory = (mount: EngineMount) => Promise<PlayerEngine>;
+/**
+ * `signal` aborts when the mount is abandoned (unmount, or StrictMode's first
+ * pass). A factory that loads code first should check it before building an
+ * engine: alphaTab's destroy() empties the host element, so destroying a
+ * cancelled engine would wipe the live one's score from the shared element.
+ */
+export type EngineFactory = (mount: EngineMount, signal: AbortSignal) => Promise<PlayerEngine>;

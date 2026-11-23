@@ -276,3 +276,13 @@ These need ears. Nothing here was heard.
 - `npm run check`: green, 43 files, 546 tests.
 - `npm run e2e`: 126 passed. Local Supabase was running.
 - Nothing is committed.
+
+## Review fixes (Copilot)
+
+All three findings were real.
+
+1. **Slider touch targets.** `min-h-11` sat on the row, so the Speed and Metronome volume inputs kept the native ~16 px height. `PercentSlider` (both sliders) now puts `min-h-11` on the `<input>`, as `SettingsPage` does. `tests/e2e/player.spec.ts` "opens a song…" asserts each slider's box is at least 44 px tall at every profile.
+2. **Damaged downloads loaded as a stray score.** `alphaTabEngine.loadScore` passed bytes to `api.load`, whose alphaTex fallback reads junk as a one-bar score. `loadGuitarPro` is now exported from `src/features/library/parseScore.ts`; the engine parses with it, returns `false` on `null` (which `PlayerService` already reports as the `score` error) and hands the parsed `Score` to `api.load`. It's still only reached through the lazy `alphaTabEngine` chunk. Tests: `loadGuitarPro` unit tests in `parseScore.test.ts`, and a new e2e "a damaged file in Storage shows the score error, not a stray score" that overwrites the uploaded object with junk (it fails without the fix).
+3. **StrictMode double construction.** Both StrictMode passes awaited the same `import()`, so both built an `AlphaTabApi` on the one score element, and destroying the cancelled one emptied the live one's element. `EngineFactory` now takes an `AbortSignal`; `usePlayer` aborts it in cleanup, and the new `lazyEngineFactory` (used for the default alphaTab loader) checks it after the import and before constructing, rejecting instead (the hook ignores rejections from aborted mounts). The hook still destroys an engine that a signal-ignoring factory builds late. Tests in `usePlayer.test.tsx`: StrictMode with a deferred import builds exactly one engine and never destroys it (fails without the check); a signal-ignoring factory under StrictMode still has its first engine destroyed; `lazyEngineFactory` unit tests for the aborted and live cases.
+
+**Results:** `npm run check` green (43 files, 552 tests). `npm run e2e` 129 passed, local Supabase running. Nothing committed.

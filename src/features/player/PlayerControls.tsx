@@ -162,7 +162,7 @@ function PercentSlider({
         aria-valuetext={`${value}%`}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-28 accent-sky-500 sm:w-36"
+        className="min-h-11 w-28 accent-sky-500 sm:w-36"
       />
       <output htmlFor={id} className="w-11 text-right tabular-nums">
         {value}%

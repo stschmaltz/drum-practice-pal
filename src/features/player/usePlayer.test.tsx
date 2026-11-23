@@ -1,9 +1,10 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { FakePlayerEngine, fakeEngineFactory } from '@/test/fakePlayerEngine';
 import { PAGE_LAYOUT_QUERY } from './layout';
 import { DEFAULT_PLAYER_OPTIONS } from './playerOptions';
-import type { EngineFactory } from './playerEngine';
-import { usePlayer } from './usePlayer';
+import type { EngineFactory, EngineMount, PlayerEngine } from './playerEngine';
+import { lazyEngineFactory, usePlayer } from './usePlayer';
 
 const bytes = new Uint8Array([7]);
 
@@ -76,6 +77,109 @@ describe('usePlayer', () => {
     render(<Harness createEngine={() => Promise.reject(new Error('chunk failed'))} />);
     expect(await screen.findByText('error engine')).toBeInTheDocument();
     expect(screen.getByText('status error')).toBeInTheDocument();
+  });
+});
+
+describe('usePlayer under StrictMode', () => {
+  /** A lazy factory whose import resolves when the test says, recording each engine it builds. */
+  function deferredImport() {
+    const built: { engine: FakePlayerEngine; mount: EngineMount }[] = [];
+    let finishImport: () => void = () => {};
+    const imported = new Promise<void>((resolve) => {
+      finishImport = resolve;
+    });
+    const factory = lazyEngineFactory(async () => {
+      await imported;
+      return (mount): PlayerEngine => {
+        const engine = new FakePlayerEngine();
+        built.push({ engine, mount });
+        return engine;
+      };
+    });
+    return { factory, built, finishImport };
+  }
+
+  it('builds one engine when both passes wait on the same import', async () => {
+    const lazy = deferredImport();
+    render(
+      <StrictMode>
+        <Harness createEngine={lazy.factory} />
+      </StrictMode>,
+    );
+
+    lazy.finishImport();
+
+    await screen.findByText('player yes');
+    // The cancelled first pass never built one, so nothing destroyed the live engine's element.
+    expect(lazy.built).toHaveLength(1);
+    const [only] = lazy.built;
+    expect(only?.engine.destroy).not.toHaveBeenCalled();
+    expect(only?.engine.loadScore).toHaveBeenCalledWith(bytes, [0]);
+    expect(only?.mount.element.isConnected).toBe(true);
+    expect(screen.getByText('error none')).toBeInTheDocument();
+  });
+
+  it('still destroys an engine a factory builds after cancellation', async () => {
+    const engines: FakePlayerEngine[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Ignores the signal, as a third-party factory might.
+    const careless: EngineFactory = async () => {
+      await gate;
+      const engine = new FakePlayerEngine();
+      engines.push(engine);
+      return engine;
+    };
+    render(
+      <StrictMode>
+        <Harness createEngine={careless} />
+      </StrictMode>,
+    );
+
+    release();
+
+    await screen.findByText('player yes');
+    expect(engines).toHaveLength(2);
+    expect(engines[0]?.destroy).toHaveBeenCalledTimes(1);
+    expect(engines[0]?.loadScore).not.toHaveBeenCalled();
+    expect(engines[1]?.destroy).not.toHaveBeenCalled();
+  });
+});
+
+describe('lazyEngineFactory', () => {
+  const mountFor = (): EngineMount => ({
+    element: document.createElement('div'),
+    scrollElement: document.createElement('div'),
+    layout: 'page',
+  });
+
+  it('builds nothing when the signal aborts during the import', async () => {
+    const create = vi.fn(() => new FakePlayerEngine());
+    let finishImport: () => void = () => {};
+    const factory = lazyEngineFactory(
+      () =>
+        new Promise((resolve) => {
+          finishImport = () => resolve(create);
+        }),
+    );
+    const controller = new AbortController();
+
+    const result = factory(mountFor(), controller.signal);
+    controller.abort();
+    finishImport();
+
+    await expect(result).rejects.toThrow('cancelled');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('builds the engine when the mount is still wanted', async () => {
+    const engine = new FakePlayerEngine();
+    const mount = mountFor();
+    const factory = lazyEngineFactory(async () => () => engine);
+
+    await expect(factory(mount, new AbortController().signal)).resolves.toBe(engine);
   });
 });
 

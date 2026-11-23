@@ -5,6 +5,7 @@
  * (so a failed fetch can be reported), one scroll container for both layouts.
  */
 import * as alphaTab from '@coderline/alphatab';
+import { loadGuitarPro } from '@/features/library/parseScore';
 import type { BarTicks } from './barTicks';
 import type { LayoutChoice } from './layout';
 import type { EngineEvents, EngineMount, PlayerEngine } from './playerEngine';
@@ -39,7 +40,10 @@ export function createAlphaTabEngine({
     },
 
     loadScore(bytes, trackIndexes) {
-      return api.load(bytes, trackIndexes);
+      // api.load(bytes) falls back to alphaTex, which reads damaged bytes as a
+      // one-bar score. Parsing with the Guitar Pro importers only refuses them.
+      const score = loadGuitarPro(bytes);
+      return score !== null && api.load(score, trackIndexes);
     },
 
     async loadSoundFont(url) {

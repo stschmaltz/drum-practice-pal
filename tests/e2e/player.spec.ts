@@ -87,6 +87,12 @@ test('opens a song in the player with notation in the layout for the width', asy
 
   expect(await layoutShown(page)).toBe(layoutForWidth(page.viewportSize()?.width ?? 0));
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+
+  // The inputs themselves, not just their row, must be 44 px tall to be easy to grab.
+  for (const name of ['Speed', 'Metronome volume']) {
+    const box = await controls(page).getByRole('slider', { name }).boundingBox();
+    expect(box?.height ?? 0, name).toBeGreaterThanOrEqual(44);
+  }
 });
 
 test('speed, metronome and drum mute change live without restarting playback', async ({
@@ -166,6 +172,34 @@ test('leaving the song page mid-play releases the player', async ({ user, page }
   await expect.poll(() => audioContextStates(page)).not.toContain('running');
   expect(await audioContextStates(page)).not.toHaveLength(0);
   expect(errors).toEqual([]);
+});
+
+test('a damaged file in Storage shows the score error, not a stray score', async ({
+  user,
+  page,
+}) => {
+  await signIn(page, user, '/library');
+  await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture('groove-120'));
+  await expect(page.getByRole('status').filter({ hasText: 'Added “Groove 120”.' })).toBeVisible();
+  const { data: song, error } = await admin
+    .from('songs')
+    .select('id, file_path')
+    .eq('user_id', user.id)
+    .single();
+  if (error) throw error;
+  // Bytes alphaTab's alphaTex fallback would happily read as a one-bar score.
+  const junk = new Uint8Array(4096).map((_, i) => (i * 7919) % 256);
+  const replaced = await admin.storage
+    .from('gp-files')
+    .upload(song.file_path, junk, { upsert: true, contentType: 'application/octet-stream' });
+  if (replaced.error) throw replaced.error;
+
+  await page.goto(`/songs/${song.id}`);
+
+  await expect(page.getByRole('alert')).toHaveText(
+    "This song couldn't be shown or played. Try reloading, or upload the file again.",
+  );
+  await expect(playButton(page)).toBeDisabled();
 });
 
 test('an unknown song id shows not found', async ({ user, page }) => {

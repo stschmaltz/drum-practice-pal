@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { EngineFactory } from './playerEngine';
+import type { EngineFactory, EngineMount, PlayerEngine } from './playerEngine';
 import type { PlayerOptions } from './playerOptions';
 import { initialPlayerSnapshot, PlayerService, type PlayerSnapshot } from './PlayerService';
 import { useLayout } from './useLayout';
@@ -14,10 +14,24 @@ export interface UsePlayerOptions {
   createEngine?: EngineFactory;
 }
 
-const loadAlphaTabEngine: EngineFactory = async (mount) => {
-  const { createAlphaTabEngine } = await import('./alphaTabEngine');
-  return createAlphaTabEngine(mount);
-};
+/**
+ * An EngineFactory that imports its engine lazily and builds nothing once the
+ * mount is cancelled. Under StrictMode both passes wait on the same import, so
+ * without the check both would construct an engine on the one score element.
+ */
+export function lazyEngineFactory(
+  importEngine: () => Promise<(mount: EngineMount) => PlayerEngine>,
+): EngineFactory {
+  return async (mount, signal) => {
+    const createEngine = await importEngine();
+    if (signal.aborted) throw new Error('Player mount cancelled');
+    return createEngine(mount);
+  };
+}
+
+const loadAlphaTabEngine = lazyEngineFactory(
+  async () => (await import('./alphaTabEngine')).createAlphaTabEngine,
+);
 
 /**
  * Creates a PlayerService for the component's lifetime and disposes it on
@@ -45,13 +59,14 @@ export function usePlayer({
     const scrollElement = scrollRef.current;
     if (!element || !scrollElement) return;
     const inputs = mountInputs.current;
-    let cancelled = false;
+    const mount = new AbortController();
     let created: PlayerService | null = null;
 
-    inputs.createEngine({ element, scrollElement, layout: inputs.layout }).then(
+    inputs.createEngine({ element, scrollElement, layout: inputs.layout }, mount.signal).then(
       (engine) => {
-        // Unmounted (or StrictMode's first pass) while alphaTab was loading.
-        if (cancelled) {
+        // Unmounted (or StrictMode's first pass) while alphaTab was loading,
+        // and the factory built an engine anyway.
+        if (mount.signal.aborted) {
           engine.destroy();
           return;
         }
@@ -63,12 +78,12 @@ export function usePlayer({
         setPlayer(created);
       },
       () => {
-        if (!cancelled) setEngineFailed(true);
+        if (!mount.signal.aborted) setEngineFailed(true);
       },
     );
 
     return () => {
-      cancelled = true;
+      mount.abort();
       created?.dispose();
       setPlayer(null);
     };
