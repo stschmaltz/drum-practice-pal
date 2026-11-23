@@ -163,3 +163,53 @@ test('an unknown song id shows not found', async ({ user, page }) => {
   await signIn(page, user, '/songs/00000000-0000-4000-8000-000000000000');
   await expect(page.getByRole('heading', { level: 1, name: 'Song not found' })).toBeVisible();
 });
+
+/** Rendered notation width against the scroll box: page layout fits, horizontal overflows. */
+async function layoutShown(page: Page): Promise<'page' | 'horizontal'> {
+  const { surface, box } = await viewport(page).evaluate((el) => ({
+    surface: el.querySelector('.at-surface')?.getBoundingClientRect().width ?? 0,
+    box: el.clientWidth,
+  }));
+  return surface > box + 1 ? 'horizontal' : 'page';
+}
+
+test('pause and play resume from the same bar, not the start', async ({ user, page }) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await controls(page).getByRole('slider', { name: 'Speed' }).fill('200');
+  await playButton(page).click();
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  const pausedAt = await barNumber(page);
+  expect(pausedAt).toBeGreaterThanOrEqual(3);
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(pausedAt);
+});
+
+test('crossing the layout breakpoint mid-play relayouts and keeps playing', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  const start = page.viewportSize();
+  if (!start) throw new Error('No viewport');
+  const startLayout = start.width >= PAGE_LAYOUT_MIN_WIDTH ? 'page' : 'horizontal';
+  await expect.poll(() => layoutShown(page)).toBe(startLayout);
+
+  await controls(page).getByRole('slider', { name: 'Speed' }).fill('200');
+  await playButton(page).click();
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+
+  const otherWidth = startLayout === 'page' ? 390 : 1024;
+  await page.setViewportSize({ width: otherWidth, height: start.height });
+  await expect
+    .poll(() => layoutShown(page), { timeout: 10_000 })
+    .toBe(startLayout === 'page' ? 'horizontal' : 'page');
+
+  const afterResize = await barNumber(page);
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(afterResize);
+});

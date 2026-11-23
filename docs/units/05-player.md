@@ -91,3 +91,39 @@ Jam mode (cursor follow tuning, tap-to-seek, BPM header), count-in and the loops
   - Does the screen stay on during a long play, and go back to normal after pause?
 - Speed, metronome and mute changes mid-play: no glitch or restart heard, on phone, tablet and laptop.
 - Leaving the song page mid-play stops sound at once on every device.
+
+## Test
+
+**Summary.** Build's service tests already covered the state machine thoroughly (loading, transport, live changes with `restartCalls()`, range, events, dispose), so this stage filled the gaps it left: component tests for `PlayerControls` and `SongPage`, layout-per-breakpoint tests for `usePlayer`, and two more e2e flows. No app code changed and no bugs were found.
+
+**Acceptance criteria, and where each is proved**
+
+| Criterion                               | Unit / component                                                                                                                                                                                                    | e2e (phone, tablet, desktop)                                                                                           |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Speed changes live without restarting   | `PlayerService.test.ts` (live changes); `PlayerControls.test.tsx` "changes speed while playing without restarting"; `SongPage.test.tsx` "changes speed, metronome and mute live…"                                   | `player.spec.ts` "speed, metronome and drum mute change live…"                                                         |
+| Metronome on/off and volume change live | `PlayerControls.test.tsx` "toggles the metronome and changes its volume…", "keeps the metronome silent when the volume moves while it is off"                                                                       | same spec                                                                                                              |
+| Drum mute changes live                  | `PlayerControls.test.tsx` "mutes and unmutes the drum track…"; no-drums case disabled with a reason                                                                                                                 | same spec; "a song without drums disables drum mute"                                                                   |
+| Disposes cleanly on route change        | `usePlayer.test.tsx` unmount cases; `SongPage.test.tsx` "destroys the player when leaving mid-play, and ignores alphaTab events after", "switching songs disposes the first player and loads the second song fresh" | "leaving the song page mid-play releases the player" (no running AudioContext, no page errors)                         |
+| Layout per breakpoint                   | `usePlayer.test.tsx` "mounts with the horizontal layout below 768 px", "switches layout live when the width crosses the breakpoint, without restarting"                                                             | "opens a song… in the layout for the width"; new "crossing the layout breakpoint mid-play relayouts and keeps playing" |
+| Defaults from `user_settings`           | `SongPage.test.tsx` settings case and the settings-failure fallback (note + column defaults)                                                                                                                        | "starts with the metronome and drum mute from settings"                                                                |
+
+**Files added or changed (tests only)**
+
+- `src/features/player/PlayerControls.test.tsx` (new, 12 tests). Renders the controls over a real `PlayerService` and `FakePlayerEngine`, subscribed through `useSyncExternalStore` as the page does. Covers the null-player state (all disabled, shows the starting values), Play disabled while loading but options editable, play/pause labels, play called synchronously inside the click (iOS), back to start, error disables transport, live speed/metronome/volume/mute with no restart calls, slider bounds 25 to 200 in 5s, and drum mute disabled with its title for a song without drums.
+- `src/features/song/SongPage.test.tsx` (new, 14 tests). Mocks `@/features/player/alphaTabEngine` so `usePlayer`'s real lazy factory hands out fake engines, and serves song, settings and Storage `download` through the fake Supabase client. Covers not found (non-uuid without a query, and a missing row), song-load and file-download errors with working "Try again", the player opening with the drum track only and the downloaded bytes, track 0 for a song without drums, settings defaults and the fallback note, the status line following the playing bar, live changes on the page, fixed error copy for score and soundfont failures (alphaTab's text never shown), and disposal on leaving and on switching songs.
+- `src/features/player/usePlayer.test.tsx` (+2 tests): a controllable `matchMedia` for `PAGE_LAYOUT_QUERY`.
+- `tests/e2e/player.spec.ts` (+2 tests x 3 sizes): pause and play resume from the paused bar; resizing across 768 px mid-play changes the rendered layout and playback keeps advancing.
+
+**Decisions**
+
+- Controls tests drive a real `PlayerService` rather than a mocked one, so they assert what the engine receives (the behaviour that matters) instead of which service method was called.
+- `SongPage` tests mock only the alphaTab adapter module, not `usePlayer`, so the lazy import, the keyed remount and the dispose path are all exercised.
+
+**Results**
+
+- `npm run check`: green, 43 files, 546 tests (was 41 files, 518).
+- `npm run e2e`: 126 passed (was 120). Local Supabase was running.
+
+**Bugs found**
+
+- None.
