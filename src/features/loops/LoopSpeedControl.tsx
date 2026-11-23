@@ -63,12 +63,13 @@ export function LoopSpeedControl({
           onCommit={(text) => setSpeed(tempo === null ? null : parseSpeedBpm(text, tempo))}
         />
       </div>
-      <div className="flex flex-wrap gap-2">
+      {/* One even row where the panel is wide enough (the phone sheet, the side panel from lg); two rows in the narrow tablet panel, never three buttons and a stray fourth. */}
+      <div className="grid grid-cols-4 gap-2 md:grid-cols-2 lg:grid-cols-4">
         {NUDGES.map((delta) => (
           <button
             key={delta}
             type="button"
-            className={`${buttonClass} min-w-14 px-2 tabular-nums`}
+            className={`${buttonClass} px-2 tabular-nums`}
             disabled={player === null}
             aria-label={`${delta < 0 ? 'Slower' : 'Faster'} by ${Math.abs(delta)}%`}
             onClick={() => setSpeed(nudgeSpeedRatio(ratio, delta))}

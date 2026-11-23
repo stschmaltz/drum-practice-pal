@@ -346,6 +346,7 @@ Handoff notes written before the Visual design unit was added call the release u
 - "One tap into practice" from On the go: the song page has no way to open on a loop yet. Add one (for example `?loop=<id>`, checked with `isUuid`) that calls `selectLoop`. It can't call `playLoop` on arrival: playback has to start inside a tap. (08 Build)
 - The session tracker needs to know which loop is playing: `useLoopPractice` has `activeLoop`. Speed at the end of a session is `snapshot.speedRatio`, which may differ from the loop's saved speed until "Save speed". The target prompt compares the saved `speed_ratio` with `target_ratio`. (08 Build)
 - Exit loop, deleting or re-ranging the playing loop during a count-in calls the count-in off and playback stops (`setRange` does that); while playing it carries on. Decide whether a session ends there. (08 Build)
+- At every loop wrap `barChanged` reports the bar after the loop for an instant (6 then 5 in a loop of bar 5) before the loop's first bar. Count passes from `loopWrapped`, and don't treat a `barChanged` outside the range as leaving the loop. (08 QA issue 7)
 
 ### 10 Keyboard shortcuts and pedals
 
@@ -362,6 +363,7 @@ Handoff notes written before the Visual design unit was added call the release u
 
 - Seeking to a bar is tap and click only. Decide whether a key moves a bar back and forward in jam mode, where left and right have no loops to switch. (06 Build)
 - Previous and next loop follow the panel's order, `sortLoops` (by first bar), and switch with `playLoop`, which keeps playing when something already is. While the loop form is open its fields take the keys. (08 Build)
+- The loop panel drops focus to `<body>` when the form opens ("New loop", "Edit") and when it closes (save, cancel). Move focus into the form and back to the button that opened it. (08 QA issue 10)
 
 ### 11 PWA and offline
 
@@ -391,6 +393,7 @@ Handoff notes written before the Visual design unit was added call the release u
 - If Unit 01's Human check picks a bigger soundfont, budget its size in the first load and the cache. (01 Findings)
 - A loop is created with a client id, so a queued create can be replayed; a replay after a lost response gets a duplicate-key error (23505) that nothing handles yet. Treat it as saved, or look the row up by id. (08 Build)
 - Loop edits are optimistic and roll back on any error, a dropped connection included. Queued offline, "Save speed" must not roll back. (08 Build)
+- Offline today, loop writes pause like the others: "Save loop" sits on "Saving…" with Cancel disabled and "Save speed" goes disabled with no message, then both go through on reconnect. (08 QA issue 8)
 
 ### 12 Visual design
 
@@ -414,6 +417,7 @@ Handoff notes written before the Visual design unit was added call the release u
 - From 06 QA: the volume readout overflows the controls box at 320 px and below; the sticky bar has no bottom edge; on a phone the score opens scrolled 47 px sideways, clipping the clef; double-tap on the score may zoom.
 - From 08 Build: on a tablet in portrait the open loop panel leaves the score about 230 px, one bar to a line (it starts closed there). The playing loop shows twice in the panel, as the card with the speed control and in the list. The controls bar's speed slider moves in 5% steps, so at a speed such as 71% its thumb sits at 70 while the readout says 71%. The controls bar was not regrouped.
 - From 08 Build: selecting a loop while paused moves the cursor but doesn't scroll the score to it (alphaTab only scrolls while playing), so on a phone the highlighted bars can be off screen until Play.
+- From 08 QA: the playing loop's card with the speed control is always at the top of the panel, thousands of pixels from the item pressed in a long list (issue 5). On a phone with the sheet open and nothing playing, about 85 px of the score shows (issue 6). A long unbroken loop name makes the "Looping" line up to 220 px tall (issue 13). A phone in landscape with the panel open leaves a 284 x 234 px score.
 
 ### 13 Polish and release
 
@@ -437,6 +441,8 @@ Handoff notes written before the Visual design unit was added call the release u
 - Speed, metronome and mute stay enabled after a player error. (05 QA issue 3)
 - Files in Storage with no songs row are possible (failed rollbacks, deleted users). Add a sweep script, or accept it. (02 QA, 04 Review)
 - A bar with a tempo change part-way through shows its starting tempo for the whole bar. No fixture has one. (06 Build)
+- Loops in a song with a repeat: a loop that starts on the repeat's last bar and runs past it plays the bar before it too (bars 4 to 5 of `repeats.gp` play 4, 3, 4, 5, and the status line says "Bar 3"). Keep it, or start such a loop from the last playthrough of its first bar; `tests/unit/loop-fixtures.test.ts` pins today's behaviour. (08 Test bug 1, 08 QA issue 3)
+- Loop failures show the server's own message ("Couldn't save the speed: …"), and with no connection the loop list says "Loading loops…" for about 24 s before its error. A tap on a bar outside the playing loop does nothing and says nothing. (08 QA issues 9 and 12)
 
 ## Open human checks
 
