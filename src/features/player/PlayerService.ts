@@ -67,6 +67,11 @@ export interface PlayerSnapshot extends PlayerOptions {
   /** The tempo `barNumber` starts at, in the file's BPM (before speed). Null until the score loads. */
   barTempo: number | null;
   hasDrumTrack: boolean;
+  /**
+   * Every track but the drum track is silenced, to hear the part on its own.
+   * Never on together with `drumsMuted`, and always off when a song opens.
+   */
+  drumsOnly: boolean;
   range: BarRange | null;
   looping: boolean;
   /** The count-in beat sounding now; null outside a count-in and before its first click. */
@@ -117,6 +122,7 @@ export function initialPlayerSnapshot(
     barNumber: null,
     barTempo: null,
     hasDrumTrack: drumTrackIndex !== null,
+    drumsOnly: false,
     range: null,
     looping: false,
     countIn: null,
@@ -132,7 +138,11 @@ export class PlayerService {
   private readonly clicks: ClickOutput;
   private readonly events = createEmitter<PlayerEvents>();
   private readonly listeners = new Set<() => void>();
-  /** Mute state per track index, kept across loads and applied once tracks exist. */
+  /**
+   * The mute asked for per track index, kept across loads and applied once
+   * tracks exist. Drums only overrides it without changing it (see
+   * isTrackSilenced), so turning Drums only off brings these back.
+   */
   private readonly mutedTracks = new Map<number, boolean>();
   private bars: BarTicks[] = [];
   /** By 0-based bar index, from the score. */
@@ -355,16 +365,41 @@ export class PlayerService {
     this.countInOptionsChanged();
   }
 
+  /**
+   * Mutes or unmutes one track. Muting the drum track turns Drums only off.
+   * While Drums only is on, a change to another track is remembered and heard
+   * once Drums only is turned off.
+   */
   setTrackMuted(trackIndex: number, muted: boolean): void {
     if (this.disposed) return;
     this.mutedTracks.set(trackIndex, muted);
-    if (trackIndex === this.drumTrackIndex) this.update({ drumsMuted: muted });
-    this.applyTrackMute(trackIndex, muted);
+    if (trackIndex !== this.drumTrackIndex) {
+      this.applyTrackMute(trackIndex);
+      return;
+    }
+    // Muted drums with everything else silenced would be a song with no sound.
+    const leavesDrumsOnly = muted && this.snapshot.drumsOnly;
+    this.update(leavesDrumsOnly ? { drumsMuted: muted, drumsOnly: false } : { drumsMuted: muted });
+    if (leavesDrumsOnly) this.applyEveryTrackMute();
+    else this.applyTrackMute(trackIndex);
   }
 
   /** A no-op for a song without a drum track. */
   setDrumsMuted(muted: boolean): void {
     if (this.drumTrackIndex !== null) this.setTrackMuted(this.drumTrackIndex, muted);
+  }
+
+  /**
+   * Silences every track except the drum track, or lets them sound again as
+   * they were (a track muted with setTrackMuted stays muted). Turning it on
+   * unmutes the drums. A no-op for a song without a drum track.
+   */
+  setDrumsOnly(drumsOnly: boolean): void {
+    if (this.disposed || this.drumTrackIndex === null) return;
+    if (drumsOnly === this.snapshot.drumsOnly) return;
+    if (drumsOnly) this.mutedTracks.set(this.drumTrackIndex, false);
+    this.update(drumsOnly ? { drumsOnly, drumsMuted: false } : { drumsOnly });
+    this.applyEveryTrackMute();
   }
 
   setLayout(layout: LayoutChoice): void {
@@ -589,13 +624,33 @@ export class PlayerService {
     this.engine.setLooping(this.snapshot.looping && !countsInEveryRepeat(this.snapshot));
   }
 
+  /**
+   * Sends the mutes a freshly loaded or reset engine lacks: it starts with
+   * every track sounding, so only tracks with a mute on record need a call,
+   * or every track while Drums only is on.
+   */
   private applyMutes(): void {
-    for (const [trackIndex, muted] of this.mutedTracks) this.applyTrackMute(trackIndex, muted);
+    if (this.snapshot.drumsOnly) this.applyEveryTrackMute();
+    else for (const trackIndex of this.mutedTracks.keys()) this.applyTrackMute(trackIndex);
+  }
+
+  /** For Drums only going on or off, which changes tracks that have no mute on record. */
+  private applyEveryTrackMute(): void {
+    for (let trackIndex = 0; trackIndex < this.trackCount; trackIndex++) {
+      this.applyTrackMute(trackIndex);
+    }
   }
 
   /** Tracks the loaded score doesn't have yet are skipped; applyMutes sends them once it does. */
-  private applyTrackMute(trackIndex: number, muted: boolean): void {
-    if (trackIndex < this.trackCount) this.engine.setTrackMuted(trackIndex, muted);
+  private applyTrackMute(trackIndex: number): void {
+    if (trackIndex >= this.trackCount) return;
+    this.engine.setTrackMuted(trackIndex, this.isTrackSilenced(trackIndex));
+  }
+
+  /** What the engine should have for a track: Drums only wins over the mute on record. */
+  private isTrackSilenced(trackIndex: number): boolean {
+    if (this.snapshot.drumsOnly) return trackIndex !== this.drumTrackIndex;
+    return this.mutedTracks.get(trackIndex) ?? false;
   }
 
   private applyRange(): void {

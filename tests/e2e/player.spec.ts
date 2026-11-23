@@ -4,6 +4,7 @@ import { createAdminClient } from '../../scripts/supabase-admin.ts';
 import { expect, signIn, test } from './auth';
 import {
   barNumber,
+  boxOf,
   controls,
   expectedLayout,
   fixture,
@@ -130,6 +131,58 @@ test('starts with the metronome and drum mute from settings', async ({ user, pag
 test('a song without drums disables drum mute', async ({ user, page }) => {
   await openFixture(page, user, 'no-drums', 'No Drums');
   await expect(controls(page).getByRole('button', { name: 'Mute drums' })).toBeDisabled();
+});
+
+test('a song without drums disables drums only, with the reason', async ({ user, page }) => {
+  await openFixture(page, user, 'no-drums', 'No Drums');
+  const drumsOnly = controls(page).getByRole('button', { name: 'Drums only' });
+  await expect(drumsOnly).toBeDisabled();
+  await expect(drumsOnly).toHaveAccessibleDescription('This song has no drum track');
+});
+
+// Unit 07. Which tracks sound is a Human check; this covers the toggle and that nothing restarts.
+test('drums only and mute drums exclude each other and change live on a multi-track song', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'multi-track', 'Multi Track');
+  const mute = controls(page).getByRole('button', { name: 'Mute drums' });
+  const drumsOnly = controls(page).getByRole('button', { name: 'Drums only' });
+  await expect(drumsOnly).toBeEnabled();
+  await expect(drumsOnly).toHaveAttribute('aria-pressed', 'false');
+
+  // Beside Mute drums on the same row, so the bar is no taller for it, and a full touch target.
+  const muteBox = await boxOf(mute, 'Mute drums button');
+  const onlyBox = await boxOf(drumsOnly, 'Drums only button');
+  expect(onlyBox.y).toBe(muteBox.y);
+  expect(onlyBox.x).toBeGreaterThan(muteBox.x);
+  expect(onlyBox.height).toBeGreaterThanOrEqual(44);
+
+  // At full speed: eight bars at 100 BPM leave time for every step before the song ends.
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+  let before = await barNumber(page);
+
+  await drumsOnly.click();
+  await expect(drumsOnly).toHaveAttribute('aria-pressed', 'true');
+  await mute.click();
+  await expect(mute).toHaveAttribute('aria-pressed', 'true');
+  await expect(drumsOnly).toHaveAttribute('aria-pressed', 'false');
+  await drumsOnly.click();
+  await expect(drumsOnly).toHaveAttribute('aria-pressed', 'true');
+  await expect(mute).toHaveAttribute('aria-pressed', 'false');
+
+  // Still playing and still moving forward: a restart would have gone back to bar 1.
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(before);
+
+  before = await barNumber(page);
+  await drumsOnly.click();
+  await expect(drumsOnly).toHaveAttribute('aria-pressed', 'false');
+  await expect(mute).toHaveAttribute('aria-pressed', 'false');
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(before);
 });
 
 test('leaving the song page mid-play releases the player', async ({ user, page }) => {

@@ -40,6 +40,7 @@ const speed = () => screen.getByRole('slider', { name: 'Speed' });
 const metronome = () => screen.getByRole('button', { name: 'Metronome' });
 const volume = () => screen.getByRole('slider', { name: 'Metronome volume' });
 const muteDrums = () => screen.getByRole('button', { name: 'Mute drums' });
+const drumsOnly = () => screen.getByRole('button', { name: 'Drums only' });
 
 /** Puts the player into "playing" the way alphaTab reports it. */
 async function startPlaying(engine: FakePlayerEngine, user: ReturnType<typeof userEvent.setup>) {
@@ -61,6 +62,8 @@ describe('PlayerControls before the player exists', () => {
       expect(control).toBeDisabled();
     }
     expect(muteDrums()).toBeDisabled();
+    expect(drumsOnly()).toBeDisabled();
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
     expect(playButton()).toHaveTextContent('Play');
     expect(speed()).toHaveValue('100');
     expect(volume()).toHaveValue('80');
@@ -77,6 +80,7 @@ describe('PlayerControls transport', () => {
     expect(speed()).toBeEnabled();
     expect(metronome()).toBeEnabled();
     expect(muteDrums()).toBeEnabled();
+    expect(drumsOnly()).toBeEnabled();
   });
 
   it('plays, shows Pause while playing, and pauses', async () => {
@@ -193,6 +197,68 @@ describe('PlayerControls live changes', () => {
     expect(muteDrums()).toBeDisabled();
     expect(muteDrums()).toHaveAttribute('title', 'This song has no drum track');
     expect(muteDrums()).toHaveAttribute('aria-pressed', 'false');
+  });
+});
+
+describe('PlayerControls drums only', () => {
+  it('sits right after Mute drums and starts off, even when drums open muted', () => {
+    setup({ options: { ...DEFAULT_PLAYER_OPTIONS, drumsMuted: true } });
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'true');
+    expect(muteDrums().nextElementSibling).toBe(drumsOnly());
+  });
+
+  it('plays the drum track alone and brings the others back, while playing, without restarting', async () => {
+    const { engine, user } = setup();
+    await startPlaying(engine, user);
+    const restartsBefore = engine.restartCalls();
+    engine.setTrackMuted.mockClear();
+
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(engine.setTrackMuted.mock.calls).toEqual([
+      [0, true],
+      [1, true],
+      [DRUMS, false],
+    ]);
+
+    engine.setTrackMuted.mockClear();
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(engine.setTrackMuted.mock.calls).toEqual([
+      [0, false],
+      [1, false],
+      [DRUMS, false],
+    ]);
+
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('and Mute drums turn each other off', async () => {
+    const { engine, user } = setup();
+
+    await user.click(muteDrums());
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'false');
+    expect(engine.setTrackMuted).toHaveBeenLastCalledWith(DRUMS, false);
+
+    await user.click(muteDrums());
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'true');
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(engine.setTrackMuted.mock.calls.slice(-3)).toEqual([
+      [0, false],
+      [1, false],
+      [DRUMS, true],
+    ]);
+  });
+
+  it('is disabled, with a reason, for a song without drums', () => {
+    setup({ drumTrackIndex: null });
+    expect(drumsOnly()).toBeDisabled();
+    expect(drumsOnly()).toHaveAccessibleDescription('This song has no drum track');
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
   });
 });
 

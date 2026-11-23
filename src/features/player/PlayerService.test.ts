@@ -535,3 +535,148 @@ describe('PlayerService dispose', () => {
     expect(engine.setSpeed).not.toHaveBeenCalledWith(0.5);
   });
 });
+
+describe('PlayerService drums only', () => {
+  /** The mute the engine was last sent for each of the song's three tracks (drums are track 2). */
+  function engineMutes(engine: FakePlayerEngine): (boolean | undefined)[] {
+    const mutes: (boolean | undefined)[] = [undefined, undefined, undefined];
+    for (const [trackIndex, muted] of engine.setTrackMuted.mock.calls as [number, boolean][]) {
+      mutes[trackIndex] = muted;
+    }
+    return mutes;
+  }
+
+  it('is off when a song opens, whatever the settings say', () => {
+    const { engine, service } = setup({ options: { drumsMuted: true } });
+    expect(service.getSnapshot().drumsOnly).toBe(false);
+    service.load(bytes);
+    engine.finishLoading();
+    expect(service.getSnapshot().drumsOnly).toBe(false);
+    expect(engineMutes(engine)).toEqual([undefined, undefined, true]);
+  });
+
+  it('silences every track but the drums while playing, and restores them, without restarting', () => {
+    const { engine, service } = playing();
+
+    service.setDrumsOnly(true);
+    expect(service.getSnapshot()).toMatchObject({ drumsOnly: true, drumsMuted: false });
+    expect(engineMutes(engine)).toEqual([true, true, false]);
+
+    service.setDrumsOnly(false);
+    expect(service.getSnapshot()).toMatchObject({ drumsOnly: false, drumsMuted: false });
+    expect(engineMutes(engine)).toEqual([false, false, false]);
+
+    expect(engine.restartCalls()).toBe(0);
+    expect(service.getSnapshot().status).toBe('playing');
+  });
+
+  it('turning it on turns Mute drums off', () => {
+    const { engine, service } = playing({ options: { drumsMuted: true } });
+    service.setDrumsOnly(true);
+    expect(service.getSnapshot()).toMatchObject({ drumsOnly: true, drumsMuted: false });
+    expect(engineMutes(engine)).toEqual([true, true, false]);
+
+    // Mute drums was replaced, not parked: off again leaves the whole band sounding.
+    service.setDrumsOnly(false);
+    expect(service.getSnapshot()).toMatchObject({ drumsOnly: false, drumsMuted: false });
+    expect(engineMutes(engine)).toEqual([false, false, false]);
+  });
+
+  it('turning Mute drums on turns it off and brings the other tracks back', () => {
+    const { engine, service } = playing();
+    service.setDrumsOnly(true);
+    service.setDrumsMuted(true);
+    expect(service.getSnapshot()).toMatchObject({ drumsOnly: false, drumsMuted: true });
+    expect(engineMutes(engine)).toEqual([false, false, true]);
+    expect(engine.restartCalls()).toBe(0);
+  });
+
+  it('turning Mute drums off while it is on changes nothing', () => {
+    const { engine, service } = playing();
+    service.setDrumsOnly(true);
+    service.setDrumsMuted(false);
+    expect(service.getSnapshot()).toMatchObject({ drumsOnly: true, drumsMuted: false });
+    expect(engineMutes(engine)).toEqual([true, true, false]);
+  });
+
+  it('keeps a track muted on its own muted after it goes off again', () => {
+    const { engine, service } = playing();
+    service.setTrackMuted(0, true);
+    service.setDrumsOnly(true);
+    expect(engineMutes(engine)).toEqual([true, true, false]);
+
+    service.setDrumsOnly(false);
+    expect(engineMutes(engine)).toEqual([true, false, false]);
+  });
+
+  it('remembers a track mute changed while it is on, and applies it when it goes off', () => {
+    const { engine, service } = playing();
+    service.setTrackMuted(0, true);
+    service.setDrumsOnly(true);
+
+    service.setTrackMuted(0, false);
+    service.setTrackMuted(1, true);
+    // Still drums only: neither change is heard yet.
+    expect(engineMutes(engine)).toEqual([true, true, false]);
+
+    service.setDrumsOnly(false);
+    expect(engineMutes(engine)).toEqual([false, true, false]);
+  });
+
+  it('goes on again after alphaTab resets its channels', () => {
+    const { engine, service } = setup();
+    service.load(bytes);
+    engine.finishLoading();
+    service.setDrumsOnly(true);
+    engine.setTrackMuted.mockClear();
+
+    // alphaTab sends "ready" again after a reload, having put every channel back to full.
+    service.load(bytes);
+    engine.finishLoading();
+
+    expect(service.getSnapshot().drumsOnly).toBe(true);
+    expect(engineMutes(engine)).toEqual([true, true, false]);
+  });
+
+  it('set before the song has loaded, applies once the tracks exist', () => {
+    const { engine, service } = setup();
+    service.load(bytes);
+    service.setDrumsOnly(true);
+    expect(engine.setTrackMuted).not.toHaveBeenCalled();
+
+    engine.finishLoading();
+    expect(engineMutes(engine)).toEqual([true, true, false]);
+  });
+
+  it('sends nothing and notifies nobody when it is already as asked', () => {
+    const { engine, service, listener } = playing();
+    engine.setTrackMuted.mockClear();
+    listener.mockClear();
+    service.setDrumsOnly(false);
+    expect(engine.setTrackMuted).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+
+    service.setDrumsOnly(true);
+    engine.setTrackMuted.mockClear();
+    listener.mockClear();
+    service.setDrumsOnly(true);
+    expect(engine.setTrackMuted).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for a song without drums', () => {
+    const { engine, service } = playing({ drumTrackIndex: null });
+    service.setDrumsOnly(true);
+    expect(engine.setTrackMuted).not.toHaveBeenCalled();
+    expect(service.getSnapshot().drumsOnly).toBe(false);
+  });
+
+  it('does nothing after dispose', () => {
+    const { engine, service } = playing();
+    service.dispose();
+    engine.setTrackMuted.mockClear();
+    service.setDrumsOnly(true);
+    expect(engine.setTrackMuted).not.toHaveBeenCalled();
+    expect(service.getSnapshot().drumsOnly).toBe(false);
+  });
+});

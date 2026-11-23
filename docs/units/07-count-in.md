@@ -305,3 +305,57 @@ Every repeat was reached through `window.__drumPalPlayer` (`setRange`, `setLoopi
 - **Medium. `setRange()` after the downbeat but before the engine reported `playing` went to `ready` with the play still pending.** `setRange()` and `pause()` now share `callOffCountIn()`, which pauses the engine in that interval. Tests cover a replacement range, `setRange(null)`, and a range change during the clicks (engine untouched).
 - `npm test`: 56 files, 2363 tests passing. Typecheck, lint and format clean.
 - The revised plan on `main` adds a Drums only toggle to this unit; it is not built here.
+
+## Build: Drums only
+
+**Summary.** A "Drums only" toggle sits beside "Mute drums" in the shared controls bar. On, it silences every track except the drum track, so the part is heard on its own (the metronome and count-in clicks are not tracks and still sound). Off, the other tracks come back as they were. It is a `PlayerService` method (`setDrumsOnly`) and a snapshot field (`drumsOnly`); the engine interface is unchanged, since `setTrackMuted` already mutes any track. It is off whenever a song opens, is not a `user_settings` field (no migration), and is disabled with the same reason as Mute drums for a song with no drum track. No keyboard shortcut: that is Unit 10.
+
+**Files**
+
+- `src/features/player/PlayerService.ts`: `snapshot.drumsOnly`, `setDrumsOnly`, the exclusion in `setTrackMuted`, and `isTrackSilenced` / `applyEveryTrackMute` behind `applyMutes`.
+- `src/features/player/PlayerService.test.ts`: a "drums only" block, 12 tests.
+- `src/features/player/PlayerControls.tsx`: the button, grouped with Mute drums.
+- `src/features/player/PlayerControls.test.tsx`: 4 tests, plus the new button in the two existing "disabled / enabled" tests.
+- `tests/e2e/player.spec.ts`: 2 tests x 3 sizes (multi-track fixture; no-drums fixture).
+- `AGENTS.md`: `setDrumsOnly` in the service API line of the Player section.
+
+**Decisions**
+
+- **Drums only is an override, not a rewrite of the per-track mutes.** `mutedTracks` stays the record of what was asked for per track. What the engine gets for a track comes from one place, `isTrackSilenced`: with Drums only on, "is this not the drum track"; otherwise the mute on record. Turning it off therefore restores exactly what was there, including a track muted on its own with `setTrackMuted`.
+- **`setTrackMuted` on another track while Drums only is on is remembered and not heard** until Drums only goes off. Nothing in the UI does this yet (there is no mixer); the rule is there so a later one can't make a non-drum track sound under "Drums only".
+- **Exclusion replaces, it doesn't park.** Drums only on sets Mute drums off (and unmutes the drum track). Mute drums on sets Drums only off, which brings the other tracks back. Turning Drums only off afterwards does not bring an earlier Mute drums back: the whole band sounds. Mute drums off while Drums only is on changes nothing.
+- **After alphaTab resets channel volumes** (`readyForPlayback`, a reload), `applyMutes` sends every track's mute while Drums only is on. With it off it sends, as before, only tracks with a mute on record, since a reset engine has everything sounding. Turning Drums only on or off sends all tracks, because that changes tracks with nothing on record.
+- **Kept across `load()` on the same service**, like the other options. "Off on open" holds because the song page keys the player by song id, so each song gets a new service.
+- **Property changes only.** `setDrumsOnly` calls `engine.setTrackMuted` and nothing else; the tests assert `restartCalls()` stays 0 while playing. Setting it to the value it already has sends nothing and notifies nobody.
+- **The disabled reason is the `title`**, the same as Mute drums ("This song has no drum track"); on a button with its own text it is the accessible description, which the tests assert.
+- **The two buttons are one flex group**, so they share a row. The controls bar measures the same as before at all three sizes (phone 398 px, tablet 238 px, desktop 126 px).
+
+**Known gaps**
+
+- Nothing has been heard. The tests prove which mutes are sent to the engine and that nothing restarts; that alphaTab then plays the drum track alone is a Human check.
+- The e2e test covers the toggle, the exclusion, the layout and that playback keeps moving. It does not observe which tracks sound (the debug hook exposes the service, not alphaTab's channels).
+- alphaTab mutes by MIDI channel. A file in which two tracks share a channel with the drum track would behave oddly; none of the fixtures does, and percussion normally has channel 10 to itself.
+- A disabled button's `title` isn't reachable by touch, as for Mute drums. The song page already shows the no-drum-track note.
+
+**Manual verify**
+
+1. `npm run db:start`, `npm run dev`, sign in, upload `tests/fixtures/gp/multi-track.gp` and open it.
+2. Drums only is off and sits right of Mute drums. Press Play, then Drums only: bass and guitar stop, drums carry on, the bar keeps advancing and Play still reads Pause.
+3. Press Drums only again: bass and guitar are back, with no restart.
+4. With Drums only on, press Mute drums: Drums only goes off, the drums stop, bass and guitar are back. Press Drums only: Mute drums goes off and only the drums sound.
+5. Settings: tick "Mute the drum track by default", open the song again: Mute drums is on and Drums only is off.
+6. Open `no-drums.gp`: both buttons are disabled; hovering either shows "This song has no drum track".
+7. On a phone (or 390 px wide): the two buttons share a row.
+
+**Human check (by ear, Shane)**
+
+- Multi-track fixture and a real Songsterr export: with Drums only on, is it the drum part alone, with no bass or guitar bleeding through?
+- Turning it on and off mid-bar: no click, gap or restart, and do notes already ringing on the other tracks cut off or fade acceptably?
+- Does the metronome (when on) still sound with Drums only on, and the count-in clicks?
+- After Pause and Play, and after Back to start, is it still drums alone?
+- Mute drums on, then Drums only: do the drums come in at once?
+
+**Results**
+
+- `npm run check`: green. Typecheck, lint and format clean; 56 test files, 2379 tests passing (2363 before).
+- `npm run e2e`: 204 tests; 197 passed, 7 skipped (the device-only skips in `jam.spec.ts`), 0 failed.

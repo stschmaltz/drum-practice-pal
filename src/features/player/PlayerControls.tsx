@@ -59,12 +59,13 @@ export function PlayPauseButton({ player, snapshot }: PlayerViewProps) {
 
 /**
  * The shared controls bar: play/pause (unless `showPlayButton` is false),
- * back to start, speed, metronome, count-in and drum mute. Every change is
+ * back to start, speed, metronome, count-in, drum mute and drums only. Every change is
  * live; none restarts playback.
  */
 export function PlayerControls({ player, snapshot, showPlayButton = true }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist.
   const noPlayer = player === null;
+  const noDrumsReason = snapshot.hasDrumTrack ? undefined : 'This song has no drum track';
 
   return (
     <section
@@ -112,14 +113,25 @@ export function PlayerControls({ player, snapshot, showPlayButton = true }: Play
         onModeChange={(mode) => player?.setCountInMode(mode)}
       />
 
-      <ToggleButton
-        pressed={snapshot.drumsMuted}
-        disabled={noPlayer || !snapshot.hasDrumTrack}
-        onChange={(muted) => player?.setDrumsMuted(muted)}
-        title={snapshot.hasDrumTrack ? undefined : 'This song has no drum track'}
-      >
-        Mute drums
-      </ToggleButton>
+      {/* One group, so the pair shares a row on a phone and the bar gets no taller. */}
+      <div className="flex gap-2">
+        <ToggleButton
+          pressed={snapshot.drumsMuted}
+          disabled={noPlayer || !snapshot.hasDrumTrack}
+          onChange={(muted) => player?.setDrumsMuted(muted)}
+          title={noDrumsReason}
+        >
+          Mute drums
+        </ToggleButton>
+        <ToggleButton
+          pressed={snapshot.drumsOnly}
+          disabled={noPlayer || !snapshot.hasDrumTrack}
+          onChange={(drumsOnly) => player?.setDrumsOnly(drumsOnly)}
+          title={noDrumsReason}
+        >
+          Drums only
+        </ToggleButton>
+      </div>
     </section>
   );
 }
