@@ -7,6 +7,7 @@
 import * as alphaTab from '@coderline/alphatab';
 import { loadGuitarPro } from '@/features/library/parseScore';
 import { barIndexAtPoint } from './barHitTest';
+import { barMeters } from './countIn';
 import type { BarTicks } from './barTicks';
 import { createEmitter, type Emitter } from './emitter';
 import type { LayoutChoice } from './layout';
@@ -98,6 +99,14 @@ export function createAlphaTabEngine({
     play() {
       api.play();
     },
+    unlockAudio() {
+      try {
+        // What play() does first: resumes the output's suspended AudioContext.
+        api.player?.output.activate();
+      } catch {
+        // No output yet. alphaTab's own first-tap listener still resumes it.
+      }
+    },
     pause() {
       api.pause();
     },
@@ -147,6 +156,7 @@ function subscribe<K extends keyof EngineEvents>(
           barCount: score.masterBars.length,
           trackCount: score.tracks.length,
           barTempos: barStartTempos(score),
+          barMeters: barMeters(score),
         }),
       );
       return;

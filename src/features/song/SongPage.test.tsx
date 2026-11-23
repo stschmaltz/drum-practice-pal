@@ -350,6 +350,100 @@ describe('SongPage disposal on route change', () => {
   });
 });
 
+describe('SongPage drums only', () => {
+  const drumsOnly = () => screen.getByRole('button', { name: 'Drums only' });
+  const muteDrums = () => screen.getByRole('button', { name: 'Mute drums' });
+
+  it('opens off even when drums are muted by default, with only the drum track muted', async () => {
+    serve({ settings: ok({ ...settingsRow, drums_muted_default: true }) });
+    renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    expect(drumsOnly()).toBeEnabled();
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'true');
+    expect(engine.setTrackMuted).not.toHaveBeenCalledWith(0, true);
+    expect(engine.setTrackMuted).not.toHaveBeenCalledWith(2, true);
+  });
+
+  it('plays the drum track alone and back, live, on the song page', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: true }));
+    const restartsBefore = engine.restartCalls();
+
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    // The song row says the drums are track 1 of the three.
+    expect(engine.setTrackMuted).toHaveBeenCalledWith(0, true);
+    expect(engine.setTrackMuted).toHaveBeenCalledWith(2, true);
+    expect(engine.setTrackMuted).not.toHaveBeenCalledWith(1, true);
+
+    await user.click(drumsOnly());
+    expect(engine.setTrackMuted).toHaveBeenCalledWith(0, false);
+    expect(engine.setTrackMuted).toHaveBeenCalledWith(2, false);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('is off again on the next song, which is sent no mutes', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    await loadPlayer(0);
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('link', { name: 'Song B' }));
+    await waitFor(() => expect(engines).toHaveLength(2));
+    const second = await loadPlayer(1);
+
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'false');
+    expect(second.setTrackMuted).not.toHaveBeenCalledWith(expect.any(Number), true);
+  });
+
+  it('is off again when the same song is opened a second time', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    await loadPlayer(0);
+    await user.click(drumsOnly());
+
+    await user.click(screen.getByRole('link', { name: 'Library' }));
+    await user.click(screen.getByRole('link', { name: 'Song A' }));
+    await waitFor(() => expect(engines).toHaveLength(2));
+    const second = await loadPlayer(1);
+
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(second.setTrackMuted).not.toHaveBeenCalledWith(expect.any(Number), true);
+  });
+
+  it('is disabled with the reason for a song without drums, and sends the engine no mutes', async () => {
+    serve({ songs: { [SONG_A]: songRow(SONG_A, { drum_track_index: null }) } });
+    renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    expect(drumsOnly()).toBeDisabled();
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(drumsOnly()).toHaveAccessibleDescription('This song has no drum track');
+    expect(engine.setTrackMuted).not.toHaveBeenCalled();
+  });
+
+  it('saves nothing: the toggle is not a setting', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    await loadPlayer();
+    await user.click(drumsOnly());
+    await user.click(drumsOnly());
+
+    const writes = queryResult.mock.calls.filter(([call]) =>
+      call.ops.some((op) => ['update', 'insert', 'upsert', 'delete'].includes(op.method)),
+    );
+    expect(writes).toHaveLength(0);
+  });
+});
+
 describe('SongPage jam mode', () => {
   const speedReadout = () => screen.getByTestId('jam-speed');
   const bpmReadout = () => screen.getByTestId('jam-bpm');
@@ -523,5 +617,155 @@ describe('SongPage jam mode', () => {
       act(() => engine.fire('stateChanged', { playing: true }));
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
     });
+  });
+});
+
+describe('SongPage count-in', () => {
+  it('takes the count-in defaults from settings and counts in over the score before playing', async () => {
+    serve({
+      settings: ok({ ...settingsRow, count_in_bars: 2, count_in_mode: 'every_repeat' }),
+    });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    expect(screen.getByRole('combobox', { name: 'Count-in' })).toHaveValue('2');
+    expect(screen.getByRole('combobox', { name: 'When to count in' })).toHaveValue('every_repeat');
+    expect(screen.queryByTestId('count-in')).not.toBeInTheDocument();
+
+    await user.click(playButton());
+
+    // Two bars at 120 BPM is four seconds, so the count is still on beat one here.
+    await waitFor(() => expect(screen.getByTestId('count-in-beat')).toHaveTextContent('1'));
+    expect(screen.getByTestId('count-in-bar')).toHaveTextContent('Bar 1 of 2');
+    expect(status()).toHaveTextContent('Counting in…');
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(engine.play).not.toHaveBeenCalled();
+
+    await user.click(playButton());
+    expect(screen.queryByTestId('count-in')).not.toBeInTheDocument();
+    expect(playButton()).toHaveTextContent('Play');
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [0, 'start'],
+    [1, 'start'],
+    [1, 'every_repeat'],
+    [2, 'start'],
+  ] as const)(
+    'opens with the saved defaults: %s bar(s), mode %s',
+    async (count_in_bars, count_in_mode) => {
+      serve({ settings: ok({ ...settingsRow, count_in_bars, count_in_mode }) });
+      renderSong(SONG_A);
+      await loadPlayer();
+      expect(screen.getByRole('combobox', { name: 'Count-in' })).toHaveValue(String(count_in_bars));
+      expect(screen.getByRole('combobox', { name: 'When to count in' })).toHaveValue(count_in_mode);
+    },
+  );
+
+  it('with the count-in saved as off, Play starts at once with no counter', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    await user.click(playButton());
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('count-in')).not.toBeInTheDocument();
+    expect(status()).not.toHaveTextContent('Counting in');
+  });
+
+  it('an override in the controls bar applies to this song only: nothing is saved, and the next song opens on the defaults', async () => {
+    serve({ settings: ok({ ...settingsRow, count_in_bars: 0, count_in_mode: 'start' }) });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Count-in' }), '2 bars');
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'When to count in' }),
+      'Before every loop repeat',
+    );
+
+    // The override is live: Play now counts in.
+    await user.click(playButton());
+    expect(await screen.findByTestId('count-in')).toBeInTheDocument();
+    expect(engine.play).not.toHaveBeenCalled();
+    await user.click(playButton());
+
+    // Only reads went to the server: the saved defaults are the Settings page's.
+    const writes = queryResult.mock.calls.filter(([call]) =>
+      call.ops.some((op) => ['update', 'insert', 'upsert', 'delete'].includes(op.method)),
+    );
+    expect(writes).toHaveLength(0);
+
+    await user.click(screen.getByRole('link', { name: 'Song B' }));
+    await loadPlayer(1);
+    expect(screen.getByRole('combobox', { name: 'Count-in' })).toHaveValue('0');
+    expect(screen.getByRole('combobox', { name: 'When to count in' })).toHaveValue('start');
+    expect(screen.getByRole('combobox', { name: 'When to count in' })).toBeDisabled();
+  });
+
+  it('shows the counter inside the score box, over the score', async () => {
+    serve({ settings: ok({ ...settingsRow, count_in_bars: 1 }) });
+    const user = renderSong(SONG_A);
+    await loadPlayer();
+
+    await user.click(playButton());
+    const counter = await screen.findByTestId('count-in');
+    const viewport = screen.getByTestId('score-viewport');
+    // Same positioned box as the score, so it covers the score and nothing else.
+    expect(counter.parentElement).toBe(viewport.parentElement);
+    await user.click(playButton());
+  });
+
+  it('brings the score on screen when the count-in starts, not only when playback does', async () => {
+    const scrollIntoView = vi.fn();
+    // jsdom has no scrollIntoView; the page calls it only when it exists.
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      serve({ settings: ok({ ...settingsRow, count_in_bars: 2 }) });
+      const user = renderSong(SONG_A);
+      const engine = await loadPlayer();
+
+      await user.click(playButton());
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+      expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByTestId('score-viewport'));
+
+      // Going from the count-in into playback is one start, not two.
+      act(() => engine.fire('stateChanged', { playing: true }));
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      await user.click(playButton());
+    } finally {
+      // @ts-expect-error restoring jsdom's missing method
+      delete Element.prototype.scrollIntoView;
+    }
+  });
+
+  it('leaving the page during a count-in disposes the player, and nothing plays afterwards', async () => {
+    serve({ settings: ok({ ...settingsRow, count_in_bars: 1 }) });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    await user.click(playButton());
+    expect(await screen.findByTestId('count-in')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('link', { name: 'Library' }));
+    expect(await screen.findByTestId('location')).toHaveTextContent('/library');
+    expect(engine.destroy).toHaveBeenCalledTimes(1);
+
+    // One bar at 120 BPM is two seconds: wait past where the downbeat would have been.
+    await new Promise((resolve) => setTimeout(resolve, 2300));
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it('hides the counter once playback starts', async () => {
+    serve({ settings: ok({ ...settingsRow, count_in_bars: 1 }) });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    await user.click(playButton());
+    expect(await screen.findByTestId('count-in')).toBeInTheDocument();
+
+    act(() => engine.fire('stateChanged', { playing: true }));
+    expect(screen.queryByTestId('count-in')).not.toBeInTheDocument();
+    expect(status()).not.toHaveTextContent('Counting in');
   });
 });

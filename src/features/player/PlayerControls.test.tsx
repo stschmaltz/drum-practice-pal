@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useSyncExternalStore } from 'react';
-import { FakePlayerEngine } from '@/test/fakePlayerEngine';
+import { FakeClickOutput, FakePlayerEngine } from '@/test/fakePlayerEngine';
 import { PlayerControls, PlayPauseButton } from './PlayerControls';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
 import { initialPlayerSnapshot, PlayerService } from './PlayerService';
@@ -18,6 +18,7 @@ function setup({
   drumTrackIndex = DRUMS as number | null,
   options = DEFAULT_PLAYER_OPTIONS as PlayerOptions,
   loaded = true,
+  clicks = undefined as FakeClickOutput | undefined,
 } = {}) {
   const engine = new FakePlayerEngine();
   const player = new PlayerService(engine, {
@@ -25,6 +26,7 @@ function setup({
     options,
     wakeLock: { setActive: vi.fn(), dispose: vi.fn() },
     unlockAudio: vi.fn(),
+    clicks,
   });
   player.load(new Uint8Array([1]));
   render(<Harness player={player} />);
@@ -38,6 +40,7 @@ const speed = () => screen.getByRole('slider', { name: 'Speed' });
 const metronome = () => screen.getByRole('button', { name: 'Metronome' });
 const volume = () => screen.getByRole('slider', { name: 'Metronome volume' });
 const muteDrums = () => screen.getByRole('button', { name: 'Mute drums' });
+const drumsOnly = () => screen.getByRole('button', { name: 'Drums only' });
 
 /** Puts the player into "playing" the way alphaTab reports it. */
 async function startPlaying(engine: FakePlayerEngine, user: ReturnType<typeof userEvent.setup>) {
@@ -59,6 +62,8 @@ describe('PlayerControls before the player exists', () => {
       expect(control).toBeDisabled();
     }
     expect(muteDrums()).toBeDisabled();
+    expect(drumsOnly()).toBeDisabled();
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
     expect(playButton()).toHaveTextContent('Play');
     expect(speed()).toHaveValue('100');
     expect(volume()).toHaveValue('80');
@@ -75,6 +80,7 @@ describe('PlayerControls transport', () => {
     expect(speed()).toBeEnabled();
     expect(metronome()).toBeEnabled();
     expect(muteDrums()).toBeEnabled();
+    expect(drumsOnly()).toBeEnabled();
   });
 
   it('plays, shows Pause while playing, and pauses', async () => {
@@ -194,6 +200,166 @@ describe('PlayerControls live changes', () => {
   });
 });
 
+describe('PlayerControls drums only', () => {
+  it('sits right after Mute drums and starts off, even when drums open muted', () => {
+    setup({ options: { ...DEFAULT_PLAYER_OPTIONS, drumsMuted: true } });
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'true');
+    expect(muteDrums().nextElementSibling).toBe(drumsOnly());
+  });
+
+  it('plays the drum track alone and brings the others back, while playing, without restarting', async () => {
+    const { engine, user } = setup();
+    await startPlaying(engine, user);
+    const restartsBefore = engine.restartCalls();
+    engine.setTrackMuted.mockClear();
+
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(engine.setTrackMuted.mock.calls).toEqual([
+      [0, true],
+      [1, true],
+      [DRUMS, false],
+    ]);
+
+    engine.setTrackMuted.mockClear();
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(engine.setTrackMuted.mock.calls).toEqual([
+      [0, false],
+      [1, false],
+      [DRUMS, false],
+    ]);
+
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('and Mute drums turn each other off', async () => {
+    const { engine, user } = setup();
+
+    await user.click(muteDrums());
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'false');
+    expect(engine.setTrackMuted).toHaveBeenLastCalledWith(DRUMS, false);
+
+    await user.click(muteDrums());
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'true');
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(engine.setTrackMuted.mock.calls.slice(-3)).toEqual([
+      [0, false],
+      [1, false],
+      [DRUMS, true],
+    ]);
+  });
+
+  it('is disabled, with a reason, for a song without drums', () => {
+    setup({ drumTrackIndex: null });
+    expect(drumsOnly()).toBeDisabled();
+    expect(drumsOnly()).toHaveAccessibleDescription('This song has no drum track');
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+  });
+});
+
+describe('PlayerControls drums only, beyond a click while playing', () => {
+  it('can be turned on while the song is still loading, and is what plays once it is in', async () => {
+    const { engine, user } = setup({ loaded: false });
+    expect(playButton()).toBeDisabled();
+    expect(drumsOnly()).toBeEnabled();
+
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+
+    act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(engine.soundingTracks()).toEqual([DRUMS]);
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it('toggles from the keyboard and keeps focus, without touching playback', async () => {
+    const { engine, user } = setup();
+    await startPlaying(engine, user);
+    const restartsBefore = engine.restartCalls();
+
+    drumsOnly().focus();
+    await user.keyboard('{Enter}');
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(engine.soundingTracks()).toEqual([DRUMS]);
+
+    await user.keyboard(' ');
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(engine.soundingTracks()).toEqual([0, 1, DRUMS]);
+    expect(drumsOnly()).toHaveFocus();
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('stays on through Pause, Play and Back to start', async () => {
+    const { engine, user } = setup();
+    await user.click(drumsOnly());
+    await startPlaying(engine, user);
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: false }));
+    await user.click(backToStart());
+    await startPlaying(engine, user);
+
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(engine.soundingTracks()).toEqual([DRUMS]);
+  });
+
+  it('settles on the last of many quick presses of both drum buttons', async () => {
+    const { engine, user } = setup();
+    await startPlaying(engine, user);
+    const restartsBefore = engine.restartCalls();
+
+    for (let round = 0; round < 5; round++) {
+      await user.click(drumsOnly());
+      await user.click(muteDrums());
+      await user.dblClick(drumsOnly());
+    }
+    // Each round ends with a double click: Drums only on (replacing Mute drums), then off.
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'false');
+    expect(engine.soundingTracks()).toEqual([0, 1, DRUMS]);
+
+    await user.click(drumsOnly());
+    expect(engine.soundingTracks()).toEqual([DRUMS]);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('pressed during a count-in, leaves the counter running and the metronome as it was', async () => {
+    const clicks = new FakeClickOutput();
+    const { engine, player, user } = setup({
+      clicks,
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1 },
+    });
+    await user.click(playButton());
+    expect(player.getSnapshot().status).toBe('countingIn');
+    engine.setMetronomeVolume.mockClear();
+
+    await user.click(drumsOnly());
+
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(player.getSnapshot().status).toBe('countingIn');
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(clicks.cancelSession).not.toHaveBeenCalled();
+    expect(engine.play).not.toHaveBeenCalled();
+    expect(engine.setMetronomeVolume).not.toHaveBeenCalled();
+    expect(metronome()).toHaveAttribute('aria-pressed', 'true');
+    expect(engine.soundingTracks()).toEqual([DRUMS]);
+    // Call the count-in off, so no timer outlives the test.
+    await user.click(playButton());
+  });
+
+  it('gives neither drum button a reason when the song has drums', () => {
+    setup();
+    expect(drumsOnly()).not.toHaveAttribute('title');
+    expect(muteDrums()).not.toHaveAttribute('title');
+  });
+});
+
 describe('PlayerControls without its Play button', () => {
   it('leaves Play/Pause to the screen and keeps the rest', () => {
     render(
@@ -228,5 +394,191 @@ describe('PlayPauseButton', () => {
     act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
     await startPlaying(engine, userEvent.setup());
     expect(engine.play).toHaveBeenCalled();
+  });
+});
+
+describe('PlayerControls count-in', () => {
+  const countIn = () => screen.getByRole('combobox', { name: 'Count-in' });
+  const countInMode = () => screen.getByRole('combobox', { name: 'When to count in' });
+
+  it('starts from the options it is given', () => {
+    setup({
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2, countInMode: 'every_repeat' },
+    });
+    expect(countIn()).toHaveValue('2');
+    expect(countInMode()).toHaveValue('every_repeat');
+    expect(countInMode()).toBeEnabled();
+  });
+
+  it('offers off, 1 bar and 2 bars, with the mode disabled while off', () => {
+    setup();
+    expect(countIn()).toHaveValue('0');
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Off',
+      '1 bar',
+      '2 bars',
+      'At the start only',
+      'Before every loop repeat',
+    ]);
+    expect(countInMode()).toBeDisabled();
+  });
+
+  it('changes the player without restarting playback', async () => {
+    const { engine, player, user } = setup();
+    await startPlaying(engine, user);
+    engine.play.mockClear();
+    engine.loadScore.mockClear();
+
+    await user.selectOptions(countIn(), '1 bar');
+    await user.selectOptions(countInMode(), 'Before every loop repeat');
+
+    expect(player.getSnapshot()).toMatchObject({ countInBars: 1, countInMode: 'every_repeat' });
+    expect(countIn()).toHaveValue('1');
+    expect(engine.restartCalls()).toBe(0);
+  });
+
+  it('shows the starting values, disabled, before the player exists', () => {
+    render(
+      <PlayerControls
+        player={null}
+        snapshot={initialPlayerSnapshot(DRUMS, {
+          ...DEFAULT_PLAYER_OPTIONS,
+          countInBars: 1,
+          countInMode: 'every_repeat',
+        })}
+      />,
+    );
+    expect(countIn()).toHaveValue('1');
+    expect(countIn()).toBeDisabled();
+    expect(countInMode()).toHaveValue('every_repeat');
+    expect(countInMode()).toBeDisabled();
+  });
+
+  it('can be set while the song is still loading', async () => {
+    const { player, user } = setup({ loaded: false });
+    expect(countIn()).toBeEnabled();
+    await user.selectOptions(countIn(), '2 bars');
+    expect(player.getSnapshot().countInBars).toBe(2);
+    expect(countInMode()).toBeEnabled();
+  });
+
+  it.each([
+    ['Off', 0],
+    ['1 bar', 1],
+    ['2 bars', 2],
+  ])('choosing "%s" sets the player to %s bar(s)', async (label, bars) => {
+    const { player, user } = setup({
+      // Start from a different value so each choice is a change.
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: bars === 1 ? 2 : 1 },
+    });
+    await user.selectOptions(countIn(), label);
+    expect(player.getSnapshot().countInBars).toBe(bars);
+    expect(countIn()).toHaveValue(String(bars));
+    expect(countIn()).toHaveDisplayValue(label);
+  });
+
+  it.each([
+    ['At the start only', 'start', 'every_repeat'],
+    ['Before every loop repeat', 'every_repeat', 'start'],
+  ] as const)('choosing "%s" sets the mode to %s', async (label, mode, from) => {
+    const { player, user } = setup({
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1, countInMode: from },
+    });
+    await user.selectOptions(countInMode(), label);
+    expect(player.getSnapshot().countInMode).toBe(mode);
+    expect(countInMode()).toHaveDisplayValue(label);
+  });
+
+  it('keeps the chosen mode while the count-in is off, and offers it again when it is back on', async () => {
+    const { player, user } = setup({
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1, countInMode: 'every_repeat' },
+    });
+    await user.selectOptions(countIn(), 'Off');
+    expect(countInMode()).toBeDisabled();
+    expect(countInMode()).toHaveValue('every_repeat');
+
+    await user.selectOptions(countIn(), '2 bars');
+    expect(countInMode()).toBeEnabled();
+    expect(countInMode()).toHaveValue('every_repeat');
+    expect(player.getSnapshot()).toMatchObject({ countInBars: 2, countInMode: 'every_repeat' });
+  });
+
+  it('the choice made in the bar is what the next Play counts', async () => {
+    const clicks = new FakeClickOutput();
+    const { engine, player, user } = setup({ clicks });
+
+    // Off: Play starts the engine straight away.
+    await user.click(playButton());
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(clicks.scheduled).toHaveLength(0);
+    act(() => engine.fire('stateChanged', { playing: true }));
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: false }));
+
+    await user.selectOptions(countIn(), '2 bars');
+    await user.click(playButton());
+    expect(player.getSnapshot().status).toBe('countingIn');
+    // Two bars of 4/4: eight clicks, two of them accented.
+    expect(clicks.scheduled).toHaveLength(8);
+    expect(clicks.scheduled.filter(({ click }) => click.accent)).toHaveLength(2);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+
+    await user.click(playButton());
+    expect(player.getSnapshot().status).toBe('ready');
+  });
+
+  it('changing either select during a count-in leaves it running', async () => {
+    const clicks = new FakeClickOutput();
+    const { engine, player, user } = setup({
+      clicks,
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2 },
+    });
+    await user.click(playButton());
+    expect(player.getSnapshot().status).toBe('countingIn');
+    const restartsBefore = engine.restartCalls();
+
+    await user.selectOptions(countInMode(), 'Before every loop repeat');
+    await user.selectOptions(countIn(), '1 bar');
+
+    expect(player.getSnapshot().status).toBe('countingIn');
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(clicks.cancelSession).not.toHaveBeenCalled();
+    expect(clicks.scheduled).toHaveLength(8);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+
+    await user.click(playButton());
+  });
+
+  it('Back to start calls a count-in off', async () => {
+    const { engine, player, user } = setup({
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2 },
+    });
+    await user.click(playButton());
+    expect(playButton()).toHaveTextContent('Pause');
+
+    await user.click(backToStart());
+    expect(playButton()).toHaveTextContent('Play');
+    expect(player.getSnapshot()).toMatchObject({ status: 'ready', countIn: null });
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it('both selects have an accessible name', () => {
+    setup();
+    expect(screen.getByLabelText('Count-in')).toBe(countIn());
+    expect(screen.getByLabelText('When to count in')).toBe(countInMode());
+  });
+
+  it('shows Pause during a count-in, and Pause calls it off', async () => {
+    const { engine, player, user } = setup({
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2 },
+    });
+    await user.click(playButton());
+    expect(player.getSnapshot().status).toBe('countingIn');
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(engine.play).not.toHaveBeenCalled();
+
+    await user.click(playButton());
+    expect(playButton()).toHaveTextContent('Play');
+    expect(player.getSnapshot().status).toBe('ready');
   });
 });

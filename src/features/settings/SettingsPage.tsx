@@ -3,7 +3,8 @@ import { ErrorAlert } from '@/components/ErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass, primaryButtonClass } from '@/components/styles';
 import { SignOutButton } from '@/features/auth/SignOutButton';
-import { COUNT_IN_BAR_OPTIONS, type CountInBars, type CountInMode } from '@/lib/schema';
+import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_LABELS } from '@/features/player/countInLabels';
+import { COUNT_IN_BAR_OPTIONS, type CountInMode } from '@/lib/schema';
 import {
   changedSettings,
   percentToVolume,
@@ -13,12 +14,6 @@ import {
   type SettingsErrors,
 } from './settingsForm';
 import { useSettings, useUpdateSettings } from './useSettings';
-
-const COUNT_IN_LABELS: Record<CountInBars, string> = { 0: 'Off', 1: '1 bar', 2: '2 bars' };
-const COUNT_IN_MODE_LABELS: Record<CountInMode, string> = {
-  start: 'At the start only',
-  every_repeat: 'Before every loop repeat',
-};
 
 export function SettingsPage() {
   const settings = useSettings();
@@ -193,7 +188,7 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
               checked={values.count_in_bars === bars}
               onChange={() => edit({ count_in_bars: bars })}
             />
-            {COUNT_IN_LABELS[bars]}
+            {COUNT_IN_BARS_LABELS[bars]}
           </label>
         ))}
       </div>

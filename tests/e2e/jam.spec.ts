@@ -2,13 +2,21 @@
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './auth';
 import {
+  barCursorBox,
   barNumber,
+  boxOf,
   expectedLayout,
   openFixture,
   playButton,
+  scoreBox,
+  scrollScoreToStart,
   speedSlider,
   status,
+  untilStill,
   viewport,
+  windowScrollSettled,
+  type Box,
+  type Point,
 } from './playerPage';
 
 // Unit 06: jam mode. Song page with a following cursor, tap a bar to seek,
@@ -18,33 +26,8 @@ const bpm = (page: Page) => page.getByTestId('jam-bpm');
 const speed = (page: Page) => page.getByTestId('jam-speed');
 const jamBar = (page: Page) => page.getByTestId('jam-bar');
 
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface Box extends Point {
-  width: number;
-  height: number;
-}
-
 const contains = (box: Box, { x, y }: Point) =>
   x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
-
-async function boxOf(locator: Locator, what: string): Promise<Box> {
-  const box = await locator.boundingBox();
-  if (!box) throw new Error(`No ${what}`);
-  return box;
-}
-
-const scoreBox = (page: Page) => boxOf(viewport(page), 'score box');
-
-/** alphaTab's bar cursor: the highlighted box over the current bar. */
-async function barCursorBox(page: Page): Promise<Box> {
-  const box = await viewport(page).locator('.at-cursor-bar').boundingBox();
-  if (!box || box.width < 2) throw new Error('No bar cursor');
-  return box;
-}
 
 async function expectBarCursorOver(page: Page, point: Point) {
   await expect.poll(async () => contains(await barCursorBox(page), point)).toBe(true);
@@ -129,27 +112,9 @@ async function onScreen(locator: Locator): Promise<boolean> {
   );
 }
 
-/** Polls `read` until it gives the same value twice running, and returns that value. */
-async function untilStill<T>(read: () => Promise<T>): Promise<T> {
-  const reads: T[] = [];
-  await expect
-    .poll(async () => {
-      reads.push(await read());
-      return reads.length > 1 && reads.at(-1) === reads.at(-2);
-    })
-    .toBe(true);
-  return reads.at(-1) as T;
-}
-
 /** Waits until the score box stops scrolling (a swipe's fling has ended). */
 const scoreScrollSettled = (page: Page) =>
   untilStill(() => viewport(page).evaluate((box) => `${box.scrollLeft},${box.scrollTop}`));
-
-/** Waits until the window stops scrolling (Play's smooth scroll has ended); returns `scrollY`. */
-const windowScrollSettled = (page: Page) => untilStill(() => page.evaluate(() => window.scrollY));
-
-const scrollScoreToStart = (page: Page) =>
-  viewport(page).evaluate((box) => box.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
 
 const scrollWindowToTop = (page: Page) =>
   page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));

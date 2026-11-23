@@ -5,6 +5,8 @@
  */
 import { createEmitter } from '@/features/player/emitter';
 import type { BarTicks } from '@/features/player/barTicks';
+import type { ClickOutput, ClickSession } from '@/features/player/clickOutput';
+import { COMMON_TIME, type CountInClick, type Meter } from '@/features/player/countIn';
 import type {
   EngineEvents,
   EngineFactory,
@@ -39,6 +41,7 @@ export class FakePlayerEngine implements PlayerEngine {
   loadSoundFont = vi.fn<PlayerEngine['loadSoundFont']>(() => this.soundFont);
   setLayout = vi.fn();
   play = vi.fn();
+  unlockAudio = vi.fn();
   pause = vi.fn();
   stop = vi.fn();
   seek = vi.fn();
@@ -59,16 +62,47 @@ export class FakePlayerEngine implements PlayerEngine {
 
   /**
    * What alphaTab does after a successful load of a song with `barCount`
-   * straight bars. Every bar is at 120 BPM unless `barTempos` says otherwise.
+   * straight bars. Every bar is 4/4 at 120 BPM unless `meter`, `barMeters` or
+   * `barTempos` says otherwise.
    */
   finishLoading({
     barCount = 16,
     trackCount = 3,
     barTempos = Array.from({ length: barCount }, () => 120),
-  }: { barCount?: number; trackCount?: number; barTempos?: readonly number[] } = {}): void {
-    this.fire('scoreLoaded', { barCount, trackCount, barTempos: [...barTempos] });
+    meter = COMMON_TIME,
+    barMeters = Array.from({ length: barCount }, () => meter),
+  }: {
+    barCount?: number;
+    trackCount?: number;
+    barTempos?: readonly number[];
+    /** Every bar's time signature. */
+    meter?: Meter;
+    /** One meter per bar, for a song whose time signature changes; pass a matching `barCount`. */
+    barMeters?: readonly Meter[];
+  } = {}): void {
+    this.fire('scoreLoaded', {
+      barCount,
+      trackCount,
+      barTempos: [...barTempos],
+      barMeters: [...barMeters],
+    });
     this.fire('ticksReady', { bars: straightBars(barCount) });
     this.fire('readyForPlayback', undefined);
+  }
+
+  /**
+   * The tracks left sounding, out of `trackCount`, after every mute sent so
+   * far. Like alphaTab's synth, a track sounds until it is muted and a mute
+   * stays until it is taken off again: nothing resets it, a reload included.
+   */
+  soundingTracks(trackCount = 3): number[] {
+    const muted = new Map<number, boolean>();
+    for (const [trackIndex, mute] of this.setTrackMuted.mock.calls as [number, boolean][]) {
+      muted.set(trackIndex, mute);
+    }
+    return Array.from({ length: trackCount }, (_, trackIndex) => trackIndex).filter(
+      (trackIndex) => !muted.get(trackIndex),
+    );
   }
 
   /** The engine calls that would interrupt or restart playback. */
@@ -87,4 +121,27 @@ export function fakeEngineFactory(engine: FakePlayerEngine): EngineFactory {
     engine.mount = mount;
     return engine;
   };
+}
+
+/**
+ * A ClickOutput for tests: no sound, and a clock that follows Date.now(), so
+ * `vi.useFakeTimers()` plus `vi.advanceTimersByTime` moves a count-in along.
+ */
+export class FakeClickOutput implements ClickOutput {
+  /** Every click handed over for scheduling, across count-ins. */
+  scheduled: { click: CountInClick; volume: number }[] = [];
+  unlock = vi.fn();
+  dispose = vi.fn();
+  cancelSession = vi.fn();
+
+  open(onOpen: (session: ClickSession) => void): () => void {
+    onOpen({
+      now: () => Date.now() / 1000,
+      schedule: (clicks, volume) => {
+        for (const click of clicks) this.scheduled.push({ click, volume });
+      },
+      cancel: this.cancelSession,
+    });
+    return () => {};
+  }
 }

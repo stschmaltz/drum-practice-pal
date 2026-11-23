@@ -15,5 +15,7 @@ export const primaryButtonClass = `${buttonBase} bg-sky-700 text-white hover:bg-
 
 export const inputClass = `min-h-11 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-base text-neutral-100 ${focusRing}`;
 
+export const selectClass = `${inputClass} py-1 disabled:cursor-not-allowed disabled:opacity-50`;
+
 // red-700 keeps white labels above 4.5:1 too.
 export const dangerButtonClass = `${buttonBase} bg-red-700 text-white hover:bg-red-800`;

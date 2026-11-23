@@ -5,6 +5,7 @@
  * it is.
  */
 import { FakePlayerEngine, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
+import { COMMON_TIME } from './countIn';
 import { DEFAULT_PLAYER_OPTIONS } from './playerOptions';
 import { PlayerService } from './PlayerService';
 import type { WakeLockControl } from './wakeLock';
@@ -27,7 +28,12 @@ describe('PlayerService out-of-turn engine events', () => {
   it('stays loading when the engine reports "stopped" before the song is ready', () => {
     const { engine, service, wakeLock } = setup();
     service.load(bytes);
-    engine.fire('scoreLoaded', { barCount: 16, trackCount: 3, barTempos: Array(16).fill(120) });
+    engine.fire('scoreLoaded', {
+      barCount: 16,
+      trackCount: 3,
+      barTempos: Array(16).fill(120),
+      barMeters: Array(16).fill(COMMON_TIME),
+    });
     wakeLock.setActive.mockClear();
 
     // alphaTab reports its idle state while the soundfont is still on its way.

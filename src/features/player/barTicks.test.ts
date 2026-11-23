@@ -1,4 +1,10 @@
-import { barIndexAtTick, barRangeToTicks, startTickOfBar, type BarTicks } from './barTicks';
+import {
+  barAtTick,
+  barIndexAtTick,
+  barRangeToTicks,
+  startTickOfBar,
+  type BarTicks,
+} from './barTicks';
 
 const sixteenBars: BarTicks[] = Array.from({ length: 16 }, (_, barIndex) => ({
   barIndex,
@@ -52,6 +58,29 @@ describe('barIndexAtTick', () => {
 
   it('returns null past the end', () => {
     expect(barIndexAtTick(sixteenBars, 16 * 3840)).toBeNull();
+  });
+});
+
+describe('barAtTick', () => {
+  it('returns the played bar a tick falls in, with its start', () => {
+    expect(barAtTick(sixteenBars, 3840 * 2 + 900)).toEqual({
+      barIndex: 2,
+      start: 3840 * 2,
+      end: 3840 * 3,
+    });
+  });
+
+  it('picks the playthrough the tick is in when a bar repeats', () => {
+    const repeated = [
+      { barIndex: 0, start: 0, end: 100 },
+      { barIndex: 0, start: 100, end: 200 },
+    ];
+    expect(barAtTick(repeated, 150)?.start).toBe(100);
+  });
+
+  it('returns null outside the song', () => {
+    expect(barAtTick(sixteenBars, -1)).toBeNull();
+    expect(barAtTick(sixteenBars, 16 * 3840)).toBeNull();
   });
 });
 
