@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './auth';
 import { barNumber, openFixture, playButton, speedSlider, status, viewport } from './playerPage';
 
@@ -292,3 +292,58 @@ test('a touch tap seeks; a touch swipe scrolls the score without seeking', async
   await scrollSettled(page);
   await expect(status(page)).toHaveText('Bar 2 of 16');
 });
+
+/** Whether the element is wholly inside the window, above the phone's fixed tab bar. */
+async function onScreen(locator: Locator): Promise<boolean> {
+  return locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const tabBar = Array.from(document.querySelectorAll('nav[aria-label="Main"]'))
+      .filter((nav) => getComputedStyle(nav).position === 'fixed')
+      .map((nav) => nav.getBoundingClientRect())
+      .find((nav) => nav.height > 0);
+    const bottom = tabBar?.top ?? window.innerHeight;
+    return rect.height > 0 && rect.top >= 0 && rect.bottom <= bottom;
+  });
+}
+
+// QA issue 1: Play used to scroll the readout and Pause off the top of a phone.
+for (const size of [
+  { name: 'portrait', width: 390, height: 844 },
+  { name: 'landscape', width: 844, height: 390 },
+]) {
+  test(`on a ${size.name} phone, Pause, the readout and the cursor stay on screen while playing`, async ({
+    user,
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'phone', 'phone sizes only');
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await openFixture(page, user, 'groove-120', 'Groove 120');
+    // From the top of the page, as when the song has just opened.
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Pause');
+    // Play scrolls the score box into view (smoothly): wait for the window to settle.
+    let lastY = -1;
+    await expect
+      .poll(async () => {
+        const y = await page.evaluate(() => window.scrollY);
+        const settled = y === lastY;
+        lastY = y;
+        return settled;
+      })
+      .toBe(true);
+    // Neither size fits the header, controls and score, so the window did scroll.
+    expect(lastY).toBeGreaterThan(0);
+
+    for (let sample = 0; sample < 12; sample++) {
+      await page.waitForTimeout(250);
+      expect(await onScreen(playButton(page))).toBe(true);
+      expect(await onScreen(bpm(page))).toBe(true);
+      expect(await onScreen(speed(page))).toBe(true);
+      expect(await beatCursorOnScreen(page)).toBe(true);
+    }
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Play');
+  });
+}

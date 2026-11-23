@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, Outlet, Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
@@ -445,6 +445,18 @@ describe('SongPage jam mode', () => {
     expect(status()).toHaveTextContent('Bar 1 of 16');
   });
 
+  it('keeps Play/Pause beside the readout in the sticky bar, not in the controls box', async () => {
+    serve();
+    renderSong(SONG_A);
+    await loadPlayer();
+    const bar = screen.getByTestId('jam-bar');
+    expect(within(bar).getByRole('button', { name: 'Play' })).toBeEnabled();
+    expect(within(bar).getByTestId('jam-bpm')).toBeInTheDocument();
+    const controls = screen.getByRole('region', { name: 'Player controls' });
+    expect(within(controls).queryByRole('button', { name: /^(Play|Pause)$/ })).toBeNull();
+    expect(screen.getAllByRole('button', { name: /^(Play|Pause)$/ })).toHaveLength(1);
+  });
+
   describe('bringing the score on screen', () => {
     const scrollIntoView = vi.fn();
     beforeEach(() => {
@@ -469,6 +481,8 @@ describe('SongPage jam mode', () => {
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
       expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByTestId('score-viewport'));
       expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'nearest' }));
+      // Clear of the sticky bar (jsdom measures it at 0 px, leaving the gap).
+      expect(screen.getByTestId('score-viewport').style.scrollMarginTop).toBe('8px');
 
       // Bar changes and taps while playing leave the page where the user put it.
       act(() => engine.fire('position', { tick: 6 * TICKS_PER_BAR + 1 }));

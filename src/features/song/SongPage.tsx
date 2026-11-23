@@ -1,11 +1,11 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass } from '@/components/styles';
 import type { Song } from '@/features/library/songForm';
 import { useSong, useSongFile } from '@/features/library/useSongs';
-import { PlayerControls } from '@/features/player/PlayerControls';
+import { PlayerControls, PlayPauseButton } from '@/features/player/PlayerControls';
 import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
 import {
   DEFAULT_PLAYER_OPTIONS,
@@ -102,14 +102,24 @@ function SongPlayer({
     drumTrackIndex,
     initialOptions,
   });
-  useJamMode(player, scrollRef, snapshot.status === 'playing');
+  const stickyBarRef = useRef<HTMLDivElement>(null);
+  useJamMode(player, { scrollRef, stickyBarRef }, snapshot.status === 'playing');
   // A soundfont failure still leaves readable notation; these leave an empty white box.
   const nothingToShow = snapshot.error === 'score' || snapshot.error === 'engine';
 
   return (
     <div className="flex flex-col gap-3">
-      <JamReadout snapshot={snapshot} />
-      <PlayerControls player={player} snapshot={snapshot} />
+      {/* Sticky, so Pause and the readout stay on screen when the page scrolls
+          to the score: on a phone the header, controls and score don't all fit. */}
+      <div
+        ref={stickyBarRef}
+        data-testid="jam-bar"
+        className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-neutral-950 px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:-mx-8 md:px-8"
+      >
+        <JamReadout snapshot={snapshot} />
+        <PlayPauseButton player={player} snapshot={snapshot} />
+      </div>
+      <PlayerControls player={player} snapshot={snapshot} showPlayButton={false} />
       <PlayerStatusLine snapshot={snapshot} />
       {/* Both layouts scroll inside this box, so the cursor's auto-scroll is one code path. */}
       <div
@@ -117,8 +127,9 @@ function SongPlayer({
         data-testid="score-viewport"
         // Hidden, not unmounted: alphaTab keeps its elements until the player is disposed.
         hidden={nothingToShow}
-        // jam-score: the cursor and tap styles in index.css. The scroll margin keeps
-        // the box clear of the phone's fixed tab bar when playback scrolls it into view.
+        // jam-score: the cursor and tap styles in index.css. The bottom scroll margin keeps
+        // the box clear of the phone's fixed tab bar when playback scrolls it into view
+        // (useJamMode sets the top one from the sticky bar's height).
         className="jam-score relative h-[60dvh] scroll-mb-[calc(4.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-lg bg-white text-black md:scroll-mb-4"
       >
         <div ref={scoreRef} />

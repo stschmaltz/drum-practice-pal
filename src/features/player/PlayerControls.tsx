@@ -15,15 +15,38 @@ interface PlayerControlsProps {
   /** Null while alphaTab loads; the controls show the snapshot but do nothing. */
   player: PlayerService | null;
   snapshot: PlayerSnapshot;
+  /**
+   * False when the screen shows `PlayPauseButton` elsewhere, such as a sticky
+   * bar that stays on screen while the page scrolls to the score.
+   */
+  showPlayButton?: boolean;
+}
+
+/** Whether Play can be pressed: the song is loaded (or already playing). */
+function canPlay(player: PlayerService | null, snapshot: PlayerSnapshot): boolean {
+  return player !== null && (snapshot.status === 'ready' || snapshot.status === 'playing');
+}
+
+/** Play/Pause. Part of `PlayerControls` unless the screen places it itself. */
+export function PlayPauseButton({ player, snapshot }: Omit<PlayerControlsProps, 'showPlayButton'>) {
+  return (
+    <button
+      type="button"
+      className={`${primaryButtonClass} min-w-24`}
+      disabled={!canPlay(player, snapshot)}
+      // No await before this: iOS only starts audio inside the tap itself.
+      onClick={() => player?.togglePlay()}
+    >
+      {snapshot.status === 'playing' ? 'Pause' : 'Play'}
+    </button>
+  );
 }
 
 /**
  * The shared controls bar: play/pause, back to start, speed, metronome and
  * drum mute. Every change is live; none restarts playback.
  */
-export function PlayerControls({ player, snapshot }: PlayerControlsProps) {
-  const playing = snapshot.status === 'playing';
-  const canPlay = player !== null && (snapshot.status === 'ready' || playing);
+export function PlayerControls({ player, snapshot, showPlayButton = true }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist.
   const noPlayer = player === null;
 
@@ -33,19 +56,11 @@ export function PlayerControls({ player, snapshot }: PlayerControlsProps) {
       className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3"
     >
       <div className="flex gap-2">
-        <button
-          type="button"
-          className={`${primaryButtonClass} min-w-24`}
-          disabled={!canPlay}
-          // No await before this: iOS only starts audio inside the tap itself.
-          onClick={() => player?.togglePlay()}
-        >
-          {playing ? 'Pause' : 'Play'}
-        </button>
+        {showPlayButton && <PlayPauseButton player={player} snapshot={snapshot} />}
         <button
           type="button"
           className={buttonClass}
-          disabled={!canPlay}
+          disabled={!canPlay(player, snapshot)}
           onClick={() => player?.stop()}
         >
           Back to start

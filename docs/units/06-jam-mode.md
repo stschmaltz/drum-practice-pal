@@ -221,3 +221,43 @@ I made no cosmetic fixes, and no app code changed.
 - Files changed by QA: this note and `docs/units/06-shots/` (36 screenshots). Nothing is committed.
 
 **Verdict: FAIL.** All four acceptance criteria pass on function. But issue 1 (major) hides the jam header and Pause for all of playback on a phone, so it should go to Build before Readability. Issues 2 and 3 are minor and can be carried forward.
+
+## Build (fix round 1)
+
+**Fixes QA issue 1 (major): Pause and the Speed/BPM readout scrolled off a phone during playback.** Issues 2 and 3 are left as they were.
+
+**Approach.** The readout and Play/Pause now sit in one sticky bar at the top of the window (`data-testid="jam-bar"`). When Play scrolls the score box into view, the bar stays put above it, so Pause, Speed and BPM are on screen for all of playback at every size. `useJamMode` measures the bar on each start and sets the score box's `scroll-margin-top` to its height plus 8 px, so the `scrollIntoView({ block: 'nearest' })` lands the box below the bar rather than under it. Measured rather than a fixed class, because the bar can wrap on a narrow phone and includes the top safe area.
+
+I picked this over QA's other options because it covers portrait and landscape with one change. Sizing the box to one line of music would fix portrait only; landscape (390 px tall) can't fit the header, three rows of controls and the score whatever the box height, so something had to stay pinned. Scrolling only the cursor's bar into view would still scroll the header away in landscape.
+
+**Files**
+
+- `src/features/player/PlayerControls.tsx`: `PlayPauseButton` exported on its own, and a `showPlayButton` prop (default true) on `PlayerControls`, so a screen can place Play/Pause elsewhere. Other screens are unchanged.
+- `src/features/song/SongPage.tsx`: the sticky bar (`JamReadout` + `PlayPauseButton`, full-bleed background over the page gutter, top padding includes `env(safe-area-inset-top)`), and `PlayerControls` with `showPlayButton={false}`.
+- `src/features/song/useJamMode.ts`: takes `{ scrollRef, stickyBarRef }` and sets the box's top scroll margin from the bar's height before scrolling.
+- `src/features/player/PlayerControls.test.tsx`: controls without the Play button; `PlayPauseButton` on its own.
+- `src/features/song/SongPage.test.tsx`: Play/Pause is in the sticky bar, not the controls region, and there is only one; the scroll test checks the top scroll margin.
+- `tests/e2e/playerPage.ts`: `playButton` is found on the page, not inside the "Player controls" region.
+- `tests/e2e/jam.spec.ts`: new test, run in the phone project at 390x844 and at 844x390 (`page.setViewportSize`, no new project). From the top of the page it presses Play, waits for the window to settle (and checks it did scroll), then samples for 3 s that Pause, Speed and BPM are inside the window above the tab bar and the beat cursor is on screen. It fails on the previous code (checked by stashing the fix).
+
+**Decisions**
+
+- The bar is sticky at every size, not only on phones. On tablet and desktop the box is already fully visible, so `nearest` doesn't scroll and nothing moves; the only visible change is Play/Pause sitting at the right of the readout instead of at the start of the controls box. Cursor following and tap to seek are untouched (all their e2e tests pass at all three sizes).
+- Back to start stays in the controls box: with it, the bar would wrap to two rows on a portrait phone.
+
+**Known gaps**
+
+- At 844x390 the bar plus the score box leave little of the page header visible during playback; that's expected, the title isn't needed while playing.
+- Not checked on a real iPhone (Human check): the sticky bar under the status bar in an installed PWA relies on `safe-area-inset-top`.
+
+**Manual verify**
+
+1. `npm run dev`, open a song at 390x844 with the page at the top, press Play: the window scrolls the score into view, the Speed/BPM row and Pause stay pinned at the top, and the cursor moves in the score below.
+2. Same at 844x390.
+3. At 820x1180 and 1440x900, press Play: nothing scrolls; tap a bar while playing and it seeks.
+
+**Results**
+
+- `npm run check`: green, 46 files, 595 tests.
+- `npm run e2e`: 154 passed, 5 skipped.
+- Nothing committed.

@@ -11,8 +11,8 @@ export const fixture = (name: string) =>
   join(process.cwd(), 'tests', 'fixtures', 'gp', `${name}.gp`);
 
 export const controls = (page: Page) => page.getByRole('region', { name: 'Player controls' });
-export const playButton = (page: Page) =>
-  controls(page).getByRole('button', { name: /^(Play|Pause)$/ });
+// Not inside the controls region: the song page keeps Play/Pause in a sticky bar.
+export const playButton = (page: Page) => page.getByRole('button', { name: /^(Play|Pause)$/ });
 export const speedSlider = (page: Page) => controls(page).getByRole('slider', { name: 'Speed' });
 export const status = (page: Page) => page.getByTestId('player-status');
 export const viewport = (page: Page) => page.getByTestId('score-viewport');
