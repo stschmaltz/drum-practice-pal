@@ -437,3 +437,30 @@ Issues 2 and 3 from the first QA round are unchanged and still minor: the phone 
 - Before: `npm run check` green, 46 files, 596 tests. `npm run e2e` 161 passed, 7 skipped.
 - After: `npm run check` green, 46 files, 596 tests. `npm run e2e` 161 passed, 7 skipped.
 - Nothing committed.
+
+## Review
+
+Read every line of `git diff origin/main...HEAD` (app code, tests, helpers, AGENTS.md). This unit adds no Supabase calls, list APIs or multi-step writes, so the review centred on listeners, races, effects and e2e flakiness.
+
+**Findings**
+
+1. **Minor, fixed: e2e race in "tapping a bar while playing seeks there and keeps playing"** (`tests/e2e/jam.spec.ts`, the `nextBarPoint` call after Play). Play can smooth-scroll the window to the score (`useJamMode`, phone sizes), and the test measured the next bar's point while that scroll could still be running, so the click could land a few pixels off the bar it measured. Added `await windowScrollSettled(page)` after Play, as the fix-round tests already do.
+2. **Checked, no change: tap hit-testing coordinates** (`alphaTabEngine.ts`, `onScoreClick`). Relative to `.at-surface`'s client rect, which matches alphaTab's own mouse handling (`BrowserMouseEventArgs.getX/getY` against `canvasElement`, then `boundsLookup.getBeatAtPos`), so no display-scale or scroll offset is missing.
+3. **Checked, no change: listener and emitter teardown.** The `click` listener is removed and the tap emitter cleared in `destroy()`; `useSeekOnTap` returns the `barTapped` unsubscribe; `PlayerService` drops taps when disposed or not loaded, and `dispose()` clears its events, so a tap from a disposed engine can't seek the next song (covered by the "old song" test).
+4. **Checked, no change: effects.** `useScoreOnScreenOnPlay` depends on `playing` and two stable refs, so it runs once per start; the inline `scrollMarginTop` is on an element React doesn't style.
+5. **Checked, no change: tempo and bar numbering.** `barTempos` is by 0-based master bar index, the same index `barIndexAtTick` returns (repeats included); conversion to 1-based happens in `tempoAtBar` and `barTapped`.
+6. **Checked, no change: e2e hygiene.** Specs use the `user` fixture from `auth.ts`, open no extra contexts, and the `waitForTimeout` calls are sampling intervals or "nothing happens" negative checks, not waits for a result. Bounding boxes go through `boxOf` / `barCursorBox`, which throw instead of passing null on.
+
+**Open issues**
+
+- **Seek mid-play can flick back one update** (`PlayerService.seekToBar` / `position` handler, already a Build known gap). A position event alphaTab posted before the seek can arrive after it, moving `barNumber` back and emitting an extra `barChanged` before the new position arrives. A tick can't tell an old event from a new one after a backward seek, so a fix needs alphaTab-side knowledge (or a seek generation counter in the engine). Worth revisiting in Unit 08 if loop logic listens to `barChanged`.
+- **A desktop mouse drag across the score seeks to where it ends.** Browsers fire `click` when mousedown and mouseup land in the same element, so a text-selection drag counts as a tap. Harmless today; Unit 08 (drag to select a range on desktop) has to handle drags explicitly anyway, e.g. by ignoring a click whose pointer moved since pointerdown.
+- Carried from QA: the 320 px volume row overflow, no bottom edge on the sticky bar, the 47 px sideways offset on a phone, double-tap zoom.
+
+**AGENTS.md**: no new pattern.
+
+**Results**
+
+- `npm run check`: green, 46 files, 596 tests.
+- `npm run e2e`: 161 passed, 7 skipped (local Supabase running).
+- Files changed: `tests/e2e/jam.spec.ts`, this note. Nothing committed.

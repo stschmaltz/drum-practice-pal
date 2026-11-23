@@ -202,6 +202,8 @@ test('tapping a bar while playing seeks there and keeps playing', async ({ user,
   await speedSlider(page).fill('50');
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Pause');
+  // Play may smooth-scroll the window to the score; measure the bar after it ends, or the tap misses.
+  await windowScrollSettled(page);
 
   const point = await nextBarPoint(page);
   // At 50% a bar lasts 4 s, so the cursor is still on bar 1 here.
