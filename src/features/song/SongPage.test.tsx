@@ -457,6 +457,34 @@ describe('SongPage jam mode', () => {
     expect(screen.getAllByRole('button', { name: /^(Play|Pause)$/ })).toHaveLength(1);
   });
 
+  it('plays and pauses from the keyboard, keeping focus, with Play first in tab order', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    // Tab from the last nav link: Play/Pause is the page's first control, then Back to start.
+    screen.getByRole('link', { name: 'Song B' }).focus();
+    await user.tab();
+    expect(playButton()).toHaveFocus();
+    expect(playButton()).toHaveAccessibleName('Play');
+
+    await user.keyboard('{Enter}');
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    act(() => engine.fire('stateChanged', { playing: true }));
+    expect(playButton()).toHaveAccessibleName('Pause');
+    // The label changes in place, so a screen reader stays on the same button.
+    expect(playButton()).toHaveFocus();
+
+    await user.keyboard(' ');
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+    act(() => engine.fire('stateChanged', { playing: false }));
+    expect(playButton()).toHaveAccessibleName('Play');
+    expect(playButton()).toHaveFocus();
+
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Back to start' })).toHaveFocus();
+  });
+
   describe('bringing the score on screen', () => {
     const scrollIntoView = vi.fn();
     beforeEach(() => {

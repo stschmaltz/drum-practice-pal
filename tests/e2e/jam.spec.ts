@@ -347,3 +347,89 @@ for (const size of [
     await expect(playButton(page)).toHaveText('Play');
   });
 }
+
+const jamBar = (page: Page) => page.getByTestId('jam-bar');
+
+/** Waits until the window stops scrolling (Play's smooth scroll has ended). */
+async function windowSettled(page: Page) {
+  let lastY = -1;
+  await expect
+    .poll(async () => {
+      const y = await page.evaluate(() => window.scrollY);
+      const settled = y === lastY;
+      lastY = y;
+      return settled;
+    })
+    .toBe(true);
+}
+
+// Fix round 1: the sticky bar must never sit over the score, swallow a tap
+// meant for a bar, or pass its own taps through to the score.
+for (const size of [null, { name: 'landscape phone', width: 844, height: 390 }]) {
+  test(`with the page scrolled to the end while playing, a tap on the bar just below the sticky bar seeks${size ? ` (${size.name})` : ''}`, async ({
+    user,
+    page,
+  }, testInfo) => {
+    test.skip(size !== null && testInfo.project.name !== 'phone', 'phone project only');
+    if (size) await page.setViewportSize({ width: size.width, height: size.height });
+    await openFixture(page, user, 'groove-120', 'Groove 120');
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    // At 50% a bar lasts 4 s, so the cursor is still on bar 1 for the taps.
+    await speedSlider(page).fill('50');
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Pause');
+    await windowSettled(page);
+    // As far down as the page goes: the score at its closest to the sticky bar.
+    await page.evaluate(() =>
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }),
+    );
+    await windowSettled(page);
+
+    const bar = await jamBar(page).boundingBox();
+    const frame = await viewport(page).boundingBox();
+    const cursor = await barCursorBox(page);
+    if (!bar || !frame) throw new Error('No sticky bar or score box');
+    const barBottom = bar.y + bar.height;
+    expect(frame.y).toBeGreaterThanOrEqual(barBottom);
+    expect(cursor.y).toBeGreaterThanOrEqual(barBottom);
+    expect(await beatCursorOnScreen(page)).toBe(true);
+
+    // A tap on the sticky bar's readout is the bar's: no seek, playback goes on.
+    const readout = await bpm(page).boundingBox();
+    if (!readout) throw new Error('No BPM readout');
+    await page.mouse.click(readout.x + readout.width / 2, readout.y + readout.height / 2);
+    await page.waitForTimeout(500);
+    await expect(status(page)).toHaveText('Bar 1 of 16');
+    await expect(playButton(page)).toHaveText('Pause');
+
+    // The next bar, on the score's top line, right under the sticky bar.
+    const next = await nextBarPoint(page);
+    expect(next.y).toBeGreaterThan(barBottom);
+    // Exactly the bar tapped. (While playing, alphaTab then scrolls its line into view.)
+    expect(await tapAndWaitForBar(page, next.x, next.y, 1)).toBe(2);
+    await expect(playButton(page)).toHaveText('Pause');
+    expect(await onScreen(playButton(page))).toBe(true);
+    expect(await onScreen(bpm(page))).toBe(true);
+  });
+}
+
+test('Play/Pause in the sticky bar works from the keyboard', async ({ user, page }) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await playButton(page).focus();
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect(playButton(page)).toBeFocused();
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(1);
+
+  await page.keyboard.press('Enter');
+  await expect(playButton(page)).toHaveText('Play');
+  await expect(playButton(page)).toBeFocused();
+  // Paused means paused: the bar stays put.
+  const pausedAt = await barNumber(page);
+  await page.waitForTimeout(1000);
+  expect(await barNumber(page)).toBe(pausedAt);
+
+  // Next in tab order: the rest of the controls.
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Back to start' })).toBeFocused();
+});

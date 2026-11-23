@@ -261,3 +261,37 @@ I picked this over QA's other options because it covers portrait and landscape w
 - `npm run check`: green, 46 files, 595 tests.
 - `npm run e2e`: 154 passed, 5 skipped.
 - Nothing committed.
+
+## Test (fix round 1)
+
+Re-ran on the area fix round 1 changed: the sticky bar (`jam-bar`) holding Speed/BPM and Play/Pause, the measured `scroll-margin-top`, and `PlayerControls`' `showPlayButton` / `PlayPauseButton`.
+
+**What was already covered by Build's tests**
+
+- Pause, Speed, BPM and the beat cursor stay on screen for 3 s of playback at 390x844 and 844x390, starting from the top of the page (`jam.spec.ts`, phone project).
+- Play/Pause is in the sticky bar, once, and not in the controls box; the score box gets a top scroll margin (`SongPage.test.tsx`).
+- `PlayerControls` without its Play button, and `PlayPauseButton` on its own (`PlayerControls.test.tsx`).
+- Cursor follow, tempo-change BPM and tap to seek at tablet and desktop: the existing jam e2e tests, all passing unchanged.
+
+**Gaps filled**
+
+- `tests/e2e/jam.spec.ts`, "with the page scrolled to the end while playing, a tap on the bar just below the sticky bar seeks": runs at phone, tablet and desktop, plus 844x390 in the phone project. While playing at 50%, after Play's scroll and with the window scrolled as far as it goes (the score at its closest to the sticky bar), it checks:
+  - The sticky bar's bottom is at or above the score box's top and the bar cursor's top, and the beat cursor is on screen.
+  - A tap on the BPM readout in the sticky bar doesn't seek or pause (the bar keeps its own taps).
+  - A tap on the next bar on the score's top line, below the sticky bar, lands on exactly bar 2 and playback keeps going, with Pause and BPM still on screen.
+- `tests/e2e/jam.spec.ts`, "Play/Pause in the sticky bar works from the keyboard" (all three projects): focus Play, Space plays (the bar advances), Enter pauses (the bar stays put), focus stays on the button throughout, and Tab goes on to Back to start.
+- `src/features/song/SongPage.test.tsx`, "plays and pauses from the keyboard, keeping focus, with Play first in tab order": Tab from the nav reaches Play first; Enter and Space call play and pause; the accessible name switches Play/Pause in place on the focused button; the next tab stop is Back to start.
+
+**Notes**
+
+- Measured geometry: the window can scroll only 8 px (portrait) or 16 px (landscape) past where Play leaves it, so at these sizes the sticky bar can't be pushed over the score by scrolling the page. Inside the box, lines scroll under the box's own top edge, not under the bar.
+- At 1440x900, Play does scroll the window by 6 px (the box ends 6 px inside the 16 px bottom scroll margin). The handoff says "nothing scrolls" there. It's harmless: nothing visible moves and taps and following are unaffected. Not logged as a bug.
+- While playing in page layout, a tap on the first bar of the next line seeks there and alphaTab then scrolls that line up, so the new test asserts the bar number rather than the cursor box under the tap point.
+
+**Bugs found:** none. No app code changed.
+
+**Results**
+
+- `npm run check`: green, 46 files, 596 tests.
+- `npm run e2e`: 161 passed, 7 skipped (phone-only and touch-only variants skipped in the other projects).
+- Nothing committed.
