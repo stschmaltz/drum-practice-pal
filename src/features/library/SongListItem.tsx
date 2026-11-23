@@ -7,6 +7,7 @@ import {
   inputClass,
   primaryButtonClass,
 } from '@/components/styles';
+import { songPath } from '@/lib/routes';
 import {
   changedSongFields,
   normaliseSongEdit,
@@ -15,7 +16,7 @@ import {
   type SongEdit,
   type SongEditErrors,
 } from './songForm';
-import { NO_DRUM_TRACK_NOTE } from './UploadPanel';
+import { NO_DRUM_TRACK_NOTE } from './songMetadata';
 import { useDeleteSong, useUpdateSong } from './useSongs';
 
 type Mode = 'view' | 'edit' | 'confirm-delete';
@@ -49,7 +50,7 @@ function SongSummary({ song }: { song: LibrarySong }) {
   return (
     <div className="flex flex-col gap-1">
       <Link
-        to={`/songs/${song.id}`}
+        to={songPath(song.id)}
         className="text-lg font-semibold break-words text-neutral-100 hover:underline"
       >
         {song.title}
@@ -77,8 +78,6 @@ function formatTempo(tempo: number): string {
 
 function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void }) {
   const update = useUpdateSong();
-  const titleId = useId();
-  const artistId = useId();
   // Only touched fields, so the other one keeps showing the latest saved value.
   const [draft, setDraft] = useState<Partial<SongEdit>>({});
   const [errors, setErrors] = useState<SongEditErrors>({});
@@ -107,28 +106,18 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
 
   return (
     <form className="flex flex-col gap-3" onSubmit={onSubmit} noValidate>
-      <div className="flex flex-col gap-1">
-        <label htmlFor={titleId}>Title</label>
-        <input
-          id={titleId}
-          className={inputClass}
-          value={values.title}
-          aria-invalid={errors.title ? true : undefined}
-          onChange={(event) => edit({ title: event.target.value })}
-        />
-        {errors.title && <span className="text-sm text-red-300">{errors.title}</span>}
-      </div>
-      <div className="flex flex-col gap-1">
-        <label htmlFor={artistId}>Artist</label>
-        <input
-          id={artistId}
-          className={inputClass}
-          value={values.artist}
-          aria-invalid={errors.artist ? true : undefined}
-          onChange={(event) => edit({ artist: event.target.value })}
-        />
-        {errors.artist && <span className="text-sm text-red-300">{errors.artist}</span>}
-      </div>
+      <TextField
+        label="Title"
+        value={values.title}
+        error={errors.title}
+        onChange={(title) => edit({ title })}
+      />
+      <TextField
+        label="Artist"
+        value={values.artist}
+        error={errors.artist}
+        onChange={(artist) => edit({ artist })}
+      />
       <div className="flex flex-wrap gap-2">
         <button type="submit" className={primaryButtonClass} disabled={update.isPending}>
           {update.isPending ? 'Saving…' : 'Save'}
@@ -139,6 +128,33 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
       </div>
       {update.isError && <ErrorAlert>Couldn't save the song: {update.error.message}</ErrorAlert>}
     </form>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  error,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  error: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        className={inputClass}
+        value={value}
+        aria-invalid={error ? true : undefined}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {error && <span className="text-sm text-red-300">{error}</span>}
+    </div>
   );
 }
 

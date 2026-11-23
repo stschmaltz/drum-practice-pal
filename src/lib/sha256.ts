@@ -3,6 +3,7 @@
  * the dev server opened from a phone on the LAN (http://192.168.x.x:5173) isn't
  * one, so there's a plain implementation to fall back on.
  */
+import { toHex } from './hex';
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const subtle = globalThis.crypto?.subtle;
@@ -12,10 +13,6 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
     return toHex(new Uint8Array(digest));
   }
   return toHex(sha256(bytes));
-}
-
-export function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 // FIPS 180-4 round constants.

@@ -2,13 +2,8 @@ import { useId } from 'react';
 import { useSearchParams } from 'react-router';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass, inputClass } from '@/components/styles';
-import {
-  isLibrarySort,
-  searchSongs,
-  sortSongs,
-  type LibrarySong,
-  type LibrarySort,
-} from './songForm';
+import type { LibrarySong } from './songForm';
+import { isLibrarySort, searchSongs, sortSongs, type LibrarySort } from './songList';
 import { SongListItem } from './SongListItem';
 import { UploadPanel } from './UploadPanel';
 import { useSongs } from './useSongs';
@@ -17,6 +12,9 @@ const SORT_LABELS: Record<LibrarySort, string> = {
   practiced: 'Recently practiced',
   added: 'Recently added',
 };
+
+/** Used when the URL names no sort; picking it drops the param. */
+const DEFAULT_SORT: LibrarySort = 'practiced';
 
 export function LibraryPage() {
   const songs = useSongs();
@@ -50,7 +48,7 @@ function useLibraryView() {
   const [params, setParams] = useSearchParams();
   const query = params.get('q') ?? '';
   const sortParam = params.get('sort');
-  const sort: LibrarySort = isLibrarySort(sortParam) ? sortParam : 'practiced';
+  const sort: LibrarySort = isLibrarySort(sortParam) ? sortParam : DEFAULT_SORT;
 
   const set = (key: 'q' | 'sort', value: string) =>
     setParams(
@@ -67,7 +65,7 @@ function useLibraryView() {
     query,
     sort,
     setQuery: (value: string) => set('q', value),
-    setSort: (value: LibrarySort) => set('sort', value === 'practiced' ? '' : value),
+    setSort: (value: LibrarySort) => set('sort', value === DEFAULT_SORT ? '' : value),
   };
 }
 

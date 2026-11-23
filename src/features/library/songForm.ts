@@ -1,6 +1,7 @@
 /**
- * The songs columns the library reads and edits, plus pure validation, search
- * and sort. No client import, so songsApi.ts, the page and node tests share it.
+ * The songs columns the library reads and edits, plus pure edit validation.
+ * No client import, so songsApi.ts, the page and node tests share it. Search
+ * and sort live in songList.ts.
  */
 import type { Database } from '@/lib/database.types';
 import { SONG_TEXT_MAX_LENGTH } from '@/lib/schema';
@@ -48,8 +49,6 @@ function latest(timestamps: readonly (string | null)[]): string | null {
   return newest;
 }
 
-// Editing ---------------------------------------------------------------------
-
 export type SongEdit = Pick<Song, 'title' | 'artist'>;
 export type SongEditErrors = Partial<Record<keyof SongEdit, string>>;
 
@@ -78,56 +77,4 @@ export function changedSongFields(saved: SongEdit, draft: SongEdit): Partial<Son
   if (draft.title !== saved.title) changes.title = draft.title;
   if (draft.artist !== saved.artist) changes.artist = draft.artist;
   return changes;
-}
-
-// Search and sort -------------------------------------------------------------
-
-export const LIBRARY_SORTS = ['practiced', 'added'] as const;
-export type LibrarySort = (typeof LIBRARY_SORTS)[number];
-
-export function isLibrarySort(value: string | null): value is LibrarySort {
-  return (LIBRARY_SORTS as readonly (string | null)[]).includes(value);
-}
-
-/** Case- and accent-insensitive, so "beyonce" finds "Beyoncé". */
-function searchable(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLocaleLowerCase();
-}
-
-/** Songs whose title or artist contains every word of the query. */
-export function searchSongs<T extends Pick<Song, 'title' | 'artist'>>(
-  songs: readonly T[],
-  query: string,
-): T[] {
-  const words = searchable(query).split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [...songs];
-  return songs.filter((song) => {
-    const haystack = searchable(`${song.title} ${song.artist}`);
-    return words.every((word) => haystack.includes(word));
-  });
-}
-
-const time = (timestamp: string | null) => (timestamp ? Date.parse(timestamp) : -Infinity);
-
-/**
- * "practiced": most recently practiced first, never-practiced songs after,
- * newest upload first among those. "added": newest upload first.
- */
-export function sortSongs<T extends Pick<LibrarySong, 'created_at' | 'last_practiced_at' | 'id'>>(
-  songs: readonly T[],
-  sort: LibrarySort,
-): T[] {
-  return [...songs].sort((a, b) => {
-    if (sort === 'practiced') {
-      const byPractice = time(b.last_practiced_at) - time(a.last_practiced_at);
-      if (byPractice !== 0 && !Number.isNaN(byPractice)) return byPractice;
-    }
-    const byAdded = time(b.created_at) - time(a.created_at);
-    if (byAdded !== 0) return byAdded;
-    // Same timestamp: keep a stable order across refetches.
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
 }

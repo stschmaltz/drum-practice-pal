@@ -110,6 +110,8 @@ docs/
 - File plus row writes (`uploadSong`, `deleteSong` in `songsApi.ts`): upload the file, insert the row, and remove the file again if the insert fails (and say so if that removal fails too). Delete the file first, then the row, so a failure leaves the song listed and retryable rather than an unreachable file. A cancel is honoured only before the insert starts.
 - Destructive actions confirm inline in the item (`SongListItem`'s `ConfirmDelete`), with no modal, and aren't optimistic.
 - Search and sort that should survive going back live in the URL (`useSearchParams`, `replace: true`), validated against a known list (`isLibrarySort`). Never echo the query back as a message.
+- Keep list search and sort in their own pure module (songList.ts: searchSongs, sortSongs), separate from the form module's columns and edit validation.
+- Build in-app links that take a parameter with the helpers in src/lib/routes.ts (songPath(id)), not template strings. UI copy shared by two components (NO_DRUM_TRACK_NOTE) lives in a pure module, not exported from a component file.
 - `tests/fixtures/gp/no-drums.gp` is a guitar-only fixture for the null `drum_track_index` path.
 
 ## Stage workflow

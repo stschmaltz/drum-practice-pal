@@ -17,6 +17,7 @@ import {
   type Song,
   type SongEdit,
 } from './songForm';
+import type { SongMetadata } from './songMetadata';
 
 /** Postgres unique_violation: here, songs_user_file_hash_key. */
 const UNIQUE_VIOLATION = '23505';
@@ -83,15 +84,7 @@ export async function uploadSong(
   { signal, onStep }: UploadOptions = {},
 ): Promise<UploadResult> {
   onStep?.('reading');
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const check = checkSongFile(file.name, bytes);
-  if (!check.ok) throw new SongFileError(SONG_FILE_MESSAGES[check.problem]);
-
-  // Lazy, so alphaTab isn't in the main bundle.
-  const { parseScore } = await import('./parseScore');
-  const parsed = parseScore(bytes, file.name);
-  if (!parsed.ok) throw new SongFileError(SONG_FILE_MESSAGES.unreadable);
-  const { metadata } = parsed;
+  const { bytes, metadata } = await readSongFile(file);
 
   onStep?.('checking');
   const fileHash = await sha256Hex(bytes);
@@ -143,20 +136,35 @@ export async function uploadSong(
   return { kind: 'uploaded', song: { ...song, last_practiced_at: null } };
 }
 
+/** The file's bytes and score metadata, or a SongFileError for a file the app refuses. */
+async function readSongFile(file: File): Promise<{ bytes: Uint8Array; metadata: SongMetadata }> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const check = checkSongFile(file.name, bytes);
+  if (!check.ok) throw new SongFileError(SONG_FILE_MESSAGES[check.problem]);
+
+  // Lazy, so alphaTab isn't in the main bundle.
+  const { parseScore } = await import('./parseScore');
+  const parsed = parseScore(bytes, file.name);
+  if (!parsed.ok) throw new SongFileError(SONG_FILE_MESSAGES.unreadable);
+  return { bytes, metadata: parsed.metadata };
+}
+
 /** Rollback for a file whose row won't exist. Throws if the file stays behind. */
 async function removeUploadedFile(filePath: string, cause: unknown): Promise<void> {
   const removed = await supabase.storage.from(GP_FILES_BUCKET).remove([filePath]);
   if (removed.error) {
-    // supabase-js errors aren't always Error instances, but all carry a message.
-    const reason =
-      typeof cause === 'object' && cause !== null && 'message' in cause
-        ? String(cause.message)
-        : String(cause);
     throw new Error(
-      `${reason} The uploaded file couldn't be removed either: ${removed.error.message}`,
+      `${messageOf(cause)} The uploaded file couldn't be removed either: ${removed.error.message}`,
       { cause },
     );
   }
+}
+
+/** supabase-js errors aren't always Error instances, but all carry a message. */
+function messageOf(cause: unknown): string {
+  return typeof cause === 'object' && cause !== null && 'message' in cause
+    ? String(cause.message)
+    : String(cause);
 }
 
 /** Returns the saved row, so the cache holds what the DB actually stored. */

@@ -195,3 +195,30 @@ I also used the real Songsterr export in `tests/fixtures/real/` (not committed).
 - `npm run check`: green, 33 files, 426 tests.
 - `npm run e2e`: 102 passed.
 - App change: `src/features/library/UploadPanel.tsx`, upload label classes only.
+
+## Readability
+
+**Summary:** Small structural clean-ups with no behavior change. No test assertions changed; tests only moved or changed imports.
+
+**Changes**
+
+- **Search and sort split out of `songForm.ts`.** `searchSongs`, `sortSongs`, `LIBRARY_SORTS`, `LibrarySort` and `isLibrarySort` now live in `src/features/library/songList.ts`, with their tests moved to `songList.test.ts`. `songForm.ts` keeps the columns, select literals, `toLibrarySong` and edit validation, like `settingsForm.ts`.
+- **`uploadSong` is shorter.** Reading, checking and parsing the file moved into `readSongFile(file)`. The error-message fallback inside `removeUploadedFile` became `messageOf(cause)`. The steps, their order and the cancel and rollback points are unchanged.
+- **`NO_DRUM_TRACK_NOTE` moved from `UploadPanel.tsx` to `songMetadata.ts`.** `SongListItem` no longer imports a constant from another component.
+- **`songPath(id)` in the new `src/lib/routes.ts`.** The three hand-built `/songs/${id}` links use it.
+- **`toHex` in the new `src/lib/hex.ts`.** `sha256.ts` and `randomUuid.ts` used to each have their own copy.
+- **`UploadPanel`:** the window-level drop guard is now a named hook (`useIgnoreStrayFileDrops`), and the step label plus Cancel is an `UploadProgress` component.
+- **`SongListItem`:** the two identical title and artist fields are now one local `TextField`, which owns its `useId`.
+- **`LibraryPage`:** `DEFAULT_SORT` names the sort that the URL leaves out, instead of repeating `'practiced'`.
+- **`sortSongs`:** a comment now explains the `NaN` check (two never-practiced songs give `-Infinity - -Infinity`).
+- **`AGENTS.md`:** under "Lists, files and ids", list search and sort get their own module, links use `src/lib/routes.ts`, and shared UI copy goes in a pure module.
+
+**Left as is**
+
+- QA issue 6 (`aria-describedby` on the edit errors): adding it would change the accessibility tree, so it's left for Unit 12. `TextField` is now the single place to add it.
+- The load-error block in `LibraryPage` matches `SettingsPage`'s and stays inline; `ErrorAlert` doesn't take a retry button.
+
+**Results**
+
+- Before: `npm run check` green (33 files, 426 tests). `npm run e2e`: 102 passed.
+- After: `npm run check` green (34 files, 426 tests; the extra file is `songList.test.ts`). `npm run e2e`: 102 passed. Local Supabase was running.

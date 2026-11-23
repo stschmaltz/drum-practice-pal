@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
-import { sha256, sha256Hex, toHex } from './sha256';
+import { toHex } from './hex';
+import { sha256, sha256Hex } from './sha256';
 
 const nodeHex = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const utf8 = (text: string) => new TextEncoder().encode(text);

@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Link } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { buttonClass, primaryButtonClass } from '@/components/styles';
+import { songPath } from '@/lib/routes';
 import { GUITAR_PRO_EXTENSIONS } from './songFile';
+import { NO_DRUM_TRACK_NOTE } from './songMetadata';
 import { SongFileError, type UploadResult, type UploadStep } from './songsApi';
 import { useUploadSong } from './useSongs';
 
@@ -12,9 +14,6 @@ const STEP_LABELS: Record<UploadStep, string> = {
   uploading: 'Uploading',
   saving: 'Saving',
 };
-
-export const NO_DRUM_TRACK_NOTE =
-  'No drum track found in this file. It will play the other parts and the metronome, with nothing to mute or read along with.';
 
 /**
  * Picker and drop zone for one Guitar Pro file at a time. The picker has no
@@ -28,18 +27,7 @@ export function UploadPanel() {
   const [dragging, setDragging] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
-
-  // A file dropped just outside the zone would otherwise replace the app with
-  // the browser's view of that file.
-  useEffect(() => {
-    const ignore = (event: Event) => event.preventDefault();
-    window.addEventListener('dragover', ignore);
-    window.addEventListener('drop', ignore);
-    return () => {
-      window.removeEventListener('dragover', ignore);
-      window.removeEventListener('drop', ignore);
-    };
-  }, []);
+  useIgnoreStrayFileDrops();
 
   const start = (file: File) => {
     setDropError(null);
@@ -113,27 +101,57 @@ export function UploadPanel() {
 
       <div aria-live="polite" className="flex flex-col gap-2">
         {upload.isPending && (
-          <div className="flex flex-wrap items-center gap-3">
-            <p role="status" className="text-neutral-300">
-              {STEP_LABELS[step]} {fileName}…
-            </p>
-            {/* The insert can't be cancelled safely, so the button goes once it starts. */}
-            {step !== 'saving' && (
-              <button
-                type="button"
-                className={buttonClass}
-                onClick={() => controller.current?.abort()}
-              >
-                Cancel
-              </button>
-            )}
-          </div>
+          <UploadProgress
+            step={step}
+            fileName={fileName}
+            onCancel={() => controller.current?.abort()}
+          />
         )}
         {upload.isSuccess && <UploadOutcome result={upload.data} />}
         {upload.isError && <UploadFailure error={upload.error} fileName={fileName} />}
         {dropError && <ErrorAlert>{dropError}</ErrorAlert>}
       </div>
     </section>
+  );
+}
+
+/**
+ * A file dropped just outside the zone would otherwise replace the app with
+ * the browser's view of that file.
+ */
+function useIgnoreStrayFileDrops() {
+  useEffect(() => {
+    const ignore = (event: Event) => event.preventDefault();
+    window.addEventListener('dragover', ignore);
+    window.addEventListener('drop', ignore);
+    return () => {
+      window.removeEventListener('dragover', ignore);
+      window.removeEventListener('drop', ignore);
+    };
+  }, []);
+}
+
+function UploadProgress({
+  step,
+  fileName,
+  onCancel,
+}: {
+  step: UploadStep;
+  fileName: string | undefined;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <p role="status" className="text-neutral-300">
+        {STEP_LABELS[step]} {fileName}…
+      </p>
+      {/* The insert can't be cancelled safely, so the button goes once it starts. */}
+      {step !== 'saving' && (
+        <button type="button" className={buttonClass} onClick={onCancel}>
+          Cancel
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -145,7 +163,7 @@ function UploadOutcome({ result }: { result: UploadResult }) {
         <p className="text-amber-300">
           You've already uploaded this file as “{song.title}”. Nothing new was added.
         </p>
-        <Link to={`/songs/${song.id}`} className="text-sky-400 underline">
+        <Link to={songPath(song.id)} className="text-sky-400 underline">
           Open “{song.title}”
         </Link>
       </div>
@@ -155,7 +173,7 @@ function UploadOutcome({ result }: { result: UploadResult }) {
     <div role="status" className="flex flex-col items-start gap-1">
       <p className="text-neutral-200">Added “{song.title}”.</p>
       {song.drum_track_index === null && <p className="text-amber-300">{NO_DRUM_TRACK_NOTE}</p>}
-      <Link to={`/songs/${song.id}`} className="text-sky-400 underline">
+      <Link to={songPath(song.id)} className="text-sky-400 underline">
         Open “{song.title}”
       </Link>
     </div>

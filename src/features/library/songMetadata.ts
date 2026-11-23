@@ -23,6 +23,10 @@ export interface SongMetadata {
   drumTrackIndex: number | null;
 }
 
+/** Shown after the upload and on the library entry when drumTrackIndex is null. */
+export const NO_DRUM_TRACK_NOTE =
+  'No drum track found in this file. It will play the other parts and the metronome, with nothing to mute or read along with.';
+
 export type MetadataResult =
   | { ok: true; metadata: SongMetadata }
   | { ok: false; reason: 'no-bars' | 'no-tracks' | 'bad-tempo' };
