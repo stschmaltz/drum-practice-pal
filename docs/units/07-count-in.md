@@ -401,3 +401,64 @@ Whether the synth honours a mute it holds is alphaTab's business and stays a Hum
 
 - `npm run check`: green. Typecheck, lint and format clean; 57 test files, 2435 tests passing (2379 before).
 - `npm run e2e`: 216 tests; 209 passed, 7 skipped (the device-only skips in `jam.spec.ts`), 0 failed.
+
+## QA: Drums only
+
+**Verdict: PASS.** No blocker or major issues. Three minor issues are logged below (one of them not from this change); none was cosmetic, so no app code was changed. Nothing was heard: the audio was measured, and the by-ear checks at the end still stand.
+
+**How it was tested.** Local Supabase, the e2e build served by Playwright's own web server, headless Chromium driven by throwaway specs at 390x844, 820x1180 and 1440x900 (plus 844x390, 1180x820, 360 and 320 wide, and a sweep of widths from 320 to 1440 in 8 px steps). Screenshots are in `docs/units/07-shots/` as `<size>-drums-only-NN-name.png`. Two instruments, both outside the app:
+
+- **What the synth holds.** `Worker.prototype.postMessage` was wrapped as in `tests/e2e/drums-only.spec.ts`, so the channels alphaTab's synth has muted, and every transport message it was sent, are known.
+- **What comes out.** An `AnalyserNode` was tapped onto each `AudioContext`'s destination and its mean power sampled every 15 ms, as in the count-in QA. Bars 1 to 2 were looped (through `window.__drumPalPlayer`) and each state measured over exactly one pass, metronome off, so the figures compare like with like.
+
+**Criteria**
+
+| Criterion                                                 | Result                           | Evidence                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| On, the multi-track fixture plays the drum track alone    | Pass in the browser; by ear open | Synth mutes channels 2, 3, 4, 5 and not 9. Output power: everything 0.0387, Drums only 0.0031, Mute drums (the band alone) 0.0353. Drums only + band alone = 0.0384, the whole mix to within 1%, so what is left is the mix minus the band. Peak falls from 0.95 to 0.49. The same at all three sizes (`02`)                               |
+| Off restores the other tracks without restarting playback | Pass                             | Nothing muted; power back to 0.0383 to 0.0388. Across on, Mute drums, on, off the synth got no play, pause, stop or MIDI load, status never left `playing`, and the bar kept advancing                                                                                                                                                     |
+| Drums only and Mute drums exclude each other              | Pass                             | Mute drums while on: Drums only goes off, exactly `[9]` muted (`03`). Drums only while muted: Mute drums goes off, `[2,3,4,5]`. A `MutationObserver` and a snapshot subscriber saw both pressed at once zero times in about 350 presses                                                                                                    |
+| Off on open                                               | Pass                             | Off on first open, after a reload with it on, after Library and back in, after browser Back and Forward, and on the next song; each time a new synth with nothing muted. With "Mute the drum track by default" saved, the song opens with Mute drums on and Drums only off, and again on the next open after using Drums only (`20`, `21`) |
+| Disabled with a reason for the no-drums fixture           | Pass, with issue 2               | Both buttons disabled with `title` "This song has no drum track", `aria-pressed="false"`; a forced click and `el.click()` do nothing; `setDrumsOnly(true)` on the service is a no-op; the song plays with nothing muted (`04`)                                                                                                             |
+| Changes live                                              | Pass                             | As above, plus at 25% and 200%, during a count-in, across loop repeats, while paused, offline and after rotating: zero transport messages from any toggle                                                                                                                                                                                  |
+
+**Break-it results** (all three sizes unless noted)
+
+- **Rapid toggling while playing.** 31 alternating clicks on the two buttons, 41 on Drums only, 101 synchronous `click()`s in one task, a double click, 12 alternating taps (phone, tablet) and 200 service calls in one tick. After each burst the buttons, the snapshot and the synth's mutes agreed; never both pressed; status only ever `playing`; no transport message; power afterwards was the drums-alone figure.
+- **During a count-in** (2 bars at 50%). Drums only on at beat 2, then Mute drums, then Drums only again: status stayed `countingIn`, the counter kept running, the beats ran 1.1 to 2.4 with no restart, exactly 8 clicks were scheduled, and playback started with `[2,3,4,5]` muted (`05`).
+- **Every repeat** (bar 1 looped at 200%, 1 bar before every repeat, six passes). Off during a repeat's count-in, on mid-pass, Mute drums during the next count-in, nine presses during the one after: statuses alternated `countingIn` / `playing` with never a `ready`, 4 clicks per count-in (24 in all), and the mutes matched the buttons at every step and after an untouched repeat. Pass length stayed 1213 to 1222 ms whether or not a toggle fell in it (`06`).
+- **While loading, on a slow network** (400 kbps, 400 ms latency). The button is disabled for about 0.4 s until the player exists, then usable for the 20 s the sounds take while Play is still disabled. On, off, Mute drums, on during that time: once ready it is pressed with `[2,3,4,5]` muted, and still is after Play (`07`, `08`). **Offline** after loading: off and on again work mid-play, no errors (`09`).
+- **Switching songs with it on.** Left mid-play for the Library: the audio context is `closed`, output power 0, `__drumPalPlayer` null. Groove, then the no-drums song, then Multi Track again: each opens off with a new synth and nothing muted; Multi Track then plays at the full-mix power (0.038).
+- **Transport with it on.** Pause, Play, Back to start, the end of the song (`finished`, back to bar 1) and Play again: still pressed, still `[2,3,4,5]`, still the drums-alone power.
+- **Speed.** 25%: drums alone 0.0007 against 0.0184 for the mix. 200%: 0.0064 against 0.048. Twenty arrow-key steps on the slider with it on: mutes unchanged, no transport message (`10`, `11`).
+- **A song that is only drums** (groove fixture). On: nothing muted, power unchanged (0.0036 to 0.0035), keeps playing. Mute drums then gives silence (power 0) and Drums only brings the drums straight back (`12`).
+- **Metronome.** With Drums only on, turning the metronome on raises the output (0.0028 to 0.0032 on average), so it still sounds; the count-in clicks were scheduled as usual.
+- **Keyboard and names.** Tab order: Count-in, Mute drums, Drums only, then the nav. Space and Enter toggle it and focus stays on the button; the focus ring is a 2 px sky outline (`13`, `14`). Space on the focused button while playing toggles it and does not pause. Role button, name "Drums only", `aria-pressed` true or false; the accessibility tree reads `button "Drums only" [pressed]`. Pressed looks the same as the Metronome toggle. Holding Enter repeats the toggle, as for any button.
+- **Phone layout.** Controls bar 398 px at 390, 360 and 320 wide, the same with the button hidden; tablet 238, desktop 126, likewise unchanged. The pair shares a row with an 8 px gap; each is 44 px tall (121 and 115 px wide); no horizontal overflow from the pair at any width (`15`, `16`, `17`). Landscape: see issue 1 (`18`, `19`).
+- **Rotation mid-play with it on** (each size turned on its side and back): stays pressed, same mutes, keeps playing, no transport message.
+- No console error or page error in any run.
+
+**Issues**
+
+1. **Minor. The controls bar is one row taller than before at some widths, phone landscape among them.** Repro: open any song at 844x390 (or any window about 576 to 703 px or 832 to 959 px wide). The bar is 238 px; with the Drums only button hidden it is 182 px, because Mute drums alone fitted on the count-in row and the pair does not. Measured by hiding the button at widths from 320 to 1440: no change anywhere else, including the three target sizes. On a phone in landscape the bar now ends at 418 px of a 390 px window, so the drum buttons are cut by the fold until the page scrolls (`phone-drums-only-18`). Play scrolls to the score, so playing is not affected. Unit 08's panel is due to regroup the controls; shorter labels or letting the pair split would also do it.
+2. **Minor. On a touch device nothing on the song page says why the two drum buttons are disabled.** Repro: phone or tablet, open `no-drums.gp`. Mute drums and Drums only are greyed; the reason is only a `title`, which touch never shows. The Build note says the song page already shows the no-drum-track note; it does not. `NO_DRUM_TRACK_NOTE` is rendered only on the library entry and after the upload. The same has been true of Mute drums since Unit 05; there are now two unexplained buttons. Showing the note on the song page would cover both.
+3. **Minor, not from this change. Below 344 px wide the Metronome volume row overflows the controls bar.** Repro: 320x844, any song: the "80%" readout is clipped by the bar's edge (21 px over at 320, 4 px of page overflow) (`phone-drums-only-17-narrow-320-controls`). Identical with the Drums only button hidden.
+
+Worth knowing for Unit 10: Space on a focused toggle button toggles it (native behaviour), so a global Space shortcut has to decide what happens when focus is on Mute drums or Drums only.
+
+**Fixed by QA.** Nothing; no issue was cosmetic.
+
+**Human check (Shane, by ear)**
+
+- Multi-track fixture and a real Songsterr export: with Drums only on, is it the drum part alone, with nothing of the bass or guitar left? (Measured in Chromium: what remains is the mix minus the band.)
+- Turning it on and off mid-bar: any click, gap or restart? Do notes already ringing on the other tracks cut off acceptably?
+- Metronome on with Drums only on, and a count-in with it on: both still heard?
+- After Pause and Play, Back to start, and letting the song end and playing again: still drums alone?
+- Mute drums on, then Drums only: do the drums come in at once?
+- On the phone in landscape, is the taller controls bar a nuisance (issue 1)?
+
+**Results**
+
+- `npm run check`: green. Typecheck, lint and format clean; 57 test files, 2435 tests passing. QA changed only this note and added screenshots.
+- `tests/e2e/drums-only.spec.ts` and `tests/e2e/player.spec.ts`: 45 passed against the same build. The full `npm run e2e` was not re-run, since no code changed.
+- The throwaway specs were removed, their users were deleted by the `user` fixture (checked: none left), and Playwright stopped the preview server it started.
