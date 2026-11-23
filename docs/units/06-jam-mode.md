@@ -295,3 +295,111 @@ Re-ran on the area fix round 1 changed: the sticky bar (`jam-bar`) holding Speed
 - `npm run check`: green, 46 files, 596 tests.
 - `npm run e2e`: 161 passed, 7 skipped (phone-only and touch-only variants skipped in the other projects).
 - Nothing committed.
+
+## QA (fix round 1)
+
+**Setup.** Local Supabase was running. The app was the e2e build (`--mode development`) on `vite preview` at :4173, built fresh from this branch. A throwaway Playwright spec (deleted afterwards) used a fresh user per test:
+
+- the phone project (touch on) at 390x844 and 844x390, plus the narrower and shorter phones below
+- the tablet project at 820x1180
+- the desktop project at 1440x900
+
+Extra sizes: 667x375 (iPhone SE landscape) and 740x360 (Android landscape). Both are under 768 px, so they get horizontal layout and the bottom tab bar. 320x568 and 280x653 tested wrapping. Fixtures: `tempo-change`, `groove-120`, and the real Songsterr export in `tests/fixtures/real/` as the long song (no screenshots of it). Screenshots are `docs/units/06-shots/fix1-*.png`.
+
+Each sample, every 150 ms, checked:
+
+- Pause, Speed and BPM are wholly inside the window and above the tab bar.
+- The beat cursor is inside the score box and the window, below the sticky bar and above the tab bar.
+- Whether the cursor overlaps the sticky bar.
+- The gap between the sticky bar's bottom and the score box's top.
+
+**Issue 1 (Pause and BPM scrolled off a phone): fixed.**
+
+Each row is Tempo Change at 200%, played to the end.
+
+| Size                | Window scroll on Play | Samples | Pause / BPM off screen | Cursor off screen | Cursor under the bar | Min gap, bar to box |
+| ------------------- | --------------------- | ------- | ---------------------- | ----------------- | -------------------- | ------------------- |
+| 390x844             | 232 px                | 116     | 0 / 0                  | 0                 | 0                    | 206 px              |
+| 844x390             | 266 px                | 115     | 0 / 0                  | 0                 | 0                    | 80 px               |
+| 667x375             | 256 px                | 115     | 0 / 0                  | 0                 | 0                    | 18 px               |
+| 740x360             | 262 px                | 116     | 0 / 0                  | 0                 | 0                    | 12 px               |
+| 320x568 (bar wraps) | 379 px                | 116     | 0 / 0                  | 0                 | 0                    | 59 px               |
+| 280x653 (bar wraps) | 250 px                | 114     | 0 / 0                  | 1 (transient)     | 0                    | 188 px              |
+| 820x1180            | 0                     | 118     | 0 / 0                  | 0                 | 0                    | 238 px              |
+| 1440x900            | 6 px                  | 115     | 0 / 0                  | 0                 | 0                    | 182 px              |
+
+`fix1-<size>-02-playing.png` shows each size. The bar is 60 px tall on one row. At 320 and 280 it wraps to 104 px, with Pause on its own row. `scroll-margin-top` measured 68 px and 112 px respectively, so the box always lands below the bar.
+
+**Trying to break the sticky bar**
+
+- **Scrolling the page mid-play: pass.**
+  - At every size I wheeled the page to the top, then scrolled to the very end (`fix1-*-04`, `fix1-*-05`).
+  - The bar stays pinned, and Pause and BPM stay on screen in every sample.
+  - At the end of the page the box sits between 4 px (740x360) and 238 px below the bar, never under it.
+  - Scrolled to the top in landscape and at 320 px, the box is below the fold, so the cursor is off screen until the user scrolls back. That's the user's choice, and nothing fights it.
+- **Rotation mid-play: pass.**
+  - Each while playing: 390x844 to 844x390 and back, 844x390 to 390x844 and back, and 390x844 to 667x375 and back (`fix1-rotate-*`).
+  - Playback keeps going and the layout switches.
+  - In the 5 s after each turn, Pause, BPM and the cursor were on screen in every sample, and the cursor was never under the bar.
+  - Pausing, scrolling to the top and pressing Play again after a rotation re-measures the bar and lands the box correctly.
+- **Long song: pass.**
+  - The real export (119 bars, 6 tracks) played at 200% for 20 s at 390x844, 844x390 and 820x1180.
+  - Pause and BPM were never off screen, and BPM followed the song's tempo change at bar 11.
+  - On the tablet, 4 samples (the longest 489 ms) caught the cursor mid line-change scroll, outside the box's visible area. That's transient, as in the first QA round.
+- **Bar wrapping on narrow widths: pass.** At 320 and 280 the readout fills the first row and Pause wraps to a second, left-aligned. Nothing overflows the bar (`fix1-narrow320-02`, `fix1-narrow280-02`).
+- **Taps right at the bar: pass.**
+  - While playing, I clicked the bar's empty strip between the readout and Pause, 2 px above its bottom edge. It didn't seek, and playback went on.
+  - The fix-round e2e covers a tap on the next bar just under the sticky bar. I re-ran `jam.spec.ts`: 32 passed, 7 skipped.
+- **Bottom tab bar on phone: pass.**
+  - While playing, the tab bar is on top at its centre (hit test). The cursor stays above it in every sample, and the sticky bar never overlaps it (`fix1-phone-06`).
+  - Tapping Library mid-play navigates away with no console errors. Going back opens the song at 100%, Bar 1.
+- **Offline mid-play: pass.** Pause and Play in the sticky bar work offline, and paused means the bar number stays put (`fix1-phone-07`).
+- **Slow network (400 ms, 200 KB/s, cache off): pass.** The sticky bar shows 100% and "–", with Play disabled, until the song is in (`fix1-phone-08`).
+- No page errors or console errors in any run.
+
+**Acceptance criteria (re-checked)**
+
+| Criterion                                                    | Result | Evidence                                                                                                                                                           |
+| ------------------------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Cursor stays in view at every size and through tempo changes | Pass   | Table above: no off-screen samples across bar 9 at any of the eight sizes, apart from one transient sample at 280 px. The cursor is never under the sticky bar.    |
+| Seeking lands on the tapped bar                              | Pass   | `jam.spec.ts` tap tests at phone, tablet, desktop and 844x390, including the bar just under the sticky bar while playing. Taps on the sticky bar never seek.       |
+| Header shows % and BPM = ratio x tempo at the current bar    | Pass   | At 200%, every sample read 240 for bars 1 to 8 and 180 for bars 9 to 16, at every size. On a phone it's now on screen for all of playback. Groove at 50% reads 60. |
+| Speed resets to 100% on open                                 | Pass   | At 150%, Library tab mid-play, then back: 100%, Bar 1. The `jam.spec.ts` reload test passes.                                                                       |
+
+**Issues**
+
+1. **Minor, from Unit 05's controls, not this fix: at 320 px and below, the Metronome volume row overflows the controls box.**
+   - Repro: open a song at 320x568 or 280x653. The "80%" after the volume slider spills past the controls box's right edge (`fix1-narrow280-09-controls`, `fix1-narrow320-09-controls`).
+   - The page's layout width becomes 324 px: 4 px of sideways overflow at 320, 44 px at 280. Widths of 375 px and up are unaffected.
+   - Cause: the slider has a fixed `w-28` and the label is `whitespace-nowrap`, so the row's min-content width is about 300 px.
+   - I tried `min-w-0` on the input and reverted it: the input's set width still decides how narrow the row can get. The fix needs a small layout change in `PercentSlider`, so I left it for Build.
+2. **Cosmetic, not fixed: the sticky bar has no bottom edge.**
+   - Controls that scroll under it are cut off abruptly, such as half the Metronome button in `fix1-phone-02`.
+   - A border or shadow only while the bar is stuck would read better. An always-on border would also show when the page is at the top, so it's a design call and I left it.
+3. **Cosmetic, note only: in short landscape (667x375, 740x360), the "Bar N of M" status line sits under the sticky bar during playback** (`fix1-se-landscape-02`). That's expected from the scroll. BPM stays visible, so only the bar number is hidden.
+
+Issues 2 and 3 from the first QA round are unchanged and still minor: the phone opens scrolled 47 px sideways, and double-tap may zoom.
+
+**Human check (Shane)**
+
+- iPhone, in Safari and the installed PWA:
+  - Does the sticky bar sit below the status bar and the notch? It relies on `env(safe-area-inset-top)`.
+  - Does the bar stay put while Safari's toolbars collapse and expand during the Play scroll?
+- iPhone, portrait and landscape:
+  - Do Pause and BPM stay on screen through a whole song?
+  - Does rotating mid-play keep playing?
+- The first round's checks still stand: tap and swipe on iPhone and iPad, double-tap zoom, cursor colours, and the line-change scroll on iPad.
+
+**Results**
+
+- `npm run check`: green, 46 files, 596 tests.
+- `npx playwright test tests/e2e/jam.spec.ts`: 32 passed, 7 skipped.
+- Files changed by QA: this note, plus 51 screenshots at `docs/units/06-shots/fix1-*.png`.
+- No app code changed (I reverted a trial `min-w-0` on the slider). Nothing is committed.
+
+**Verdict: PASS.**
+
+- Issue 1 is fixed at every size tried.
+- The sticky bar held up to scrolling, rotation, wrapping, taps at its edge and the tab bar.
+- All four acceptance criteria pass.
+- Carried forward: one minor overflow at 320 px and below (it predates this fix) and two cosmetic notes.
