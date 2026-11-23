@@ -240,3 +240,39 @@ These need ears. Nothing here was heard.
 
 - Before: `npm run check` green (43 files, 546 tests); `npm run e2e` 126 passed.
 - After: `npm run check` green (43 files, 546 tests); `npm run e2e` 126 passed. Local Supabase was running. Nothing is committed.
+
+## Review
+
+**Scope.** Every line of `git diff origin/main...HEAD`: the player feature, the song page, the library additions (`fetchSong`, `downloadSongFile`, `useSong`, `useSongFile`), the spike import moves, `isUuid`, the fakes, the e2e spec and AGENTS.md. I checked alphaTab 1.9's source (`dist/alphaTab.core.mjs`) for `loadSoundFont`, `destroy` and `playerFinished`.
+
+**Fixed**
+
+1. `src/features/player/alphaTabEngine.ts:57` (`loadSoundFont`): the result of `api.loadSoundFont(bytes, false)` was ignored. alphaTab returns `false` when it has no player (for example no Web Audio), and then `playerReady` never fires, so the page would say "Loading the score and sounds…" forever with Play disabled. It now throws, which the service reports as the `soundFont` error.
+2. `src/features/player/alphaTabEngine.ts:18, 46, 96`: the soundfont fetch (1.3 MB) wasn't cancelled when the player was destroyed. Leaving a song (or switching songs) mid-load kept downloading, then handed the bytes to a destroyed `AlphaTabApi`. An `AbortController` now aborts the fetch in `destroy()`, and the bytes are dropped if it was aborted. The rejection reaches `PlayerService`'s `.catch`, which ignores it because the service is disposed.
+3. `src/features/song/SongPage.tsx:51`: `file.isError` is also true for a failed background refetch that keeps its data. That would unmount a playing player and show "Couldn't download…" over bytes the page already has. It now checks `isLoadingError`, matching the song row check above it. Nothing refetches the file today (`staleTime: Infinity`, no invalidation), so this was latent.
+4. QA issue 1, `src/features/shell/AppShell.tsx:36`: `<main>` gets `min-w-0`, so alphaTab's old surface width no longer stops it shrinking when the window narrows at 768 px or wider (224 px of sideways scroll). It is one class, and the player is what exposes it. `tests/e2e/player.spec.ts` "crossing the layout breakpoint…" now narrows to 900 px first, where the start width is wider (desktop), and asserts no sideways overflow. I confirmed that check fails without the class and passes with it. The new `horizontalOverflow` helper also replaces the first test's inline copy.
+
+**Checked, no change needed**
+
+- supabase-js: `fetchSong` uses `throwIfError` and `downloadSongFile` uses `unwrap`. The e2e settings update checks `error`. No list API was added, so there is no pagination.
+- Teardown: the e2e `user` fixture deletes files first, then the user, and throws on failure. `usePlayer.test.tsx` unstubs `matchMedia` in `afterEach`.
+- Leaks and races:
+  - `usePlayer` destroys an engine that resolves after unmount or StrictMode's first pass, and disposes the service in cleanup.
+  - `PlayerService.dispose` is idempotent, and every engine handler checks `disposed`.
+  - `screenWakeLock` releases a lock that resolves after pause or dispose, and removes its `visibilitychange` listener.
+  - `useLayout` removes its `matchMedia` and `resize` listeners.
+  - No object URLs or timers.
+- Bars: `barRangeToTicks`, `startTickOfBar` and the `position` handler convert 1-based bar numbers to 0-based indexes at the boundary. `playerFinished` fires once per pass with looping on, as the service's `loopWrapped` assumes (alphaTab `AlphaSynth`, "Finished playback (main looping)").
+- URL input: `isUuid` guards the `:id` param before it reaches Postgres. No URL text is rendered.
+
+**Open**
+
+- QA issue 2 (no retry after a soundfont failure). A retry button, or retrying on `online`, means a new service method and UI. Unit 11 caches the soundfont, which makes this rare, so it belongs there.
+- QA issue 3 (options stay enabled after a player error). Cosmetic, and changing it is a behaviour change. It's harmless, since the values only apply if anything plays.
+- The `isLoadingError` change (Fixed 3) has no component test, because nothing in the app triggers a file refetch yet. Unit 11, which adds offline caching, should cover it if it adds refetching.
+
+**Results**
+
+- `npm run check`: green, 43 files, 546 tests.
+- `npm run e2e`: 126 passed. Local Supabase was running.
+- Nothing is committed.

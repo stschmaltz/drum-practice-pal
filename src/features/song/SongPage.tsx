@@ -48,7 +48,8 @@ function SongBody({ song }: { song: Song }) {
   const file = useSongFile(song.id);
   const settings = useSettings();
 
-  if (file.isError) {
+  // isLoadingError, not isError: a failed background refetch keeps the bytes, so a playing song stays mounted.
+  if (file.isLoadingError) {
     return (
       <LoadFailed
         message="Couldn't download this song's file. Check your connection and try again."

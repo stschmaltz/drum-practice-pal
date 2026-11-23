@@ -70,6 +70,13 @@ async function layoutShown(page: Page): Promise<'page' | 'horizontal'> {
   return surface > box + 1 ? 'horizontal' : 'page';
 }
 
+/** How far the page scrolls sideways; 0 or less means it fits. */
+async function horizontalOverflow(page: Page): Promise<number> {
+  return page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+}
+
 test('opens a song in the player with notation in the layout for the width', async ({
   user,
   page,
@@ -79,10 +86,7 @@ test('opens a song in the player with notation in the layout for the width', asy
   await expect(playButton(page)).toHaveText('Play');
 
   expect(await layoutShown(page)).toBe(layoutForWidth(page.viewportSize()?.width ?? 0));
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
-  expect(overflow).toBeLessThanOrEqual(0);
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 });
 
 test('speed, metronome and drum mute change live without restarting playback', async ({
@@ -198,6 +202,12 @@ test('crossing the layout breakpoint mid-play relayouts and keeps playing', asyn
   await controls(page).getByRole('slider', { name: 'Speed' }).fill('200');
   await playButton(page).click();
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+
+  // Narrowing within page layout must not leave the old score width pushing the page sideways.
+  if (start.width > 900) {
+    await page.setViewportSize({ width: 900, height: start.height });
+    await expect.poll(() => horizontalOverflow(page), { timeout: 10_000 }).toBeLessThanOrEqual(0);
+  }
 
   const otherWidth = startLayout === 'page' ? 390 : 1024;
   await page.setViewportSize({ width: otherWidth, height: start.height });
