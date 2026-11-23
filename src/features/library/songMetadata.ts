@@ -3,6 +3,7 @@
  * fields it reads rather than alphaTab's classes, so it stays a pure module
  * that node tests can feed real fixture scores or plain objects.
  */
+import { barStartTempos } from '@/features/player/tempo';
 import { SONG_TEMPO_MAX, SONG_TEXT_MAX_LENGTH } from '@/lib/schema';
 import { titleFromFileName } from './songFile';
 
@@ -10,7 +11,9 @@ export interface ScoreLike {
   title: string;
   artist: string;
   tempo: number;
-  masterBars: readonly { tempoAutomations: readonly { value: number }[] }[];
+  masterBars: readonly {
+    tempoAutomations: readonly { value: number; ratioPosition: number }[];
+  }[];
   tracks: readonly { staves: readonly { isPercussion: boolean }[] }[];
 }
 
@@ -37,9 +40,13 @@ export function cleanSongText(text: string): string {
   return Array.from(cleaned).slice(0, SONG_TEXT_MAX_LENGTH).join('').trim();
 }
 
-/** The tempo bar 1 plays at: an automation on bar 1 overrides the score tempo. */
+/**
+ * The tempo bar 1 starts at, from the same helper the player's BPM readout
+ * uses, so the library's BPM and the jam header can't disagree. A change
+ * part-way through bar 1 doesn't count: the bar starts at the score tempo.
+ */
 export function tempoAtFirstBar(score: ScoreLike): number {
-  return score.masterBars[0]?.tempoAutomations[0]?.value ?? score.tempo;
+  return barStartTempos(score)[0] ?? score.tempo;
 }
 
 export function drumTrackIndexOf(score: ScoreLike): number | null {

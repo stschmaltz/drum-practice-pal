@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import * as alphaTab from '@coderline/alphatab';
+import { barStartTempos } from '../../src/features/player/tempo.ts';
 
 const settings = new alphaTab.Settings();
 
@@ -8,13 +9,13 @@ export function loadScoreFile(path: string): alphaTab.model.Score {
   return alphaTab.importer.ScoreLoader.loadScoreFromBytes(bytes, settings);
 }
 
-/** Tempo a bar starts at, following tempo automations from bar 1. */
+/**
+ * Tempo 1-based `barNumber` starts at, from the app's own helper, so the seed
+ * script and the fixture tests agree with uploads and the player.
+ */
 export function tempoAtBar(score: alphaTab.model.Score, barNumber: number): number {
-  let tempo = score.tempo;
-  for (const masterBar of score.masterBars.slice(0, barNumber)) {
-    const first = masterBar.tempoAutomations[0];
-    if (first) tempo = first.value;
-  }
+  const tempo = barStartTempos(score)[barNumber - 1];
+  if (tempo === undefined) throw new RangeError(`The score has no bar ${barNumber}`);
   return tempo;
 }
 

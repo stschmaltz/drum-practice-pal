@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
-import { opArgs, queryResult, resetFakeSupabase } from '@/test/fakeSupabase';
+import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
 import { renderRoutes } from '@/test/render';
 import type { Settings } from './settingsForm';
 import { SettingsPage } from './SettingsPage';
@@ -133,6 +133,39 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('radio', { name: '1 bar' })).toBeChecked();
     expect(saveButton()).toBeEnabled();
     expect(screen.queryByText('Saved')).not.toBeInTheDocument();
+  });
+
+  it('ignores edits and submits while a save is pending, then shows how it went', async () => {
+    serveSettings(saved);
+    const { user } = renderSettings();
+    await user.click(await screen.findByRole('radio', { name: '1 bar' }));
+
+    let finishSave!: (result: FakeResult) => void;
+    queryResult.mockImplementation((call) =>
+      opArgs(call, 'update')
+        ? new Promise<FakeResult>((resolve) => (finishSave = resolve))
+        : Promise.resolve({ data: saved, error: null }),
+    );
+    await user.click(saveButton());
+    const saving = await screen.findByRole('button', { name: 'Saving…' });
+    await waitFor(() => expect(writes()).toHaveLength(1));
+
+    await user.click(screen.getByRole('radio', { name: '2 bars' }));
+    await user.click(screen.getByRole('checkbox', { name: /Mute the drum track/ }));
+    fireEvent.submit(saving.closest('form')!);
+    expect(screen.getByRole('radio', { name: '1 bar' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Mute the drum track/ })).not.toBeChecked();
+    expect(saving).toBeDisabled();
+    expect(writes()).toEqual([{ count_in_bars: 1 }]);
+
+    await act(async () => finishSave({ data: null, error: { message: 'Failed to fetch' } }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't save your settings: Failed to fetch",
+    );
+    // Unlocked again, with the edit still there to retry or change.
+    expect(screen.getByRole('radio', { name: '1 bar' })).toBeChecked();
+    await user.click(screen.getByRole('radio', { name: '2 bars' }));
+    expect(screen.getByRole('radio', { name: '2 bars' })).toBeChecked();
   });
 
   it('discards edits back to the saved values', async () => {

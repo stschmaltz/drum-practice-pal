@@ -59,8 +59,12 @@ function SettingsForm({ saved }: { saved: Settings }) {
   const values: Settings = { ...saved, ...draft };
   const changes = changedSettings(saved, values);
   const dirty = Object.keys(changes).length > 0;
+  // Locked while saving: an edit would reset() the mutation, so the form would
+  // stop showing its progress or error and allow a second save alongside it.
+  const saving = update.isPending;
 
   const edit = (edited: Partial<Settings>) => {
+    if (saving) return;
     setDraft({ ...draft, ...edited });
     setErrors({});
     update.reset();
@@ -73,7 +77,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (!draft) return;
+    if (!draft || saving) return;
     const found = validateSettings(values);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
@@ -88,22 +92,22 @@ function SettingsForm({ saved }: { saved: Settings }) {
   const fieldsetProps: FieldsetProps = { values, errors, edit };
 
   return (
-    <form className="flex max-w-xl flex-col gap-6" onSubmit={onSubmit} noValidate>
+    <form
+      className="flex max-w-xl flex-col gap-6"
+      onSubmit={onSubmit}
+      aria-busy={saving}
+      noValidate
+    >
       <MetronomeFieldset {...fieldsetProps} />
       <CountInFieldset {...fieldsetProps} />
       <DrumsFieldset {...fieldsetProps} />
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" className={primaryButtonClass} disabled={!dirty || update.isPending}>
-          {update.isPending ? 'Saving…' : 'Save settings'}
+        <button type="submit" className={primaryButtonClass} disabled={!dirty || saving}>
+          {saving ? 'Saving…' : 'Save settings'}
         </button>
         {dirty && (
-          <button
-            type="button"
-            className={buttonClass}
-            disabled={update.isPending}
-            onClick={discard}
-          >
+          <button type="button" className={buttonClass} disabled={saving} onClick={discard}>
             Discard changes
           </button>
         )}
