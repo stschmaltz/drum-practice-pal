@@ -1,3 +1,8 @@
+/**
+ * Bar numbers and MIDI ticks. alphaTab's tick cache lists master bars in play
+ * order (a repeated bar appears once per playthrough), with 0-based indexes.
+ */
+
 /** Tick span of one played master bar, as alphaTab's tick cache reports it. */
 export interface BarTicks {
   /** 0-based master bar index */
@@ -30,16 +35,13 @@ export function barRangeToTicks(
   return { startTick: startBar.start, endTick: endBar.end };
 }
 
-export const MIN_SPEED_RATIO = 0.25;
-export const MAX_SPEED_RATIO = 2;
-
-export function clampSpeedRatio(ratio: number): number {
-  if (Number.isNaN(ratio)) return 1;
-  return Math.min(MAX_SPEED_RATIO, Math.max(MIN_SPEED_RATIO, ratio));
-}
-
 /** 0-based bar index playing at `tick`, or null outside the song. */
 export function barIndexAtTick(bars: readonly BarTicks[], tick: number): number | null {
   const bar = bars.find((b) => tick >= b.start && tick < b.end);
   return bar ? bar.barIndex : null;
+}
+
+/** Tick where 1-based `barNumber` first starts, or null when the bar doesn't exist. */
+export function startTickOfBar(bars: readonly BarTicks[], barNumber: number): number | null {
+  return bars.find((bar) => bar.barIndex === barNumber - 1)?.start ?? null;
 }

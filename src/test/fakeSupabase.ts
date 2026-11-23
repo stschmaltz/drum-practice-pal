@@ -6,7 +6,7 @@
  * then script answers per test: `fakeSupabase.auth.signInWithOtp.mockResolvedValue(...)`,
  * or `queryResult.mockResolvedValue({ data, error: null })` for table queries
  * and `storageResult` for Storage calls (these answer `{ data: {}, error: null }`
- * unless scripted). Call `resetFakeSupabase()` in `beforeEach`.
+ * unless scripted; a `download` wants `{ data: new Blob([...]), error: null }`). Call `resetFakeSupabase()` in `beforeEach`.
  */
 import type { Session } from '@supabase/supabase-js';
 
@@ -38,7 +38,7 @@ export const queryResult = vi.fn<(call: QueryCall) => Promise<FakeResult>>();
 /** One Storage call, e.g. storage.from('gp-files').upload(path, bytes, options). */
 export interface StorageCall {
   bucket: string;
-  method: 'upload' | 'remove';
+  method: 'upload' | 'remove' | 'download';
   args: unknown[];
 }
 
@@ -78,7 +78,7 @@ function storageBucket(bucket: string) {
   const call = (method: StorageCall['method']) => {
     return (...args: unknown[]) => storageResult({ bucket, method, args });
   };
-  return { upload: call('upload'), remove: call('remove') };
+  return { upload: call('upload'), remove: call('remove'), download: call('download') };
 }
 
 export const fakeSupabase = {

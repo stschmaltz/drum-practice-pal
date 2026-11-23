@@ -19,8 +19,12 @@ export function guitarProImporters(): alphaTab.importer.ScoreImporter[] {
   );
 }
 
-/** ScoreLoader.loadScoreFromBytes, limited to guitarProImporters(). */
-function loadGuitarPro(bytes: Uint8Array): alphaTab.model.Score | null {
+/**
+ * ScoreLoader.loadScoreFromBytes, limited to guitarProImporters(). Null when
+ * the bytes aren't a readable Guitar Pro file. The player uses it too, so a
+ * damaged download is refused rather than rendered as a one-bar score.
+ */
+export function loadGuitarPro(bytes: Uint8Array): alphaTab.model.Score | null {
   const settings = new alphaTab.Settings();
   const data = alphaTab.io.ByteBuffer.fromBuffer(bytes);
   for (const importer of guitarProImporters()) {

@@ -37,11 +37,12 @@ describe('App', () => {
   it.each([
     ['/', 'On the go'],
     ['/library', 'Library'],
-    ['/songs/abc', 'Song'],
+    // Lazy-loaded with the player; "abc" isn't a song id.
+    ['/songs/abc', 'Song not found'],
     ['/no-such-page', 'Page not found'],
-  ])('shows a signed-in user %s inside the shell', (path, heading) => {
+  ])('shows a signed-in user %s inside the shell', async (path, heading) => {
     renderAt(path, fakeSession());
-    expect(screen.getByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
     expect(screen.getAllByRole('navigation', { name: 'Main' }).length).toBeGreaterThan(0);
   });
 

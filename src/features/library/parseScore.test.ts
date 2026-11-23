@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixtures } from '../../../tests/fixtures/sources';
 import { drumTrackIndex, loadScoreFile, tempoAtBar } from '../../../tests/unit/score-helpers';
-import { guitarProImporters, parseScore } from './parseScore';
+import { guitarProImporters, loadGuitarPro, parseScore } from './parseScore';
 import { checkSongFile } from './songFile';
 
 const fixturesDir = join(process.cwd(), 'tests', 'fixtures');
@@ -36,6 +36,19 @@ describe('guitarProImporters', () => {
       'Guitar Pro 6',
       'Guitar Pro 7-8',
     ]);
+  });
+});
+
+describe('loadGuitarPro', () => {
+  it('reads a Guitar Pro file into a score', () => {
+    const score = loadGuitarPro(read(join(fixturesDir, 'gp', 'groove-120.gp')));
+    expect(score?.masterBars).toHaveLength(16);
+  });
+
+  // The player hands its result to alphaTab, so junk must come back null, not a one-bar score.
+  it('gives null for junk', () => {
+    const junk = new Uint8Array(4096).map((_, i) => (i * 7919) % 256);
+    expect(loadGuitarPro(junk)).toBeNull();
   });
 });
 

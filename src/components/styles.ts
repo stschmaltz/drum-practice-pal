@@ -7,6 +7,9 @@ const buttonBase = `min-h-11 rounded-md px-4 py-2 font-medium ${focusRing} disab
 
 export const buttonClass = `${buttonBase} bg-neutral-800 text-neutral-100 hover:bg-neutral-700`;
 
+/** A toggle button (aria-pressed) while on; buttonClass while off. */
+export const pressedButtonClass = `${buttonBase} bg-sky-900 text-sky-50 ring-1 ring-sky-500 hover:bg-sky-800`;
+
 // sky-700 and the darker hover keep white labels above WCAG AA's 4.5:1.
 export const primaryButtonClass = `${buttonBase} bg-sky-700 text-white hover:bg-sky-800`;
 

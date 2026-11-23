@@ -1,6 +1,11 @@
 import * as alphaTab from '@coderline/alphatab';
-import { barIndexAtTick, barRangeToTicks, type BarTicks, type TickRange } from './barRange';
-import type { LayoutChoice } from './layout';
+import {
+  barIndexAtTick,
+  barRangeToTicks,
+  type BarTicks,
+  type TickRange,
+} from '@/features/player/barTicks';
+import type { LayoutChoice } from '@/features/player/layout';
 import { countInClicks, loopDurationMs, type BarTiming } from './timing';
 
 /**

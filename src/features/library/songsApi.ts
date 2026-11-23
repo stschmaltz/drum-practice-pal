@@ -57,6 +57,27 @@ export async function findSongByHash(userId: string, fileHash: string): Promise<
   return result.data;
 }
 
+/** One song, or null when it doesn't exist (or isn't this user's). */
+export async function fetchSong(userId: string, songId: string): Promise<Song | null> {
+  const result = await supabase
+    .from('songs')
+    .select(SONG_SELECT)
+    .eq('id', songId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  throwIfError(result);
+  return result.data;
+}
+
+/** The song's Guitar Pro file from Storage. */
+export async function downloadSongFile(userId: string, songId: string): Promise<Uint8Array> {
+  const blob = unwrap(
+    await supabase.storage.from(GP_FILES_BUCKET).download(songFilePath(userId, songId)),
+    'song file',
+  );
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
 /** A file the app refuses, with copy fit to show as is. */
 export class SongFileError extends Error {
   override name = 'SongFileError';

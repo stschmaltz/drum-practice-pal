@@ -31,8 +31,9 @@ export function AppShell() {
         </div>
       </aside>
 
-      {/* Bottom padding keeps content clear of the fixed tab bar and the iOS home indicator. */}
-      <main className="mx-auto w-full max-w-5xl p-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:p-8">
+      {/* Bottom padding keeps content clear of the fixed tab bar and the iOS home indicator.
+          min-w-0 lets main shrink below a wide child (alphaTab's rendered score) when the window narrows. */}
+      <main className="mx-auto w-full min-w-0 max-w-5xl p-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:p-8">
         <Outlet />
       </main>
 
