@@ -1,4 +1,4 @@
-import { barIndexAtTick, barRangeToTicks, clampSpeedRatio, type BarTicks } from './barRange';
+import { barIndexAtTick, barRangeToTicks, startTickOfBar, type BarTicks } from './barTicks';
 
 const sixteenBars: BarTicks[] = Array.from({ length: 16 }, (_, barIndex) => ({
   barIndex,
@@ -43,19 +43,6 @@ describe('barRangeToTicks', () => {
   });
 });
 
-describe('clampSpeedRatio', () => {
-  it.each([
-    [0.1, 0.25],
-    [0.25, 0.25],
-    [1, 1],
-    [2, 2],
-    [3, 2],
-    [Number.NaN, 1],
-  ])('clamps %f to %f', (input, expected) => {
-    expect(clampSpeedRatio(input)).toBe(expected);
-  });
-});
-
 describe('barIndexAtTick', () => {
   it('finds the bar containing a tick', () => {
     expect(barIndexAtTick(sixteenBars, 0)).toBe(0);
@@ -87,9 +74,21 @@ describe('edge cases', () => {
     expect(barIndexAtTick(repeated, 250)).toBe(0);
     expect(barIndexAtTick(repeated, 450)).toBe(2);
   });
+});
 
-  it('clamps infinite speeds to the bounds', () => {
-    expect(clampSpeedRatio(Number.POSITIVE_INFINITY)).toBe(2);
-    expect(clampSpeedRatio(Number.NEGATIVE_INFINITY)).toBe(0.25);
+describe('startTickOfBar', () => {
+  it('finds the first playthrough of a bar', () => {
+    const repeated: BarTicks[] = [0, 1, 0, 1, 2].map((barIndex, i) => ({
+      barIndex,
+      start: i * 100,
+      end: (i + 1) * 100,
+    }));
+    expect(startTickOfBar(repeated, 2)).toBe(100);
+    expect(startTickOfBar(repeated, 3)).toBe(400);
+  });
+
+  it('returns null for a bar that does not exist', () => {
+    expect(startTickOfBar(sixteenBars, 0)).toBeNull();
+    expect(startTickOfBar(sixteenBars, 17)).toBeNull();
   });
 });

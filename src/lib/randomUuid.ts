@@ -12,3 +12,10 @@ export function randomUuid(): string {
   const hex = toHex(bytes);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** True for any UUID-shaped string. Ids from a URL are checked first, since Postgres rejects a malformed uuid with an error rather than no rows. */
+export function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}

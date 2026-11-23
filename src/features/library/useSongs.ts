@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useSignedInUser } from '@/lib/auth';
-import { deleteSong, fetchSongs, updateSong, uploadSong, type UploadOptions } from './songsApi';
+import {
+  deleteSong,
+  downloadSongFile,
+  fetchSong,
+  fetchSongs,
+  updateSong,
+  uploadSong,
+  type UploadOptions,
+} from './songsApi';
 import { revertSongEdit, type LibrarySong, type SongEdit } from './songForm';
 
 /** Keyed by user id, so switching accounts never shows the previous user's cache. */
@@ -9,6 +17,17 @@ export const songKeys = {
   forUser: (userId: string) => [...songKeys.all, userId] as const,
   /** Shared by every mutation that writes this user's songs; see invalidateWhenIdle. */
   writes: (userId: string) => [...songKeys.forUser(userId), 'write'] as const,
+  detail: (userId: string, songId: string) =>
+    [...songKeys.forUser(userId), 'detail', songId] as const,
+};
+
+/**
+ * Song files, kept apart from songKeys so a song edit's invalidation (which
+ * covers every songKeys.forUser key) never re-downloads a file.
+ */
+export const songFileKeys = {
+  all: ['song-file'] as const,
+  forSong: (userId: string, songId: string) => [...songFileKeys.all, userId, songId] as const,
 };
 
 /**
@@ -27,6 +46,29 @@ export function useSongs() {
   return useQuery({
     queryKey: songKeys.forUser(user.id),
     queryFn: () => fetchSongs(user.id),
+  });
+}
+
+/** One song's row, for the song page. Null data means no such song. */
+export function useSong(songId: string, { enabled = true } = {}) {
+  const user = useSignedInUser();
+  return useQuery({
+    queryKey: songKeys.detail(user.id, songId),
+    queryFn: () => fetchSong(user.id, songId),
+    enabled,
+  });
+}
+
+/**
+ * The song's Guitar Pro bytes. A stored file never changes (its path is the
+ * song id), so it never goes stale and only leaves the cache when unused.
+ */
+export function useSongFile(songId: string) {
+  const user = useSignedInUser();
+  return useQuery({
+    queryKey: songFileKeys.forSong(user.id, songId),
+    queryFn: () => downloadSongFile(user.id, songId),
+    staleTime: Infinity,
   });
 }
 

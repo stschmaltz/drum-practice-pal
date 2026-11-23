@@ -6,13 +6,18 @@ import { RequireAuth } from '@/features/auth/RequireAuth';
 import { LibraryPage } from '@/features/library/LibraryPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { AppShell } from '@/features/shell/AppShell';
-import { NotFoundPage, OnTheGoPage, SongPage } from '@/features/shell/PlaceholderPages';
+import { NotFoundPage, OnTheGoPage } from '@/features/shell/PlaceholderPages';
 import { supabaseConfigError } from '@/lib/supabase';
 
 // Lazy so alphaTab stays out of the main bundle until a player screen opens.
 const SpikePage = lazy(() =>
   import('./features/spike/SpikePage').then((m) => ({ default: m.SpikePage })),
 );
+const SongPage = lazy(() =>
+  import('./features/song/SongPage').then((m) => ({ default: m.SongPage })),
+);
+
+const playerFallback = <p className="p-6">Loading player…</p>;
 
 export function App() {
   if (supabaseConfigError) {
@@ -31,7 +36,7 @@ export function App() {
       <Route
         path="/spike"
         element={
-          <Suspense fallback={<p className="p-6">Loading player…</p>}>
+          <Suspense fallback={playerFallback}>
             <SpikePage />
           </Suspense>
         }
@@ -45,7 +50,14 @@ export function App() {
       >
         <Route index element={<OnTheGoPage />} />
         <Route path="library" element={<LibraryPage />} />
-        <Route path="songs/:id" element={<SongPage />} />
+        <Route
+          path="songs/:id"
+          element={
+            <Suspense fallback={playerFallback}>
+              <SongPage />
+            </Suspense>
+          }
+        />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

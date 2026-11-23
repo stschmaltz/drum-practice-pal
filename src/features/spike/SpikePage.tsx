@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { clampSpeedRatio } from './barRange';
+import { clampSpeedRatio } from '@/features/player/speed';
 import { SPIKE_FIXTURES } from './fixtures';
-import { layoutForWidth, type LayoutChoice } from './layout';
+import { layoutForWidth, type LayoutChoice } from '@/features/player/layout';
 import { DEFAULT_SOUND_FONT_URL, isLocalSoundFontPath, SOUND_FONTS } from './soundfonts';
 import {
   SpikePlayer,
