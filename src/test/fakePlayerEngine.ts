@@ -25,6 +25,15 @@ export function straightBars(count: number): BarTicks[] {
   }));
 }
 
+/** Bars of 4/4 in the order they play (1-based numbers), for a song whose repeats play some twice. */
+export function barsInPlayOrder(barNumbers: readonly number[]): BarTicks[] {
+  return barNumbers.map((barNumber, position) => ({
+    barIndex: barNumber - 1,
+    start: position * TICKS_PER_BAR,
+    end: (position + 1) * TICKS_PER_BAR,
+  }));
+}
+
 /** `barTempos` like the tempo-change fixture: 16 bars, 120 BPM for bars 1 to 8, 90 from bar 9. */
 export const TEMPO_CHANGE_BAR_TEMPOS: readonly number[] = Array.from(
   { length: 16 },
@@ -50,6 +59,7 @@ export class FakePlayerEngine implements PlayerEngine {
   setTrackMuted = vi.fn();
   setPlaybackRange = vi.fn();
   setLooping = vi.fn();
+  setHighlight = vi.fn();
   destroy = vi.fn();
 
   on<K extends keyof EngineEvents>(event: K, handler: (payload: EngineEvents[K]) => void): void {
@@ -62,7 +72,7 @@ export class FakePlayerEngine implements PlayerEngine {
 
   /**
    * What alphaTab does after a successful load of a song with `barCount`
-   * straight bars. Every bar is 4/4 at 120 BPM unless `meter`, `barMeters` or
+   * straight bars (or `bars`, for a song whose repeats play some twice). Every bar is 4/4 at 120 BPM unless `meter`, `barMeters` or
    * `barTempos` says otherwise.
    */
   finishLoading({
@@ -71,6 +81,7 @@ export class FakePlayerEngine implements PlayerEngine {
     barTempos = Array.from({ length: barCount }, () => 120),
     meter = COMMON_TIME,
     barMeters = Array.from({ length: barCount }, () => meter),
+    bars = straightBars(barCount),
   }: {
     barCount?: number;
     trackCount?: number;
@@ -79,6 +90,8 @@ export class FakePlayerEngine implements PlayerEngine {
     meter?: Meter;
     /** One meter per bar, for a song whose time signature changes; pass a matching `barCount`. */
     barMeters?: readonly Meter[];
+    /** The bars in play order, when that isn't 1 to `barCount` straight through. */
+    bars?: readonly BarTicks[];
   } = {}): void {
     this.fire('scoreLoaded', {
       barCount,
@@ -86,7 +99,7 @@ export class FakePlayerEngine implements PlayerEngine {
       barTempos: [...barTempos],
       barMeters: [...barMeters],
     });
-    this.fire('ticksReady', { bars: straightBars(barCount) });
+    this.fire('ticksReady', { bars: [...bars] });
     this.fire('readyForPlayback', undefined);
   }
 

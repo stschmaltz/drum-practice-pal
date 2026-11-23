@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 /**
  * Locators and steps for the song page's player, shared by player.spec.ts,
- * jam.spec.ts, count-in.spec.ts and drums-only.spec.ts.
+ * jam.spec.ts, count-in.spec.ts, drums-only.spec.ts and loops.spec.ts.
  */
 import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
@@ -75,6 +75,51 @@ export async function barCursorBox(page: Page): Promise<Box> {
   const box = await viewport(page).locator('.at-cursor-bar').boundingBox();
   if (!box || box.width < 2) throw new Error('No bar cursor');
   return box;
+}
+
+/** Taps a point in the window and waits for the status line to leave bar `from`. */
+export async function tapAndWaitForBar(page: Page, point: Point, from: number): Promise<number> {
+  await page.mouse.click(point.x, point.y);
+  await expect.poll(() => barNumber(page)).not.toBe(from);
+  return barNumber(page);
+}
+
+/**
+ * A point just inside the bar after the cursor's: to its right, or at the
+ * start of the next line when the cursor's bar ends one (bar 1 is wide, with
+ * the clef, and fills a line on a tablet).
+ */
+export async function nextBarPoint(page: Page): Promise<Point> {
+  const box = await barCursorBox(page);
+  const frame = await scoreBox(page);
+  const right = { x: box.x + box.width + 20, y: box.y + box.height / 2 };
+  if (right.x < frame.x + frame.width - 20) return right;
+  return { x: frame.x + 40, y: box.y + box.height * 1.5 };
+}
+
+/** The middle of the bar the cursor is on. */
+export async function cursorBarPoint(page: Page): Promise<Point> {
+  const box = await barCursorBox(page);
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/**
+ * Scrolls the score box, and only the box, so the cursor's bar sits near its
+ * top left: the cursor's bar and the one after it are then on screen at every
+ * size, clear of the phone's loop sheet. (Element.scrollIntoView would move
+ * the window as well.)
+ */
+export async function scrollScoreToCursor(page: Page): Promise<void> {
+  await viewport(page).evaluate((box) => {
+    const cursor = box.querySelector('.at-cursor-bar')?.getBoundingClientRect();
+    if (!cursor) throw new Error('No bar cursor');
+    const frame = box.getBoundingClientRect();
+    box.scrollBy({
+      left: cursor.left - frame.left - 24,
+      top: cursor.top - frame.top - 24,
+      behavior: 'instant',
+    });
+  });
 }
 
 /** Polls `read` until it gives the same value twice running, and returns that value. */

@@ -22,3 +22,28 @@
 .jam-score .at-surface * {
   cursor: pointer;
 }
+
+/*
+ * The bars of a loop, or the bars being picked for one: blocks the player
+ * engine draws over the score (alphaTabEngine.ts, setHighlight). They never
+ * take a tap meant for the bar underneath.
+ */
+.jam-score .bar-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+.jam-score .bar-highlight > div {
+  position: absolute;
+  background: rgb(2 132 199 / 0.16);
+  outline: 2px solid rgb(2 132 199 / 0.7);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+/* A mouse drag across bars picks a loop's range; it shouldn't select the score as text on the way. */
+.jam-score {
+  user-select: none;
+  -webkit-user-select: none;
+}

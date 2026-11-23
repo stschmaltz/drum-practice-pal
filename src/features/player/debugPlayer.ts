@@ -10,8 +10,8 @@ declare global {
 /**
  * Puts the mounted player on `window.__drumPalPlayer` in dev, test and the
  * e2e build (`--mode development`), never in production. QA and e2e use it to
- * reach service features whose UI belongs to a later unit, such as setting a
- * loop range before Unit 08.
+ * watch the service (count-in.spec.ts records every status it goes through)
+ * and to reach service features whose UI belongs to a later unit.
  *
  * An allow-list of modes, so a build in any other mode (`--mode staging`)
  * leaves it out too. Vite replaces MODE at build time and the body is dropped.

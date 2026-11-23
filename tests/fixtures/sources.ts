@@ -17,6 +17,8 @@ export interface FixtureSource {
     trackCount: number;
     drumTrackIndex: number | null;
     timeSignature: [number, number];
+    /** 1-based bar numbers in the order they play, for a song with repeats. */
+    playOrder?: number[];
   };
 }
 
@@ -132,6 +134,29 @@ export const fixtures: FixtureSource[] = [
       trackCount: 1,
       drumTrackIndex: null,
       timeSignature: [4, 4],
+    },
+  },
+  {
+    // Bars 3 and 4 play twice, so alphaTab's tick cache lists them twice (Unit 08).
+    name: 'repeats',
+    tex: [
+      '\\title "Repeats"',
+      '\\artist "Fixture"',
+      '\\tempo 120',
+      DRUM_HEADER,
+      repeat(ROCK_BAR_44, 2),
+      `\\ro ${ROCK_BAR_44}`,
+      `\\rc 2 ${ROCK_BAR_44}`,
+      repeat(ROCK_BAR_44, 4),
+    ].join('\n'),
+    expected: {
+      title: 'Repeats',
+      barCount: 8,
+      tempoAtBar1: 120,
+      trackCount: 1,
+      drumTrackIndex: 0,
+      timeSignature: [4, 4],
+      playOrder: [1, 2, 3, 4, 3, 4, 5, 6, 7, 8],
     },
   },
 ];

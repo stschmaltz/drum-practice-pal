@@ -20,3 +20,53 @@ export function ratioToPercent(ratio: number): number {
 export function percentToRatio(percent: number): number {
   return clampSpeedRatio(Math.round(percent) / 100);
 }
+
+/**
+ * Ratios are kept to this many decimal places: enough that a typed BPM comes
+ * back as the same whole BPM at any tempo the DB allows (the error is under
+ * 0.001 BPM at 1000 BPM), without storing float noise like 0.7083333333333334.
+ */
+const RATIO_DECIMALS = 6;
+
+function roundRatio(ratio: number): number {
+  const scale = 10 ** RATIO_DECIMALS;
+  return Math.round(ratio * scale) / scale;
+}
+
+/**
+ * The speed ratio that plays `tempo` (the file's BPM at the relevant bar) at
+ * `bpm`, clamped to the bounds. Not rounded to a whole percent: 85 BPM of 120
+ * is 70.8333%, and storing 71% would show 85 BPM as 85.2. Null when there is
+ * no ratio to give (no tempo, or a BPM that isn't a positive number).
+ */
+export function bpmToRatio(bpm: number, tempo: number): number | null {
+  if (!Number.isFinite(bpm) || bpm <= 0 || !Number.isFinite(tempo) || tempo <= 0) return null;
+  return clampSpeedRatio(roundRatio(bpm / tempo));
+}
+
+/**
+ * Moves the speed by whole percent steps from the percent on show, so a ratio
+ * that came from a BPM (70.8333%, shown as 71%) nudges to 72%, not 71.8333%.
+ */
+export function nudgeSpeedRatio(ratio: number, percentDelta: number): number {
+  return percentToRatio(ratioToPercent(ratio) + percentDelta);
+}
+
+/** A typed percentage ("85", "85%", " 85.4 ") as a ratio, or null when it isn't a positive number. */
+export function parseSpeedPercent(text: string): number | null {
+  const percent = parsePositiveNumber(text.replace('%', ''));
+  return percent === null ? null : percentToRatio(percent);
+}
+
+/** A typed BPM as the ratio that gives it at `tempo`, or null when it isn't a positive number. */
+export function parseSpeedBpm(text: string, tempo: number): number | null {
+  const bpm = parsePositiveNumber(text);
+  return bpm === null ? null : bpmToRatio(bpm, tempo);
+}
+
+function parsePositiveNumber(text: string): number | null {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const value = Number(trimmed);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}

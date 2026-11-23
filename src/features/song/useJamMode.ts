@@ -12,26 +12,40 @@ interface JamModeRefs {
 }
 
 /**
+ * When the score box is brought into the window. `playing`: as close as it
+ * needs to move to be fully visible. `picking-bars`: its top right under the
+ * sticky bar, because on a phone the loop sheet covers the lower part of the
+ * window and the staff is at the top of the box.
+ */
+export type ScoreOnScreen = 'playing' | 'picking-bars' | null;
+
+export interface JamModeOptions {
+  /** False while taps mean something else: picking a loop's bars (useLoopPractice). */
+  seekOnTap: boolean;
+  scoreOnScreen: ScoreOnScreen;
+}
+
+/**
  * Jam mode's behaviour on top of the player: a tapped bar is where playback
  * goes next (playing or paused), and the score box comes on screen when
- * playback starts.
+ * playback starts or the user is about to pick bars on it.
  */
 export function useJamMode(
   player: PlayerService | null,
   refs: JamModeRefs,
-  playing: boolean,
+  { seekOnTap, scoreOnScreen }: JamModeOptions,
 ): void {
-  useSeekOnTap(player);
-  useScoreOnScreenOnPlay(refs, playing);
+  useSeekOnTap(player, seekOnTap);
+  useScoreOnScreen(refs, scoreOnScreen);
 }
 
-function useSeekOnTap(player: PlayerService | null): void {
+function useSeekOnTap(player: PlayerService | null, enabled: boolean): void {
   useEffect(() => {
-    if (!player) return;
+    if (!player || !enabled) return;
     return player.on('barTapped', ({ barNumber }) => {
       player.seekToBar(barNumber);
     });
-  }, [player]);
+  }, [player, enabled]);
 }
 
 /**
@@ -39,9 +53,9 @@ function useSeekOnTap(player: PlayerService | null): void {
  * sure the box itself is in the window, which on a short screen it may not
  * be, without sliding it under the sticky bar.
  */
-function useScoreOnScreenOnPlay({ scrollRef, stickyBarRef }: JamModeRefs, playing: boolean): void {
+function useScoreOnScreen({ scrollRef, stickyBarRef }: JamModeRefs, when: ScoreOnScreen): void {
   useEffect(() => {
-    if (!playing) return;
+    if (when === null) return;
     const box = scrollRef.current;
     if (!box) return;
     // Measured, not a fixed class: the bar's height depends on wrapping and the safe area.
@@ -50,6 +64,9 @@ function useScoreOnScreenOnPlay({ scrollRef, stickyBarRef }: JamModeRefs, playin
     // 'nearest' leaves the page alone when the box is already fully visible,
     // and only once per start, so it never fights the user scrolling the page.
     // jsdom has no scrollIntoView.
-    box.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
-  }, [playing, scrollRef, stickyBarRef]);
+    box.scrollIntoView?.({
+      block: when === 'picking-bars' ? 'start' : 'nearest',
+      behavior: 'smooth',
+    });
+  }, [when, scrollRef, stickyBarRef]);
 }

@@ -6,6 +6,7 @@ import {
   storageResult,
   type FakeResult,
 } from '@/test/fakeSupabase';
+import { loopKeys } from '@/features/loops/loopKeys';
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import type { ParseResult } from './parseScore';
 import type { LibrarySong, Song } from './songForm';
@@ -314,6 +315,33 @@ describe('useDeleteSong', () => {
     expect(view.queryClient.getQueryData(detailKey)).toBeNull();
     expect(view.queryClient.getQueryData(fileKey)).toBeUndefined();
     expect(view.queryClient.getQueryData(otherFileKey)).toEqual(new Uint8Array([2]));
+  });
+
+  it("forgets the deleted song's loops, and only that song's", async () => {
+    const view = await renderLoaded([song('a'), song('b')]);
+    const loopsKey = loopKeys.forSong('user-1', 'a');
+    const otherLoopsKey = loopKeys.forSong('user-1', 'b');
+    view.queryClient.setQueryData(loopsKey, [{ id: 'loop-a' }]);
+    view.queryClient.setQueryData(otherLoopsKey, [{ id: 'loop-b' }]);
+    queryResult.mockResolvedValueOnce(ok(null));
+    queryResult.mockResolvedValue(ok([listRow(song('b'))]));
+
+    act(() => view.result.current.remove.mutate('a'));
+    await waitFor(() => expect(view.result.current.remove.isSuccess).toBe(true));
+    expect(view.queryClient.getQueryData(loopsKey)).toBeUndefined();
+    expect(view.queryClient.getQueryData(otherLoopsKey)).toEqual([{ id: 'loop-b' }]);
+  });
+
+  it('keeps the loops of a song whose delete fails', async () => {
+    const view = await renderLoaded([song('a')]);
+    const loopsKey = loopKeys.forSong('user-1', 'a');
+    view.queryClient.setQueryData(loopsKey, [{ id: 'loop-a' }]);
+    storageResult.mockResolvedValueOnce(fail('storage down'));
+    queryResult.mockResolvedValue(ok([listRow(song('a'))]));
+
+    act(() => view.result.current.remove.mutate('a'));
+    await waitFor(() => expect(view.result.current.remove.isError).toBe(true));
+    expect(view.queryClient.getQueryData(loopsKey)).toEqual([{ id: 'loop-a' }]);
   });
 
   it('keeps the song and its downloaded file when the delete fails', async () => {

@@ -53,6 +53,7 @@ describe('songs edges', () => {
     ['original_tempo', -120],
     ['file_hash', 'abc123'],
     ['file_hash', 'A'.repeat(64)],
+    ['title', '   '],
   ])('rejects %s = %j', async (field, value) => {
     const { error } = await user.client.from('songs').insert(songRow(user.id, { [field]: value }));
     expect(error?.code).toBe(PG.CHECK_VIOLATION);
@@ -166,9 +167,54 @@ describe('loops edges', () => {
     expect((await loopById(id)).finished_at).not.toBeNull();
   });
 
-  it('ignores a finished_at sent with an active loop', async () => {
-    const id = await insertLoop(user, songId, { finished_at: new Date().toISOString() });
-    expect(await loopById(id)).toMatchObject({ status: 'active', finished_at: null });
+  // Unit 08: these columns are the database's, set by trigger; a client can't send them.
+  it.each([
+    ['finished_at', '2026-01-01T00:00:00.000Z'],
+    ['last_practiced_at', '2026-01-01T00:00:00.000Z'],
+    ['created_at', '2026-01-01T00:00:00.000Z'],
+    ['updated_at', '2026-01-01T00:00:00.000Z'],
+  ])("won't take %s on insert", async (field, value) => {
+    await expect(insertLoop(user, songId, { [field]: value })).rejects.toMatchObject({
+      code: PG.INSUFFICIENT_PRIVILEGE,
+    });
+  });
+
+  it.each([
+    ['finished_at', '2026-01-01T00:00:00.000Z'],
+    ['last_practiced_at', '2026-01-01T00:00:00.000Z'],
+    ['created_at', '2026-01-01T00:00:00.000Z'],
+    ['updated_at', '2026-01-01T00:00:00.000Z'],
+    ['song_id', crypto.randomUUID()],
+    ['user_id', crypto.randomUUID()],
+  ])("won't let %s change after insert", async (field, value) => {
+    const id = await insertLoop(user, songId);
+    const before = await loopById(id);
+    const { error } = await user.client
+      .from('loops')
+      .update({ [field]: value } as TablesUpdate<'loops'>)
+      .eq('id', id);
+    expect(error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
+    expect(await loopById(id)).toEqual(before);
+  });
+
+  it('a session still moves last_practiced_at, though the user cannot write it', async () => {
+    const id = await insertLoop(user, songId);
+    const { error } = await user.client.from('practice_sessions').insert(sessionRow(user.id, id));
+    expect(error).toBeNull();
+    expect((await loopById(id)).last_practiced_at).not.toBeNull();
+  });
+
+  it.each(['   ', '\t', '\n \n'])('rejects a blank name %j', async (name) => {
+    await expect(insertLoop(user, songId, { name })).rejects.toMatchObject({
+      code: PG.CHECK_VIOLATION,
+    });
+  });
+
+  it('rejects renaming a loop to a blank name', async () => {
+    const id = await insertLoop(user, songId);
+    const { error } = await user.client.from('loops').update({ name: '  ' }).eq('id', id);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
+    expect((await loopById(id)).name).toBe('Test loop');
   });
 
   it('editing a finished loop keeps its finished_at', async () => {
