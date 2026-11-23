@@ -2,7 +2,8 @@
  * Drums only, beyond the basics in PlayerService.test.ts: the order things
  * happen in around loading, count-ins and counted repeats, songs of other
  * shapes, and long runs of toggles. What is checked is which tracks the
- * engine has been left sounding, not which calls got it there.
+ * engine has been left sounding (FakePlayerEngine.soundingTracks), not which
+ * calls got it there.
  */
 import {
   BAR_MS,
@@ -51,21 +52,6 @@ function playing(config: Parameters<typeof setup>[0] = {}, trackCount = 3) {
   return ctx;
 }
 
-/**
- * The tracks the synth would let sound, out of `trackCount`. Like alphaTab's
- * synth, a track sounds until it is muted and a mute stays until it is taken
- * off again: nothing resets it, a reload of the score included.
- */
-function sounding(engine: FakePlayerEngine, trackCount = 3): number[] {
-  const muted = new Map<number, boolean>();
-  for (const [trackIndex, mute] of engine.setTrackMuted.mock.calls as [number, boolean][]) {
-    muted.set(trackIndex, mute);
-  }
-  return Array.from({ length: trackCount }, (_, trackIndex) => trackIndex).filter(
-    (trackIndex) => !muted.get(trackIndex),
-  );
-}
-
 /** The highest track index the engine was ever sent a mute for. */
 function highestTrackSent(engine: FakePlayerEngine): number {
   return Math.max(-1, ...(engine.setTrackMuted.mock.calls as [number, boolean][]).map(([i]) => i));
@@ -75,39 +61,39 @@ describe('Drums only on songs of other shapes', () => {
   it('leaves the drums alone when they are the first track, as in the multi-track fixture', () => {
     const { engine, service } = playing({ drumTrackIndex: 0 });
     service.setDrumsOnly(true);
-    expect(sounding(engine)).toEqual([0]);
+    expect(engine.soundingTracks()).toEqual([0]);
     service.setDrumsOnly(false);
-    expect(sounding(engine)).toEqual([0, 1, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
     expect(engine.restartCalls()).toBe(0);
   });
 
   it('leaves the drums alone when they sit between other tracks', () => {
     const { engine, service } = playing({ drumTrackIndex: 1 }, 4);
     service.setDrumsOnly(true);
-    expect(sounding(engine, 4)).toEqual([1]);
+    expect(engine.soundingTracks(4)).toEqual([1]);
     service.setDrumsOnly(false);
-    expect(sounding(engine, 4)).toEqual([0, 1, 2, 3]);
+    expect(engine.soundingTracks(4)).toEqual([0, 1, 2, 3]);
   });
 
   it('on a song that is only drums, turns on and off with the drums still sounding', () => {
     const { engine, service } = playing({ drumTrackIndex: 0 }, 1);
     service.setDrumsOnly(true);
     expect(service.getSnapshot().drumsOnly).toBe(true);
-    expect(sounding(engine, 1)).toEqual([0]);
+    expect(engine.soundingTracks(1)).toEqual([0]);
 
     service.setDrumsOnly(false);
     expect(service.getSnapshot().drumsOnly).toBe(false);
-    expect(sounding(engine, 1)).toEqual([0]);
+    expect(engine.soundingTracks(1)).toEqual([0]);
     expect(engine.restartCalls()).toBe(0);
     expect(highestTrackSent(engine)).toBeLessThan(1);
   });
 
   it('on a drums-only song that opens with the drums muted, unmutes them', () => {
     const { engine, service } = playing({ drumTrackIndex: 0, options: { drumsMuted: true } }, 1);
-    expect(sounding(engine, 1)).toEqual([]);
+    expect(engine.soundingTracks(1)).toEqual([]);
     service.setDrumsOnly(true);
     expect(service.getSnapshot()).toMatchObject({ drumsOnly: true, drumsMuted: false });
-    expect(sounding(engine, 1)).toEqual([0]);
+    expect(engine.soundingTracks(1)).toEqual([0]);
   });
 
   it('never sends the engine a track the song does not have', () => {
@@ -136,7 +122,7 @@ describe('Drums only around loading', () => {
     service.load(bytes);
     engine.finishLoading();
     expect(service.getSnapshot()).toMatchObject({ status: 'ready', drumsOnly: true });
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
   });
 
   it('turned on before load() over a drums-muted default, opens with the drums sounding', () => {
@@ -145,7 +131,7 @@ describe('Drums only around loading', () => {
     expect(service.getSnapshot()).toMatchObject({ drumsOnly: true, drumsMuted: false });
     service.load(bytes);
     engine.finishLoading();
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
   });
 
   it.each([
@@ -166,7 +152,7 @@ describe('Drums only around loading', () => {
     });
 
     expect(service.getSnapshot()).toMatchObject({ status: 'ready', drumsOnly: true });
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
     expect(engine.play).not.toHaveBeenCalled();
   });
 
@@ -180,7 +166,7 @@ describe('Drums only around loading', () => {
     engine.fire('readyForPlayback', undefined);
 
     expect(service.getSnapshot()).toMatchObject({ status: 'ready', drumsOnly: false });
-    expect(sounding(engine)).toEqual([0, 1, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
   });
 
   it('stays on when alphaTab regenerates its MIDI mid-play, without restarting', () => {
@@ -193,7 +179,7 @@ describe('Drums only around loading', () => {
 
     expect(service.getSnapshot()).toMatchObject({ status: 'playing', drumsOnly: true });
     // Sent again in full, in case the engine dropped them.
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
     expect(engine.setTrackMuted).toHaveBeenCalledWith(0, true);
     expect(engine.setTrackMuted).toHaveBeenCalledWith(1, true);
     expect(engine.restartCalls()).toBe(0);
@@ -204,14 +190,14 @@ describe('Drums only around loading', () => {
     service.load(bytes);
     engine.finishLoading();
     service.setDrumsOnly(true);
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
 
     service.load(bytes);
     service.setDrumsOnly(false);
     engine.finishLoading();
 
     expect(service.getSnapshot().drumsOnly).toBe(false);
-    expect(sounding(engine)).toEqual([0, 1, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
   });
 
   it('turned on while a second load is under way, applies to the new score', () => {
@@ -223,7 +209,7 @@ describe('Drums only around loading', () => {
     service.setDrumsOnly(true);
     engine.finishLoading();
 
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
   });
 
   it('covers the extra tracks when the next load has more of them', () => {
@@ -231,14 +217,14 @@ describe('Drums only around loading', () => {
     service.load(bytes);
     engine.finishLoading({ trackCount: 2 });
     service.setDrumsOnly(true);
-    expect(sounding(engine, 2)).toEqual([0]);
+    expect(engine.soundingTracks(2)).toEqual([0]);
 
     service.load(bytes);
     engine.finishLoading({ trackCount: 5 });
-    expect(sounding(engine, 5)).toEqual([0]);
+    expect(engine.soundingTracks(5)).toEqual([0]);
 
     service.setDrumsOnly(false);
-    expect(sounding(engine, 5)).toEqual([0, 1, 2, 3, 4]);
+    expect(engine.soundingTracks(5)).toEqual([0, 1, 2, 3, 4]);
   });
 
   it('sends nothing past the last track when the next load has fewer of them', () => {
@@ -254,7 +240,7 @@ describe('Drums only around loading', () => {
     service.setDrumsOnly(true);
 
     expect(highestTrackSent(engine)).toBe(1);
-    expect(sounding(engine, 2)).toEqual([0]);
+    expect(engine.soundingTracks(2)).toEqual([0]);
   });
 
   it('a failed load leaves the toggle as it was and sends the engine nothing', () => {
@@ -292,9 +278,9 @@ describe('Drums only and the transport', () => {
     engine.loadScore.mockClear();
 
     service.setDrumsOnly(true);
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
     service.setDrumsOnly(false);
-    expect(sounding(engine)).toEqual([0, 1, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
     expect(engine.restartCalls()).toBe(0);
     expect(service.getSnapshot().status).toBe('ready');
   });
@@ -348,11 +334,11 @@ describe('Drums only and the transport', () => {
 
     for (let press = 1; press <= 51; press++) service.setDrumsOnly(press % 2 === 1);
     expect(service.getSnapshot()).toMatchObject({ drumsOnly: true, status: 'playing' });
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
     expect(listener).toHaveBeenCalledTimes(51);
 
     service.setDrumsOnly(false);
-    expect(sounding(engine)).toEqual([0, 1, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
     expect(engine.restartCalls()).toBe(0);
   });
 
@@ -361,10 +347,10 @@ describe('Drums only and the transport', () => {
     for (let round = 0; round < 10; round++) {
       service.setDrumsOnly(true);
       expect(service.getSnapshot()).toMatchObject({ drumsOnly: true, drumsMuted: false });
-      expect(sounding(engine)).toEqual([2]);
+      expect(engine.soundingTracks()).toEqual([2]);
       service.setDrumsMuted(true);
       expect(service.getSnapshot()).toMatchObject({ drumsOnly: false, drumsMuted: true });
-      expect(sounding(engine)).toEqual([0, 1]);
+      expect(engine.soundingTracks()).toEqual([0, 1]);
     }
     expect(engine.restartCalls()).toBe(0);
   });
@@ -376,12 +362,12 @@ describe('Drums only and per-track mutes', () => {
     service.setTrackMuted(1, true);
     service.load(bytes);
     engine.finishLoading();
-    expect(sounding(engine)).toEqual([0, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 2]);
 
     service.setDrumsOnly(true);
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
     service.setDrumsOnly(false);
-    expect(sounding(engine)).toEqual([0, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 2]);
   });
 
   it('a track muted after Drums only went off is muted alone', () => {
@@ -389,9 +375,9 @@ describe('Drums only and per-track mutes', () => {
     service.setDrumsOnly(true);
     service.setDrumsOnly(false);
     service.setTrackMuted(0, true);
-    expect(sounding(engine)).toEqual([1, 2]);
+    expect(engine.soundingTracks()).toEqual([1, 2]);
     service.setTrackMuted(0, false);
-    expect(sounding(engine)).toEqual([0, 1, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
   });
 
   it('muting the drum track by its index turns Drums only off, like Mute drums', () => {
@@ -399,7 +385,7 @@ describe('Drums only and per-track mutes', () => {
     service.setDrumsOnly(true);
     service.setTrackMuted(2, true);
     expect(service.getSnapshot()).toMatchObject({ drumsOnly: false, drumsMuted: true });
-    expect(sounding(engine)).toEqual([0, 1]);
+    expect(engine.soundingTracks()).toEqual([0, 1]);
   });
 
   it('unmuting another track while Drums only is on does not let it through', () => {
@@ -407,7 +393,7 @@ describe('Drums only and per-track mutes', () => {
     service.setDrumsOnly(true);
     service.setTrackMuted(0, false);
     service.setTrackMuted(1, false);
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
   });
 
   it('per-track mutes made while Drums only is on survive a reload and show when it goes off', () => {
@@ -419,10 +405,10 @@ describe('Drums only and per-track mutes', () => {
 
     service.load(bytes);
     engine.finishLoading();
-    expect(sounding(engine)).toEqual([2]);
+    expect(engine.soundingTracks()).toEqual([2]);
 
     service.setDrumsOnly(false);
-    expect(sounding(engine)).toEqual([0, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 2]);
   });
 
   it('Mute drums off, after it replaced Drums only, leaves the whole band sounding', () => {
@@ -431,7 +417,7 @@ describe('Drums only and per-track mutes', () => {
     service.setDrumsMuted(true);
     service.setDrumsMuted(false);
     expect(service.getSnapshot()).toMatchObject({ drumsOnly: false, drumsMuted: false });
-    expect(sounding(engine)).toEqual([0, 1, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
   });
 });
 
@@ -453,7 +439,7 @@ describe('Drums only during a count-in', () => {
     service.setDrumsOnly(true);
     expect(service.getSnapshot()).toMatchObject({ status: 'countingIn', drumsOnly: true });
     expect(service.getSnapshot().countIn).not.toBeNull();
-    expect(sounding(engine)).toEqual([0]);
+    expect(engine.soundingTracks()).toEqual([0]);
     expect(engine.restartCalls()).toBe(0);
     expect(clicks.cancelSession).not.toHaveBeenCalled();
     expect(clicks.scheduled).toHaveLength(scheduled);
@@ -464,7 +450,7 @@ describe('Drums only during a count-in', () => {
     expect(engine.play).toHaveBeenCalledTimes(1);
     enginePlays(engine);
     expect(service.getSnapshot()).toMatchObject({ status: 'playing', drumsOnly: true });
-    expect(sounding(engine)).toEqual([0]);
+    expect(engine.soundingTracks()).toEqual([0]);
   });
 
   it('toggled between the downbeat and alphaTab reporting play, playback still starts once', () => {
@@ -478,7 +464,7 @@ describe('Drums only during a count-in', () => {
     enginePlays(engine);
 
     expect(service.getSnapshot()).toMatchObject({ status: 'playing', drumsOnly: true });
-    expect(sounding(engine)).toEqual([0]);
+    expect(engine.soundingTracks()).toEqual([0]);
     expect(engine.play).toHaveBeenCalledTimes(1);
     expect(engine.pause).not.toHaveBeenCalled();
     expect(engine.stop).not.toHaveBeenCalled();
@@ -496,7 +482,7 @@ describe('Drums only during a count-in', () => {
       drumsOnly: false,
       drumsMuted: true,
     });
-    expect(sounding(engine)).toEqual([1, 2]);
+    expect(engine.soundingTracks()).toEqual([1, 2]);
     expect(clicks.cancelSession).not.toHaveBeenCalled();
     expect(engine.restartCalls()).toBe(0);
   });
@@ -529,7 +515,7 @@ describe('Drums only in a loop with a count-in before every repeat', () => {
       vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
       enginePlays(engine);
       expect(engine.play).toHaveBeenCalledTimes(pass);
-      expect(sounding(engine)).toEqual([0]);
+      expect(engine.soundingTracks()).toEqual([0]);
     }
     expect(engine.pause).not.toHaveBeenCalled();
     expect(engine.stop).not.toHaveBeenCalled();
@@ -550,10 +536,10 @@ describe('Drums only in a loop with a count-in before every repeat', () => {
     vi.advanceTimersByTime(BAR_MS / 2);
     expect(engine.play).toHaveBeenCalledTimes(1);
     enginePlays(engine);
-    expect(sounding(engine)).toEqual([0]);
+    expect(engine.soundingTracks()).toEqual([0]);
 
     service.setDrumsOnly(false);
-    expect(sounding(engine)).toEqual([0, 1, 2]);
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
     expect(service.getSnapshot()).toMatchObject({
       status: 'playing',
       looping: true,
@@ -634,7 +620,7 @@ describe('Drums only against any order of presses', () => {
         const expected = Array.from({ length: TRACKS }, (_, i) => i).filter((i) =>
           drumsOnly ? i === DRUMS : !asked.get(i),
         );
-        expect(sounding(engine, TRACKS), trail).toEqual(expected);
+        expect(engine.soundingTracks(TRACKS), trail).toEqual(expected);
       }
       expect(engine.play).not.toHaveBeenCalled();
       expect(engine.pause).not.toHaveBeenCalled();

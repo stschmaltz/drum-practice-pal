@@ -6,9 +6,11 @@ import {
   barNumber,
   boxOf,
   controls,
+  drumsOnlyButton,
   expectedLayout,
   fixture,
   layoutForWidth,
+  muteDrumsButton,
   openFixture,
   playButton,
   status,
@@ -94,7 +96,7 @@ test('speed, metronome and drum mute change live without restarting playback', a
   await metronome.click();
   await expect(metronome).not.toHaveAttribute('aria-pressed', pressedBefore ?? '');
   await controls(page).getByRole('slider', { name: 'Metronome volume' }).fill('30');
-  const mute = controls(page).getByRole('button', { name: 'Mute drums' });
+  const mute = muteDrumsButton(page);
   await mute.click();
   await expect(mute).toHaveAttribute('aria-pressed', 'true');
 
@@ -121,21 +123,18 @@ test('starts with the metronome and drum mute from settings', async ({ user, pag
     'false',
   );
   await expect(controls(page).getByRole('slider', { name: 'Metronome volume' })).toHaveValue('40');
-  await expect(controls(page).getByRole('button', { name: 'Mute drums' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
+  await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'true');
   await expect(controls(page).getByRole('slider', { name: 'Speed' })).toHaveValue('100');
 });
 
 test('a song without drums disables drum mute', async ({ user, page }) => {
   await openFixture(page, user, 'no-drums', 'No Drums');
-  await expect(controls(page).getByRole('button', { name: 'Mute drums' })).toBeDisabled();
+  await expect(muteDrumsButton(page)).toBeDisabled();
 });
 
 test('a song without drums disables drums only, with the reason', async ({ user, page }) => {
   await openFixture(page, user, 'no-drums', 'No Drums');
-  const drumsOnly = controls(page).getByRole('button', { name: 'Drums only' });
+  const drumsOnly = drumsOnlyButton(page);
   await expect(drumsOnly).toBeDisabled();
   await expect(drumsOnly).toHaveAccessibleDescription('This song has no drum track');
 });
@@ -146,8 +145,8 @@ test('drums only and mute drums exclude each other and change live on a multi-tr
   page,
 }) => {
   await openFixture(page, user, 'multi-track', 'Multi Track');
-  const mute = controls(page).getByRole('button', { name: 'Mute drums' });
-  const drumsOnly = controls(page).getByRole('button', { name: 'Drums only' });
+  const mute = muteDrumsButton(page);
+  const drumsOnly = drumsOnlyButton(page);
   await expect(drumsOnly).toBeEnabled();
   await expect(drumsOnly).toHaveAttribute('aria-pressed', 'false');
 

@@ -1,12 +1,25 @@
 /// <reference lib="dom" />
 import type { Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
-import { barNumber, controls, fixture, openFixture, playButton } from './playerPage';
+import {
+  barNumber,
+  drumsOnlyButton,
+  fixture,
+  muteDrumsButton,
+  openFixture,
+  playButton,
+} from './playerPage';
 
 // Unit 07: Drums only. Nothing here listens to audio; whether the drums are
 // heard alone is a Human check. These read what alphaTab tells its synth:
 // alphaTab mutes by MIDI channel, with a message to the synth's worker, and
 // the synth keeps a channel muted until it is told otherwise.
+//
+// The `alphaSynth.*` command names and the `{ cmd, channel, mute }` message are
+// alphaTab internals, read from 1.9.0's source (the lockfile pins the version).
+// If an upgrade renames them the recorder sees nothing, so every test below
+// first asserts something it must have recorded (a transport command, a muted
+// channel or the synth itself) and fails there instead of passing on an empty log.
 
 /** MIDI's percussion channel, which alphaTab gives the drum track. */
 const DRUM_CHANNEL = 9;
@@ -28,7 +41,12 @@ interface SynthLog {
 
 type SynthWindow = Window & { __synthLog: SynthLog };
 
-/** Records the mute and transport messages alphaTab posts to its synth worker. Call before the page loads. */
+/**
+ * Records the mute and transport messages alphaTab posts to its synth worker.
+ * Call before the page loads. The wrapper lives in this test's page only (an
+ * init script, run again on each full load) and goes with it, so there is
+ * nothing to restore.
+ */
 async function recordSynthMessages(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const log: SynthLog = { synths: [], commands: [] };
@@ -85,9 +103,6 @@ function transportCommands(page: Page): Promise<number> {
   );
 }
 
-const muteButton = (page: Page) => controls(page).getByRole('button', { name: 'Mute drums' });
-const drumsOnlyButton = (page: Page) => controls(page).getByRole('button', { name: 'Drums only' });
-
 /** The multi-track fixture's bass and guitar, each on a primary and a secondary channel of its own. */
 function expectOnlyDrumsSounding(muted: number[]) {
   expect(muted).not.toContain(DRUM_CHANNEL);
@@ -107,6 +122,8 @@ test('drums only mutes every channel but the drums in the synth, and unmutes the
   await expect(playButton(page)).toHaveText('Pause');
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
   const transportBefore = await transportCommands(page);
+  // Play itself was recorded, so an unchanged count below means something.
+  expect(transportBefore).toBeGreaterThan(0);
   const barBefore = await barNumber(page);
 
   await drumsOnlyButton(page).click();
@@ -115,13 +132,13 @@ test('drums only mutes every channel but the drums in the synth, and unmutes the
   expectOnlyDrumsSounding(others);
 
   // Mute drums takes over: the band is back and only the drum channel is silent.
-  await muteButton(page).click();
+  await muteDrumsButton(page).click();
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');
   expect(await mutedChannels(page)).toEqual([DRUM_CHANNEL]);
 
   // And back: the drums return, the same other channels go.
   await drumsOnlyButton(page).click();
-  await expect(muteButton(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'false');
   expect(await mutedChannels(page)).toEqual(others);
 
   await drumsOnlyButton(page).click();
@@ -195,7 +212,7 @@ test('drums only is off again when the song is opened again, with nothing muted'
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
 
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');
-  await expect(muteButton(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'false');
   expect(await synthCount(page)).toBe(2);
   expect(await mutedChannels(page)).toEqual([]);
 });
@@ -209,6 +226,8 @@ test('a song that is only drums plays on with drums only on', async ({ user, pag
   await expect(playButton(page)).toHaveText('Pause');
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
   const transportBefore = await transportCommands(page);
+  // Play itself was recorded, so an unchanged count below means something.
+  expect(transportBefore).toBeGreaterThan(0);
   const barBefore = await barNumber(page);
 
   await drumsOnlyButton(page).click();

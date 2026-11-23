@@ -59,8 +59,8 @@ export function PlayPauseButton({ player, snapshot }: PlayerViewProps) {
 
 /**
  * The shared controls bar: play/pause (unless `showPlayButton` is false),
- * back to start, speed, metronome, count-in, drum mute and drums only. Every change is
- * live; none restarts playback.
+ * back to start, speed, metronome, count-in, drum mute and drums only. Every
+ * change is live; none restarts playback.
  */
 export function PlayerControls({ player, snapshot, showPlayButton = true }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist.

@@ -90,6 +90,21 @@ export class FakePlayerEngine implements PlayerEngine {
     this.fire('readyForPlayback', undefined);
   }
 
+  /**
+   * The tracks left sounding, out of `trackCount`, after every mute sent so
+   * far. Like alphaTab's synth, a track sounds until it is muted and a mute
+   * stays until it is taken off again: nothing resets it, a reload included.
+   */
+  soundingTracks(trackCount = 3): number[] {
+    const muted = new Map<number, boolean>();
+    for (const [trackIndex, mute] of this.setTrackMuted.mock.calls as [number, boolean][]) {
+      muted.set(trackIndex, mute);
+    }
+    return Array.from({ length: trackCount }, (_, trackIndex) => trackIndex).filter(
+      (trackIndex) => !muted.get(trackIndex),
+    );
+  }
+
   /** The engine calls that would interrupt or restart playback. */
   restartCalls(): number {
     return (

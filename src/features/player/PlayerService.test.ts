@@ -623,14 +623,14 @@ describe('PlayerService drums only', () => {
     expect(engineMutes(engine)).toEqual([false, true, false]);
   });
 
-  it('goes on again after alphaTab resets its channels', () => {
+  it('is sent again in full after a reload', () => {
     const { engine, service } = setup();
     service.load(bytes);
     engine.finishLoading();
     service.setDrumsOnly(true);
     engine.setTrackMuted.mockClear();
 
-    // alphaTab sends "ready" again after a reload, having put every channel back to full.
+    // alphaTab keeps its channel mutes across a reload; the service sends them anyway.
     service.load(bytes);
     engine.finishLoading();
 

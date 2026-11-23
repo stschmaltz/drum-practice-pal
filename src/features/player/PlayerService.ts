@@ -443,7 +443,8 @@ export class PlayerService {
     });
     engine.on('readyForPlayback', () => {
       if (this.disposed || this.snapshot.status !== 'loading') return;
-      // alphaTab resets channel volumes when it gets ready, so mutes go on again after.
+      // Sent again so being ready never rests on what alphaTab kept while it loaded. Nothing
+      // is known to be lost: alphaTab 1.9 holds its channel mutes until told otherwise.
       this.applyAll();
       this.update({ status: 'ready' });
     });

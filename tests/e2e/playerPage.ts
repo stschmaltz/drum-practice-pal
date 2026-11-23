@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 /**
  * Locators and steps for the song page's player, shared by player.spec.ts,
- * jam.spec.ts and count-in.spec.ts.
+ * jam.spec.ts, count-in.spec.ts and drums-only.spec.ts.
  */
 import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
@@ -24,6 +24,10 @@ export const fixture = (name: string) =>
 export const controls = (page: Page) => page.getByRole('region', { name: 'Player controls' });
 // Not inside the controls region: the song page keeps Play/Pause in a sticky bar.
 export const playButton = (page: Page) => page.getByRole('button', { name: /^(Play|Pause)$/ });
+export const muteDrumsButton = (page: Page) =>
+  controls(page).getByRole('button', { name: 'Mute drums' });
+export const drumsOnlyButton = (page: Page) =>
+  controls(page).getByRole('button', { name: 'Drums only' });
 export const speedSlider = (page: Page) => controls(page).getByRole('slider', { name: 'Speed' });
 export const status = (page: Page) => page.getByTestId('player-status');
 export const viewport = (page: Page) => page.getByTestId('score-viewport');

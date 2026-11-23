@@ -324,7 +324,7 @@ Every repeat was reached through `window.__drumPalPlayer` (`setRange`, `setLoopi
 - **Drums only is an override, not a rewrite of the per-track mutes.** `mutedTracks` stays the record of what was asked for per track. What the engine gets for a track comes from one place, `isTrackSilenced`: with Drums only on, "is this not the drum track"; otherwise the mute on record. Turning it off therefore restores exactly what was there, including a track muted on its own with `setTrackMuted`.
 - **`setTrackMuted` on another track while Drums only is on is remembered and not heard** until Drums only goes off. Nothing in the UI does this yet (there is no mixer); the rule is there so a later one can't make a non-drum track sound under "Drums only".
 - **Exclusion replaces, it doesn't park.** Drums only on sets Mute drums off (and unmutes the drum track). Mute drums on sets Drums only off, which brings the other tracks back. Turning Drums only off afterwards does not bring an earlier Mute drums back: the whole band sounds. Mute drums off while Drums only is on changes nothing.
-- **After alphaTab resets channel volumes** (`readyForPlayback`, a reload), `applyMutes` sends every track's mute while Drums only is on. With it off it sends, as before, only tracks with a mute on record, since a reset engine has everything sounding. Turning Drums only on or off sends all tracks, because that changes tracks with nothing on record.
+- **On `readyForPlayback` and after a reload**, `applyMutes` sends every track's mute while Drums only is on. With it off it sends, as before, only tracks with a mute on record. Turning Drums only on or off sends all tracks, because that changes tracks with nothing on record. (Corrected in Review: this bullet said alphaTab resets channel volumes at those points, so a reloaded engine has everything sounding. It doesn't: alphaTab 1.9 keeps channel mutes until told otherwise, which is why the Test stage added `engineHoldsDrumsOnly`.)
 - **Kept across `load()` on the same service**, like the other options. "Off on open" holds because the song page keys the player by song id, so each song gets a new service.
 - **Property changes only.** `setDrumsOnly` calls `engine.setTrackMuted` and nothing else; the tests assert `restartCalls()` stays 0 while playing. Setting it to the value it already has sends nothing and notifies nobody.
 - **The disabled reason is the `title`**, the same as Mute drums ("This song has no drum track"); on a button with its own text it is the accessible description, which the tests assert.
@@ -335,7 +335,7 @@ Every repeat was reached through `window.__drumPalPlayer` (`setRange`, `setLoopi
 - Nothing has been heard. The tests prove which mutes are sent to the engine and that nothing restarts; that alphaTab then plays the drum track alone is a Human check.
 - The e2e test covers the toggle, the exclusion, the layout and that playback keeps moving. It does not observe which tracks sound (the debug hook exposes the service, not alphaTab's channels).
 - alphaTab mutes by MIDI channel. A file in which two tracks share a channel with the drum track would behave oddly; none of the fixtures does, and percussion normally has channel 10 to itself.
-- A disabled button's `title` isn't reachable by touch, as for Mute drums. The song page already shows the no-drum-track note.
+- A disabled button's `title` isn't reachable by touch, as for Mute drums. (Corrected in Review: this said the song page already shows the no-drum-track note. It doesn't; `NO_DRUM_TRACK_NOTE` is rendered only in the library, on the song's entry and after an upload. See QA issue 2.)
 
 **Manual verify**
 
@@ -462,3 +462,37 @@ Worth knowing for Unit 10: Space on a focused toggle button toggles it (native b
 - `npm run check`: green. Typecheck, lint and format clean; 57 test files, 2435 tests passing. QA changed only this note and added screenshots.
 - `tests/e2e/drums-only.spec.ts` and `tests/e2e/player.spec.ts`: 45 passed against the same build. The full `npm run e2e` was not re-run, since no code changed.
 - The throwaway specs were removed, their users were deleted by the `user` fixture (checked: none left), and Playwright stopped the preview server it started.
+
+## Review: Drums only
+
+Scope: `git diff d83836b..HEAD` (the Drums only toggle), screenshots excluded. This pass also stood in for Readability on that diff. alphaTab's behaviour was checked against `node_modules/@coderline/alphatab/dist/alphaTab.core.mjs` (1.9.0, the locked version).
+
+**Findings**
+
+1. **Low, fixed. The `wireEngine` comment was wrong about alphaTab** (`src/features/player/PlayerService.ts:446`). It said alphaTab resets channel volumes when it gets ready. In 1.9.0 the synth's `_mutedChannels` is cleared only by `resetChannelStates`, which nothing in alphaTab calls, so mutes persist through ready and a reload. The comment now says the options are sent again as a precaution and that nothing is known to be lost. The same wrong premise sat in a test title and comment (`PlayerService.test.ts`, "goes on again after alphaTab resets its channels", now "is sent again in full after a reload") and in a Build decision bullet above, both corrected.
+2. **Medium, fixed. Two e2e tests could pass on an empty recorder** (`tests/e2e/drums-only.spec.ts`, the mid-play test and the drums-only-song test). The recorder depends on alphaTab's private worker messages (`alphaSynth.*`, `{ cmd, channel, mute }`). Were those renamed, "no transport command since" and, for the groove fixture, "nothing muted" would hold trivially. Both tests now assert that Play itself was recorded (`transportBefore > 0`) before comparing. The other two already fail on an empty log (four muted channels expected; synth count 1 then 2). The dependence on 1.9.0's internals is now stated at the top of the spec and in AGENTS.md.
+3. **Low, fixed (readability). The "tracks left sounding" replay was written twice**, in `PlayerService.drumsOnly.test.ts` and `PlayerControls.test.tsx`. It is now `FakePlayerEngine.soundingTracks(trackCount = 3)` in `src/test/fakePlayerEngine.ts`, used by both. No assertion changed.
+4. **Low, fixed (readability). The Mute drums and Drums only locators were repeated** five times in `player.spec.ts` and again in `drums-only.spec.ts`. They are `muteDrumsButton` and `drumsOnlyButton` in `tests/e2e/playerPage.ts`.
+5. **Low, fixed. Build note said the song page shows the no-drum-track note.** It does not (QA issue 2); the line is corrected in place.
+6. **Checked, no change. Mute bookkeeping in `PlayerService.ts`.** Walked `setDrumsOnly`, `setDrumsMuted`, `setTrackMuted`, `applyMutes`, `applyEveryTrackMute` and `engineHoldsDrumsOnly` through: toggles before `load()`, between each loading event, during a second `load()` (track count 0, so nothing is sent and the flag stays set until `scoreLoaded` sends every track), more or fewer tracks on the next load, the drum mute taking over during a reload, a refused score, the error state and dispose. The flag is only ever written after every track has really been sent, so it cannot claim more than the engine holds. Every path calls `engine.setTrackMuted` only; none stops, plays or reloads. `api.score` is already the new score when `scoreLoaded` fires, so the mutes sent there reach the new tracks' channels.
+7. **Checked, no change. The `Worker.prototype.postMessage` wrapper is not restored, and need not be.** It is installed with `page.addInitScript`, so it exists only in that test's page and goes with it; the comment on `recordSynthMessages` now says so.
+8. **Checked, no change. The seeded runs are deterministic.** The generator is a 32-bit LCG whose products stay under 2^53, seeded with fixed integers; there is no `Math.random` or clock in the file. The count-in blocks restore real timers in `afterEach`.
+9. **Rejected. `setup` / `playing` are duplicated between `PlayerService.test.ts` and `PlayerService.drumsOnly.test.ts`.** True, but the count-in test files already follow the same shape and moving the base file's helpers would touch tests reviewed earlier. Logged below.
+10. **Rejected. `player.spec.ts`'s exclusion test overlaps `drums-only.spec.ts`'s first test.** The first also checks the layout (same row, 44 px) and the second reads the synth; neither is redundant enough to delete.
+
+**Open issues**
+
+- QA issue 1 (minor): the controls bar is one row taller at about 576 to 703 px and 832 to 959 px wide, phone landscape included. Left for Unit 08's regrouping of the controls.
+- QA issue 2 (minor): on a touch device nothing on the song page says why Mute drums and Drums only are disabled for a song without drums. Showing `NO_DRUM_TRACK_NOTE` there is new song-page UI with its own tests, so it was not done here.
+- QA issue 3 (minor, older than this change): below 344 px wide the Metronome volume row overflows the controls bar.
+- A second `load()` of a different file on one `PlayerService` can leave channels muted in the synth that the new file's tracks don't use. Harmless and unreachable today (one service per song, loaded once); a `resetChannelStates` call in the engine on load would close it if a screen ever reloads in place.
+- `songs.drum_track_index` at or past the file's track count would make Drums only silence every track. The upload derives the index from the same file, so this needs a corrupt row; the player already renders the wrong track in that case.
+- `setup` / `playing` in the two `PlayerService` test files could share one helper in `src/test/`.
+- `package.json` allows `@coderline/alphatab` `^1.9.0`. A minor upgrade that renames the synth's worker messages will fail `drums-only.spec.ts` (by design); re-read the message names then.
+- Nothing has been heard. The by-ear list in the QA section stands.
+
+**Results**
+
+- `npm run check`: green. Typecheck, lint and format clean; 57 test files, 2435 tests passing.
+- `npm run e2e`: 216 tests; 209 passed, 7 skipped (the device-only skips in `jam.spec.ts`), 0 failed.
+- Not committed.
