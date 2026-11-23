@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { createEvent, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import {
@@ -68,6 +68,13 @@ const picker = () => screen.getByLabelText('Upload a Guitar Pro file');
 function renderPanel() {
   renderRoutes(<Route path="/library" element={<UploadPanel />} />, { path: '/library' });
   return userEvent.setup();
+}
+
+/** jsdom has no DragEvent, so `relatedTarget` (where the drag went) is set by hand. */
+function dragLeaveTo(zone: HTMLElement, relatedTarget: Element) {
+  const leave = createEvent.dragLeave(zone);
+  Object.defineProperty(leave, 'relatedTarget', { value: relatedTarget });
+  fireEvent(zone, leave);
 }
 
 function deferred() {
@@ -213,6 +220,44 @@ describe('UploadPanel', () => {
     });
     expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
     expect(storageMethods()).toEqual(['upload']);
+  });
+
+  it('highlights the drop zone while a file is dragged over it', () => {
+    renderPanel();
+    const zone = screen.getByTestId('drop-zone');
+    const highlighted = () => zone.classList.contains('border-sky-500');
+
+    fireEvent.dragOver(zone);
+    expect(highlighted()).toBe(true);
+    // Moving onto the button inside the zone is still inside it.
+    dragLeaveTo(zone, picker());
+    expect(highlighted()).toBe(true);
+    dragLeaveTo(zone, document.body);
+    expect(highlighted()).toBe(false);
+
+    fireEvent.dragOver(zone);
+    fireEvent.drop(zone, { dataTransfer: { files: [] } });
+    expect(highlighted()).toBe(false);
+  });
+
+  it('takes no drop and shows no highlight while an upload is running', async () => {
+    const upload = deferred();
+    storageResult.mockReturnValueOnce(upload.promise);
+    serve({});
+    const user = renderPanel();
+    await user.upload(picker(), gpFile('first.gp'));
+    expect(await screen.findByText('Uploading first.gp…')).toBeInTheDocument();
+
+    const zone = screen.getByTestId('drop-zone');
+    fireEvent.dragOver(zone);
+    expect(zone.classList.contains('border-sky-500')).toBe(false);
+    fireEvent.drop(zone, { dataTransfer: { files: [gpFile('second.gp')] } });
+    expect(screen.getByText('Uploading first.gp…')).toBeInTheDocument();
+
+    upload.resolve(ok({}));
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(storageMethods()).toEqual(['upload']);
+    expect(inserts()).toHaveLength(1);
   });
 
   it('refuses several dropped files at once, uploading none', async () => {

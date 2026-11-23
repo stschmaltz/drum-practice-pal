@@ -9,7 +9,14 @@ import {
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import type { ParseResult } from './parseScore';
 import type { LibrarySong, Song } from './songForm';
-import { songKeys, useDeleteSong, useSongs, useUpdateSong, useUploadSong } from './useSongs';
+import {
+  songFileKeys,
+  songKeys,
+  useDeleteSong,
+  useSongs,
+  useUpdateSong,
+  useUploadSong,
+} from './useSongs';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -35,6 +42,12 @@ const listRow = ({ last_practiced_at, ...rest }: LibrarySong) => ({
   ...rest,
   loops: last_practiced_at ? [{ last_practiced_at }] : [],
 });
+/** The row the song page caches: the song without the library's practice date. */
+const songRow = (id: string): Song => {
+  const row: Partial<LibrarySong> = song(id);
+  delete row.last_practiced_at;
+  return row as Song;
+};
 const ok = (data: unknown): FakeResult => ({ data, error: null });
 const fail = (message: string): FakeResult => ({ data: null, error: { message } });
 const gpFile = () => new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 9])], 'new.gp');
@@ -176,6 +189,28 @@ describe('useUpdateSong', () => {
     await waitFor(() => expect(view.result.current.update.isError).toBe(true));
     expect(view.cached()?.[0]?.artist).toBe('Band');
   });
+
+  it("updates the song page's cached row, so it opens with the new title", async () => {
+    const view = await renderLoaded([song('a')]);
+    const detailKey = songKeys.detail('user-1', 'a');
+    view.queryClient.setQueryData<Song>(detailKey, songRow('a'));
+    queryResult.mockResolvedValueOnce(ok({ ...songRow('a'), title: 'Renamed' }));
+    queryResult.mockResolvedValue(ok([listRow({ ...song('a'), title: 'Renamed' })]));
+
+    act(() => view.result.current.update.mutate({ songId: 'a', changes: { title: 'Renamed' } }));
+    await waitFor(() => expect(view.result.current.update.isSuccess).toBe(true));
+    expect(view.queryClient.getQueryData<Song>(detailKey)?.title).toBe('Renamed');
+  });
+
+  it('makes up no song page row for a song whose page was never opened', async () => {
+    const view = await renderLoaded([song('a')]);
+    queryResult.mockResolvedValueOnce(ok({ ...songRow('a'), title: 'Renamed' }));
+    queryResult.mockResolvedValue(ok([listRow({ ...song('a'), title: 'Renamed' })]));
+
+    act(() => view.result.current.update.mutate({ songId: 'a', changes: { title: 'Renamed' } }));
+    await waitFor(() => expect(view.result.current.update.isSuccess).toBe(true));
+    expect(view.queryClient.getQueryData(songKeys.detail('user-1', 'a'))).toBeUndefined();
+  });
 });
 
 describe('useUpdateSong alongside other writes', () => {
@@ -262,8 +297,29 @@ describe('useDeleteSong', () => {
     expect(view.cached()?.map((s) => s.id)).toEqual(['b']);
   });
 
-  it('keeps the song when the delete fails', async () => {
+  it("forgets the deleted song's page row and downloaded file", async () => {
+    const view = await renderLoaded([song('a'), song('b')]);
+    const detailKey = songKeys.detail('user-1', 'a');
+    const fileKey = songFileKeys.forSong('user-1', 'a');
+    const otherFileKey = songFileKeys.forSong('user-1', 'b');
+    view.queryClient.setQueryData<Song>(detailKey, songRow('a'));
+    view.queryClient.setQueryData(fileKey, new Uint8Array([1]));
+    view.queryClient.setQueryData(otherFileKey, new Uint8Array([2]));
+    queryResult.mockResolvedValueOnce(ok(null));
+    queryResult.mockResolvedValue(ok([listRow(song('b'))]));
+
+    act(() => view.result.current.remove.mutate('a'));
+    await waitFor(() => expect(view.result.current.remove.isSuccess).toBe(true));
+    // Null is "no such song", which the song page shows as not found.
+    expect(view.queryClient.getQueryData(detailKey)).toBeNull();
+    expect(view.queryClient.getQueryData(fileKey)).toBeUndefined();
+    expect(view.queryClient.getQueryData(otherFileKey)).toEqual(new Uint8Array([2]));
+  });
+
+  it('keeps the song and its downloaded file when the delete fails', async () => {
     const view = await renderLoaded([song('a')]);
+    const fileKey = songFileKeys.forSong('user-1', 'a');
+    view.queryClient.setQueryData(fileKey, new Uint8Array([1]));
     storageResult.mockResolvedValueOnce(fail('storage down'));
     queryResult.mockResolvedValue(ok([listRow(song('a'))]));
 
@@ -271,5 +327,6 @@ describe('useDeleteSong', () => {
     await waitFor(() => expect(view.result.current.remove.isError).toBe(true));
     expect(view.result.current.remove.error?.message).toBe('storage down');
     expect(view.cached()?.map((s) => s.id)).toEqual(['a']);
+    expect(view.queryClient.getQueryData(fileKey)).toEqual(new Uint8Array([1]));
   });
 });

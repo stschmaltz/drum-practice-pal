@@ -74,4 +74,9 @@ describe('readSupabaseConfig', () => {
     const config = readSupabaseConfig({ ...env, VITE_SUPABASE_URL: 'not a url' }, 'localhost');
     expect(config.ok).toBe(false);
   });
+
+  it('rejects an http URL with no host instead of throwing', () => {
+    const config = readSupabaseConfig({ ...env, VITE_SUPABASE_URL: 'http://' }, '192.168.1.20');
+    expect(config).toEqual({ ok: false, error: 'VITE_SUPABASE_URL is not a valid URL: http://' });
+  });
 });

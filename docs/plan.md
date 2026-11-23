@@ -124,6 +124,7 @@ If QA finds a real bug, a Build agent fixes it from QA's notes, then Test and QA
 - `docs/units/NN-name.md`: one handoff note per unit. Each agent appends its own section: what it did, decisions, open issues, how to verify.
 - One branch and one PR per unit; one commit per stage.
 - Every stage ends green: `npm run check`, and `npm run e2e` once e2e covers real flows.
+- An open issue that a stage hands to a later unit gets a line in that unit's **Carried forward** list below, with the note it came from. Handoff notes are long; a later agent shouldn't have to find the issue by rereading all of them. The unit that picks an item up deletes its line.
 - **Human check** items are for Shane on a real device (mostly iOS audio). Agents can't hear playback.
 
 **Prompt templates** (swap in the unit number and name)
@@ -144,6 +145,10 @@ QA: You are the QA agent for Unit NN: <name>. Run the app against local Supabase
 READABILITY: You are the Readability agent for Unit NN: <name>. Read AGENTS.md and the handoff note. Refactor this unit's code for clarity with zero behavior change: naming, file placement per AGENTS.md, small focused functions, shared helpers, dead code removed, comments only where the why isn't obvious, consistency with earlier units. All checks green before and after. Update AGENTS.md if you set a new pattern. Append a Readability section.
 ```
 
+```text
+REVIEW: You are the Review agent for Unit NN: <name>. Read AGENTS.md and the handoff note, then every line of git diff main...HEAD, tests and scripts included. Review as a strict PR reviewer: ignored errors, pagination, partial failures, test teardown, races, leaks, 1-based vs 0-based bars, anything that breaks AGENTS.md. Verify each finding before acting. Fix what is small and in scope; log the rest under Open issues, and add a Carried forward line to the unit of docs/plan.md that should own it. All checks green after. Append a Review section.
+```
+
 ## Units of work
 
 Thirteen units, run in order. Each is sized for one Build agent session. Unit 01 proves the audio stack on real devices before anything is built on it.
@@ -157,7 +162,8 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 | 04  | Song library and upload                    | 03         |
 | 05  | Player core                                | 01, 04     |
 | 06  | Jam mode                                   | 05         |
-| 07  | Count-in                                   | 05         |
+| —   | Hosted setup (configuration, not a unit)   | 05         |
+| 07  | Count-in                                   | 05, hosted |
 | 08  | Loops                                      | 06, 07     |
 | 09  | Practice sessions and progress             | 08         |
 | 10  | Keyboard shortcuts and pedals              | 09         |
@@ -260,6 +266,25 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 
 **Test focus:** BPM-at-bar helper against the tempo-change fixture; seek. **QA focus:** long songs, scroll fighting the cursor, landscape phone.
 
+**Carried forward**
+
+- Tap-to-seek needs a bar hit-test added to the `PlayerEngine` interface first. alphaTab's own click handling is off (`enableUserInteraction: false`) so it can't seek or select behind the service. (05 Build)
+- One tempo-per-bar helper for the whole app. A tempo change part-way through a bar counts from the next bar. `songs.original_tempo` (`tempoAtFirstBar` in `songMetadata.ts`) and the seed's `tempoAtBar` (`tests/unit/score-helpers.ts`) each have their own simpler version today; move both onto the shared helper so upload, seed and header can't disagree.
+- Files with repeats: alphaTab's tick cache lists a repeated bar once per playthrough, and the service maps ticks to the bar's number, so the header and cursor revisit bar numbers. No fixture has a repeat yet; add one and check current bar, seek and auto-scroll on it. (01 Findings)
+- Score height on short viewports. On a 390x844 phone the controls take about 290 px before the score; in landscape about 170 px of score shows. (05 QA issue 5)
+- Check BPM against the real export in `tests/fixtures/real/` (155 BPM, 163 from bar 11), skipping when the folder is empty. (00)
+
+### Hosted setup (before Unit 07)
+
+**Goal:** the app runs on an HTTPS preview URL against a hosted Supabase project, so the iOS audio checks can happen before count-in is built on that audio. Moved here from Unit 12. It is configuration, not a unit: no Build, Test, QA pipeline. Creating the project and entering its settings need Shane's Supabase and Cloudflare accounts; an agent can prepare the values and verify the result.
+
+- Production Cloudflare Workers: `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as Workers Builds variables. Until then every preview shows the "not connected" message. Decide whether previews share the production project
+- Hosted Supabase project: apply the migrations, and settle how later migrations reach it (by hand with `supabase db push`, or from CI on merge)
+- Hosted auth settings. `supabase/config.toml` only configures the local stack, so each of these is set again on the project: Site URL and redirect allow-list for the production and preview Workers hosts; the sign-in email template with the 6-digit code; a real SMTP sender (the built-in one is rate-limited and meant for testing)
+- Close password sign-up, which is open and auto-confirmed with the local settings: turn on email confirmations, and consider turning sign-ups off once the account exists
+
+**Acceptance:** a preview URL signs in with an emailed code on an iPhone and plays a song. Then the Unit 01 and Unit 05 rows of Open human checks are done.
+
 ### 07 Count-in
 
 **Goal:** the count-in options from the MVP scope.
@@ -273,6 +298,17 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 **Acceptance:** count-in matches meter and speed, including 3/4 and after a tempo change; "every repeat" pauses at loop end, counts in, resumes on the downbeat.
 
 **Test focus:** pure scheduler function (tempo, meter, ratio, bars to click times), tested exhaustively. **QA focus:** toggling mid-loop, extreme speeds. **Human check:** by ear.
+
+**Carried forward** (all from 01 Findings unless noted)
+
+- Hosted setup and the Unit 01 and 05 rows of Open human checks come first. This unit builds on a provisional go.
+- "Every repeat" plays the range with alphaTab's looping off and starts it again after the count-in ("stop on finish"). Pausing at the wrap drops 0.25 to 0.75 s of buffered audio and clips the last bar.
+- In that mode alphaTab no longer wraps, so `PlayerService` has to emit `loopWrapped` itself. Unit 09 counts repeats from that event in both modes.
+- Call `play()` early by a measured offset (it reports playing 3 to 16 ms later, plus output latency), and put the first click on the beat grid at the predicted end of the pass, not when `finished` arrives.
+- Pick the clock and record it in `AGENTS.md`: alphaTab's own `AudioContext` (one clock, but only reachable through the private `api.player.output.context`) or a second context (public API, two clocks). A second context also needs unlocking inside the play tap on iOS.
+- `midiEventsPlayed` with the metronome filter reports every beat, even at volume 0. It can drive the visual counter while the song plays.
+- Pause, Back to start, seek and leaving the page during a count-in must cancel the clicks already scheduled.
+- Count-in bars and mode join `PlayerOptions` and `playerOptionsFromSettings`. (05 Build)
 
 ### 08 Loops
 
@@ -289,6 +325,14 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 
 **Test focus:** ratio and BPM helpers, range validation, loop hooks. **QA focus:** selecting on a phone, ranges across tempo changes, single-bar loops.
 
+**Carried forward**
+
+- Migration, loops grants: clients can write every loops column today, including `finished_at`, `last_practiced_at`, `created_at` and `updated_at`. Grant insert and update only on the columns the app writes, and set `created_at` and `updated_at` in the insert trigger. The session trigger that sets `last_practiced_at` runs as the signed-in user, so it needs `security definer` once that column is no longer writable. (02 QA issue 4)
+- Migration, names: `'   '` passes the length checks. Add `btrim(name) <> ''` on `loops.name` (and `songs.title`), and trim in the form. (02 QA issue 6)
+- A typed BPM rarely lands on a whole percent. Store the ratio it implies (within 0.25 to 2.0) and round only for display, or BPM will jump when the loop is reopened. The Unit 05 speed slider rounds to whole percent (`percentToRatio`).
+- Ranges on files with repeats: `barRangeToTicks` runs from the first playthrough of the start bar to the next time the end bar plays. Test it on the repeat fixture from Unit 06. (01 Findings)
+- Loop caches follow the list pattern in `useSongs.ts`. Deleting a song must also drop that song's loop caches, as `useDeleteSong` drops its detail and file entries.
+
 ### 09 Practice sessions and progress
 
 **Goal:** remember what you practiced and what's on the go.
@@ -302,6 +346,14 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 **Acceptance:** a minute of practice creates one session with the right speed and duration; finish and reopen move the loop between tabs.
 
 **Test focus:** tracker logic with fake timers; status transitions. **QA focus:** closing mid-session, speed changes mid-session, many loops.
+
+**Carried forward**
+
+- Migration, session sanity: nothing bounds `duration_seconds` or `started_at`, and `last_practiced_at` never moves back, so one session from a phone with a wrong clock pins a loop to the top of On the go for good. Cap the duration (24 h) and refuse a `started_at` more than a day ahead. (02 QA issue 3)
+- "On leaving the page": a request started while the page unloads is dropped unless it is sent with `keepalive`, and iOS often fires `visibilitychange` without `pagehide`. Log on both, with a keepalive request; Unit 11's queue makes it durable.
+- Insert sessions with a client id from `randomUuid()` and ignore a duplicate key, so a retry never logs twice.
+- Play time excludes count-ins and pauses. Repeats come from `loopWrapped`, which Unit 07 keeps firing in "every repeat" mode.
+- Only loop practice is logged. Jam-mode play time has no table, so the library's "recently practiced" sort reflects loops only. Accepted for the MVP.
 
 ### 10 Keyboard shortcuts and pedals
 
@@ -328,17 +380,53 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 
 **Test focus:** queue and flush; Playwright offline mode. **QA focus:** dropping offline mid-session, two devices editing one loop. **Human check:** practice in airplane mode on your phone.
 
+**Carried forward**
+
+- Offline, mutations pause silently: sign-out sits on "Signing out…", a settings save on "Saving…", an upload on "Reading…" with a Cancel that does nothing. Choose a `networkMode` per mutation, or disable the control with a reason. (03 QA issues 1 and 2, 04 QA issue 1)
+- Sign-out must also clear the persisted query cache and the IndexedDB song files. `AuthProvider` only clears the in-memory cache today.
+- A token refresh that fails for lack of network must not sign the user out or clear those caches. Check what supabase-js emits offline before relying on `SIGNED_OUT`. A 401 on a query still isn't treated as signed out. (03 QA issue 3)
+- A soundfont that fails to load has no retry and doesn't recover when the connection returns. Cache it with the fonts and alphaTab's lazy chunks and worker files, and retry on `online`. (05 QA issue 2)
+- A cache miss for a file must never be answered with `index.html` (the Workers SPA fallback does this). `alphaTabEngine.loadSoundFont` already checks the content type; do the same for anything the service worker caches.
+- Lost responses on flaky Wi-Fi: an insert that commits but whose response is lost has its file removed, leaving a listed song with no file; an upload whose response is lost leaves an orphan file. Look the row up by id before rolling back. (04 Review open issues 1 and 2)
+- `updated_at` isn't yet fit for last-write-wins: logging a session bumps the loop's `updated_at`, and a client can send its own value on insert (unless Unit 08 closed that). Decide whether it means edited or touched. (02 QA issues 4 and 5)
+- Add the component test for a failed background refetch of a song file (`isLoadingError`), once something refetches it. (05 Review)
+- Installed iOS PWA: sign-in links open in Safari, so the 6-digit code is the way in. Check it. (03 QA)
+- If Unit 01's Human check picks a bigger soundfont, budget its size in the first load and the cache. (01 Findings)
+
 ### 12 Polish and release
 
 **Goal:** ship it to yourself.
 
 - Empty, loading and error states everywhere; touch targets 44 px+
 - Full e2e journey on all three profiles: sign in, upload, jam, save loop, practice, hit target, finish
-- Production Cloudflare Workers and Supabase; README
+- Production release on the hosted project from the Hosted setup step; re-check its auth settings against `supabase/config.toml`
+- README
 
 **Acceptance:** the journey passes in CI; a real-device pass finds nothing blocking.
 
 **Test focus:** the e2e journey. **QA focus:** first-run experience. **Human check:** a week of real practice.
+
+**Carried forward**
+
+- Retire the spike: the `/spike` route, `src/features/spike/`, `scripts/spike-measure.ts`, `tests/e2e/spike.spec.ts` and `public/sf-candidates/`. Its fixtures ship in `dist` today. (05 Build)
+- Final soundfont, after the Unit 01 listen. (01 Findings)
+- Fixed copy for network failures instead of "Failed to fetch". (04 QA issue 2)
+- Link inline form errors to their inputs with `aria-describedby`. (04 QA issue 6)
+- Speed, metronome and mute stay enabled after a player error. (05 QA issue 3)
+- Files in Storage with no songs row are possible (failed rollbacks, deleted users). Add a sweep script, or accept it. (02 QA, 04 Review)
+- The on-phone controls bar is four rows. (05 Build)
+
+## Open human checks
+
+The handoff notes record none of these as done; delete a row once it is. Everything audible so far is unverified, and Unit 01's go on alphaTab is provisional until its list passes. Do that list before Unit 07.
+
+| From | Check                                                                                                                                                                                                                                      |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 01   | At `/spike` on phone, tablet and laptop: drum sound (Sonivox sf2 against sf3 and MuseScore General); the loop seam at 50%, 100% and 200%; whether "stop on finish" lands on the downbeat; start latency; memory and battery on a long loop |
+| 01   | iOS: the first tap makes sound; the ringer switch on silent; lock and app switch mid-play; page against horizontal layout in portrait and landscape                                                                                        |
+| 04   | iPhone and Android on the LAN dev server: `.gp` isn't greyed out in the picker, and an upload works (this runs the non-secure-context hash and id fallbacks). A real `.gp5` or `.gpx` if one is on hand                                    |
+| 05   | iPhone and iPad on a preview URL: sound on the first Play tap, and with the ringer on silent; the screen stays on while playing. Needs HTTPS for the wake lock, so Hosted setup comes first                                                |
+| 05   | Every device: speed, metronome and mute changes mid-play with no click, gap or restart; sound stops at once on leaving the page; rotating mid-play; 20 fast Play/Pause taps                                                                |
 
 ## Risks and mitigations
 
@@ -352,6 +440,10 @@ Thirteen units, run in order. Each is sized for one Build agent session. Unit 01
 | Agent drift from earlier patterns                                  | `AGENTS.md`, handoff notes, one PR per unit, Readability every unit |
 | Two devices edit one loop offline                                  | Last write wins on `updated_at`; sessions append-only               |
 | Copyrighted tabs committed                                         | Synthetic fixtures in git; real exports gitignored                  |
+| Repeats in a file (a bar plays more than once)                     | Repeat fixture in 06; ranges and current bar tested on it in 06, 08 |
+| Count-in needs alphaTab's private AudioContext                     | Decide in 07; pin the alphaTab version if the private field is used |
+| Open issues lost between units                                     | Carried forward lists per unit, kept by Review                      |
+| Hosted auth differs from the local stack                           | Settings listed in Hosted setup; a real sign-in on a preview URL    |
 
 ## Post-MVP backlog
 

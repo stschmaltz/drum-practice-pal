@@ -97,6 +97,7 @@ docs/
   - `<feature>Form.ts` (or another pure module): the selected columns as a `const` list plus a matching select string literal (a test keeps them equal), the row type picked from `Database`, and pure validation and diff helpers. It imports no client, so the API module, components and node tests share it.
   - `<feature>Api.ts`: plain async functions over `supabase` that return typed rows and throw on error via `unwrap(result, 'what')` or `throwIfError(result)` from `src/lib/supabaseResult.ts`. Select columns with a string literal (not a joined array) so supabase-js can type the row. Always scope by `user_id` as well as relying on RLS.
   - `use<Feature>.ts`: a key factory (`settingsKeys.forUser(userId)`; every key includes the user id) plus `useQuery`/`useMutation` hooks that call the API functions. Mutations that the user sees immediately are optimistic: `cancelQueries`, `setQueryData`, roll back in `onError`, set the server row in `onSuccess`, `invalidateQueries` in `onSettled`. For a list cache, roll back only the edited item's sent fields (not a snapshot of the whole list, which undoes other writes made meanwhile), give the list's mutations one shared `mutationKey`, and invalidate in `onSettled` only when no other is pending (`isMutating({ mutationKey }) > 1` means another is in flight). See `useSongs.ts`. While a form's mutation is pending, lock its inputs and ignore submits rather than calling `reset()` on edit.
+  - A mutation keeps every cache of the item right, not only the list: an edit also updates the item's detail entry if one is cached (never creates one), and a delete sets the detail entry to its "not found" value and removes caches of things that went with it (`useDeleteSong` removes the downloaded file). Otherwise the item's page opens on stale data until a refetch lands.
   - Components call only the hooks. Forms keep a local draft of only the fields the user touched (`Partial<Row> | null`), render `{ ...saved, ...draft }` so refetched values show through for every other field, and send only changed fields (`changedSettings`). A full-row draft would send stale values for fields another device changed.
 - Component and hook tests mock the client with `vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule)`, call `resetFakeSupabase()` in `beforeEach`, and script answers on `fakeSupabase.auth.*`, `queryResult` (every `.single()`, `.maybeSingle()` or awaited chain; inspect sent payloads with `opArgs`) or `storageResult` (Storage `upload` / `remove` / `download`, ok by default). Render with `renderRoutes` / `wrapperFor` from `src/test/render.tsx`, which supply a retry-free QueryClient, a fixed auth state (`signedInAs`, `signedOut`, `loadingAuth`) and a `location` test id for asserting redirects. TanStack Query notifies on a timer, so wait (`findBy`, `waitFor`) after `setQueryData` instead of asserting synchronously.
 - Shared UI: `src/components/` (`PageHeader`, `FullPageMessage`, `ErrorAlert` for inline `role="alert"` errors such as a failed mutation, class strings in `styles.ts` including `dangerButtonClass` for destructive confirms). Long pages split into one small component per step or fieldset in the same file (`LoginPage`'s `EmailStep` / `CodeStep`, `SettingsPage`'s fieldsets taking `{ values, errors, edit }`). Bottom tabs below 768 px (`md`), sidebar from 768 px; touch targets `min-h-11` (44 px) or more.
@@ -132,10 +133,11 @@ docs/
 
 ## Stage workflow
 
-Each unit runs Build, Test, QA, Readability (see `docs/plan.md`). Each stage:
+Each unit runs Build, Test, QA, Readability, Review (see `docs/plan.md`). Each stage:
 
 1. Reads this file, its unit section in `docs/plan.md`, and earlier notes in `docs/units/`.
 2. Stays inside its unit's scope.
 3. Ends with `npm run check` green (and `npm run e2e` from Unit 03 on).
 4. Appends its section to `docs/units/NN-name.md`.
 5. Updates this file when it sets a pattern later units should copy.
+6. Adds a line to the owning unit's **Carried forward** list in `docs/plan.md` for each open issue it hands to a later unit, and deletes the lines its own unit dealt with.
