@@ -1,7 +1,8 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import type { Loop } from '@/features/loops/loopForm';
+import { loopKeys } from '@/features/loops/loopKeys';
 import { PRACTICE_LOOP_SELECT, type PracticeLoop } from '@/features/loops/practiceList';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
 import { loopRow } from '@/test/loopTable';
@@ -302,5 +303,91 @@ describe('On the go with nothing to show', () => {
     failing = false;
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(listed()).toEqual(['Chorus fill']));
+  });
+});
+
+describe('On the go read again', () => {
+  /** The page over a client the test can ask to read the list again, as a logged session does. */
+  function renderHomeWithClient() {
+    const { queryClient } = renderRoutes(<Route path="/" element={<OnTheGoPage />} />);
+    const reads = () => queryResult.mock.calls.length;
+    return {
+      readAgain: async () => {
+        const before = reads();
+        await queryClient.invalidateQueries({ queryKey: loopKeys.forUser('user-1') });
+        expect(reads()).toBeGreaterThan(before);
+        // TanStack Query tells React on a timer: give the answer time to be drawn.
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        });
+      },
+      listState: () => queryClient.getQueryState(loopKeys.practice('user-1')),
+    };
+  }
+
+  it('moves a loop practiced since to the top', async () => {
+    let rows = [fill, intro, outro];
+    queryResult.mockImplementation(async () => ({ data: rows, error: null }));
+    const view = renderHomeWithClient();
+    await waitFor(() => expect(listed()).toEqual(['Intro', 'Chorus fill', 'Outro']));
+
+    // A session was logged for Outro: the server moved its last_practiced_at.
+    rows = [
+      fill,
+      intro,
+      { ...outro, last_practiced_at: new Date(NOW.getTime() + 60_000).toISOString() },
+    ];
+    await view.readAgain();
+
+    await waitFor(() => expect(listed()).toEqual(['Outro', 'Intro', 'Chorus fill']));
+    expect(item('Outro').getByText(/Last practiced today/)).toBeInTheDocument();
+  });
+
+  it('keeps the list on show when a later read fails', async () => {
+    let failing = false;
+    queryResult.mockImplementation(async () =>
+      failing
+        ? { data: null, error: { message: 'internal detail' } }
+        : { data: [fill], error: null },
+    );
+    const view = renderHomeWithClient();
+    await waitFor(() => expect(listed()).toEqual(['Chorus fill']));
+
+    failing = true;
+    await view.readAgain();
+
+    // The read did fail, or keeping the list would prove nothing.
+    expect(view.listState()).toMatchObject({ status: 'error', data: [fill] });
+    expect(listed()).toEqual(['Chorus fill']);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Practice Chorus fill' })).toBeInTheDocument();
+  });
+});
+
+describe('the tab in the address', () => {
+  it('follows the tab pressed, and leaves the address clean on the first', async () => {
+    serve([fill, done]);
+    const user = renderHome('/?tab=nonsense');
+    await waitFor(() => expect(listed()).toEqual(['Chorus fill']));
+
+    await user.click(tab(/^Finished/));
+    expect(screen.getByTestId('location')).toHaveTextContent('/?tab=finished');
+    expect(listed()).toEqual(['Done one']);
+
+    await user.click(tab(/^On the go/));
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/);
+    expect(listed()).toEqual(['Chorus fill']);
+  });
+
+  it('stays on the Finished tab when its last loop is reopened', async () => {
+    const table = serve([done]);
+    const user = renderHome('/?tab=finished');
+
+    await user.click(await screen.findByRole('button', { name: 'Reopen Done one' }));
+
+    expect(await screen.findByText(/No finished loops yet/)).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('/?tab=finished');
+    expect(table.writes()).toEqual([{ status: 'active' }]);
+    expect(tab(/^On the go/)).toHaveTextContent('On the go (1)');
   });
 });

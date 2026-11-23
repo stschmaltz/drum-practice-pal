@@ -13,7 +13,15 @@ import {
   saveNewLoop,
   saveSpeedButton,
 } from './loopsPage';
-import { openFixture, playButton, status } from './playerPage';
+import {
+  countInModeSelect,
+  countInSelect,
+  openFixture,
+  playButton,
+  recordedStatuses,
+  recordStatuses,
+  status,
+} from './playerPage';
 
 // Unit 09: practice sessions and progress. Loop play time is logged, a loop
 // has a history, a loop at its target asks "Mark finished?", and the home page
@@ -282,4 +290,177 @@ test('leaving the page mid-practice still logs the session, once', async ({ page
   await navLink(page, 'Library').click();
 
   await expect.poll(async () => (await sessionsOf(user)).length, { timeout: 10_000 }).toBe(2);
+});
+
+/** A `practice_sessions` insert the page sent: its row's id, and whether it asked the browser to keep it alive. */
+interface SentSession {
+  id: string;
+  keepalive: boolean;
+}
+
+interface SentSessionsWindow {
+  __sentSessions?: SentSession[];
+}
+
+/**
+ * Records every session insert the page sends from its next load on, by
+ * wrapping `fetch`: Playwright's own request events don't say whether a
+ * request was sent with `keepalive`.
+ */
+async function recordSentSessions(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const sent: SentSession[] = [];
+    (window as unknown as SentSessionsWindow).__sentSessions = sent;
+    const realFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+      if (url.includes('/rest/v1/practice_sessions') && method === 'POST') {
+        const body = typeof init?.body === 'string' ? init.body : '{}';
+        const row = JSON.parse(body) as { id?: string } | { id?: string }[];
+        const id = (Array.isArray(row) ? row[0]?.id : row.id) ?? 'unknown';
+        sent.push({ id, keepalive: init?.keepalive === true });
+      }
+      return realFetch(input, init);
+    };
+  });
+}
+
+const sentSessions = (page: Page) =>
+  page.evaluate(() => (window as unknown as SentSessionsWindow).__sentSessions ?? []);
+
+/** Hides or shows the page as a phone does when it is locked or another app comes up. */
+async function setPageVisibility(page: Page, state: 'hidden' | 'visible'): Promise<void> {
+  await page.evaluate((next) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => next });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => next === 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, state);
+}
+
+test('a session whose answer is lost is sent again on request and logged once', async ({
+  page,
+  user,
+}) => {
+  await shortSessions(page, 2);
+  await recordSentSessions(page);
+  // The first insert reaches the database, and its answer never reaches the page.
+  let lost = 0;
+  await page.route('**/rest/v1/practice_sessions*', async (route) => {
+    if (route.request().method() !== 'POST' || lost > 0) return route.continue();
+    lost += 1;
+    await route.fetch();
+    await route.abort('connectionfailed');
+  });
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Flaky', firstBar: 1, lastBar: 2 });
+
+  await playButton(page).click();
+  await playFor(page, 3_000);
+
+  const notSaved = page.getByRole('alert').filter({ hasText: /Couldn.t save your last practice/ });
+  await expect(notSaved).toBeVisible();
+  await expect(sessionLogged(page)).toHaveCount(0);
+  // The row is there all the same: this is the retry that must not double it.
+  expect(lost).toBe(1);
+  await expect.poll(async () => (await sessionsOf(user)).length).toBe(1);
+
+  await notSaved.getByRole('button', { name: 'Try again' }).click();
+
+  await expect(sessionLogged(page)).toContainText('of Flaky at 100%');
+  await expect(notSaved).toHaveCount(0);
+  const sent = await sentSessions(page);
+  expect(sent.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(sent.map((session) => session.id)).size).toBe(1);
+  const sessions = await sessionsOf(user);
+  expect(sessions).toHaveLength(1);
+  expect(sessions[0]!.id).toBe(sent[0]!.id);
+
+  // And the loop's history lists it once.
+  await openLoopPanel(page);
+  await loopItem(page, 'Flaky')
+    .getByRole('button', { name: /^History/ })
+    .click();
+  const history = loopPanel(page).getByRole('region', { name: 'History of Flaky' });
+  await expect(history.getByTestId('loop-history-summary')).toContainText('1 session');
+  await expect(history.getByRole('listitem')).toHaveCount(1);
+});
+
+test('a hidden page logs with keepalive, counts none of the hidden time, and starts again when it is back', async ({
+  page,
+  user,
+}) => {
+  await shortSessions(page, 2);
+  await recordSentSessions(page);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Pocket', firstBar: 1, lastBar: 2 });
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await page.waitForTimeout(3_500);
+
+  // The phone is locked: the page is hidden while the player still says "playing".
+  await setPageVisibility(page, 'hidden');
+
+  await expect.poll(async () => (await sessionsOf(user)).length, { timeout: 10_000 }).toBe(1);
+  const [first] = await sessionsOf(user);
+  expect(first!.duration_seconds).toBeGreaterThanOrEqual(3);
+  expect(first!.duration_seconds).toBeLessThanOrEqual(6);
+  expect(await sentSessions(page)).toEqual([{ id: first!.id, keepalive: true }]);
+
+  // Five seconds in the pocket, still "playing".
+  await page.waitForTimeout(5_000);
+  await expect(playButton(page)).toHaveText('Pause');
+  expect(await sessionsOf(user)).toHaveLength(1);
+  await setPageVisibility(page, 'visible');
+  // The page lived to hear the answer.
+  await expect(sessionLogged(page)).toContainText('of Pocket');
+
+  const backMs = await playFor(page, 3_000);
+
+  await expect.poll(async () => (await sessionsOf(user)).length, { timeout: 10_000 }).toBe(2);
+  const second = (await sessionsOf(user)).find((session) => session.id !== first!.id);
+  // Only the time since it came back: with the pocket time it would be 8 s or more.
+  expect(Math.abs(second!.duration_seconds - backMs / 1000)).toBeLessThanOrEqual(1.5);
+  expect(Date.parse(second!.started_at)).toBeGreaterThan(
+    Date.parse(first!.started_at) + (first!.duration_seconds + 4) * 1000,
+  );
+  // On a page that is on show the app's own request is used, where a failure can be shown.
+  expect((await sentSessions(page)).at(-1)).toEqual({ id: second!.id, keepalive: false });
+});
+
+test('with a count-in before every repeat, a sitting is one session of play time alone', async ({
+  page,
+  user,
+}) => {
+  await shortSessions(page, 2);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await countInSelect(page).selectOption('1 bar');
+  await countInModeSelect(page).selectOption('Before every loop repeat');
+  // Two bars at 120 BPM: 4 s a pass, with a 2 s count-in before each.
+  await saveNewLoop(page, { name: 'Counted', firstBar: 1, lastBar: 2 });
+  await recordStatuses(page);
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  const started = Date.now();
+  // Until the third pass is playing: two whole passes and three count-ins are behind.
+  await expect
+    .poll(async () => (await recordedStatuses(page)).join(' '), { timeout: 30_000 })
+    .toContain('countingIn playing countingIn playing countingIn playing');
+  await page.waitForTimeout(1_000);
+  await playButton(page).click();
+  const wallSeconds = (Date.now() - started) / 1000;
+  await expect(playButton(page)).toHaveText('Play');
+
+  await expect(sessionLogged(page)).toContainText('of Counted');
+  await expect.poll(async () => (await sessionsOf(user)).length).toBe(1);
+  // Each pass ends in a stop of the engine; none of them ended the session.
+  await page.waitForTimeout(1_000);
+  const sessions = await sessionsOf(user);
+  expect(sessions).toHaveLength(1);
+  const [session] = sessions;
+  expect(session!.repeats).toBe(2);
+  // Two passes and a second of the third, about 9 s; the three count-ins, about 6 s, are left out.
+  expect(session!.duration_seconds).toBeGreaterThanOrEqual(7);
+  expect(session!.duration_seconds).toBeLessThanOrEqual(wallSeconds - 4);
 });

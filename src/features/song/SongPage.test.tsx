@@ -1,8 +1,10 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { QueryClient } from '@tanstack/react-query';
 import { Link, Outlet, Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
 import type { Loop } from '@/features/loops/loopForm';
+import { loopKeys } from '@/features/loops/loopKeys';
 import type { EngineMount } from '@/features/player/playerEngine';
 import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
 import type { Settings } from '@/features/settings/settingsForm';
@@ -22,7 +24,7 @@ import {
   TICKS_PER_BAR,
 } from '@/test/fakePlayerEngine';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
-import { renderRoutes, RouteMarker } from '@/test/render';
+import { renderRoutes, RouteMarker, testQueryClient } from '@/test/render';
 import { SongPage } from './SongPage';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -98,7 +100,7 @@ function serve({
 }
 
 /** The song page inside a layout with nav links, so tests can leave it the way the app does. */
-function renderSong(id: string) {
+function renderSong(id: string, queryClient?: QueryClient) {
   renderRoutes(
     <Route
       element={
@@ -115,7 +117,7 @@ function renderSong(id: string) {
       <Route path="/songs/:id" element={<SongPage />} />
       <Route path="/library" element={<RouteMarker name="library" />} />
     </Route>,
-    { path: `/songs/${id}` },
+    { path: `/songs/${id}`, queryClient },
   );
   return userEvent.setup();
 }
@@ -1284,6 +1286,70 @@ describe('SongPage opened on a loop (?loop=)', () => {
 
     expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
   });
+
+  it('waits for the loops when the score is in first, and still starts nothing', async () => {
+    serve({ loops: [chorus, other] });
+    const release = loops.holdNext('select');
+    renderSong(`${SONG_A}?loop=${LOOP_ID}`);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('100%');
+
+    release();
+
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+    expect(status()).toHaveTextContent('Bar 9 of 16');
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it('waits for the player when the loops are in first (cached from an earlier visit)', async () => {
+    serve({ loops: [chorus, other] });
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(loopKeys.forSong(USER, SONG_A), [chorus, other]);
+    renderSong(`${SONG_A}?loop=${LOOP_ID}`, queryClient);
+
+    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    // Opened once there was a player to give the saved speed to, not before.
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+    expect(status()).toHaveTextContent('Bar 9 of 16');
+  });
+
+  it('opens the loop under a song already playing, without stopping it', async () => {
+    serve({ loops: [chorus, other] });
+    const release = loops.holdNext('select');
+    const user = renderSong(`${SONG_A}?loop=${LOOP_ID}`);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    // Play before the loops are in: the whole song starts.
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: true }));
+    expect(playButton()).toHaveTextContent('Pause');
+
+    release();
+
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+    expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+      startTick: startOfBar(9),
+      endTick: startOfBar(13),
+    });
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(engine.pause).not.toHaveBeenCalled();
+    expect(engine.stop).not.toHaveBeenCalled();
+  });
+
+  it('opens a finished loop too: it is still a loop', async () => {
+    await openSongAt(`?loop=${LOOP_ID}`, [
+      { ...chorus, status: 'finished', finished_at: '2026-11-22T10:00:00Z' },
+      other,
+    ]);
+
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+  });
 });
 
 describe('SongPage practice sessions', () => {
@@ -1397,5 +1463,164 @@ describe('SongPage practice sessions', () => {
     expect(await screen.findByText('At library')).toBeInTheDocument();
     await waitFor(() => expect(sessionsSent()).toHaveLength(1));
     expect(sessionsSent()[0]).toMatchObject({ loop_id: 'verse', duration_seconds: 90 });
+  });
+
+  const chorus = loopOfSongA('chorus', {
+    name: 'Chorus',
+    start_bar: 9,
+    end_bar: 12,
+    speed_ratio: 0.6,
+  });
+
+  /** Starts the Verse loop from the panel, with the engine's report of it. */
+  async function startVerse(savedLoops: Loop[] = [verse]) {
+    serve({ loops: savedLoops });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    const panel = within(screen.getByTestId('loop-panel'));
+    await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
+    act(() => engine.fire('stateChanged', { playing: true }));
+    const pause = async () => {
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: false }));
+    };
+    return { user, engine, panel, pause };
+  }
+
+  it('"Play loop" on another loop logs the first at the speed it was played at, not the next one’s', async () => {
+    const { user, panel, pause } = await startVerse([verse, chorus]);
+    vi.setSystemTime(Date.now() + 45_000);
+
+    await user.click(panel.getByRole('button', { name: 'Play loop Chorus' }));
+
+    await waitFor(() => expect(sessionsSent()).toHaveLength(1));
+    expect(sessionsSent()[0]).toMatchObject({
+      loop_id: 'verse',
+      duration_seconds: 45,
+      speed_ratio: 0.8,
+    });
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('60%');
+
+    vi.setSystemTime(Date.now() + 31_000);
+    await pause();
+
+    await waitFor(() => expect(sessionsSent()).toHaveLength(2));
+    expect(sessionsSent()[1]).toMatchObject({
+      loop_id: 'chorus',
+      started_at: '2026-11-23T18:00:45.000Z',
+      duration_seconds: 31,
+      speed_ratio: 0.6,
+    });
+    expect(sessionsSent()[1]!.id).not.toBe(sessionsSent()[0]!.id);
+  });
+
+  it('finishing the loop that is playing does not end its session', async () => {
+    const { user, panel, pause } = await startVerse();
+    vi.setSystemTime(Date.now() + 20_000);
+
+    await user.click(panel.getByRole('button', { name: 'Mark finished Verse' }));
+    await panel.findByRole('button', { name: 'Reopen Verse' });
+    expect(loops.sent('update')).toEqual([{ status: 'finished' }]);
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(sessionsSent()).toEqual([]);
+
+    vi.setSystemTime(Date.now() + 20_000);
+    await pause();
+
+    await waitFor(() => expect(sessionsSent()).toHaveLength(1));
+    expect(sessionsSent()[0]).toMatchObject({ loop_id: 'verse', duration_seconds: 40 });
+  });
+
+  it('changing the bars of the loop that is playing does not end its session either', async () => {
+    const { user, panel, pause } = await startVerse();
+    vi.setSystemTime(Date.now() + 20_000);
+
+    await user.click(panel.getByRole('button', { name: 'Edit Verse' }));
+    const lastBar = panel.getByLabelText('Last bar');
+    await user.clear(lastBar);
+    await user.type(lastBar, '6');
+    await user.click(panel.getByRole('button', { name: 'Save loop' }));
+    await waitFor(() => expect(screen.getByTestId('active-loop')).toHaveTextContent('Bars 5 to 6'));
+    expect(sessionsSent()).toEqual([]);
+
+    vi.setSystemTime(Date.now() + 20_000);
+    await pause();
+
+    await waitFor(() => expect(sessionsSent()).toHaveLength(1));
+    expect(sessionsSent()[0]).toMatchObject({ loop_id: 'verse', duration_seconds: 40 });
+  });
+
+  it('deleting the loop mid-practice drops its session without a word: its history went with it', async () => {
+    serve({ loops: [verse] });
+    const answer = queryResult.getMockImplementation()!;
+    const sessionAnswers: Promise<FakeResult>[] = [];
+    queryResult.mockImplementation((call) => {
+      if (call.table !== 'practice_sessions') return answer(call);
+      // What the database says of a session for a loop that is gone.
+      const refused = Promise.resolve<FakeResult>({
+        data: null,
+        error: { message: 'violates foreign key constraint', code: '23503' },
+      });
+      sessionAnswers.push(refused);
+      return refused;
+    });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    const panel = within(screen.getByTestId('loop-panel'));
+    await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
+    act(() => engine.fire('stateChanged', { playing: true }));
+    vi.setSystemTime(Date.now() + 45_000);
+
+    await user.click(panel.getByRole('button', { name: 'Delete Verse' }));
+    await user.click(panel.getByRole('button', { name: 'Delete loop' }));
+
+    // The session was sent and refused; only then is it worth saying nothing was shown.
+    await waitFor(() => expect(sessionsSent()).toHaveLength(1));
+    expect(sessionsSent()[0]).toMatchObject({ loop_id: 'verse', duration_seconds: 45 });
+    await act(async () => {
+      await Promise.all(sessionAnswers);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.queryByText(/Couldn't save your last/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('session-logged')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+    // The whole song plays on.
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('counts the sessions it could not save, and Try again sends each of them', async () => {
+    serve({ loops: [verse] });
+    const answer = queryResult.getMockImplementation()!;
+    let failing = true;
+    queryResult.mockImplementation(async (call) =>
+      call.table === 'practice_sessions' && failing ? fail('offline') : answer(call),
+    );
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    const panel = within(screen.getByTestId('loop-panel'));
+    await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
+    for (const seconds of [40, 50]) {
+      act(() => engine.fire('stateChanged', { playing: true }));
+      vi.setSystemTime(Date.now() + seconds * 1000);
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: false }));
+      if (seconds === 40) {
+        await screen.findByText("Couldn't save your last practice session.");
+        await user.click(playButton());
+      }
+    }
+
+    expect(
+      await screen.findByText("Couldn't save your last 2 practice sessions."),
+    ).toBeInTheDocument();
+
+    failing = false;
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByTestId('session-logged')).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't save/)).not.toBeInTheDocument();
+    expect(sessionsSent().map((row) => row.duration_seconds)).toEqual([40, 50, 40, 50]);
+    expect(sessionsSent()[2]!.id).toBe(sessionsSent()[0]!.id);
+    expect(sessionsSent()[3]!.id).toBe(sessionsSent()[1]!.id);
   });
 });

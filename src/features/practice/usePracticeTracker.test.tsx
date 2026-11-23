@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { loopKeys } from '@/features/loops/loopKeys';
+import { songKeys } from '@/features/library/useSongs';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
@@ -37,13 +38,21 @@ function setVisibility(state: 'visible' | 'hidden') {
 }
 
 /** The tracker over a real player, as the song page wires it; the loop is a prop. */
-function renderTracker(initialLoopId: string | null = 'loop-a') {
+function renderTracker(
+  initialLoopId: string | null = 'loop-a',
+  { strict = false }: { strict?: boolean } = {},
+) {
   const { engine, player } = loopPlayer();
   const queryClient = testQueryClient();
   const hook = renderHook(
     ({ loopId }: { loopId: string | null }) =>
       usePracticeTracker(player, usePlayerSnapshot(player), loopId),
-    { wrapper: wrapperFor(queryClient, signedInAs(USER)), initialProps: { loopId: initialLoopId } },
+    {
+      wrapper: wrapperFor(queryClient, signedInAs(USER)),
+      initialProps: { loopId: initialLoopId },
+      // Mounts, cleans up and mounts again, as the app does in development.
+      reactStrictMode: strict,
+    },
   );
   /** Moves the clock; nothing else is on a timer. */
   const seconds = (count: number) => vi.setSystemTime(Date.now() + count * 1000);
@@ -398,5 +407,252 @@ describe('a log that fails', () => {
 
     expect(view.hook.result.current.unsaved).toEqual([]);
     expect(view.hook.result.current.lastLogged).toBeNull();
+  });
+});
+
+/** An answer the test gives when it chooses, to see what happens while a log is on its way. */
+function heldAnswer() {
+  let answer!: (result: FakeResult) => void;
+  const promise = new Promise<FakeResult>((resolve) => (answer = resolve));
+  return { promise, answer };
+}
+
+describe('while a session log is on its way', () => {
+  it('Play again opens a new session with its own id, and each log answers for itself', async () => {
+    const first = heldAnswer();
+    const second = heldAnswer();
+    queryResult.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const view = renderTracker();
+    view.playFor(40);
+    await waitFor(() => expect(logged()).toHaveLength(1));
+
+    view.playFor(50);
+    await waitFor(() => expect(logged()).toHaveLength(2));
+    expect(logged()[1]!.id).not.toBe(logged()[0]!.id);
+    expect(view.hook.result.current.lastLogged).toBeNull();
+
+    // The later one fails and the earlier one lands: neither takes the other's place.
+    await act(async () => second.answer({ data: null, error: { message: 'offline' } }));
+    await waitFor(() => expect(view.hook.result.current.unsaved).toHaveLength(1));
+    await act(async () => first.answer(ok));
+
+    await waitFor(() =>
+      expect(view.hook.result.current.lastLogged).toMatchObject({ durationSeconds: 40 }),
+    );
+    expect(view.hook.result.current.unsaved).toEqual([
+      expect.objectContaining({ id: logged()[1]!.id, durationSeconds: 50 }),
+    ]);
+  });
+
+  it('leaving the screen lets it finish, and the caches still hear of it', async () => {
+    const held = heldAnswer();
+    queryResult.mockReturnValueOnce(held.promise);
+    const view = renderTracker();
+    view.queryClient.setQueryData<PracticeSession[]>(sessionKeys.forLoop(USER, 'loop-a'), []);
+    view.queryClient.setQueryData(loopKeys.practice(USER), []);
+    view.queryClient.setQueryData(songKeys.forUser(USER), []);
+    view.playFor(40);
+    await waitFor(() => expect(logged()).toHaveLength(1));
+
+    view.hook.unmount();
+    held.answer(ok);
+
+    await waitFor(() =>
+      expect(
+        view.queryClient.getQueryData<PracticeSession[]>(sessionKeys.forLoop(USER, 'loop-a')),
+      ).toEqual([expect.objectContaining({ duration_seconds: 40 })]),
+    );
+    expect(view.queryClient.getQueryState(loopKeys.practice(USER))?.isInvalidated).toBe(true);
+    expect(view.queryClient.getQueryState(songKeys.forUser(USER))?.isInvalidated).toBe(true);
+    // The session that ended was already sent: unmounting sends nothing more.
+    expect(logged()).toHaveLength(1);
+  });
+
+  it('Try again pressed twice sends the same session twice and keeps it once', async () => {
+    queryResult.mockResolvedValueOnce({ data: null, error: { message: 'offline' } });
+    const view = renderTracker();
+    view.playFor(40);
+    await waitFor(() => expect(view.hook.result.current.unsaved).toHaveLength(1));
+    // Both retries fail too.
+    queryResult
+      .mockResolvedValueOnce({ data: null, error: { message: 'offline' } })
+      .mockResolvedValueOnce({ data: null, error: { message: 'offline' } });
+
+    act(() => {
+      view.hook.result.current.retryUnsaved();
+      view.hook.result.current.retryUnsaved();
+    });
+
+    await waitFor(() => expect(logged()).toHaveLength(3));
+    expect(new Set(logged().map((row) => row.id)).size).toBe(1);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(view.hook.result.current.unsaved).toHaveLength(1);
+
+    act(() => view.hook.result.current.retryUnsaved());
+    await waitFor(() => expect(view.hook.result.current.unsaved).toEqual([]));
+    expect(view.hook.result.current.lastLogged).toMatchObject({ durationSeconds: 40 });
+  });
+});
+
+describe('a keepalive log on a page that lives on', () => {
+  it('tells the caches once it is in', async () => {
+    const view = renderTracker();
+    view.queryClient.setQueryData<PracticeSession[]>(sessionKeys.forLoop(USER, 'loop-a'), []);
+    view.queryClient.setQueryData(loopKeys.practice(USER), []);
+    view.play();
+    view.seconds(40);
+
+    setVisibility('hidden');
+
+    await waitFor(() =>
+      expect(
+        view.queryClient.getQueryData<PracticeSession[]>(sessionKeys.forLoop(USER, 'loop-a')),
+      ).toEqual([expect.objectContaining({ id: keptAlive()[0]!.id, duration_seconds: 40 })]),
+    );
+    expect(view.queryClient.getQueryState(loopKeys.practice(USER))?.isInvalidated).toBe(true);
+    expect(logged()).toEqual([]);
+  });
+
+  it('is dropped quietly when the loop has been deleted: not sent again, not shown, not cached', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ code: '23503', message: 'violates foreign key constraint' }), {
+        status: 409,
+      }),
+    );
+    const view = renderTracker();
+    view.queryClient.setQueryData<PracticeSession[]>(sessionKeys.forLoop(USER, 'loop-a'), []);
+    view.play();
+    view.seconds(40);
+
+    setVisibility('hidden');
+
+    // The refusal has arrived and been read before anything is said about what did not follow it.
+    expect(keptAlive()).toHaveLength(1);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(keptAlive()).toHaveLength(1);
+    expect(logged()).toEqual([]);
+    expect(view.hook.result.current.lastLogged).toBeNull();
+    expect(view.hook.result.current.unsaved).toEqual([]);
+    expect(
+      view.queryClient.getQueryData<PracticeSession[]>(sessionKeys.forLoop(USER, 'loop-a')),
+    ).toEqual([]);
+  });
+
+  it('any other refusal is sent again through the app, and a second failure is kept for Try again', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
+    queryResult.mockResolvedValueOnce({ data: null, error: { message: 'offline' } });
+    const view = renderTracker();
+    view.play();
+    view.seconds(40);
+
+    setVisibility('hidden');
+
+    await waitFor(() => expect(view.hook.result.current.unsaved).toHaveLength(1));
+    expect(view.hook.result.current.unsaved[0]!.id).toBe(keptAlive()[0]!.id);
+    expect(logged()).toHaveLength(1);
+  });
+});
+
+describe('a page that comes back from the back/forward cache', () => {
+  it('carries on as a new session after the one pagehide ended', async () => {
+    const view = renderTracker();
+    view.play();
+    view.seconds(40);
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    expect(keptAlive()).toHaveLength(1);
+
+    // An hour in the cache, then back with the player as it was.
+    view.seconds(3600);
+    act(() => {
+      window.dispatchEvent(new Event('pageshow'));
+    });
+    view.seconds(35);
+    view.pause();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject({
+      started_at: '2026-11-23T19:00:40.000Z',
+      duration_seconds: 35,
+    });
+    expect(logged()[0]!.id).not.toBe(keptAlive()[0]!.id);
+  });
+
+  it('pagehide while paused drops a short session for good', async () => {
+    const view = renderTracker();
+    view.playFor(20);
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    act(() => {
+      window.dispatchEvent(new Event('pageshow'));
+    });
+
+    view.playFor(15);
+    // 15 s on their own, not 35 with what was left behind. The next stop proves the tracker is live.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(logged()).toEqual([]);
+    view.playFor(15);
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject({
+      started_at: '2026-11-23T18:00:20.000Z',
+      duration_seconds: 30,
+    });
+  });
+});
+
+describe('with effects run twice (StrictMode)', () => {
+  it('logs nothing at mount, and one session for one stretch of practice', async () => {
+    const view = renderTracker('loop-a', { strict: true });
+    expect(logged()).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    view.playFor(40);
+
+    await waitFor(() => expect(view.hook.result.current.lastLogged).not.toBeNull());
+    expect(logged()).toHaveLength(1);
+    expect(logged()[0]).toMatchObject({ duration_seconds: 40 });
+  });
+
+  it('counts each pass once', async () => {
+    const view = renderTracker('loop-a', { strict: true });
+    act(() => {
+      view.player.setRange({ startBar: 5, endBar: 8 });
+      view.player.setLooping(true);
+    });
+    view.play();
+    for (let pass = 0; pass < 3; pass++) act(() => view.engine.fire('finished', undefined));
+    view.seconds(40);
+    view.pause();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject({ repeats: 3 });
+  });
+
+  it('sends one keepalive on pagehide, and one log when the screen goes', async () => {
+    const hidden = renderTracker('loop-a', { strict: true });
+    hidden.play();
+    hidden.seconds(40);
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    expect(keptAlive()).toHaveLength(1);
+    hidden.hook.unmount();
+    fetchMock.mockClear();
+
+    const left = renderTracker('loop-a', { strict: true });
+    left.play();
+    left.seconds(45);
+    left.hook.unmount();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject({ duration_seconds: 45 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

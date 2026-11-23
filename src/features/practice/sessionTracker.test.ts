@@ -131,6 +131,56 @@ describe('the 30-second minimum', () => {
     });
   });
 
+  it('adds up many short goes, and logs at the stop that takes it past the minimum', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding' });
+    // Ten goes of 3 s, a 7 s rest after each, one pass in every go.
+    for (let go = 0; go < 10; go++) {
+      const start = go * 10;
+      t.at(start, { phase: 'sounding' });
+      t.wrap();
+      t.at(start + 3, { phase: 'stopped' });
+      expect(t.ended).toHaveLength(go < 9 ? 0 : 1);
+    }
+
+    expect(t.ended[0]).toEqual({
+      id: 'session-1',
+      loopId: 'loop-a',
+      startedAt: '2026-11-23T18:00:00.000Z',
+      durationSeconds: 30,
+      speedRatio: 1,
+      repeats: 10,
+    });
+  });
+
+  it.each([
+    [29.999, false],
+    [30, true],
+  ])('leaving the loop after %s s of play logs: %s', (seconds, logs) => {
+    const toAnotherLoop = tracking();
+    toAnotherLoop.at(0, { loopId: 'loop-a', phase: 'sounding' });
+    toAnotherLoop.at(seconds, { loopId: 'loop-b' });
+    expect(toAnotherLoop.ended).toHaveLength(logs ? 1 : 0);
+
+    const toTheWholeSong = tracking();
+    toTheWholeSong.at(0, { loopId: 'loop-a', phase: 'sounding' });
+    toTheWholeSong.at(seconds, { loopId: null });
+    expect(toTheWholeSong.ended).toHaveLength(logs ? 1 : 0);
+  });
+
+  it('a session dropped for being short takes its passes with it', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding' });
+    t.wrap();
+    t.wrap();
+    t.at(20, { loopId: null });
+
+    t.at(30, { loopId: 'loop-a' });
+    t.wrap();
+
+    expect(t.at(70, { phase: 'stopped' })).toMatchObject({ durationSeconds: 40, repeats: 1 });
+  });
+
   it('can be tuned', () => {
     const t = tracking({ minPlaySeconds: 3 });
     t.at(0, { loopId: 'loop-a', phase: 'sounding' });
@@ -222,6 +272,26 @@ describe('the speed of a session', () => {
 
     expect(t.at(50, { phase: 'stopped' })?.speedRatio).toBe(0.708333);
     expect(t.ended).toHaveLength(1);
+  });
+
+  it('a change of speed neither ends the session nor starts its stretch again', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    t.wrap();
+    expect(t.at(35, { speedRatio: 0.75 })).toBeNull();
+
+    expect(t.at(50, { phase: 'stopped' })).toMatchObject({
+      startedAt: '2026-11-23T18:00:00.000Z',
+      durationSeconds: 50,
+      repeats: 1,
+    });
+  });
+
+  it('is the exact ratio, never the whole percent it shows as', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.855556 });
+
+    expect(t.at(31, { loopId: 'loop-b', speedRatio: 0.5 })?.speedRatio).toBe(0.855556);
   });
 
   it('follows a change made while paused in a session still too short', () => {

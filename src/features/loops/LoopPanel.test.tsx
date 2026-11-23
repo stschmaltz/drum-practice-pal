@@ -929,6 +929,98 @@ describe('LoopPanel finishing a loop', () => {
     );
     expect(view.table.rows().find((row) => row.id === 'late')?.status).toBe('active');
   });
+
+  it('asks when the speed shows as the target’s percent, though its ratio is a hair under', async () => {
+    // A speed typed as a BPM is kept as a fine ratio (85 at a tempo of 120 is 0.708333);
+    // the target field holds whole percents.
+    const view = renderPanel({
+      loops: [loopRow('late', { ...atTarget, speed_ratio: 0.708333, target_ratio: 0.71 })],
+    });
+    await view.press('Play loop Late');
+    view.enginePlays();
+
+    expect(view.item('Late').getByText(/71% \(64 BPM\) · target 71% \(64 BPM\)/)).toBeVisible();
+    expect(await view.panel.findByTestId('finish-prompt')).toHaveTextContent(
+      "You've reached your target of 71%.",
+    );
+  });
+
+  it('while the prompt’s "Mark finished" is on its way, the list’s button is locked and a press sends nothing', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+    const release = view.table.holdNext('update');
+    await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
+
+    const reopen = await view.panel.findByRole('button', { name: 'Reopen Late' });
+    expect(reopen).toBeDisabled();
+    // Another loop's button is not held up by it.
+    expect(view.panel.getByRole('button', { name: 'Mark finished Intro' })).toBeEnabled();
+    await view.user.click(reopen);
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+
+    release();
+
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toBeEnabled(),
+    );
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+    expect(view.table.rows().find((row) => row.id === 'late')?.status).toBe('finished');
+  });
+
+  it('"Save speed" answered while "Mark finished" is on its way does not put the loop back among the active', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+    const release = view.table.holdNext('update');
+    await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
+    await waitFor(() => expect(finishedNames(view)).toEqual(['Late']));
+
+    // The server answers this one first, with a row from before the finish: status active.
+    await view.press('Slower by 5%');
+    await view.press('Save speed');
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ status: 'finished' }, { speed_ratio: 0.95 }]),
+    );
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Save speed' })).toBeDisabled(),
+    );
+    expect(view.table.rows().find((row) => row.id === 'late')).toMatchObject({
+      status: 'active',
+      speed_ratio: 0.95,
+    });
+
+    expect(finishedNames(view)).toEqual(['Late']);
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+
+    release();
+
+    await waitFor(() =>
+      expect(view.table.rows().find((row) => row.id === 'late')).toMatchObject({
+        status: 'finished',
+        speed_ratio: 0.95,
+      }),
+    );
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toBeEnabled(),
+    );
+    expect(finishedNames(view)).toEqual(['Late']);
+    expect(view.item('Late').getByText(/95% \(86 BPM\)/)).toBeInTheDocument();
+  });
+
+  it('a finer target survives finishing and reopening: only the status is sent', async () => {
+    const view = renderPanel({
+      loops: [loopRow('late', { ...late, speed_ratio: 0.708333, target_ratio: 0.855556 })],
+    });
+
+    await view.press('Mark finished Late');
+    await view.press('Reopen Late');
+
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ status: 'finished' }, { status: 'active' }]),
+    );
+    expect(view.table.rows()[0]).toMatchObject({ speed_ratio: 0.708333, target_ratio: 0.855556 });
+  });
 });
 
 describe('LoopPanel history', () => {
@@ -1028,6 +1120,38 @@ describe('LoopPanel history', () => {
     expect(alert).toHaveTextContent("Couldn't load this loop's history.");
     expect(alert).not.toHaveTextContent('internal');
     expect(within(alert).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('keeps the history on show when a later read of it fails', async () => {
+    let failing = false;
+    const view = renderPanel({
+      prepare: (table) => {
+        queryResult.mockImplementation(async (call) => {
+          if (call.table === 'loops') return table.answer(call);
+          return failing
+            ? { data: null, error: { message: 'internal detail' } }
+            : { data: [session('only')], error: null };
+        });
+      },
+    });
+    await view.press('History Late');
+    const list = history(view, 'Late');
+    await waitFor(() => expect(list.getAllByRole('listitem')).toHaveLength(1));
+    const reads = () =>
+      queryResult.mock.calls.filter(([call]) => call.table === 'practice_sessions').length;
+    const readsBefore = reads();
+
+    failing = true;
+    // Closed and opened again: the history is read anew, and this time the read fails.
+    await view.press('History Late');
+    await view.press('History Late');
+    await waitFor(() => expect(reads()).toBeGreaterThan(readsBefore));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(history(view, 'Late').getAllByRole('listitem')).toHaveLength(1);
+    expect(view.item('Late').queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('says when each loop was last practiced', async () => {

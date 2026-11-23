@@ -251,12 +251,16 @@ export function barsLabel(startBar: number, endBar: number): string {
  * The loop's saved speed has reached its target, so the app asks "Mark
  * finished?". It only asks: a loop is never finished for the user. Compares
  * the saved speed, not the one playing, so a nudge past the target that was
- * never saved doesn't count.
+ * never saved doesn't count. Compares the whole percents the loop's line
+ * shows, not the stored ratios: a speed typed as a BPM (85 at a tempo of 120 is
+ * 0.708333) shows as "71%" beside "target 71%", and must count as there.
  */
 export function hasReachedTarget(
   loop: Pick<Loop, 'status' | 'speed_ratio' | 'target_ratio'>,
 ): boolean {
   return (
-    loop.status === 'active' && loop.target_ratio !== null && loop.speed_ratio >= loop.target_ratio
+    loop.status === 'active' &&
+    loop.target_ratio !== null &&
+    ratioToPercent(loop.speed_ratio) >= ratioToPercent(loop.target_ratio)
   );
 }

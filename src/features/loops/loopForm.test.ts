@@ -387,7 +387,17 @@ describe('hasReachedTarget', () => {
       { speed_ratio: 0.855556, target_ratio: 0.855556 },
       true,
     ],
-    ['a hair under such a target', { speed_ratio: 0.855555, target_ratio: 0.855556 }, false],
+    // What the loop's line shows is what counts: "71% (85 BPM) · target 71% (85 BPM)"
+    // with no question would look broken. 85 BPM typed at a tempo of 120 is 0.708333.
+    [
+      'showing the target’s percent from under it',
+      { speed_ratio: 0.708333, target_ratio: 0.71 },
+      true,
+    ],
+    ['a hair under a finer target', { speed_ratio: 0.855555, target_ratio: 0.855556 }, true],
+    ['showing one percent less', { speed_ratio: 0.704999, target_ratio: 0.71 }, false],
+    ['rounding up to the target', { speed_ratio: 0.845, target_ratio: 0.85 }, true],
+    ['rounding down from it', { speed_ratio: 0.844, target_ratio: 0.85 }, false],
     ['with no target', { speed_ratio: 2, target_ratio: null }, false],
   ])('%s: %j is %s', (_what, speeds, reached) => {
     expect(hasReachedTarget(loop(speeds))).toBe(reached);

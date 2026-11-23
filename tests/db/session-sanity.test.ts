@@ -220,6 +220,165 @@ describe('logging the same session twice', () => {
 
     expect(error?.code).toBe(PG.FOREIGN_KEY_VIOLATION);
   });
+
+  /** The request keepaliveInsert builds (src/lib/keepaliveInsert.ts), as that user. */
+  async function keepaliveAs(user: TestUser, row: ReturnType<typeof sessionRow>) {
+    const env = localSupabaseEnv();
+    const session = await user.client.auth.getSession();
+    if (session.error) throw session.error;
+    const accessToken = session.data.session?.access_token;
+    if (!accessToken) throw new Error('test user has no session');
+    return fetch(`${env.url}/rest/v1/practice_sessions?on_conflict=id`, {
+      method: 'POST',
+      keepalive: true,
+      headers: {
+        apikey: env.publishableKey,
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=ignore-duplicates,return=minimal',
+      },
+      body: JSON.stringify(row),
+    });
+  }
+
+  it('the keepalive request for a deleted loop is refused with the code in its body, where the app reads it', async () => {
+    const loopId = await insertLoop(a, songA);
+    const { error: deleteError } = await a.client.from('loops').delete().eq('id', loopId);
+    if (deleteError) throw deleteError;
+
+    const response = await keepaliveAs(a, sessionRow(a.id, loopId));
+
+    expect(response.ok).toBe(false);
+    expect(await response.json()).toMatchObject({ code: PG.FOREIGN_KEY_VIOLATION });
+  });
+
+  it('the keepalive request is bound by the same rules: a start days ahead is refused, not ignored', async () => {
+    const loopId = await insertLoop(a, songA);
+
+    const response = await keepaliveAs(
+      a,
+      sessionRow(a.id, loopId, { started_at: fromNow(3 * DAY_MS) }),
+    );
+
+    expect(response.ok).toBe(false);
+    expect(await response.json()).toMatchObject({ code: PG.CHECK_VIOLATION });
+    expect(await sessionsAsAdmin(loopId)).toEqual([]);
+  });
+
+  it("sending an id that is another user's session changes nothing of theirs and logs nothing", async () => {
+    const loopOfB = await insertLoop(b, songB);
+    const theirs = sessionRow(b.id, loopOfB, { duration_seconds: 77 });
+    const { error: theirError } = await b.client.from('practice_sessions').insert(theirs);
+    if (theirError) throw theirError;
+    const before = await sessionsAsAdmin(loopOfB);
+    const loopOfA = await insertLoop(a, songA);
+
+    const { error, data } = await upsertAsApp(a, {
+      ...sessionRow(a.id, loopOfA, { duration_seconds: 500 }),
+      id: theirs.id,
+    }).select('id');
+
+    // "On conflict do nothing" skips it without an error, and returns no row: nothing of B's is told.
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+    expect(await sessionsAsAdmin(loopOfB)).toEqual(before);
+    expect(await sessionsAsAdmin(loopOfA)).toEqual([]);
+    expect((await loopAsAdmin(loopOfA)).last_practiced_at).toBeNull();
+  });
+});
+
+describe('how far a wrong clock can move a loop', () => {
+  it('at most two days ahead: the latest start the trigger takes, for the longest session the check takes', async () => {
+    const loopId = await insertLoop(a, songA);
+    const { error } = await a.client.from('practice_sessions').insert(
+      sessionRow(a.id, loopId, {
+        started_at: fromNow(DAY_MS - 60_000),
+        duration_seconds: SESSION_MAX_DURATION_SECONDS,
+      }),
+    );
+    expect(error).toBeNull();
+
+    const practicedAt = Date.parse((await loopAsAdmin(loopId)).last_practiced_at ?? '');
+    expect(practicedAt).toBeGreaterThan(Date.now() + DAY_MS);
+    expect(practicedAt).toBeLessThanOrEqual(Date.now() + 2 * DAY_MS);
+  });
+
+  it('an honest session logged afterwards does not move it back, and is in the history all the same', async () => {
+    const loopId = await insertLoop(a, songA);
+    const ahead = sessionRow(a.id, loopId, { started_at: fromNow(20 * 60 * 60 * 1000) });
+    const { error: aheadError } = await a.client.from('practice_sessions').insert(ahead);
+    if (aheadError) throw aheadError;
+    const pinned = (await loopAsAdmin(loopId)).last_practiced_at;
+
+    const { error } = await a.client
+      .from('practice_sessions')
+      .insert(sessionRow(a.id, loopId, { started_at: fromNow(-60_000), duration_seconds: 45 }));
+
+    expect(error).toBeNull();
+    expect((await loopAsAdmin(loopId)).last_practiced_at).toBe(pinned);
+    expect(await sessionsAsAdmin(loopId)).toHaveLength(2);
+  });
+});
+
+describe("the history's read", () => {
+  // The app's own select and order (fetchLoopSessions in src/features/practice/sessionsApi.ts).
+  const SESSION_SELECT = 'id, loop_id, started_at, duration_seconds, speed_ratio, repeats';
+
+  it("returns the loop's sessions newest first, with the exact speed, and none of another loop's or user's", async () => {
+    const loopId = await insertLoop(a, songA);
+    const otherLoop = await insertLoop(a, songA);
+    const loopOfB = await insertLoop(b, songB);
+    const older = sessionRow(a.id, loopId, { started_at: fromNow(-2 * DAY_MS) });
+    const newer = sessionRow(a.id, loopId, {
+      started_at: fromNow(-60_000),
+      duration_seconds: 61,
+      speed_ratio: 0.855556,
+      repeats: 7,
+    });
+    for (const [user, row] of [
+      [a, older],
+      [a, newer],
+      [a, sessionRow(a.id, otherLoop)],
+      [b, sessionRow(b.id, loopOfB)],
+    ] as const) {
+      const { error } = await user.client.from('practice_sessions').insert(row);
+      if (error) throw error;
+    }
+
+    const { data, error } = await a.client
+      .from('practice_sessions')
+      .select(SESSION_SELECT)
+      .eq('user_id', a.id)
+      .eq('loop_id', loopId)
+      .order('started_at', { ascending: false })
+      .order('id');
+
+    expect(error).toBeNull();
+    expect(data?.map((session) => session.id)).toEqual([newer.id, older.id]);
+    expect(data?.[0]).toMatchObject({ duration_seconds: 61, speed_ratio: 0.855556, repeats: 7 });
+
+    // B asking for A's loop gets nothing, and no error to tell the loop exists.
+    const asB = await b.client
+      .from('practice_sessions')
+      .select(SESSION_SELECT)
+      .eq('loop_id', loopId);
+    expect(asB.error).toBeNull();
+    expect(asB.data).toEqual([]);
+  });
+
+  it('deleting the loop takes its history with it', async () => {
+    const loopId = await insertLoop(a, songA);
+    const { error: logError } = await a.client
+      .from('practice_sessions')
+      .insert(sessionRow(a.id, loopId));
+    if (logError) throw logError;
+    expect(await sessionsAsAdmin(loopId)).toHaveLength(1);
+
+    const { error } = await a.client.from('loops').delete().eq('id', loopId);
+
+    expect(error).toBeNull();
+    expect(await sessionsAsAdmin(loopId)).toEqual([]);
+  });
 });
 
 describe("the home page's read", () => {
