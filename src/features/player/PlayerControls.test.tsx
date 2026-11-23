@@ -262,6 +262,113 @@ describe('PlayerControls drums only', () => {
   });
 });
 
+describe('PlayerControls drums only, beyond a click while playing', () => {
+  /** The tracks left sounding, from every mute the engine was sent (a mute stays until taken off). */
+  function sounding(engine: FakePlayerEngine): number[] {
+    const muted = new Map<number, boolean>();
+    for (const [trackIndex, mute] of engine.setTrackMuted.mock.calls as [number, boolean][]) {
+      muted.set(trackIndex, mute);
+    }
+    return [0, 1, 2].filter((trackIndex) => !muted.get(trackIndex));
+  }
+
+  it('can be turned on while the song is still loading, and is what plays once it is in', async () => {
+    const { engine, user } = setup({ loaded: false });
+    expect(playButton()).toBeDisabled();
+    expect(drumsOnly()).toBeEnabled();
+
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+
+    act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(sounding(engine)).toEqual([DRUMS]);
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it('toggles from the keyboard and keeps focus, without touching playback', async () => {
+    const { engine, user } = setup();
+    await startPlaying(engine, user);
+    const restartsBefore = engine.restartCalls();
+
+    drumsOnly().focus();
+    await user.keyboard('{Enter}');
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(sounding(engine)).toEqual([DRUMS]);
+
+    await user.keyboard(' ');
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(sounding(engine)).toEqual([0, 1, DRUMS]);
+    expect(drumsOnly()).toHaveFocus();
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('stays on through Pause, Play and Back to start', async () => {
+    const { engine, user } = setup();
+    await user.click(drumsOnly());
+    await startPlaying(engine, user);
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: false }));
+    await user.click(backToStart());
+    await startPlaying(engine, user);
+
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(sounding(engine)).toEqual([DRUMS]);
+  });
+
+  it('settles on the last of many quick presses of both drum buttons', async () => {
+    const { engine, user } = setup();
+    await startPlaying(engine, user);
+    const restartsBefore = engine.restartCalls();
+
+    for (let round = 0; round < 5; round++) {
+      await user.click(drumsOnly());
+      await user.click(muteDrums());
+      await user.dblClick(drumsOnly());
+    }
+    // Each round ends with a double click: Drums only on (replacing Mute drums), then off.
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'false');
+    expect(sounding(engine)).toEqual([0, 1, DRUMS]);
+
+    await user.click(drumsOnly());
+    expect(sounding(engine)).toEqual([DRUMS]);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('pressed during a count-in, leaves the counter running and the metronome as it was', async () => {
+    const clicks = new FakeClickOutput();
+    const { engine, player, user } = setup({
+      clicks,
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1 },
+    });
+    await user.click(playButton());
+    expect(player.getSnapshot().status).toBe('countingIn');
+    engine.setMetronomeVolume.mockClear();
+
+    await user.click(drumsOnly());
+
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    expect(player.getSnapshot().status).toBe('countingIn');
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(clicks.cancelSession).not.toHaveBeenCalled();
+    expect(engine.play).not.toHaveBeenCalled();
+    expect(engine.setMetronomeVolume).not.toHaveBeenCalled();
+    expect(metronome()).toHaveAttribute('aria-pressed', 'true');
+    expect(sounding(engine)).toEqual([DRUMS]);
+    // Call the count-in off, so no timer outlives the test.
+    await user.click(playButton());
+  });
+
+  it('gives neither drum button a reason when the song has drums', () => {
+    setup();
+    expect(drumsOnly()).not.toHaveAttribute('title');
+    expect(muteDrums()).not.toHaveAttribute('title');
+  });
+});
+
 describe('PlayerControls without its Play button', () => {
   it('leaves Play/Pause to the screen and keeps the rest', () => {
     render(

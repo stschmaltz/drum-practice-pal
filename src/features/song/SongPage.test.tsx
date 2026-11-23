@@ -350,6 +350,100 @@ describe('SongPage disposal on route change', () => {
   });
 });
 
+describe('SongPage drums only', () => {
+  const drumsOnly = () => screen.getByRole('button', { name: 'Drums only' });
+  const muteDrums = () => screen.getByRole('button', { name: 'Mute drums' });
+
+  it('opens off even when drums are muted by default, with only the drum track muted', async () => {
+    serve({ settings: ok({ ...settingsRow, drums_muted_default: true }) });
+    renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    expect(drumsOnly()).toBeEnabled();
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'true');
+    expect(engine.setTrackMuted).not.toHaveBeenCalledWith(0, true);
+    expect(engine.setTrackMuted).not.toHaveBeenCalledWith(2, true);
+  });
+
+  it('plays the drum track alone and back, live, on the song page', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: true }));
+    const restartsBefore = engine.restartCalls();
+
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+    // The song row says the drums are track 1 of the three.
+    expect(engine.setTrackMuted).toHaveBeenCalledWith(0, true);
+    expect(engine.setTrackMuted).toHaveBeenCalledWith(2, true);
+    expect(engine.setTrackMuted).not.toHaveBeenCalledWith(1, true);
+
+    await user.click(drumsOnly());
+    expect(engine.setTrackMuted).toHaveBeenCalledWith(0, false);
+    expect(engine.setTrackMuted).toHaveBeenCalledWith(2, false);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('is off again on the next song, which is sent no mutes', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    await loadPlayer(0);
+    await user.click(drumsOnly());
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('link', { name: 'Song B' }));
+    await waitFor(() => expect(engines).toHaveLength(2));
+    const second = await loadPlayer(1);
+
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'false');
+    expect(second.setTrackMuted).not.toHaveBeenCalledWith(expect.any(Number), true);
+  });
+
+  it('is off again when the same song is opened a second time', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    await loadPlayer(0);
+    await user.click(drumsOnly());
+
+    await user.click(screen.getByRole('link', { name: 'Library' }));
+    await user.click(screen.getByRole('link', { name: 'Song A' }));
+    await waitFor(() => expect(engines).toHaveLength(2));
+    const second = await loadPlayer(1);
+
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(second.setTrackMuted).not.toHaveBeenCalledWith(expect.any(Number), true);
+  });
+
+  it('is disabled with the reason for a song without drums, and sends the engine no mutes', async () => {
+    serve({ songs: { [SONG_A]: songRow(SONG_A, { drum_track_index: null }) } });
+    renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    expect(drumsOnly()).toBeDisabled();
+    expect(drumsOnly()).toHaveAttribute('aria-pressed', 'false');
+    expect(drumsOnly()).toHaveAccessibleDescription('This song has no drum track');
+    expect(engine.setTrackMuted).not.toHaveBeenCalled();
+  });
+
+  it('saves nothing: the toggle is not a setting', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    await loadPlayer();
+    await user.click(drumsOnly());
+    await user.click(drumsOnly());
+
+    const writes = queryResult.mock.calls.filter(([call]) =>
+      call.ops.some((op) => ['update', 'insert', 'upsert', 'delete'].includes(op.method)),
+    );
+    expect(writes).toHaveLength(0);
+  });
+});
+
 describe('SongPage jam mode', () => {
   const speedReadout = () => screen.getByTestId('jam-speed');
   const bpmReadout = () => screen.getByTestId('jam-bpm');

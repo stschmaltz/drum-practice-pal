@@ -161,6 +161,8 @@ export class PlayerService {
    */
   private haltRequested = false;
   private trackCount = 0;
+  /** The engine was last sent Drums only's mutes, which it keeps until every track is sent again. */
+  private engineHoldsDrumsOnly = false;
   private soundFontRequested = false;
   private disposed = false;
   private snapshot: PlayerSnapshot;
@@ -625,20 +627,24 @@ export class PlayerService {
   }
 
   /**
-   * Sends the mutes a freshly loaded or reset engine lacks: it starts with
-   * every track sounding, so only tracks with a mute on record need a call,
-   * or every track while Drums only is on.
+   * Sends the mutes a freshly loaded engine lacks: it starts with every track
+   * sounding, so only tracks with a mute on record need a call. Every track
+   * goes while Drums only is on, and once more after it went off unsent:
+   * alphaTab's synth keeps its channel mutes across a reload, so tracks it
+   * silenced before one would otherwise stay silent.
    */
   private applyMutes(): void {
-    if (this.snapshot.drumsOnly) this.applyEveryTrackMute();
+    if (this.snapshot.drumsOnly || this.engineHoldsDrumsOnly) this.applyEveryTrackMute();
     else for (const trackIndex of this.mutedTracks.keys()) this.applyTrackMute(trackIndex);
   }
 
   /** For Drums only going on or off, which changes tracks that have no mute on record. */
   private applyEveryTrackMute(): void {
+    if (this.trackCount === 0) return;
     for (let trackIndex = 0; trackIndex < this.trackCount; trackIndex++) {
       this.applyTrackMute(trackIndex);
     }
+    this.engineHoldsDrumsOnly = this.snapshot.drumsOnly;
   }
 
   /** Tracks the loaded score doesn't have yet are skipped; applyMutes sends them once it does. */

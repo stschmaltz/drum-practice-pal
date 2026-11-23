@@ -359,3 +359,45 @@ Every repeat was reached through `window.__drumPalPlayer` (`setRange`, `setLoopi
 
 - `npm run check`: green. Typecheck, lint and format clean; 56 test files, 2379 tests passing (2363 before).
 - `npm run e2e`: 204 tests; 197 passed, 7 skipped (the device-only skips in `jam.spec.ts`), 0 failed.
+
+## Test: Drums only
+
+Scope: the Drums only toggle only. The count-in tests were left alone.
+
+**What was added (56 unit and component tests, 4 e2e tests x 3 sizes)**
+
+- `src/features/player/PlayerService.drumsOnly.test.ts` (new, 44 tests). These assert which tracks the engine is left sounding (every `setTrackMuted` call replayed in order, a mute staying until it is taken off, as in alphaTab's synth), not the calls that got it there.
+  - Other song shapes: drums as track 0 (the multi-track fixture's shape), drums between other tracks, a song that is only drums (also opening with Mute drums on), and never a mute for a track the song lacks.
+  - Around loading: turned on before `load()`, after each of the three loading events, on then off while loading, alphaTab regenerating its MIDI mid-play, on or off during a second `load()`, more or fewer tracks on the next load, a refused score.
+  - Transport: stays on through pause, play, seek and Back to start with nothing sent again; changes while paused without starting; leaves speed, metronome, range and looping untouched; one notification per change and no playback event; 51 quick toggles; the two drum buttons alternated ten times.
+  - Per-track mutes set before the song loaded, after Drums only went off, on the drum track by index, unmuting another track while it is on, and across a reload.
+  - During a count-in (while clicking, between the downbeat and alphaTab reporting play, Mute drums during it, click volume unchanged) and in a loop that counts in before every repeat (across three repeats, toggled during a repeat's count-in, native looping not handed back).
+  - Eight seeded runs of 200 random presses (Drums only, Mute drums, per-track mutes, load, loaded) checked after every step against the rules in the Build section: never both toggles on, and the engine left with exactly what they say.
+- `src/features/player/PlayerControls.test.tsx` (6 tests): pressed while the song is still loading; from the keyboard, keeping focus; through Pause, Play and Back to start; quick presses of both drum buttons; during a count-in (counter keeps running, metronome untouched); no `title` on either button when the song has drums.
+- `src/features/song/SongPage.test.tsx` (6 tests): off on open with Mute drums on by default; the drum track from the song row is the one left sounding; off on the next song and when the same song is opened again, with the new player sent no mutes; disabled with the reason for a song without drums; nothing is written to the server.
+- `tests/e2e/drums-only.spec.ts` (new, 4 tests x 3 sizes). See below.
+
+**Which tracks sound, in e2e**
+
+The build's gap is closed as far as it can be without listening. alphaTab mutes by MIDI channel with a message to its synth worker (`alphaSynth.setChannelMute`), so the spec wraps `Worker.prototype.postMessage` in an init script and keeps, per synth worker, the channels muted. That is what the synth itself holds; nothing in the app or the debug hook is involved.
+
+- Multi-track fixture, playing: Drums only mutes four channels, none of them the drum channel (9); Mute drums then leaves exactly `[9]` muted; Drums only again mutes the same four; off leaves none. Across all of it the synth is sent no play, pause, stop or MIDI load, and the bar keeps advancing.
+- Pressed while the soundfont is held back (so before alphaTab is ready): once ready the four channels are muted, still are after Play, and are unmuted when it goes off.
+- Library and back into the same song without a page load: a second synth, Drums only off, nothing muted.
+- A drums-only song: on mid-play, nothing muted, no transport message, still advancing.
+
+Whether the synth honours a mute it holds is alphaTab's business and stays a Human check (the list in the Build section stands). Ran the spec four times over at all three sizes (48 runs), no flakes.
+
+**Bugs found**
+
+1. **Low, fixed. Drums only turned off while a second `load()` is under way left the other tracks silent.** Repro on one `PlayerService`: load and finish, `setDrumsOnly(true)`, `load()` again, `setDrumsOnly(false)` before the score arrives, finish loading. The toggle read off and only the drums sounded. With no tracks known, turning it off sent nothing, and after the load only tracks with a mute on record were sent. That rested on "a reset engine has everything sounding", which isn't so for mutes: alphaTab 1.9 never calls `resetChannelStates` itself, so the synth keeps channel mutes across a reload. The same happened when Mute drums took over from Drums only during the reload. Not reachable in the app today (the song page makes a new service per song and loads once), hence low. Fix in `PlayerService.ts`: `engineHoldsDrumsOnly` remembers that the engine was last sent Drums only's mutes, and `applyMutes` sends every track while that is so. Ten lines; no existing test changed. Found by the seeded runs (seeds 2 and 5) and pinned by "turned off while a second load is under way".
+
+**Not bugs, worth knowing**
+
+- A second `load()` on one service with a different file can leave channels muted that the new file's tracks no longer map to (five tracks, then two). The service can't address them; only a new service (what the app does) or `resetChannelStates` in the engine would. Unreachable today.
+- From reading alphaTab 1.9's source, nothing resets mutes on `readyForPlayback` either. Re-applying them there is harmless and the tests keep it covered, but the comment in `wireEngine` ("resets channel volumes") overstates it for mutes.
+
+**Results**
+
+- `npm run check`: green. Typecheck, lint and format clean; 57 test files, 2435 tests passing (2379 before).
+- `npm run e2e`: 216 tests; 209 passed, 7 skipped (the device-only skips in `jam.spec.ts`), 0 failed.
