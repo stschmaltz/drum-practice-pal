@@ -98,3 +98,42 @@ Following the Unit 05 pattern, the new alphaTab features went into the engine in
 - On the iPhone and iPad: does a tap on a bar seek reliably? Does a sideways swipe on the score never seek?
 - Is the cursor easy to follow from the throne, at a distance? Are the colours readable?
 - During a long song on the iPad (page layout), does the line change scroll smoothly, without jumping away from where you're reading?
+
+## Test
+
+**Summary.** The builder's tests already covered the pure helpers well (`tempo.test.ts`, `barHitTest.test.ts`, `tempo-fixtures.test.ts` over every fixture, including the tempo-change one), the service's tempo and tap events, and the main page flows. I filled the gaps around seeking (every tap landing on the bar tapped, taps that should do nothing, touch input) and the page's own scroll-into-view. No app code changed.
+
+**Criteria and where they're proven**
+
+| Criterion                                                    | Unit / component                                                                                                   | e2e (phone, tablet, desktop)                                                                                                                         |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cursor stays in view at every size and through tempo changes | `useJamMode` scroll-into-view (new, `SongPage.test.tsx`)                                                           | `jam.spec.ts` "the cursor stays on screen through a tempo change" (builder)                                                                          |
+| Seeking lands on the tapped bar                              | `barHitTest.test.ts`, service and page tap tests                                                                   | "each tap lands on the bar tapped..." (new), "tapping a bar moves playback and the cursor" (builder), "a touch tap seeks..." (new, phone and tablet) |
+| Header: song, % and BPM = ratio x tempo at the current bar   | `tempo.test.ts`, `tempo-fixtures.test.ts`, page readout tests, "BPM for the tapped bar at the current speed" (new) | "the header shows speed and BPM" (builder), "each tap lands..." (new: 120 then 90 from bar 9, 45 at 50%)                                             |
+| Speed resets to 100% on open                                 | "opens every song at 100%" (builder)                                                                               | "every song opens at 100%" (builder)                                                                                                                 |
+
+**Added**
+
+- `src/features/song/SongPage.test.tsx`, in the jam mode block:
+  - BPM for a tapped bar at 150% on both sides of the tempo change (180 at bar 8, 135 at bar 9), with the speed kept.
+  - A tap fired by the old song's engine after switching songs seeks nothing.
+  - The score box is scrolled into view (`block: 'nearest'`) once per start of playback: not on a paused tap, not on bar changes or taps while playing, not on pause, and again on the next play.
+- `tests/e2e/jam.spec.ts`, 3 tests:
+  - **Each tap lands on the bar tapped, through the tempo change.** On the tempo-change fixture, taps the next bar nine times (bar 2 to 10, across line ends in page layout). Each tap must land on exactly the next bar with the cursor under the tap, and BPM must read 120 through bar 8 and 90 from bar 9. A tap while paused stays paused. At 50%, BPM reads 45, and Play starts from bar 10.
+  - **A tap on the score's top margin doesn't seek.** It's outside every bar.
+  - **Touch, phone and tablet only.** A CDP touch tap seeks to the bar, the same as a click. A touch swipe (sideways on the phone, up on the tablet) then scrolls the score and leaves the bar alone.
+  - New helpers `tapNextBar` (waits for the status and the cursor) and `scrollSettled`.
+
+**Results**
+
+- `npm run check`: green, 46 files, 592 tests (was 589).
+- `npm run e2e`: 152 passed, 1 skipped (the touch test on desktop). Was 144. `jam.spec.ts` also passed twice in a row with `--repeat-each=2`.
+
+**Bugs found**
+
+None.
+
+**Notes for QA**
+
+- **In Chromium's touch emulation, the first tap after a swipe's fling doesn't fire `click`, so it doesn't seek.** The second tap does. A tap that stops momentum scrolling usually doesn't click on real phones either, so I don't think it's a bug. The e2e test taps before it swipes. Worth checking on the iPhone: after a swipe ends, does a tap need repeating?
+- **Mid-bar tempo changes and real touch devices are still untested.** No fixture has a mid-bar change (see Build known gaps).

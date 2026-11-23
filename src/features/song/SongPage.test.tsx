@@ -413,4 +413,75 @@ describe('SongPage jam mode', () => {
     expect(speedReadout()).toHaveTextContent('100%');
     expect(second.setSpeed).toHaveBeenLastCalledWith(1);
   });
+
+  it('shows BPM for the tapped bar at the current speed, across the tempo change', async () => {
+    serve();
+    renderSong(SONG_A);
+    const engine = await loadPlayer(0, { barTempos: tempoChange });
+    fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '150' } });
+    expect(bpmReadout()).toHaveTextContent('180'); // 120 x 1.5 at bar 1
+
+    act(() => engine.fire('barTapped', { barIndex: 8 })); // bar 9, the first at 90
+    expect(status()).toHaveTextContent('Bar 9 of 16');
+    expect(bpmReadout()).toHaveTextContent('135');
+    expect(speedReadout()).toHaveTextContent('150%');
+
+    act(() => engine.fire('barTapped', { barIndex: 7 })); // bar 8, the last at 120
+    expect(bpmReadout()).toHaveTextContent('180');
+    expect(engine.seek).toHaveBeenLastCalledWith(7 * TICKS_PER_BAR);
+  });
+
+  it('ignores a tap from the old song after switching songs', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const first = await loadPlayer(0);
+    await user.click(screen.getByRole('link', { name: 'Song B' }));
+    await waitFor(() => expect(engines).toHaveLength(2));
+    const second = await loadPlayer(1);
+
+    act(() => first.fire('barTapped', { barIndex: 5 }));
+    expect(first.seek).not.toHaveBeenCalled();
+    expect(second.seek).not.toHaveBeenCalled();
+    expect(status()).toHaveTextContent('Bar 1 of 16');
+  });
+
+  describe('bringing the score on screen', () => {
+    const scrollIntoView = vi.fn();
+    beforeEach(() => {
+      scrollIntoView.mockReset();
+      // jsdom has no scrollIntoView; the page calls it only when it exists.
+      Element.prototype.scrollIntoView = scrollIntoView;
+    });
+    afterEach(() => {
+      // @ts-expect-error restoring jsdom's missing method
+      delete Element.prototype.scrollIntoView;
+    });
+
+    it('scrolls the score box into view once per start, never while playing or paused', async () => {
+      serve();
+      const user = renderSong(SONG_A);
+      const engine = await loadPlayer();
+      act(() => engine.fire('barTapped', { barIndex: 3 }));
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+      expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByTestId('score-viewport'));
+      expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'nearest' }));
+
+      // Bar changes and taps while playing leave the page where the user put it.
+      act(() => engine.fire('position', { tick: 6 * TICKS_PER_BAR + 1 }));
+      act(() => engine.fire('barTapped', { barIndex: 10 }));
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: false }));
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
+    });
+  });
 });
