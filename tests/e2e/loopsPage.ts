@@ -1,8 +1,9 @@
 /// <reference lib="dom" />
 /**
  * Locators and steps for the song page's loop panel (Unit 08), shared by
- * loops.spec.ts and count-in.spec.ts. The panel is a bottom sheet below
- * 768 px and a column beside the score from there up; these steps work on both.
+ * loops.spec.ts, loop-scroll.spec.ts and count-in.spec.ts. The panel is a
+ * bottom sheet below 768 px and a column beside the score from there up;
+ * these steps work on both.
  */
 import type { Locator, Page } from '@playwright/test';
 import { expect } from './auth';
@@ -51,13 +52,13 @@ export const loopPanelToggle = (page: Page) =>
 
 /** Opens the loop panel if it is closed: the sheet on a phone, the side column otherwise. */
 export async function openLoopPanel(page: Page): Promise<void> {
-  const toggle = isSheet(page) ? sheetHeader(page) : sidePanelToggle(page);
+  const toggle = loopPanelToggle(page);
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 }
 
 export async function closeLoopPanel(page: Page): Promise<void> {
-  const toggle = isSheet(page) ? sheetHeader(page) : sidePanelToggle(page);
+  const toggle = loopPanelToggle(page);
   if ((await toggle.getAttribute('aria-expanded')) === 'true') await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
 }

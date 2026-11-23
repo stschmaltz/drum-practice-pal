@@ -9,12 +9,17 @@ import type { PlayerStatus } from '@/features/player/PlayerService';
  */
 export const LOOP_PANEL_OPEN_MIN_WIDTH = 1024;
 
+/** A media query's answer; `withoutMatchMedia` stands in where there is none (jsdom). */
+function mediaMatches(query: string, withoutMatchMedia: () => boolean): boolean {
+  if (typeof window.matchMedia !== 'function') return withoutMatchMedia();
+  return window.matchMedia(query).matches;
+}
+
 export function loopPanelStartsOpen(): boolean {
-  // jsdom has no matchMedia.
-  if (typeof window.matchMedia !== 'function') {
-    return window.innerWidth >= LOOP_PANEL_OPEN_MIN_WIDTH;
-  }
-  return window.matchMedia(`(min-width: ${LOOP_PANEL_OPEN_MIN_WIDTH}px)`).matches;
+  return mediaMatches(
+    `(min-width: ${LOOP_PANEL_OPEN_MIN_WIDTH}px)`,
+    () => window.innerWidth >= LOOP_PANEL_OPEN_MIN_WIDTH,
+  );
 }
 
 /**
@@ -23,9 +28,7 @@ export function loopPanelStartsOpen(): boolean {
  * is the player's layout one, as in LoopPanel's `md:` classes.
  */
 export function loopPanelIsSheet(): boolean {
-  // jsdom has no matchMedia.
-  if (typeof window.matchMedia !== 'function') return layoutForWidth(window.innerWidth) !== 'page';
-  return !window.matchMedia(PAGE_LAYOUT_QUERY).matches;
+  return !mediaMatches(PAGE_LAYOUT_QUERY, () => layoutForWidth(window.innerWidth) === 'page');
 }
 
 /**
@@ -40,8 +43,8 @@ export function playLoopClosesPanel(isSheet: boolean, status: PlayerStatus): boo
 
 /**
  * The loop panel's open state, and the id of its body for the `aria-controls`
- * of whatever toggles it (the sheet's own header on a phone, a button in the
- * song page's sticky bar from 768 px).
+ * of whatever toggles it (the sheet's own header on a phone, a button beside
+ * the song page's status line from 768 px).
  */
 export function useLoopPanelOpen() {
   const bodyId = useId();

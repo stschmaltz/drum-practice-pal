@@ -8,15 +8,19 @@ import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
 import type { Settings } from '@/features/settings/settingsForm';
 import { songFilePath } from '@/lib/schema';
 import {
-  opArgs,
   queryResult,
   resetFakeSupabase,
   storageResult,
   type FakeResult,
-  type QueryCall,
   type StorageCall,
 } from '@/test/fakeSupabase';
-import { FakePlayerEngine, TEMPO_CHANGE_BAR_TEMPOS, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
+import {
+  FakePlayerEngine,
+  startOfBar,
+  TEMPO_CHANGE_BAR_TEMPOS,
+  TICKS_PER_BAR,
+} from '@/test/fakePlayerEngine';
+import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { renderRoutes, RouteMarker } from '@/test/render';
 import { SongPage } from './SongPage';
 
@@ -62,44 +66,12 @@ const ok = (data: unknown): FakeResult => ({ data, error: null });
 const fail = (message: string): FakeResult => ({ data: null, error: { message } });
 const fileBytes = (id: string) => (id === SONG_A ? [1, 2, 3] : [4, 5]);
 
-const loopRow = (id: string, overrides: Partial<Loop> = {}): Loop => ({
-  id,
-  song_id: SONG_A,
-  name: `Loop ${id}`,
-  start_bar: 5,
-  end_bar: 8,
-  speed_ratio: 1,
-  target_ratio: null,
-  status: 'active',
-  last_practiced_at: null,
-  created_at: '2026-11-21T12:00:00Z',
-  ...overrides,
-});
+/** A saved loop of song A. */
+const loopOfSongA = (id: string, overrides: Partial<Loop> = {}): Loop =>
+  loopRow(id, { song_id: SONG_A, ...overrides });
 
-/** The loops table as the fake client serves it; tests read it to see what was saved. */
-let loopTable: Loop[] = [];
-
-/** Answers a loops query from `loopTable` the way PostgREST would: list, insert, update, delete. */
-function serveLoops(call: QueryCall): FakeResult {
-  const eq = (column: string) =>
-    call.ops.find((op) => op.method === 'eq' && op.args[0] === column)?.args[1];
-  const inserted = opArgs(call, 'insert')?.[0] as Partial<Loop> | undefined;
-  if (inserted) {
-    const row = loopRow(inserted.id ?? 'new', { ...inserted });
-    loopTable = [...loopTable, row];
-    return ok(row);
-  }
-  const changes = opArgs(call, 'update')?.[0] as Partial<Loop> | undefined;
-  if (changes) {
-    loopTable = loopTable.map((loop) => (loop.id === eq('id') ? { ...loop, ...changes } : loop));
-    return ok(loopTable.find((loop) => loop.id === eq('id')) ?? null);
-  }
-  if (opArgs(call, 'delete')) {
-    loopTable = loopTable.filter((loop) => loop.id !== eq('id'));
-    return ok(null);
-  }
-  return ok(loopTable.filter((loop) => loop.song_id === eq('song_id')));
-}
+/** The loops table as the fake client serves it; tests read it to see what was sent. */
+let loops: LoopTable = loopTable();
 
 /**
  * Answers song, settings and loop queries; `songs` maps an id to its row, or
@@ -108,12 +80,12 @@ function serveLoops(call: QueryCall): FakeResult {
 function serve({
   songs = { [SONG_A]: songRow(SONG_A), [SONG_B]: songRow(SONG_B) } as Record<string, Song | null>,
   settings = ok(settingsRow),
-  loops = [],
+  loops: savedLoops = [],
 }: { songs?: Record<string, Song | null>; settings?: FakeResult; loops?: Loop[] } = {}) {
-  loopTable = loops;
+  loops = loopTable(savedLoops);
   queryResult.mockImplementation(async (call) => {
     if (call.table === 'user_settings') return settings;
-    if (call.table === 'loops') return serveLoops(call);
+    if (call.table === 'loops') return loops.answer(call);
     const id = call.ops.find((op) => op.method === 'eq' && op.args[0] === 'id')?.args[1];
     return ok(songs[id as string] ?? null);
   });
@@ -823,14 +795,9 @@ describe('SongPage loops', () => {
   const form = () => within(panel().getByRole('form'));
   const speedReadout = () => screen.getByTestId('jam-speed');
   const bpmReadout = () => screen.getByTestId('jam-bpm');
-  const startOf = (barNumber: number) => (barNumber - 1) * TICKS_PER_BAR;
-  const loopQueries = (method: string) =>
-    queryResult.mock.calls
-      .map(([call]) => call)
-      .filter((call) => call.table === 'loops' && opArgs(call, method));
 
   /** Bars 7 to 10 straddle the tempo change at bar 9: the first bar is at 120, the last at 90. */
-  const acrossTheChange = loopRow('across', {
+  const acrossTheChange = loopOfSongA('across', {
     name: 'Across the change',
     start_bar: 7,
     end_bar: 10,
@@ -847,7 +814,7 @@ describe('SongPage loops', () => {
 
   it('lists the saved loops in bar order, with speed as % and the BPM at each loop’s first bar', async () => {
     await openSong([
-      loopRow('late', { name: 'Late', start_bar: 9, end_bar: 12, speed_ratio: 0.5 }),
+      loopOfSongA('late', { name: 'Late', start_bar: 9, end_bar: 12, speed_ratio: 0.5 }),
       acrossTheChange,
     ]);
 
@@ -871,12 +838,12 @@ describe('SongPage loops', () => {
     await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
 
     expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
-      startTick: startOf(7),
-      endTick: startOf(11),
+      startTick: startOfBar(7),
+      endTick: startOfBar(11),
     });
     expect(engine.setLooping).toHaveBeenLastCalledWith(true);
     expect(engine.setSpeed).toHaveBeenLastCalledWith(0.708333);
-    expect(engine.seek).toHaveBeenLastCalledWith(startOf(7));
+    expect(engine.seek).toHaveBeenLastCalledWith(startOfBar(7));
     expect(engine.play).toHaveBeenCalledTimes(1);
     expect(status()).toHaveTextContent('Bar 7 of 16');
     expect(screen.getByTestId('active-loop')).toHaveTextContent(
@@ -894,9 +861,9 @@ describe('SongPage loops', () => {
     expect(bpmReadout()).toHaveTextContent('85');
 
     // alphaTab's answer to the loop's seek comes first; then playback moves on.
-    act(() => engine.fire('position', { tick: startOf(7) }));
+    act(() => engine.fire('position', { tick: startOfBar(7) }));
     // Into bar 9, where the file's tempo drops to 90: the loop's BPM stays its first bar's.
-    act(() => engine.fire('position', { tick: startOf(9) + 10 }));
+    act(() => engine.fire('position', { tick: startOfBar(9) + 10 }));
     expect(status()).toHaveTextContent('Bar 9 of 16');
     expect(bpmReadout()).toHaveTextContent('85');
     expect(panel().getByLabelText('BPM')).toHaveValue('85');
@@ -906,7 +873,7 @@ describe('SongPage loops', () => {
   it('switching to another loop while playing keeps playing', async () => {
     const { user, engine } = await openSong([
       acrossTheChange,
-      loopRow('late', { name: 'Late', start_bar: 13, end_bar: 16, speed_ratio: 0.9 }),
+      loopOfSongA('late', { name: 'Late', start_bar: 13, end_bar: 16, speed_ratio: 0.9 }),
     ]);
     await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
     act(() => engine.fire('stateChanged', { playing: true }));
@@ -916,8 +883,8 @@ describe('SongPage loops', () => {
 
     expect(engine.restartCalls()).toBe(restartsBefore);
     expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
-      startTick: startOf(13),
-      endTick: startOf(17),
+      startTick: startOfBar(13),
+      endTick: startOfBar(17),
     });
     expect(engine.setSpeed).toHaveBeenLastCalledWith(0.9);
     expect(playButton()).toHaveTextContent('Pause');
@@ -939,9 +906,9 @@ describe('SongPage loops', () => {
     expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
     expect(speedReadout()).toHaveTextContent('71%');
     // alphaTab's answer to the loop's seek comes first; then playback moves on.
-    act(() => engine.fire('position', { tick: startOf(7) }));
+    act(() => engine.fire('position', { tick: startOfBar(7) }));
     // Jam mode again: BPM follows the current bar.
-    act(() => engine.fire('position', { tick: startOf(9) + 10 }));
+    act(() => engine.fire('position', { tick: startOfBar(9) + 10 }));
     expect(bpmReadout()).toHaveTextContent('64'); // 90 x 0.708333
   });
 
@@ -969,7 +936,7 @@ describe('SongPage loops', () => {
     await user.click(form().getByRole('button', { name: 'Cancel' }));
     expect(engine.setHighlight).toHaveBeenLastCalledWith(null);
     act(() => engine.fire('barTapped', { barIndex: 2 }));
-    expect(engine.seek).toHaveBeenLastCalledWith(startOf(3));
+    expect(engine.seek).toHaveBeenLastCalledWith(startOfBar(3));
   });
 
   it('typed bars are highlighted once they make a range in the song', async () => {
@@ -999,9 +966,9 @@ describe('SongPage loops', () => {
     await user.type(form().getByLabelText(/Target speed/), '100');
     await user.click(form().getByRole('button', { name: 'Save loop' }));
 
-    await waitFor(() => expect(loopQueries('insert')).toHaveLength(1));
-    const [row] = opArgs(loopQueries('insert')[0]!, 'insert') as [Record<string, unknown>];
-    expect(row).toMatchObject({
+    await waitFor(() => expect(loops.sent('insert')).toHaveLength(1));
+    expect(loops.sent('insert')[0]).toMatchObject({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       song_id: SONG_A,
       user_id: USER,
       name: 'Second half',
@@ -1010,7 +977,6 @@ describe('SongPage loops', () => {
       speed_ratio: 0.8,
       target_ratio: 1,
     });
-    expect(row.id).toMatch(/^[0-9a-f-]{36}$/);
 
     // The form closes and the new loop is the one playing, without Play being pressed.
     expect(await screen.findByTestId('active-loop')).toHaveTextContent(
@@ -1018,8 +984,8 @@ describe('SongPage loops', () => {
     );
     expect(panel().queryByRole('form')).not.toBeInTheDocument();
     expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
-      startTick: startOf(9),
-      endTick: startOf(13),
+      startTick: startOfBar(9),
+      endTick: startOfBar(13),
     });
     expect(engine.setLooping).toHaveBeenLastCalledWith(true);
     expect(engine.play).not.toHaveBeenCalled();
@@ -1036,7 +1002,7 @@ describe('SongPage loops', () => {
 
     expect(form().getByText('Give the loop a name.')).toBeInTheDocument();
     expect(form().getByText('Bars go from 1 to 16 in this song.')).toBeInTheDocument();
-    expect(loopQueries('insert')).toHaveLength(0);
+    expect(loops.sent('insert')).toHaveLength(0);
   });
 
   it('a mouse drag across bars opens the form with those bars, on release', async () => {
@@ -1076,11 +1042,11 @@ describe('SongPage loops', () => {
     expect(engine.setSpeed).toHaveBeenLastCalledWith(0.833333);
     expect(panel().getByLabelText('Speed %')).toHaveValue('83');
     expect(bpmReadout()).toHaveTextContent('100');
-    expect(loopQueries('update')).toHaveLength(0);
+    expect(loops.sent('update')).toHaveLength(0);
 
     await user.click(save);
-    await waitFor(() => expect(loopQueries('update')).toHaveLength(1));
-    expect(opArgs(loopQueries('update')[0]!, 'update')).toEqual([{ speed_ratio: 0.833333 }]);
+    await waitFor(() => expect(loops.sent('update')).toHaveLength(1));
+    expect(loops.sent('update')).toEqual([{ speed_ratio: 0.833333 }]);
     await waitFor(() =>
       expect(screen.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 83% (100 BPM)'),
     );
@@ -1110,12 +1076,12 @@ describe('SongPage loops', () => {
     await user.type(lastBar, '12');
     await user.click(form().getByRole('button', { name: 'Save loop' }));
 
-    await waitFor(() => expect(loopQueries('update')).toHaveLength(1));
-    expect(opArgs(loopQueries('update')[0]!, 'update')).toEqual([{ end_bar: 12 }]);
+    await waitFor(() => expect(loops.sent('update')).toHaveLength(1));
+    expect(loops.sent('update')).toEqual([{ end_bar: 12 }]);
     await waitFor(() =>
       expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
-        startTick: startOf(7),
-        endTick: startOf(13),
+        startTick: startOfBar(7),
+        endTick: startOfBar(13),
       }),
     );
     expect(screen.getByTestId('active-loop')).toHaveTextContent('Bars 7 to 12');
@@ -1127,7 +1093,7 @@ describe('SongPage loops', () => {
 
     await user.click(panel().getByRole('button', { name: 'Delete Across the change' }));
     const confirm = within(panel().getByRole('group', { name: 'Delete Across the change' }));
-    expect(loopQueries('delete')).toHaveLength(0);
+    expect(loops.sent('delete')).toHaveLength(0);
     await user.click(confirm.getByRole('button', { name: 'Keep it' }));
     expect(panel().getByRole('button', { name: 'Delete Across the change' })).toBeInTheDocument();
 
@@ -1139,7 +1105,7 @@ describe('SongPage loops', () => {
     );
 
     expect(await panel().findByText(/No loops yet/)).toBeInTheDocument();
-    expect(loopQueries('delete')).toHaveLength(1);
+    expect(loops.sent('delete')).toHaveLength(1);
     await waitFor(() => expect(engine.setPlaybackRange).toHaveBeenLastCalledWith(null));
     expect(engine.setLooping).toHaveBeenLastCalledWith(false);
     expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
@@ -1165,7 +1131,7 @@ describe('SongPage loops', () => {
 
   it('a new song opens with no loop playing, and its own loops', async () => {
     serve({
-      loops: [acrossTheChange, loopRow('b-loop', { song_id: SONG_B, name: 'On song B' })],
+      loops: [acrossTheChange, loopOfSongA('b-loop', { song_id: SONG_B, name: 'On song B' })],
     });
     const user = renderSong(SONG_A);
     await loadPlayer(0);
@@ -1180,7 +1146,7 @@ describe('SongPage loops', () => {
     expect(await panel().findByRole('button', { name: 'Play loop On song B' })).toBeEnabled();
     expect(panel().queryByText('Across the change')).not.toBeInTheDocument();
     expect(second.setPlaybackRange).not.toHaveBeenCalledWith(
-      expect.objectContaining({ startTick: startOf(7) }),
+      expect.objectContaining({ startTick: startOfBar(7) }),
     );
   });
 });
@@ -1230,7 +1196,7 @@ describe('SongPage scrolling the score to a bar', () => {
   });
 
   it('Play loop while paused scrolls to the loop’s first bar; Exit loop scrolls nowhere', async () => {
-    serve({ loops: [loopRow('late', { name: 'Late', start_bar: 13, end_bar: 14 })] });
+    serve({ loops: [loopOfSongA('late', { name: 'Late', start_bar: 13, end_bar: 14 })] });
     const user = renderSong(SONG_A);
     const engine = await loadPlayer();
 

@@ -4,14 +4,9 @@ import { DEFAULT_PLAYER_OPTIONS } from '@/features/player/playerOptions';
 import { initialPlayerSnapshot, type PlayerService } from '@/features/player/PlayerService';
 import { SPEED_RATIO_MAX, SPEED_RATIO_MIN } from '@/lib/schema';
 import { resetFakeSupabase } from '@/test/fakeSupabase';
-import {
-  LOOP_SONG_ID,
-  loopPlayer,
-  loopRow,
-  serveLoopTable,
-  startOfBar,
-  usePlayerSnapshot,
-} from '@/test/loopPlayer';
+import { startOfBar } from '@/test/fakePlayerEngine';
+import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
+import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
 import { testQueryClient, wrapperFor } from '@/test/render';
 import type { Loop } from './loopForm';
 import { LoopSpeedControl } from './LoopSpeedControl';

@@ -6,7 +6,8 @@ import {
   barCursorBox,
   barNumber,
   boxOf,
-  controls,
+  countInModeSelect,
+  countInSelect,
   openFixture,
   playButton,
   scoreBox,
@@ -22,10 +23,6 @@ import {
 const countIn = (page: Page) => page.getByTestId('count-in');
 const countInBeat = (page: Page) => page.getByTestId('count-in-beat');
 const countInBar = (page: Page) => page.getByTestId('count-in-bar');
-const countInSelect = (page: Page) =>
-  controls(page).getByRole('combobox', { name: 'Count-in', exact: true });
-const countInModeSelect = (page: Page) =>
-  controls(page).getByRole('combobox', { name: 'When to count in' });
 
 interface Recording {
   statuses: string[];

@@ -28,21 +28,21 @@ import {
   barCursorBox,
   barNumber,
   boxOf,
-  controls,
+  contains,
   cursorBarPoint,
   expectedLayout,
   nextBarPoint,
   openFixture,
   playButton,
+  recordedStatuses,
+  recordStatuses,
   scoreBox,
   scrollScoreToCursor,
-  scrollScoreToStart,
   speedSlider,
   status,
   tapAndWaitForBar,
   viewport,
   windowScrollSettled,
-  type Box,
   type Point,
 } from './playerPage';
 
@@ -52,9 +52,6 @@ import {
 const bpm = (page: Page) => page.getByTestId('jam-bpm');
 const speed = (page: Page) => page.getByTestId('jam-speed');
 const barsHint = (page: Page) => page.getByTestId('loop-bars-hint');
-
-const contains = (box: Box, { x, y }: Point) =>
-  x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
 
 /** Whether some highlighted block covers the point. */
 async function highlighted(page: Page, point: Point): Promise<boolean> {
@@ -74,16 +71,45 @@ async function putCursorOnBar2(page: Page): Promise<void> {
   await scrollScoreToCursor(page);
 }
 
-/** Samples the current bar for `ms` while the song plays. */
-async function barsPlayedFor(page: Page, ms: number): Promise<Set<number>> {
-  const seen = new Set<number>();
+/** Reads the current bar every 50 ms for `ms` and gives the bars in the order they came up. */
+async function barSequenceFor(page: Page, ms: number): Promise<number[]> {
+  const sequence: number[] = [];
   const started = Date.now();
   while (Date.now() - started < ms) {
-    seen.add(await barNumber(page));
-    await page.waitForTimeout(100);
+    const bar = await barNumber(page);
+    if (sequence.at(-1) !== bar) sequence.push(bar);
+    await page.waitForTimeout(50);
   }
-  return seen;
+  return sequence;
 }
+
+/** Every bar the status line shows over `ms` while the song plays. */
+const barsPlayedFor = async (page: Page, ms: number) => new Set(await barSequenceFor(page, ms));
+
+/** A tap as the device makes it: a finger on the phone and tablet projects, a mouse click on desktop. */
+async function tapScore(page: Page, point: Point, touch: boolean): Promise<void> {
+  if (touch) await page.touchscreen.tap(point.x, point.y);
+  else await page.mouse.click(point.x, point.y);
+}
+
+/** Taps the bar after the cursor's (jam mode) and waits for the cursor to get there. */
+async function seekToNextBar(page: Page): Promise<number> {
+  const from = await barNumber(page);
+  await scrollScoreToCursor(page);
+  const next = await nextBarPoint(page);
+  const landed = await tapAndWaitForBar(page, next, from);
+  await expect.poll(async () => contains(await barCursorBox(page), next)).toBe(true);
+  return landed;
+}
+
+/** The bar and the big BPM readout, read in one go so they belong to the same moment. */
+const barAndBpm = (page: Page) =>
+  page.evaluate(() => {
+    const text = (testId: string) =>
+      document.querySelector(`[data-testid="${testId}"]`)?.textContent ?? '';
+    const bar = /Bar (\d+) of/.exec(text('player-status'))?.[1];
+    return { bar: Number(bar), bpm: text('jam-bpm') };
+  });
 
 test('tap the first bar, then the last: the bars are highlighted and saved as a loop', async ({
   user,
@@ -458,68 +484,6 @@ test('the loop panel is a bottom sheet on a phone and a side panel from a tablet
   }
 });
 
-// --- Added by the Unit 08 Test stage ---
-
-/** Reads the current bar every 50 ms for `ms` and gives the bars in the order they came up. */
-async function barSequenceFor(page: Page, ms: number): Promise<number[]> {
-  const sequence: number[] = [];
-  const started = Date.now();
-  while (Date.now() - started < ms) {
-    const bar = await barNumber(page);
-    if (sequence.at(-1) !== bar) sequence.push(bar);
-    await page.waitForTimeout(50);
-  }
-  return sequence;
-}
-
-/** A tap as the device makes it: a finger on the phone and tablet projects, a mouse click on desktop. */
-async function tapScore(page: Page, point: Point, touch: boolean): Promise<void> {
-  if (touch) await page.touchscreen.tap(point.x, point.y);
-  else await page.mouse.click(point.x, point.y);
-}
-
-/** Taps the bar after the cursor's (jam mode) and waits for the cursor to get there. */
-async function seekToNextBar(page: Page): Promise<number> {
-  const from = await barNumber(page);
-  await scrollScoreToCursor(page);
-  const next = await nextBarPoint(page);
-  const landed = await tapAndWaitForBar(page, next, from);
-  await expect.poll(async () => contains(await barCursorBox(page), next)).toBe(true);
-  return landed;
-}
-
-interface StatusWindow {
-  __drumPalPlayer?: { getSnapshot(): { status: string }; subscribe(listener: () => void): void };
-  __statuses?: string[];
-}
-
-/** Records every status the player goes through from now on, starting with the one it is in. */
-async function recordStatuses(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const debug = window as unknown as StatusWindow;
-    const player = debug.__drumPalPlayer;
-    if (!player) throw new Error('No player on window.__drumPalPlayer');
-    const statuses = [player.getSnapshot().status];
-    debug.__statuses = statuses;
-    player.subscribe(() => {
-      const { status } = player.getSnapshot();
-      if (statuses.at(-1) !== status) statuses.push(status);
-    });
-  });
-}
-
-const recordedStatuses = (page: Page) =>
-  page.evaluate(() => (window as unknown as StatusWindow).__statuses ?? []);
-
-/** The bar and the big BPM readout, read in one go so they belong to the same moment. */
-const barAndBpm = (page: Page) =>
-  page.evaluate(() => {
-    const text = (testId: string) =>
-      document.querySelector(`[data-testid="${testId}"]`)?.textContent ?? '';
-    const bar = /Bar (\d+) of/.exec(text('player-status'))?.[1];
-    return { bar: Number(bar), bpm: text('jam-bpm') };
-  });
-
 test('a loop across the tempo change opens on another device with BPM from its first bar, and keeps it past the change', async ({
   user,
   page,
@@ -871,65 +835,4 @@ test('a finger dragged across the score scrolls it: it picks no bars and never s
   await expect(lastBarField(page)).toHaveValue('');
   expect(await highlightBoxes(page)).toEqual([]);
   await expect(status(page)).toHaveText('Bar 2 of 16');
-});
-
-// 08 QA issue 1: the phone's sheet used to stay open over the counter, and at
-// every size the score stayed on bar 1 until the downbeat.
-test('Play loop with a count-in: the counter is in the clear and the loop’s first bar is on screen', async ({
-  user,
-  page,
-}) => {
-  await openFixture(page, user, 'groove-120', 'Groove 120');
-  // Half speed, so the two-bar count-in lasts eight seconds: time to measure during it.
-  await speedSlider(page).fill('50');
-  await saveNewLoop(page, { name: 'Late fill', firstBar: 13, lastBar: 14 });
-  await controls(page)
-    .getByRole('combobox', { name: 'Count-in', exact: true })
-    .selectOption('2 bars');
-
-  // Back to the top of the song, as a user who has just been playing something else.
-  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
-  await page.getByRole('button', { name: 'Back to start' }).click();
-  await expect(status(page)).toHaveText('Bar 1 of 16');
-  await scrollScoreToStart(page);
-
-  await openLoopPanel(page);
-  await playLoopButton(page, 'Late fill').click();
-  await expect(status(page)).toHaveText('Bar 13 of 16 · Counting in…');
-  const beat = page.getByTestId('count-in-beat');
-  await expect(beat).toBeVisible();
-  await windowScrollSettled(page);
-
-  const overlaps = (a: Box, b: Box) =>
-    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-
-  // The whole number is in the window, and the loop panel is not over any of it.
-  await expect(beat).toBeInViewport({ ratio: 1 });
-  const panel = await boxOf(loopPanel(page), 'loop panel');
-  expect(overlaps(await boxOf(beat, 'count-in number'), panel)).toBe(false);
-  if (expectedLayout(page) === 'horizontal') {
-    // The sheet closed itself, and its header says which loop is coming.
-    await expect(loopPanel(page).locator('button[aria-controls]')).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    );
-    await expect(loopPanel(page)).toContainText('Loop: Late fill');
-  }
-
-  // The loop's first bar is there to be read during the count-in: the start of the
-  // highlight is inside the score box, in the window, and clear of the panel.
-  const frame = await scoreBox(page);
-  const [first] = await highlightBoxes(page);
-  if (!first) throw new Error('No highlight');
-  const firstBarStart = { x: first.x + 20, y: first.y + first.height / 2 };
-  expect(contains(frame, firstBarStart)).toBe(true);
-  expect(contains(panel, firstBarStart)).toBe(false);
-  const size = page.viewportSize();
-  if (!size) throw new Error('No viewport size');
-  expect(contains({ x: 0, y: 0, ...size }, firstBarStart)).toBe(true);
-  // Still counting: all of that was measured before the downbeat.
-  await expect(status(page)).toContainText('Counting in');
-
-  await playButton(page).click();
-  await expect(playButton(page)).toHaveText('Play');
 });

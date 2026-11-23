@@ -1,14 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { PlayerService } from '@/features/player/PlayerService';
 import { resetFakeSupabase } from '@/test/fakeSupabase';
-import {
-  LOOP_SONG_ID,
-  loopPlayer,
-  loopRow,
-  serveLoopTable,
-  startOfBar,
-  usePlayerSnapshot,
-} from '@/test/loopPlayer';
+import { startOfBar } from '@/test/fakePlayerEngine';
+import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
+import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import type { Loop } from './loopForm';
 import { loopKeys } from './loopKeys';

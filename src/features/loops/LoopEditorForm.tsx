@@ -11,6 +11,7 @@ import {
   loopFormValues,
   parseLoopForm,
   type Loop,
+  type LoopBarFields,
   type LoopFormErrors,
   type LoopFormValues,
 } from './loopForm';
@@ -45,7 +46,7 @@ export function LoopEditorForm({
   editor: LoopEditor;
   player: PlayerService | null;
   snapshot: PlayerSnapshot;
-  onBarsChange: (bars: Partial<Pick<LoopFormValues, 'startBar' | 'endBar'>>) => void;
+  onBarsChange: (bars: Partial<LoopBarFields>) => void;
   onSaved: (saved: Loop) => void;
   onCancel: () => void;
 }) {
@@ -80,7 +81,7 @@ export function LoopEditorForm({
     touched();
   };
 
-  const editBars = (bars: Partial<Pick<LoopFormValues, 'startBar' | 'endBar'>>) => {
+  const editBars = (bars: Partial<LoopBarFields>) => {
     if (saving) return;
     onBarsChange(bars);
     touched();

@@ -60,6 +60,9 @@ export interface LoopFormValues {
   targetPercent: string;
 }
 
+/** The two bar fields, which the score can fill in as well as the keyboard. */
+export type LoopBarFields = Pick<LoopFormValues, 'startBar' | 'endBar'>;
+
 export type LoopFormErrors = Partial<Record<'name' | 'bars' | 'targetPercent', string>>;
 
 export const EMPTY_LOOP_FORM: LoopFormValues = {
@@ -92,7 +95,7 @@ export function parseBarNumber(text: string): number | null {
  * in a song of `barCount` bars. What the score highlights while the form is open.
  */
 export function formBarRange(
-  values: Pick<LoopFormValues, 'startBar' | 'endBar'>,
+  values: LoopBarFields,
   barCount: number,
 ): { startBar: number; endBar: number } | null {
   const startBar = parseBarNumber(values.startBar);

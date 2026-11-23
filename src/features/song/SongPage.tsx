@@ -154,38 +154,21 @@ function SongPlayer({
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <PlayerStatusLine snapshot={snapshot} />
-            <button
-              type="button"
-              // From md the panel is a column beside the score; on a phone the sheet has its own header.
-              className={`hidden md:inline-flex md:items-center ${loopPanel.open ? pressedButtonClass : buttonClass}`}
-              aria-expanded={loopPanel.open}
-              aria-controls={loopPanel.bodyId}
-              onClick={() => setLoopPanelOpen(!loopPanel.open)}
-            >
-              {loopPanel.open ? 'Hide loops' : 'Show loops'}
-            </button>
+            <LoopPanelToggle
+              open={loopPanel.open}
+              panelBodyId={loopPanel.bodyId}
+              onOpenChange={setLoopPanelOpen}
+            />
           </div>
           {practice.activeLoop && (
             <ActiveLoopLine loop={practice.activeLoop} onExit={practice.exitLoop} />
           )}
-          {/* The counter covers the score box without scrolling with what's inside it. */}
-          <div className="relative">
-            <CountInCounter snapshot={snapshot} />
-            {/* Both layouts scroll inside this box, so the cursor's auto-scroll is one code path. */}
-            <div
-              ref={scrollRef}
-              data-testid="score-viewport"
-              // Hidden, not unmounted: alphaTab keeps its elements until the player is disposed.
-              hidden={nothingToShow}
-              // jam-score: the cursor, highlight and tap styles in index.css. The bottom scroll
-              // margin keeps the box clear of the phone's fixed tab bar and the loop sheet's
-              // header above it when playback scrolls it into view (useJamMode sets the top
-              // one from the sticky bar's height).
-              className="jam-score relative h-[60dvh] scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-lg bg-white text-black md:scroll-mb-4"
-            >
-              <div ref={scoreRef} />
-            </div>
-          </div>
+          <ScoreBox
+            scrollRef={scrollRef}
+            scoreRef={scoreRef}
+            snapshot={snapshot}
+            hidden={nothingToShow}
+          />
         </div>
         <LoopPanel
           songId={songId}
@@ -197,6 +180,66 @@ function SongPlayer({
           onOpenChange={setLoopPanelOpen}
           bodyId={loopPanel.bodyId}
         />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Shows or hides the loop panel from 768 px, where it is a column beside the
+ * score. Hidden on a phone: the sheet has its own header there.
+ */
+function LoopPanelToggle({
+  open,
+  panelBodyId,
+  onOpenChange,
+}: {
+  open: boolean;
+  panelBodyId: string;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`hidden md:inline-flex md:items-center ${open ? pressedButtonClass : buttonClass}`}
+      aria-expanded={open}
+      aria-controls={panelBodyId}
+      onClick={() => onOpenChange(!open)}
+    >
+      {open ? 'Hide loops' : 'Show loops'}
+    </button>
+  );
+}
+
+/** The scrolling box alphaTab renders the score into, with the count-in counter over it. */
+function ScoreBox({
+  scrollRef,
+  scoreRef,
+  snapshot,
+  hidden,
+}: {
+  scrollRef: Ref<HTMLDivElement>;
+  scoreRef: Ref<HTMLDivElement>;
+  snapshot: PlayerSnapshot;
+  hidden: boolean;
+}) {
+  return (
+    // The counter covers the score box without scrolling with what's inside it.
+    <div className="relative">
+      <CountInCounter snapshot={snapshot} />
+      {/* Both layouts scroll inside this box, so the cursor's auto-scroll is one code path. */}
+      <div
+        ref={scrollRef}
+        data-testid="score-viewport"
+        // Hidden, not unmounted: alphaTab keeps its elements until the player is disposed.
+        hidden={hidden}
+        // jam-score: the cursor, highlight and tap styles in index.css. The bottom scroll
+        // margin keeps the box clear of the phone's fixed tab bar and the loop sheet's
+        // header above it when playback scrolls it into view (useJamMode sets the top
+        // one from the sticky bar's height).
+        className="jam-score relative h-[60dvh] scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-lg bg-white text-black md:scroll-mb-4"
+      >
+        <div ref={scoreRef} />
       </div>
     </div>
   );

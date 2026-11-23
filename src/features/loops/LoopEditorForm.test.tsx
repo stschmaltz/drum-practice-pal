@@ -4,13 +4,8 @@ import userEvent from '@testing-library/user-event';
 import type { PlayerService } from '@/features/player/PlayerService';
 import { LOOP_NAME_MAX_LENGTH } from '@/lib/schema';
 import { resetFakeSupabase } from '@/test/fakeSupabase';
-import {
-  LOOP_SONG_ID,
-  loopPlayer,
-  loopRow,
-  serveLoopTable,
-  usePlayerSnapshot,
-} from '@/test/loopPlayer';
+import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
+import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
 import { testQueryClient, wrapperFor } from '@/test/render';
 import type { Loop } from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';

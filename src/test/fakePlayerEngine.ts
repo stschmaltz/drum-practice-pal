@@ -25,6 +25,9 @@ export function straightBars(count: number): BarTicks[] {
   }));
 }
 
+/** Bar `barNumber`'s start tick in a song of 4/4 bars played straight through. */
+export const startOfBar = (barNumber: number) => (barNumber - 1) * TICKS_PER_BAR;
+
 /** Bars of 4/4 in the order they play (1-based numbers), for a song whose repeats play some twice. */
 export function barsInPlayOrder(barNumbers: readonly number[]): BarTicks[] {
   return barNumbers.map((barNumber, position) => ({
@@ -73,8 +76,9 @@ export class FakePlayerEngine implements PlayerEngine {
 
   /**
    * What alphaTab does after a successful load of a song with `barCount`
-   * straight bars (or `bars`, for a song whose repeats play some twice). Every bar is 4/4 at 120 BPM unless `meter`, `barMeters` or
-   * `barTempos` says otherwise.
+   * straight bars (or `bars`, for a song whose repeats play some twice).
+   * Every bar is 4/4 at 120 BPM unless `meter`, `barMeters` or `barTempos`
+   * says otherwise.
    */
   finishLoading({
     barCount = 16,

@@ -502,3 +502,59 @@ Retaken, overwriting the old shots: `phone-120-count-in-play-loop.png`, `phone-1
 - `npm run check`: green after the notes were formatted. 78 test files, 3087 tests.
 - `npm run e2e`: green. 294 tests: 280 passed, 14 skipped (the same size-specific skips as the Test stage).
 - `npm run test:db`: not run; nothing in the database or `tests/db` changed.
+
+## Readability
+
+No behaviour changed: the app's markup, classes, copy, queries and player calls are what they were, and the migration is untouched. The work was splitting three long functions, and bringing the tests of four stages (Build, Test, the fix round's Build and its Test) back to one set of helpers and one file per subject.
+
+**App code**
+
+- `alphaTabEngine.ts`: `createAlphaTabEngine` had grown the pointer handling, the highlight layer and the scroll inline. They are now three functions in the same file that take the element and a `staffSystems()` getter for alphaTab's bounds: `watchScorePointer` (returns its own teardown), `createHighlightLayer` (`show`, `draw`) and `scrollBoxToBar`. The factory is wiring again. Same listeners, same order of teardown.
+- `LoopPanel.tsx`: `LoopPanelBody` is split into `DeletedLoopNotice` and `ActiveLoopCard`, beside the existing `LoopList`, `LoopListItem` and `ConfirmDelete`; the "Play loop" handler has a name (`playLoop`) in place of an inline closure.
+- `SongPage.tsx`: `SongPlayer`'s JSX is split into `LoopPanelToggle` and `ScoreBox` in the same file, as the page's other parts already were.
+- `loopForm.ts` exports `LoopBarFields`; `useLoopPractice.ts` and `LoopEditorForm.tsx` had each spelled out `Pick<LoopFormValues, 'startBar' | 'endBar'>`.
+- `useLoopPanelOpen.ts`: the two "no `matchMedia` in jsdom" branches share `mediaMatches(query, withoutMatchMedia)`.
+- Two comments said the "Show loops" toggle is in the sticky bar; it is beside the status line.
+
+**Test helpers**
+
+- `src/test/loopTable.ts` (new): `loopRow` and the in-memory loops table, moved out of `loopPlayer.ts`. The table is now `loopTable(rows)` with an `answer(call)` method, and `serveLoopTable(rows)` is that behind `queryResult`. `SongPage.test.tsx` had its own copy of both from the Build stage (`loopRow`, `serveLoops`, `loopQueries`); it uses the shared table. `loopsApi.test.ts` and `useLoops.test.tsx` had a third and fourth copy of the row builder.
+- `src/test/loopPlayer.ts` keeps the player (`loopPlayer`, `usePlayerSnapshot`).
+- `startOfBar(barNumber)` is in `src/test/fakePlayerEngine.ts`; four files each defined it, as `startOf` or `startOfBar`.
+- `LoopPanel.test.tsx`: the view has `press(name)`, `refetch()`, `enginePlays()` and `pause()`, and the file has `typeNewLoop`, `rename` and one `atWidth('phone' | 'wide')`. They replace 62 spelled-out button presses, three copies of the query invalidation, and two sets of `matchMedia` stubs that the two phone-sheet describes had each defined. Those two describes are one.
+- `alphaTabEngine.pointer.test.ts`: the two "scrolling a bar into view" describes had the same box setup twice (`scrolledTo`, `boxScrolledTo`); one helper with `{ inset, border }`, one describe.
+- e2e: `contains`, `overlaps`, `countInSelect`, `countInModeSelect`, `recordStatuses` and `recordedStatuses` are in `playerPage.ts`. `loops.spec.ts`, `loop-scroll.spec.ts` and `count-in.spec.ts` had two or three copies of each. `loops.spec.ts`'s helpers are together at the top (they were under an "Added by the Test stage" divider mid-file), and its two bar samplers are one (`barsPlayedFor` is the set of `barSequenceFor`). `openLoopPanel` / `closeLoopPanel` use `loopPanelToggle`.
+
+**Test files merged, and how the counts changed**
+
+Unit and component tests: 3087 to 3073 (78 files to 76). Every removed test was a case another test in the merged file states in full; none was the only proof of anything.
+
+| Merge                                                                                               | Before  | After   | Removed, and what still covers it                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------------------------------------------------------- | ------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PlayerService.showBar.edges.test.ts` into `PlayerService.showBar.test.ts`                          | 15 + 30 | 36      | 9 worked examples: bar as a 0-based index, bars 0 / 17 / -3, "only scrolls", no-op while playing, scrolls during a count-in, `seekToBar` doesn't scroll, one repeat. The state table, the bars-the-song-lacks table, "what does not scroll" and the three-pass repeat test say each of them with more checked. "Before load, or after dispose" kept its dispose half, which nothing else had |
+| `barScroll.edges.test.ts` into `barScroll.test.ts`                                                  | 18 + 23 | 39      | "forgives a fraction of a pixel" (the 1 px tolerance table) and "moves a bar that is only partly on show" (cut by the right edge, then the left)                                                                                                                                                                                                                                             |
+| "positions around a seek" from `PlayerService.loops.test.ts` into `PlayerService.seekGuard.test.ts` | 33 + 21 | 26 + 27 | "gives up waiting after `SEEK_SETTLE_MS`", which the guard's own file tells to the millisecond (499 ms dropped, 500 ms believed)                                                                                                                                                                                                                                                             |
+| `LoopPanel.test.tsx`, the two phone-sheet describes                                                 | 38      | 36      | "the sheet stays open when a loop is switched or restarted while playing" and "from 768 px Play loop leaves it open": the fix round's Test stage wrote a fuller test of each (no restart, no scroll; starting, switching, restarting and a count-in)                                                                                                                                         |
+
+e2e: 294 runs to 291. `loops.spec.ts`'s "Play loop with a count-in: the counter is in the clear and the loop's first bar is on screen" (x 3 sizes) is removed. `loop-scroll.spec.ts`'s two-bar test has the same setup and press and checks the same things on every beat rather than once: the number in the window with no panel over it, the sheet closed and named on a phone, the loop's first bar in the score box and in the window.
+
+**AGENTS.md**
+
+The Loops section is reordered (app, then tests, then e2e) and its two overlapping lines about the phone sheet and the two about e2e helpers are merged. New: where the engine's DOM work goes (`watchScorePointer` and friends), `loopTable.ts`, `startOfBar`, the shared e2e helpers, and a rule that a later stage adds its cases to the subject's existing test file rather than a `*.edges.test.ts` beside it.
+
+**Left as it was**
+
+- `tests/db/loops-grants.test.ts` (Test) overlaps `constraints.test.ts` and `rls.test.ts` (Build) on blank names and on the server-owned columns. Not merged: each asserts through a different client and row, and telling a true duplicate from a near one there wants the Review stage's read of the migration.
+- `PlayerService.loops.test.ts` keeps its own small `setup`, like `PlayerService.test.ts` from Unit 05; `setupCountIn` would do, but the file needs `finishLoading({ bars })` before anything else.
+- `LoopEditorForm.tsx`'s `Field` and `LoopSpeedControl.tsx`'s `CommitField` share a label-over-input shape, and the "practicing" card and the "Looping" line share their sky border classes. Unit 12 replaces these classes with tokens; a shared class string now would be renamed then.
+- `targetNote` in `LoopEditorForm.tsx` parses the target percent more loosely than `parseLoopForm` (it shows a BPM for 300%, clamped, where the form then refuses it). Using the strict parser would change what is shown, so it stays.
+- `ok` / `fail` / `deferred` are still defined per test file, as in Units 03 to 05.
+- The spike, the migration, and every open issue in the QA sections.
+
+**Results**
+
+|                   | Before                             | After                                                             |
+| ----------------- | ---------------------------------- | ----------------------------------------------------------------- |
+| `npm run check`   | green, 78 files, 3087 tests        | green, 76 files, 3073 tests                                       |
+| `npm run e2e`     | green, 294: 280 passed, 14 skipped | green, 291: 277 passed, 14 skipped                                |
+| `npm run test:db` | not run                            | not run: nothing in `tests/db`, `scripts/` or `supabase/` changed |

@@ -6,27 +6,14 @@ import {
   type FakeResult,
   type QueryCall,
 } from '@/test/fakeSupabase';
-import { LOOP_SELECT, type Loop, type NewLoop } from './loopForm';
+import { LOOP_SONG_ID, loopRow } from '@/test/loopTable';
+import { LOOP_SELECT, type NewLoop } from './loopForm';
 import { createLoop, deleteLoop, fetchLoops, updateLoop } from './loopsApi';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
 const USER = 'user-1';
-const SONG = 'song-1';
-
-const loop = (id: string, overrides: Partial<Loop> = {}): Loop => ({
-  id,
-  song_id: SONG,
-  name: `Loop ${id}`,
-  start_bar: 5,
-  end_bar: 8,
-  speed_ratio: 1,
-  target_ratio: null,
-  status: 'active',
-  last_practiced_at: null,
-  created_at: '2026-11-20T10:00:00Z',
-  ...overrides,
-});
+const SONG = LOOP_SONG_ID;
 
 const ok = (data: unknown): FakeResult => ({ data, error: null });
 const fail = (message: string, code?: string): FakeResult => ({
@@ -44,9 +31,9 @@ beforeEach(() => {
 
 describe('fetchLoops', () => {
   it("reads the song's loops, scoped to the user, in a total order", async () => {
-    queryResult.mockResolvedValueOnce(ok([loop('a'), loop('b')]));
+    queryResult.mockResolvedValueOnce(ok([loopRow('a'), loopRow('b')]));
 
-    expect(await fetchLoops(USER, SONG)).toEqual([loop('a'), loop('b')]);
+    expect(await fetchLoops(USER, SONG)).toEqual([loopRow('a'), loopRow('b')]);
 
     const [call] = calls();
     expect(call!.table).toBe('loops');
@@ -63,8 +50,8 @@ describe('fetchLoops', () => {
   });
 
   it('reads every page, not only the first', async () => {
-    const fullPage = Array.from({ length: PAGE_SIZE }, (_, i) => loop(`p1-${i}`));
-    queryResult.mockResolvedValueOnce(ok(fullPage)).mockResolvedValueOnce(ok([loop('last')]));
+    const fullPage = Array.from({ length: PAGE_SIZE }, (_, i) => loopRow(`p1-${i}`));
+    queryResult.mockResolvedValueOnce(ok(fullPage)).mockResolvedValueOnce(ok([loopRow('last')]));
 
     const loops = await fetchLoops(USER, SONG);
 
@@ -74,7 +61,7 @@ describe('fetchLoops', () => {
   });
 
   it('throws when a page fails, instead of returning what it has', async () => {
-    const fullPage = Array.from({ length: PAGE_SIZE }, (_, i) => loop(`p1-${i}`));
+    const fullPage = Array.from({ length: PAGE_SIZE }, (_, i) => loopRow(`p1-${i}`));
     queryResult.mockResolvedValueOnce(ok(fullPage)).mockResolvedValueOnce(fail('timeout'));
     await expect(fetchLoops(USER, SONG)).rejects.toMatchObject({ message: 'timeout' });
   });
@@ -92,7 +79,11 @@ describe('createLoop', () => {
   };
 
   it('inserts the loop for the user and returns the saved row', async () => {
-    const saved = loop('new-id', { name: 'Chorus fill', speed_ratio: 0.708333, target_ratio: 1 });
+    const saved = loopRow('new-id', {
+      name: 'Chorus fill',
+      speed_ratio: 0.708333,
+      target_ratio: 1,
+    });
     queryResult.mockResolvedValueOnce(ok(saved));
 
     expect(await createLoop(USER, newLoop)).toEqual(saved);
@@ -104,7 +95,7 @@ describe('createLoop', () => {
   });
 
   it('sends only columns a client may write', async () => {
-    queryResult.mockResolvedValueOnce(ok(loop('new-id')));
+    queryResult.mockResolvedValueOnce(ok(loopRow('new-id')));
     await createLoop(USER, newLoop);
     const [row] = opArgs(calls()[0]!, 'insert') as [Record<string, unknown>];
     expect(Object.keys(row).sort()).toEqual(
@@ -134,7 +125,7 @@ describe('createLoop', () => {
 
 describe('updateLoop', () => {
   it('sends only the changes, scoped to the loop and the user', async () => {
-    const saved = loop('a', { speed_ratio: 0.9 });
+    const saved = loopRow('a', { speed_ratio: 0.9 });
     queryResult.mockResolvedValueOnce(ok(saved));
 
     expect(await updateLoop(USER, 'a', { speed_ratio: 0.9 })).toEqual(saved);

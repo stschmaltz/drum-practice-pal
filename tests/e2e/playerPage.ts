@@ -1,7 +1,8 @@
 /// <reference lib="dom" />
 /**
  * Locators and steps for the song page's player, shared by player.spec.ts,
- * jam.spec.ts, count-in.spec.ts, drums-only.spec.ts and loops.spec.ts.
+ * jam.spec.ts, count-in.spec.ts, drums-only.spec.ts, loops.spec.ts and
+ * loop-scroll.spec.ts.
  */
 import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
@@ -122,6 +123,14 @@ export async function scrollScoreToCursor(page: Page): Promise<void> {
   });
 }
 
+/** Whether the point is inside the box, edges included. */
+export const contains = (box: Box, { x, y }: Point) =>
+  x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+
+/** Whether the two boxes share any area. */
+export const overlaps = (a: Box, b: Box) =>
+  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
 /** Polls `read` until it gives the same value twice running, and returns that value. */
 export async function untilStill<T>(read: () => Promise<T>): Promise<T> {
   const reads: T[] = [];
@@ -140,3 +149,35 @@ export const windowScrollSettled = (page: Page) =>
 
 export const scrollScoreToStart = (page: Page) =>
   viewport(page).evaluate((box) => box.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
+
+export const countInSelect = (page: Page) =>
+  controls(page).getByRole('combobox', { name: 'Count-in', exact: true });
+export const countInModeSelect = (page: Page) =>
+  controls(page).getByRole('combobox', { name: 'When to count in' });
+
+interface StatusWindow {
+  __drumPalPlayer?: { getSnapshot(): { status: string }; subscribe(listener: () => void): void };
+  __statuses?: string[];
+}
+
+/**
+ * Records every status the player goes through from now on, starting with
+ * the one it is in, through `window.__drumPalPlayer`. Read it back with
+ * `recordedStatuses`: a spec that says playback never stopped asserts on it.
+ */
+export async function recordStatuses(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const debug = window as unknown as StatusWindow;
+    const player = debug.__drumPalPlayer;
+    if (!player) throw new Error('No player on window.__drumPalPlayer');
+    const statuses = [player.getSnapshot().status];
+    debug.__statuses = statuses;
+    player.subscribe(() => {
+      const { status } = player.getSnapshot();
+      if (statuses.at(-1) !== status) statuses.push(status);
+    });
+  });
+}
+
+export const recordedStatuses = (page: Page) =>
+  page.evaluate(() => (window as unknown as StatusWindow).__statuses ?? []);

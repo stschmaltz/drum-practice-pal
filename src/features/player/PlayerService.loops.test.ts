@@ -1,11 +1,17 @@
 /**
  * What Unit 08's loops need from the service on top of range and looping
- * (PlayerService.test.ts): the highlight, drags, positions around a seek, and
- * a song whose repeats play some bars twice.
+ * (PlayerService.test.ts): the highlight, drags, and a song whose repeats
+ * play some bars twice. Positions around a seek are in
+ * PlayerService.seekGuard.test.ts, scrolling in PlayerService.showBar.test.ts.
  */
-import { barsInPlayOrder, FakePlayerEngine, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
+import {
+  barsInPlayOrder,
+  FakePlayerEngine,
+  startOfBar,
+  TICKS_PER_BAR,
+} from '@/test/fakePlayerEngine';
 import { DEFAULT_PLAYER_OPTIONS } from './playerOptions';
-import { isSameBarRange, PlayerService, SEEK_SETTLE_MS } from './PlayerService';
+import { isSameBarRange, PlayerService } from './PlayerService';
 import type { WakeLockControl } from './wakeLock';
 
 interface SetupOptions {
@@ -28,9 +34,6 @@ function setup({ loaded = true, finishLoading }: SetupOptions = {}) {
   engine.loadScore.mockClear();
   return { engine, service };
 }
-
-/** Bar `barNumber`'s start in a song played straight through. */
-const startOf = (barNumber: number) => (barNumber - 1) * TICKS_PER_BAR;
 
 describe('isSameBarRange', () => {
   it.each([
@@ -86,8 +89,8 @@ describe('highlight', () => {
       highlight: { startBar: 9, endBar: 12 },
     });
     expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
-      startTick: startOf(1),
-      endTick: startOf(5),
+      startTick: startOfBar(1),
+      endTick: startOfBar(5),
     });
   });
 
@@ -168,101 +171,6 @@ describe('barsDragged', () => {
     disposed.engine.fire('barsDragged', { fromBarIndex: 0, toBarIndex: 1, done: true });
 
     expect(drags).not.toHaveBeenCalled();
-  });
-});
-
-describe('positions around a seek', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  /** A song playing in bar 12. */
-  function playingAtBar12() {
-    const ctx = setup();
-    ctx.service.play();
-    ctx.engine.fire('stateChanged', { playing: true });
-    ctx.engine.fire('position', { tick: startOf(12) + 100 });
-    const barChanges: (number | null)[] = [];
-    ctx.service.on('barChanged', ({ barNumber }) => barChanges.push(barNumber));
-    const positions: number[] = [];
-    ctx.service.on('position', ({ tick }) => positions.push(tick));
-    return { ...ctx, barChanges, positions };
-  }
-
-  it('drops a position alphaTab posted before the seek, so the bar never flicks back', () => {
-    const { engine, service, barChanges, positions } = playingAtBar12();
-
-    service.seekToBar(3);
-    // Still on its way from the worker when the seek was made.
-    engine.fire('position', { tick: startOf(12) + 400 });
-    expect(service.getSnapshot().barNumber).toBe(3);
-
-    engine.fire('position', { tick: startOf(3) + 50 });
-    engine.fire('position', { tick: startOf(4) + 10 });
-
-    expect(barChanges).toEqual([3, 4]);
-    expect(positions).toEqual([startOf(3) + 50, startOf(4) + 10]);
-  });
-
-  it('believes any position again once one has arrived in the bar asked for', () => {
-    const { engine, service, barChanges } = playingAtBar12();
-    service.seekToBar(3);
-    engine.fire('position', { tick: startOf(3) });
-    // A loop wrap or the end of the song can take playback anywhere next.
-    engine.fire('position', { tick: startOf(12) });
-    expect(barChanges).toEqual([3, 12]);
-  });
-
-  it('gives up waiting after SEEK_SETTLE_MS and follows the engine', () => {
-    const { engine, service, barChanges } = playingAtBar12();
-    service.seekToBar(3);
-    engine.fire('position', { tick: startOf(9) });
-    expect(service.getSnapshot().barNumber).toBe(3);
-
-    vi.advanceTimersByTime(SEEK_SETTLE_MS);
-    engine.fire('position', { tick: startOf(9) + 200 });
-
-    expect(service.getSnapshot().barNumber).toBe(9);
-    expect(barChanges).toEqual([3, 9]);
-  });
-
-  it('a newer seek replaces the bar being waited for', () => {
-    const { engine, service, barChanges } = playingAtBar12();
-    service.seekToBar(3);
-    service.seekToBar(7);
-    // The echo of the first seek is now the stale one.
-    engine.fire('position', { tick: startOf(3) });
-    engine.fire('position', { tick: startOf(7) });
-    expect(barChanges).toEqual([3, 7]);
-  });
-
-  it('Back to start is believed at once, even right after a seek', () => {
-    const { engine, service } = playingAtBar12();
-    service.seekToBar(9);
-    service.stop();
-    engine.fire('stateChanged', { playing: false });
-    engine.fire('position', { tick: 0 });
-    expect(service.getSnapshot().barNumber).toBe(1);
-  });
-
-  it('a new range is believed at once: alphaTab moves to its start itself', () => {
-    const { engine, service } = playingAtBar12();
-    service.seekToBar(9);
-    service.setRange({ startBar: 5, endBar: 8 });
-    engine.fire('position', { tick: startOf(5) });
-    expect(service.getSnapshot().barNumber).toBe(5);
-  });
-
-  it('a seek to the bar already playing changes nothing either way', () => {
-    const { engine, service, barChanges } = playingAtBar12();
-    service.seekToBar(12);
-    engine.fire('position', { tick: startOf(12) + 400 });
-    engine.fire('position', { tick: startOf(12) });
-    expect(barChanges).toEqual([]);
-    expect(service.getSnapshot().barNumber).toBe(12);
   });
 });
 

@@ -509,21 +509,30 @@ describe('scrolling a bar into view', () => {
 
   /**
    * A 200 x 100 score box at (50, 60) in the window, scrolled to (left, top),
-   * with alphaTab's surface `inset` px inside its content.
+   * with a border `border` px wide and alphaTab's surface `inset` px inside
+   * its content.
    */
-  function scrolledTo(left: number, top: number, inset = { x: 0, y: 0 }) {
+  function scrolledTo(left: number, top: number, { inset = { x: 0, y: 0 }, border = 0 } = {}) {
     const view = mounted();
     const box = view.element.parentElement!;
     Object.defineProperty(box, 'clientWidth', { value: BOX.width });
     Object.defineProperty(box, 'clientHeight', { value: BOX.height });
-    box.getBoundingClientRect = () => new DOMRect(BOX.x, BOX.y, BOX.width, BOX.height);
+    Object.defineProperty(box, 'clientLeft', { value: border });
+    Object.defineProperty(box, 'clientTop', { value: border });
+    box.getBoundingClientRect = () =>
+      new DOMRect(BOX.x, BOX.y, BOX.width + 2 * border, BOX.height + 2 * border);
     // Where the surface is in the window follows the box's scroll position, as in a browser.
     view.surface.getBoundingClientRect = () =>
-      new DOMRect(BOX.x + inset.x - box.scrollLeft, BOX.y + inset.y - box.scrollTop, 320, 200);
+      new DOMRect(
+        BOX.x + border + inset.x - box.scrollLeft,
+        BOX.y + border + inset.y - box.scrollTop,
+        320,
+        200,
+      );
     box.scrollLeft = left;
     box.scrollTop = top;
     const scroll = () => ({ left: box.scrollLeft, top: box.scrollTop });
-    return { ...view, scroll };
+    return { ...view, box, scroll };
   }
 
   it('leaves the box alone for a bar that is all on show', () => {
@@ -556,7 +565,7 @@ describe('scrolling a bar into view', () => {
   });
 
   it('allows for the surface starting inside the box’s content', () => {
-    const { engine, scroll } = scrolledTo(0, 0, { x: 4, y: 30 });
+    const { engine, scroll } = scrolledTo(0, 0, { inset: { x: 4, y: 30 } });
     engine.scrollToBar(3);
     expect(scroll()).toEqual({ left: 0, top: 130 });
   });
@@ -575,27 +584,6 @@ describe('scrolling a bar into view', () => {
     expect(taps).toEqual([]);
     expect(drags).toEqual([]);
   });
-});
-
-// Test stage, QA fix round 1: bars cut off by an edge, and what must leave the scroll alone.
-describe('scrolling a bar into view: bars cut off by an edge', () => {
-  /** A 200 x 100 score box at the window's origin, scrolled to (left, top). */
-  function boxScrolledTo(left: number, top: number, border = 0) {
-    const view = mounted();
-    const box = view.element.parentElement!;
-    Object.defineProperty(box, 'clientWidth', { value: 200 });
-    Object.defineProperty(box, 'clientHeight', { value: 100 });
-    Object.defineProperty(box, 'clientLeft', { value: border });
-    Object.defineProperty(box, 'clientTop', { value: border });
-    box.getBoundingClientRect = () => new DOMRect(0, 0, 200 + 2 * border, 100 + 2 * border);
-    view.surface.getBoundingClientRect = () =>
-      new DOMRect(border - box.scrollLeft, border - box.scrollTop, 320, 200);
-    box.scrollLeft = left;
-    box.scrollTop = top;
-    const scroll = () => ({ left: box.scrollLeft, top: box.scrollTop });
-    return { ...view, box, scroll };
-  }
-
   it.each([
     // Bar index 1 spans x 110 to 210 on the first line (y 20 to 100).
     ['cut off by the right edge', 1, { left: 0, top: 0 }, { left: 110, top: 0 }],
@@ -604,13 +592,13 @@ describe('scrolling a bar into view: bars cut off by an edge', () => {
     ['cut off by the bottom edge', 3, { left: 0, top: 40 }, { left: 0, top: 100 }],
     ['cut off by the top edge', 3, { left: 0, top: 130 }, { left: 0, top: 100 }],
   ])('a bar %s goes to the start of the box on that axis only', (_what, barIndex, from, to) => {
-    const { engine, scroll } = boxScrolledTo(from.left, from.top);
+    const { engine, scroll } = scrolledTo(from.left, from.top);
     engine.scrollToBar(barIndex);
     expect(scroll()).toEqual(to);
   });
 
   it('allows for the box’s border', () => {
-    const { engine, scroll } = boxScrolledTo(0, 0, 4);
+    const { engine, scroll } = scrolledTo(0, 0, { border: 4 });
     engine.scrollToBar(5);
     expect(scroll()).toEqual({ left: 210, top: 100 });
     // All on show now: asked again, it stays.
@@ -619,7 +607,7 @@ describe('scrolling a bar into view: bars cut off by an edge', () => {
   });
 
   it('scrolls at once, not smoothly, where the browser has Element.scrollTo', () => {
-    const { engine, box } = boxScrolledTo(0, 0);
+    const { engine, box } = scrolledTo(0, 0);
     const scrollTo = vi.fn();
     box.scrollTo = scrollTo;
     engine.scrollToBar(5);
@@ -632,20 +620,20 @@ describe('scrolling a bar into view: bars cut off by an edge', () => {
 
   it('a tap on a bar that is partly on show reports the bar and leaves the scroll alone', () => {
     // Bar index 1 is cut off by the right edge of the box.
-    const { tap, taps, scroll } = boxScrolledTo(0, 0);
-    tap({ x: 150, y: 60 });
+    const { tap, taps, scroll } = scrolledTo(0, 0);
+    tap({ x: BOX.x + 150, y: BOX.y + 60 });
     expect(taps).toEqual([{ barIndex: 1 }]);
     expect(scroll()).toEqual({ left: 0, top: 0 });
   });
 
   it('drawing a highlight scrolls nothing', () => {
-    const { engine, scroll } = boxScrolledTo(0, 0);
+    const { engine, scroll } = scrolledTo(0, 0);
     engine.setHighlight({ startBarIndex: 4, endBarIndex: 5 });
     expect(scroll()).toEqual({ left: 0, top: 0 });
   });
 
   it('scrolls nothing, and does not throw, when alphaTab has no surface yet', () => {
-    const { engine, surface, scroll } = boxScrolledTo(40, 10);
+    const { engine, surface, scroll } = scrolledTo(40, 10);
     surface.remove();
     expect(() => engine.scrollToBar(5)).not.toThrow();
     expect(scroll()).toEqual({ left: 40, top: 10 });

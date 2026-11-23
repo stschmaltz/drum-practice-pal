@@ -22,10 +22,15 @@ import {
 } from './loopsPage';
 import {
   barCursorBox,
-  controls,
+  contains,
+  countInModeSelect,
+  countInSelect,
   expectedLayout,
   openFixture,
+  overlaps,
   playButton,
+  recordedStatuses,
+  recordStatuses,
   scoreBox,
   scrollScoreToStart,
   speedSlider,
@@ -39,16 +44,8 @@ import {
 // box scrolls to the bar a count-in counts into, or a paused loop starts on.
 // Nothing here listens to audio; these check where things are on the page, and when.
 
-const countInSelect = (page: Page) =>
-  controls(page).getByRole('combobox', { name: 'Count-in', exact: true });
-const countInModeSelect = (page: Page) =>
-  controls(page).getByRole('combobox', { name: 'When to count in' });
-
 /** Measured positions are whole or half pixels; a bar this close to an edge is inside it. */
 const EDGE_PX = 2;
-
-const contains = (box: Box, { x, y }: Point) =>
-  x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
 
 /** Whether all of `inner` is inside `outer`. */
 const inside = (outer: Box, inner: Box) =>
@@ -56,9 +53,6 @@ const inside = (outer: Box, inner: Box) =>
   inner.y >= outer.y - EDGE_PX &&
   inner.x + inner.width <= outer.x + outer.width + EDGE_PX &&
   inner.y + inner.height <= outer.y + outer.height + EDGE_PX;
-
-const overlaps = (a: Box, b: Box) =>
-  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 /** Just inside the start of a highlight block: a point on the loop's first bar. */
 const startOf = (block: Box): Point => ({ x: block.x + 20, y: block.y + block.height / 2 });
@@ -289,29 +283,6 @@ for (const bars of [1, 2]) {
     await expect(playButton(page)).toHaveText('Play');
   });
 }
-
-interface StatusWindow {
-  __drumPalPlayer?: { getSnapshot(): { status: string }; subscribe(listener: () => void): void };
-  __statuses?: string[];
-}
-
-/** Records every status the player goes through from now on, starting with the one it is in. */
-async function recordStatuses(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const debug = window as unknown as StatusWindow;
-    const player = debug.__drumPalPlayer;
-    if (!player) throw new Error('No player on window.__drumPalPlayer');
-    const statuses = [player.getSnapshot().status];
-    debug.__statuses = statuses;
-    player.subscribe(() => {
-      const { status } = player.getSnapshot();
-      if (statuses.at(-1) !== status) statuses.push(status);
-    });
-  });
-}
-
-const recordedStatuses = (page: Page) =>
-  page.evaluate(() => (window as unknown as StatusWindow).__statuses ?? []);
 
 test('the panel after Play loop: closed on a phone and open from 768 px; reopened it has the playing loop and its speed, and switching or restarting leaves it open', async ({
   user,

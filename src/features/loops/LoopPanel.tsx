@@ -24,7 +24,7 @@ interface LoopPanelProps {
   loops: ReturnType<typeof useLoops>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** For the `aria-controls` of a toggle the page places elsewhere (the sticky bar, from 768 px). */
+  /** For the `aria-controls` of a toggle the page places elsewhere (beside the status line, from 768 px). */
   bodyId: string;
 }
 
@@ -45,6 +45,13 @@ export function LoopPanel({
   bodyId,
 }: LoopPanelProps) {
   const count = loops.data?.length ?? 0;
+
+  const playLoop = (loop: Loop) => {
+    // The sheet lies over the score and the count-in number; the press that starts
+    // a loop gives them back. Its header goes on naming the loop.
+    if (playLoopClosesPanel(loopPanelIsSheet(), snapshot.status)) onOpenChange(false);
+    practice.playLoop(loop);
+  };
 
   return (
     <aside
@@ -80,12 +87,7 @@ export function LoopPanel({
           snapshot={snapshot}
           practice={practice}
           loops={loops}
-          onPlayLoop={(loop) => {
-            // The sheet lies over the score and the count-in number; the press that starts
-            // a loop gives them back. Its header goes on naming the loop.
-            if (playLoopClosesPanel(loopPanelIsSheet(), snapshot.status)) onOpenChange(false);
-            practice.playLoop(loop);
-          }}
+          onPlayLoop={playLoop}
         />
       </div>
     </aside>
@@ -114,14 +116,7 @@ function LoopPanelBody({
 
   if (editor && barCount !== null) {
     if (editor.loopId !== null && !editedLoop) {
-      return (
-        <div className="flex flex-col items-start gap-3">
-          <p className="text-neutral-300">This loop has been deleted.</p>
-          <button type="button" className={buttonClass} onClick={practice.closeEditor}>
-            Back to loops
-          </button>
-        </div>
-      );
+      return <DeletedLoopNotice onBack={practice.closeEditor} />;
     }
     return (
       <LoopEditorForm
@@ -158,21 +153,13 @@ function LoopPanelBody({
         </button>
       </div>
       {activeLoop && (
-        <section
-          aria-label={`Practicing ${activeLoop.name}`}
-          className="flex flex-col gap-3 rounded-lg border border-sky-800 bg-sky-950/40 p-3"
-        >
-          <div className="flex flex-col gap-1">
-            <p className="font-semibold break-words">{activeLoop.name}</p>
-            <p className="text-sm text-neutral-300">
-              {barsLabel(activeLoop.start_bar, activeLoop.end_bar)}, repeating
-            </p>
-          </div>
-          <LoopSpeedControl songId={songId} loop={activeLoop} player={player} snapshot={snapshot} />
-          <button type="button" className={buttonClass} onClick={practice.exitLoop}>
-            Back to whole song
-          </button>
-        </section>
+        <ActiveLoopCard
+          songId={songId}
+          loop={activeLoop}
+          player={player}
+          snapshot={snapshot}
+          onExit={practice.exitLoop}
+        />
       )}
       <LoopList
         songId={songId}
@@ -183,6 +170,45 @@ function LoopPanelBody({
         onPlayLoop={onPlayLoop}
       />
     </div>
+  );
+}
+
+/** In place of the edit form when another device deleted the loop it was opened for. */
+function DeletedLoopNotice({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="flex flex-col items-start gap-3">
+      <p className="text-neutral-300">This loop has been deleted.</p>
+      <button type="button" className={buttonClass} onClick={onBack}>
+        Back to loops
+      </button>
+    </div>
+  );
+}
+
+/** The loop that is repeating, with its speed control and the way back to the whole song. */
+function ActiveLoopCard({
+  songId,
+  loop,
+  player,
+  snapshot,
+  onExit,
+}: Pick<LoopPanelProps, 'songId' | 'player' | 'snapshot'> & { loop: Loop; onExit: () => void }) {
+  return (
+    <section
+      aria-label={`Practicing ${loop.name}`}
+      className="flex flex-col gap-3 rounded-lg border border-sky-800 bg-sky-950/40 p-3"
+    >
+      <div className="flex flex-col gap-1">
+        <p className="font-semibold break-words">{loop.name}</p>
+        <p className="text-sm text-neutral-300">
+          {barsLabel(loop.start_bar, loop.end_bar)}, repeating
+        </p>
+      </div>
+      <LoopSpeedControl songId={songId} loop={loop} player={player} snapshot={snapshot} />
+      <button type="button" className={buttonClass} onClick={onExit}>
+        Back to whole song
+      </button>
+    </section>
   );
 }
 

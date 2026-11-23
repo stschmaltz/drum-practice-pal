@@ -7,7 +7,7 @@
 import * as alphaTab from '@coderline/alphatab';
 import { loadGuitarPro } from '@/features/library/parseScore';
 import { highlightRects, type BarIndexRange } from './barHighlight';
-import { barIndexAtPoint } from './barHitTest';
+import { barIndexAtPoint, type SystemBoundsLike } from './barHitTest';
 import { barBounds, scrollToShow } from './barScroll';
 import { barMeters } from './countIn';
 import type { BarTicks } from './barTicks';
@@ -38,7 +38,7 @@ export function createAlphaTabEngine({
 }: EngineMount): PlayerEngine {
   // destroy() aborts it, so leaving mid-load stops the download and never feeds a destroyed api.
   const soundFontDownload = new AbortController();
-  // alphaTab's own click handling is off (below), so taps are hit-tested here.
+  // alphaTab's own click handling is off (below), so taps are hit-tested in watchScorePointer.
   const taps = createEmitter<TapEvents>();
   const api = new alphaTab.AlphaTabApi(element, {
     // Without this, production builds look for fonts next to the lazy chunk
@@ -56,116 +56,20 @@ export function createAlphaTabEngine({
       scrollMode: alphaTab.ScrollMode.Continuous,
       // alphaTab's click handling seeks and selects ranges on mousedown, behind
       // PlayerService's back and on the first touch of a scroll. Taps come
-      // through onScoreClick instead, as the barTapped event.
+      // through watchScorePointer instead, as the barTapped event.
       enableUserInteraction: false,
     },
   });
 
-  /** The bar under a point in the window, or null outside every bar. */
-  const barIndexAt = (point: PointerPoint): number | null => {
-    const surface = element.querySelector('.at-surface');
-    if (!surface) return null;
-    const origin = surface.getBoundingClientRect();
-    return barIndexAtPoint(
-      api.boundsLookup?.staffSystems ?? [],
-      point.x - origin.left,
-      point.y - origin.top,
-    );
-  };
-
-  let press: Press | null = null;
-  // Where the last press went down, kept past its release for the click that follows it.
-  let lastDown: PointerPoint | null = null;
-
-  const onPointerDown = (event: PointerEvent) => {
-    if (!event.isPrimary || event.button !== 0) return;
-    const down = pointOf(event);
-    lastDown = down;
-    press = {
-      down,
-      barIndex: barIndexAt(down),
-      mouse: event.pointerType === 'mouse',
-      draggedTo: null,
-    };
-  };
-
-  /** Reports a mouse drag from the pressed bar as it reaches each new bar. */
-  const onPointerMove = (event: PointerEvent) => {
-    if (!press || !press.mouse || press.barIndex === null) return;
-    const now = pointOf(event);
-    if (press.draggedTo === null && !movedBeyondTap(press.down, now)) return;
-    // Over a margin or off the score, the drag stays on the last bar it reached.
-    const barIndex = barIndexAt(now) ?? press.draggedTo ?? press.barIndex;
-    if (barIndex === press.draggedTo) return;
-    press.draggedTo = barIndex;
-    taps.emit('barsDragged', { fromBarIndex: press.barIndex, toBarIndex: barIndex, done: false });
-  };
-
-  const onPointerUp = () => {
-    const released = press;
-    press = null;
-    if (!released || released.barIndex === null || released.draggedTo === null) return;
-    taps.emit('barsDragged', {
-      fromBarIndex: released.barIndex,
-      toBarIndex: released.draggedTo,
-      done: true,
-    });
-  };
-
-  const onPointerCancel = () => {
-    press = null;
-  };
-
-  // click, not pointerdown: browsers don't fire it after a pan, so scrolling the score never seeks.
-  // They do fire it after a mouse drag that ends on the score, which is not a tap.
-  const onScoreClick = (event: MouseEvent) => {
-    const at = pointOf(event);
-    const dragged = lastDown !== null && movedBeyondTap(lastDown, at);
-    lastDown = null;
-    if (dragged) return;
-    const barIndex = barIndexAt(at);
-    if (barIndex !== null) taps.emit('barTapped', { barIndex });
-  };
-
-  element.addEventListener('pointerdown', onPointerDown);
-  element.addEventListener('click', onScoreClick);
-  // On the window: a drag may leave the score, and its release must still end it.
-  window.addEventListener('pointermove', onPointerMove);
-  window.addEventListener('pointerup', onPointerUp);
-  window.addEventListener('pointercancel', onPointerCancel);
-
-  // The highlighted bar range, drawn over the score from alphaTab's bounds.
-  // alphaTab's own selection markers follow the playback range and end a beat
-  // late, and the range on show isn't always the one playing (a selection
-  // being made while another loop plays), so this layer is drawn here.
-  const highlightLayer = document.createElement('div');
-  highlightLayer.className = 'bar-highlight';
-  let highlight: BarIndexRange | null = null;
-
-  const drawHighlight = () => {
-    const surface = element.querySelector<HTMLElement>('.at-surface');
-    const rects =
-      highlight && surface ? highlightRects(api.boundsLookup?.staffSystems ?? [], highlight) : [];
-    highlightLayer.replaceChildren(
-      ...rects.map((rect) => {
-        const block = document.createElement('div');
-        block.style.left = `${rect.x + (surface?.offsetLeft ?? 0)}px`;
-        block.style.top = `${rect.y + (surface?.offsetTop ?? 0)}px`;
-        block.style.width = `${rect.w}px`;
-        block.style.height = `${rect.h}px`;
-        return block;
-      }),
-    );
-    // alphaTab owns the host element's children; put the layer back if a render dropped it.
-    if (rects.length > 0 && highlightLayer.parentElement !== element) {
-      element.appendChild(highlightLayer);
-    }
-  };
+  // Read afresh each time: the bounds change with every layout, and are null until the first.
+  const staffSystems = () => api.boundsLookup?.staffSystems ?? [];
+  const stopWatchingPointer = watchScorePointer(element, staffSystems, taps);
+  const highlight = createHighlightLayer(element, staffSystems);
   // Bounds change with every layout (resize, page or horizontal). alphaTab
   // renders lazily, so the layer is also redrawn as each part of the score
   // renders, in case bars further down only get their bounds then.
-  api.postRenderFinished.on(drawHighlight);
-  api.renderer.partialRenderFinished.on(drawHighlight);
+  api.postRenderFinished.on(highlight.draw);
+  api.renderer.partialRenderFinished.on(highlight.draw);
 
   return {
     on(event, handler) {
@@ -239,52 +143,185 @@ export function createAlphaTabEngine({
       api.isLooping = looping;
     },
     setHighlight(range) {
-      highlight = range;
-      drawHighlight();
+      highlight.show(range);
     },
     scrollToBar(barIndex) {
-      const surface = element.querySelector('.at-surface');
-      const bar = barBounds(api.boundsLookup?.staffSystems ?? [], barIndex);
-      if (!surface || !bar) return;
-      const view = {
-        left: scrollElement.scrollLeft,
-        top: scrollElement.scrollTop,
-        width: scrollElement.clientWidth,
-        height: scrollElement.clientHeight,
-      };
-      // Bounds are relative to the surface; the box scrolls in its own content's coordinates.
-      const surfaceRect = surface.getBoundingClientRect();
-      const boxRect = scrollElement.getBoundingClientRect();
-      const target = scrollToShow(
-        {
-          x: bar.x + surfaceRect.left - boxRect.left - scrollElement.clientLeft + view.left,
-          y: bar.y + surfaceRect.top - boxRect.top - scrollElement.clientTop + view.top,
-          w: bar.w,
-          h: bar.h,
-        },
-        view,
-      );
-      if (!target) return;
-      // At once, not animated: a count-in may be a second long, and the bar is to be read during it.
-      if (typeof scrollElement.scrollTo === 'function') {
-        scrollElement.scrollTo({ ...target, behavior: 'instant' });
-      } else {
-        // jsdom has no Element.scrollTo.
-        scrollElement.scrollLeft = target.left;
-        scrollElement.scrollTop = target.top;
-      }
+      scrollBoxToBar(element, scrollElement, staffSystems(), barIndex);
     },
     destroy() {
-      element.removeEventListener('pointerdown', onPointerDown);
-      element.removeEventListener('click', onScoreClick);
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerCancel);
+      stopWatchingPointer();
       taps.clear();
       soundFontDownload.abort();
       api.destroy();
     },
   };
+}
+
+/** alphaTab's rendered bounds as they are now; empty before the first layout. */
+type StaffSystems = () => readonly SystemBoundsLike[];
+
+/**
+ * Turns pointer events on the score into `barTapped` and `barsDragged`.
+ * Returns the function that stops listening.
+ */
+function watchScorePointer(
+  element: HTMLElement,
+  staffSystems: StaffSystems,
+  taps: Emitter<TapEvents>,
+): () => void {
+  /** The bar under a point in the window, or null outside every bar. */
+  const barIndexAt = (point: PointerPoint): number | null => {
+    const surface = element.querySelector('.at-surface');
+    if (!surface) return null;
+    const origin = surface.getBoundingClientRect();
+    return barIndexAtPoint(staffSystems(), point.x - origin.left, point.y - origin.top);
+  };
+
+  let press: Press | null = null;
+  // Where the last press went down, kept past its release for the click that follows it.
+  let lastDown: PointerPoint | null = null;
+
+  const onPointerDown = (event: PointerEvent) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    const down = pointOf(event);
+    lastDown = down;
+    press = {
+      down,
+      barIndex: barIndexAt(down),
+      mouse: event.pointerType === 'mouse',
+      draggedTo: null,
+    };
+  };
+
+  /** Reports a mouse drag from the pressed bar as it reaches each new bar. */
+  const onPointerMove = (event: PointerEvent) => {
+    if (!press || !press.mouse || press.barIndex === null) return;
+    const now = pointOf(event);
+    if (press.draggedTo === null && !movedBeyondTap(press.down, now)) return;
+    // Over a margin or off the score, the drag stays on the last bar it reached.
+    const barIndex = barIndexAt(now) ?? press.draggedTo ?? press.barIndex;
+    if (barIndex === press.draggedTo) return;
+    press.draggedTo = barIndex;
+    taps.emit('barsDragged', { fromBarIndex: press.barIndex, toBarIndex: barIndex, done: false });
+  };
+
+  const onPointerUp = () => {
+    const released = press;
+    press = null;
+    if (!released || released.barIndex === null || released.draggedTo === null) return;
+    taps.emit('barsDragged', {
+      fromBarIndex: released.barIndex,
+      toBarIndex: released.draggedTo,
+      done: true,
+    });
+  };
+
+  const onPointerCancel = () => {
+    press = null;
+  };
+
+  // click, not pointerdown: browsers don't fire it after a pan, so scrolling the score never seeks.
+  // They do fire it after a mouse drag that ends on the score, which is not a tap.
+  const onScoreClick = (event: MouseEvent) => {
+    const at = pointOf(event);
+    const dragged = lastDown !== null && movedBeyondTap(lastDown, at);
+    lastDown = null;
+    if (dragged) return;
+    const barIndex = barIndexAt(at);
+    if (barIndex !== null) taps.emit('barTapped', { barIndex });
+  };
+
+  element.addEventListener('pointerdown', onPointerDown);
+  element.addEventListener('click', onScoreClick);
+  // On the window: a drag may leave the score, and its release must still end it.
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerCancel);
+
+  return () => {
+    element.removeEventListener('pointerdown', onPointerDown);
+    element.removeEventListener('click', onScoreClick);
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerUp);
+    window.removeEventListener('pointercancel', onPointerCancel);
+  };
+}
+
+/**
+ * The highlighted bar range, drawn over the score from alphaTab's bounds.
+ * alphaTab's own selection markers follow the playback range and end a beat
+ * late, and the range on show isn't always the one playing (a selection
+ * being made while another loop plays), so this layer is drawn here.
+ * `draw` redraws the current range after a layout.
+ */
+function createHighlightLayer(element: HTMLElement, staffSystems: StaffSystems) {
+  const layer = document.createElement('div');
+  layer.className = 'bar-highlight';
+  let range: BarIndexRange | null = null;
+
+  const draw = () => {
+    const surface = element.querySelector<HTMLElement>('.at-surface');
+    const rects = range && surface ? highlightRects(staffSystems(), range) : [];
+    layer.replaceChildren(
+      ...rects.map((rect) => {
+        const block = document.createElement('div');
+        block.style.left = `${rect.x + (surface?.offsetLeft ?? 0)}px`;
+        block.style.top = `${rect.y + (surface?.offsetTop ?? 0)}px`;
+        block.style.width = `${rect.w}px`;
+        block.style.height = `${rect.h}px`;
+        return block;
+      }),
+    );
+    // alphaTab owns the host element's children; put the layer back if a render dropped it.
+    if (rects.length > 0 && layer.parentElement !== element) element.appendChild(layer);
+  };
+
+  return {
+    draw,
+    show(next: BarIndexRange | null) {
+      range = next;
+      draw();
+    },
+  };
+}
+
+/** Scrolls the box so the bar can be read, unless all of it is on show or it has no bounds yet. */
+function scrollBoxToBar(
+  element: HTMLElement,
+  scrollElement: HTMLElement,
+  systems: readonly SystemBoundsLike[],
+  barIndex: number,
+): void {
+  const surface = element.querySelector('.at-surface');
+  const bar = barBounds(systems, barIndex);
+  if (!surface || !bar) return;
+  const view = {
+    left: scrollElement.scrollLeft,
+    top: scrollElement.scrollTop,
+    width: scrollElement.clientWidth,
+    height: scrollElement.clientHeight,
+  };
+  // Bounds are relative to the surface; the box scrolls in its own content's coordinates.
+  const surfaceRect = surface.getBoundingClientRect();
+  const boxRect = scrollElement.getBoundingClientRect();
+  const target = scrollToShow(
+    {
+      x: bar.x + surfaceRect.left - boxRect.left - scrollElement.clientLeft + view.left,
+      y: bar.y + surfaceRect.top - boxRect.top - scrollElement.clientTop + view.top,
+      w: bar.w,
+      h: bar.h,
+    },
+    view,
+  );
+  if (!target) return;
+  // At once, not animated: a count-in may be a second long, and the bar is to be read during it.
+  if (typeof scrollElement.scrollTo === 'function') {
+    scrollElement.scrollTo({ ...target, behavior: 'instant' });
+  } else {
+    // jsdom has no Element.scrollTo.
+    scrollElement.scrollLeft = target.left;
+    scrollElement.scrollTop = target.top;
+  }
 }
 
 function subscribe<K extends keyof EngineEvents>(

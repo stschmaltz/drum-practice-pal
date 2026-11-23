@@ -6,10 +6,8 @@ import {
   type PlayerSnapshot,
 } from '@/features/player/PlayerService';
 import { isValidBarRange } from '@/lib/schema';
-import { formBarRange, type Loop, type LoopFormValues } from './loopForm';
+import { formBarRange, type Loop, type LoopBarFields } from './loopForm';
 import { tapBar } from './rangeSelection';
-
-type BarFields = Pick<LoopFormValues, 'startBar' | 'endBar'>;
 
 /** The open loop form's state that the score takes part in: which loop, and its bars. */
 export interface LoopEditor {
@@ -19,13 +17,13 @@ export interface LoopEditor {
    * The bars as picked on the score or typed. Only what the user touched, so
    * an edit keeps showing the saved value of the other field (editorBarFields).
    */
-  bars: Partial<BarFields>;
+  bars: Partial<LoopBarFields>;
   /** The first bar has been tapped; the next tap picks the other end. */
   awaitingEnd: boolean;
 }
 
 /** The form's bar fields: what the user touched over the saved loop's bars, or empty for a new loop. */
-export function editorBarFields(editor: LoopEditor, loop: Loop | null): BarFields {
+export function editorBarFields(editor: LoopEditor, loop: Loop | null): LoopBarFields {
   return {
     startBar: editor.bars.startBar ?? (loop ? String(loop.start_bar) : ''),
     endBar: editor.bars.endBar ?? (loop ? String(loop.end_bar) : ''),
@@ -34,7 +32,7 @@ export function editorBarFields(editor: LoopEditor, loop: Loop | null): BarField
 
 const rangeOf = (loop: Loop): BarRange => ({ startBar: loop.start_bar, endBar: loop.end_bar });
 
-const barFieldsOf = ({ startBar, endBar }: BarRange): BarFields => ({
+const barFieldsOf = ({ startBar, endBar }: BarRange): LoopBarFields => ({
   startBar: String(startBar),
   endBar: String(endBar),
 });
@@ -126,7 +124,7 @@ export function useLoopPractice(
   const closeEditor = useCallback(() => setEditor(null), []);
 
   /** A typed bar field. Typing ends a half-made tap selection. */
-  const setEditorBars = useCallback((bars: Partial<BarFields>) => {
+  const setEditorBars = useCallback((bars: Partial<LoopBarFields>) => {
     setEditor((current) =>
       current ? { ...current, bars: { ...current.bars, ...bars }, awaitingEnd: false } : current,
     );
