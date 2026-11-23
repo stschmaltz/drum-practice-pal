@@ -143,6 +143,12 @@ export class PlayerService {
   private lastTick: number | null = null;
   /** Cancels the count-in that is clicking now; null once it has handed over to playback. */
   private cancelCountIn: (() => void) | null = null;
+  /**
+   * Pause or stop was sent to a playing engine that hasn't answered yet. A pass
+   * end already on its way from alphaTab's worker must not start the next
+   * count-in over the user's Pause.
+   */
+  private haltRequested = false;
   private trackCount = 0;
   private soundFontRequested = false;
   private disposed = false;
@@ -184,6 +190,7 @@ export class PlayerService {
   load(bytes: Uint8Array): void {
     if (this.disposed) return;
     this.abandonCountIn();
+    this.haltRequested = false;
     if (this.isLoaded()) this.engine.stop();
     this.bars = [];
     this.barTempos = [];
@@ -214,6 +221,7 @@ export class PlayerService {
   /** Call straight from the tap handler, with no await before it: iOS only unlocks audio inside the gesture. */
   play(): void {
     if (this.disposed || this.snapshot.status !== 'ready') return;
+    this.haltRequested = false;
     this.unlockAudio();
     if (this.snapshot.countInBars > 0) {
       // Playback starts from a timer after the count-in, outside this tap, so
@@ -235,7 +243,10 @@ export class PlayerService {
       if (handedOver) this.engine.pause();
       return;
     }
-    if (this.snapshot.status === 'playing') this.engine.pause();
+    if (this.snapshot.status === 'playing') {
+      this.haltRequested = true;
+      this.engine.pause();
+    }
   }
 
   togglePlay(): void {
@@ -247,6 +258,7 @@ export class PlayerService {
   stop(): void {
     if (this.disposed || !this.isLoaded()) return;
     this.abandonCountIn();
+    if (this.snapshot.status === 'playing') this.haltRequested = true;
     this.engine.stop();
   }
 
@@ -322,11 +334,21 @@ export class PlayerService {
     this.applyMetronome();
   }
 
-  /** 0 turns the count-in off. Takes effect from the next count-in; one under way finishes. */
+  /**
+   * 0 turns the count-in off, and ends one under way: playback starts at once.
+   * 1 or 2 take effect from the next count-in; one under way finishes as it began.
+   */
   setCountInBars(countInBars: CountInBars): void {
     if (this.disposed) return;
     this.update({ countInBars });
     this.countInOptionsChanged();
+    if (countInBars === 0 && this.cancelCountIn !== null) {
+      // Off while the counter runs reads as "stop counting", not "from next time".
+      // Status stays countingIn until the engine reports it is playing, as after a downbeat.
+      this.stopCountInClicks();
+      this.update({ countIn: null });
+      this.engine.play();
+    }
   }
 
   setCountInMode(countInMode: CountInMode): void {
@@ -391,7 +413,9 @@ export class PlayerService {
       this.update({ status: 'ready' });
     });
     engine.on('stateChanged', ({ playing }) => {
-      if (this.disposed || this.snapshot.status === 'error') return;
+      if (this.disposed) return;
+      this.haltRequested = false;
+      if (this.snapshot.status === 'error') return;
       if (this.snapshot.status === 'loading' && !playing) return;
       // Before a repeat's count-in alphaTab stops at the end of the pass; that isn't a pause.
       if (this.snapshot.status === 'countingIn' && !playing) return;
@@ -478,7 +502,7 @@ export class PlayerService {
    * start of the range, and waits here for the count-in to start it again.
    */
   private countInBeforeRepeat(): void {
-    if (!countsInEveryRepeat(this.snapshot)) return;
+    if (!countsInEveryRepeat(this.snapshot) || this.haltRequested) return;
     const { status, range } = this.snapshot;
     if (status !== 'playing' && status !== 'ready') return;
     if (!this.beginCountIn(range?.startBar ?? 1)) this.engine.play();
@@ -520,11 +544,13 @@ export class PlayerService {
 
   private fail(error: PlayerError): void {
     if (this.disposed || this.snapshot.status === 'error') return;
-    const wasPlaying = this.snapshot.status === 'playing';
+    // Past a count-in's downbeat the engine has been told to play, though it hasn't said so yet.
+    const handedOver = this.snapshot.status === 'countingIn' && this.cancelCountIn === null;
+    const engineStarted = this.snapshot.status === 'playing' || handedOver;
     this.stopCountInClicks();
     this.update({ status: 'error', error, countIn: null });
     this.wakeLock.setActive(false);
-    if (wasPlaying) this.engine.stop();
+    if (engineStarted) this.engine.stop();
   }
 
   private isLoaded(): boolean {

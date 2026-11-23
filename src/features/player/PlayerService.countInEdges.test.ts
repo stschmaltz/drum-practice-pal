@@ -600,7 +600,6 @@ describe('count-in settings changed in the middle of a loop', () => {
   it.each<[string, (service: PlayerService) => void]>([
     ['the mode', (service) => service.setCountInMode('start')],
     ['the bar count', (service) => service.setCountInBars(2)],
-    ['count-in off', (service) => service.setCountInBars(0)],
     ['the speed', (service) => service.setSpeed(0.5)],
     ['the metronome', (service) => service.setMetronomeOn(false)],
   ])(
@@ -773,5 +772,119 @@ describe('count-in options on the service', () => {
     service.setCountInBars(2);
     service.setCountInMode('every_repeat');
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('review: races and partial failures', () => {
+  it('count-in set to off during a count-in ends it and plays at once', () => {
+    const { engine, service, clicks, wakeLock } = setupCountIn({ options: { countInBars: 2 } });
+    service.play();
+    vi.advanceTimersByTime(START_DELAY_MS + 700);
+    expect(service.getSnapshot().countIn).not.toBeNull();
+
+    service.setCountInBars(0);
+
+    expect(clicks.cancelSession).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    // Still running, with no number up, until the engine says it is playing.
+    expect(service.getSnapshot()).toMatchObject({ status: 'countingIn', countIn: null });
+    expect(wakeLock.setActive).toHaveBeenLastCalledWith(true);
+
+    enginePlays(engine);
+    expect(service.getSnapshot().status).toBe('playing');
+    // The old downbeat passes without a second play.
+    vi.advanceTimersByTime(10_000);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('count-in set to off during a repeat’s count-in goes straight into the next pass, then loops natively', () => {
+    const { engine, service, clicks } = loopingBars5To8(EVERY_REPEAT);
+    engineFinishesPass(engine, LOOP_START_TICK);
+    vi.advanceTimersByTime(START_DELAY_MS + 600);
+
+    service.setCountInBars(0);
+
+    expect(clicks.cancelSession).toHaveBeenCalledTimes(1);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(engine.setLooping).toHaveBeenLastCalledWith(true);
+    expect(engine.stop).not.toHaveBeenCalled();
+    expect(engine.pause).not.toHaveBeenCalled();
+    enginePlays(engine);
+    vi.advanceTimersByTime(10_000);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('count-in set to off after the downbeat, or outside a count-in, plays nothing extra', () => {
+    const { engine, service } = setupCountIn();
+    service.setCountInBars(0);
+    expect(engine.play).not.toHaveBeenCalled();
+
+    service.setCountInBars(1);
+    service.play();
+    vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    service.setCountInBars(0);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+  });
+
+  it.each<[string, (service: PlayerService) => void]>([
+    ['Pause', (service) => service.pause()],
+    ['Back to start', (service) => service.stop()],
+  ])(
+    '%s sent just before a pass end already on its way: no count-in starts over it',
+    (_name, halt) => {
+      const { engine, service, clicks, wakeLock } = loopingBars5To8(EVERY_REPEAT);
+
+      halt(service);
+      // alphaTab's worker had finished the pass before it saw the pause.
+      engineFinishesPass(engine, LOOP_START_TICK);
+
+      expect(service.getSnapshot()).toMatchObject({ status: 'ready', countIn: null });
+      expect(clicks.scheduled).toHaveLength(0);
+      expect(wakeLock.setActive).toHaveBeenLastCalledWith(false);
+      vi.advanceTimersByTime(10_000);
+      expect(engine.play).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it('a Pause that was answered doesn’t stop later repeats from counting in', () => {
+    const { engine, service, clicks } = loopingBars5To8(EVERY_REPEAT);
+    service.pause();
+    engine.fire('stateChanged', { playing: false });
+    service.play();
+    vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
+    enginePlays(engine);
+    clicks.scheduled = [];
+
+    engineFinishesPass(engine, LOOP_START_TICK);
+    expect(service.getSnapshot().status).toBe('countingIn');
+    expect(clicks.scheduled).toHaveLength(4);
+  });
+
+  it('an engine error after the downbeat, before the engine reports playing, stops the engine', () => {
+    const { engine, service, wakeLock } = setupCountIn();
+    service.play();
+    vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(service.getSnapshot().status).toBe('countingIn');
+
+    engine.fire('error', { error: new Error('render failed') });
+
+    expect(service.getSnapshot()).toMatchObject({ status: 'error', countIn: null });
+    // Otherwise the song would start under an error screen with no Pause to press.
+    expect(engine.stop).toHaveBeenCalledTimes(1);
+    expect(wakeLock.setActive).toHaveBeenLastCalledWith(false);
+  });
+
+  it('an engine error during the clicks leaves the engine alone: it was never started', () => {
+    const { engine, service } = setupCountIn();
+    service.play();
+    vi.advanceTimersByTime(START_DELAY_MS + 700);
+    engine.fire('error', { error: new Error('render failed') });
+    expect(service.getSnapshot().status).toBe('error');
+    expect(engine.stop).not.toHaveBeenCalled();
   });
 });
