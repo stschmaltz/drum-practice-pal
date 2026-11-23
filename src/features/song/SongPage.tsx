@@ -90,6 +90,8 @@ function SongPlayer({
     drumTrackIndex,
     initialOptions,
   });
+  // A soundfont failure still leaves readable notation; these leave an empty white box.
+  const nothingToShow = snapshot.error === 'score' || snapshot.error === 'engine';
 
   return (
     <div className="flex flex-col gap-3">
@@ -107,6 +109,8 @@ function SongPlayer({
       <div
         ref={scrollRef}
         data-testid="score-viewport"
+        // Hidden, not unmounted: alphaTab keeps its elements until the player is disposed.
+        hidden={nothingToShow}
         className="relative h-[60dvh] overflow-auto rounded-lg bg-white text-black"
       >
         <div ref={scoreRef} />

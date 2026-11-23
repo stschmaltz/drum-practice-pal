@@ -281,6 +281,8 @@ describe('SongPage player', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(PLAYER_ERROR_MESSAGES.score);
     expect(screen.queryByText(/alphaTab internals/)).not.toBeInTheDocument();
     expect(playButton()).toBeDisabled();
+    // No empty white score box under the message.
+    expect(screen.getByTestId('score-viewport')).not.toBeVisible();
   });
 
   it('shows the soundfont copy when the sounds cannot be fetched', async () => {
@@ -292,6 +294,8 @@ describe('SongPage player', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(PLAYER_ERROR_MESSAGES.soundFont);
     expect(playButton()).toBeDisabled();
+    // The notation still renders and is worth reading.
+    expect(screen.getByTestId('score-viewport')).toBeVisible();
   });
 });
 

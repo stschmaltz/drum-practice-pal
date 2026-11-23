@@ -127,3 +127,84 @@ Jam mode (cursor follow tuning, tap-to-seek, BPM header), count-in and the loops
 **Bugs found**
 
 - None.
+
+## QA
+
+**Setup:** I ran local Supabase from `npm run db:start`. The app was the e2e build (`--mode development`) on `vite preview` at :4173. A throwaway Playwright suite (removed afterwards) drove it at phone 390x844, tablet 820x1180 and desktop 1440x900, with a fresh user per test. Screenshots are in `docs/units/05-shots/`, named `<size>-NN-<what>.png`. The fixtures were `groove-120`, `multi-track` and the real Songsterr export in `tests/fixtures/real/` (119 bars, 6 tracks; not committed). "Still playing" means the button says Pause and the bar number keeps going up and never drops back to bar 1. I also wrapped `window.AudioContext` to count contexts and their states, and stubbed `navigator.wakeLock` to log requests and releases.
+
+**Acceptance criteria**
+
+| Criterion                                                | Result | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Speed, mute and metronome change live without restarting | Pass   | At every size, while playing at 200%, I ran seven changes in a row: speed 60%, speed 200%, metronome off, volume 20%, metronome on, mute, unmute. After each one it was still playing and the bar never went down (`*-03`, `*-04`). It also kept playing with the real export at 75% and drums muted (`*-18`). Whether it _sounds_ seamless is a Human check.                                                              |
+| The service disposes cleanly on route change             | Pass   | Leaving mid-play leaves no `running` AudioContext. Leaving while the song is still loading ends with one `closed` context and no page errors. After eight song-to-song switches (same route, new id, several before the player was ready), there were eight `closed` contexts and one `running`, one `.at-surface`, and no errors. The wake lock goes request, release on pause, request on play, then release on leaving. |
+
+**QA focus**
+
+- **Rapid toggling: pass.** I made 21 back-to-back Play/Pause clicks with no waits, and it ended playing and advancing. Mute and Metronome got 20 clicks each, interleaved, and both ended where they started. I swept the Speed slider with the keyboard through every 5% step (40 left, 40 right, then Home and End) while playing: it bottomed at 25%, topped at 200%, and stayed playing. Back to start, mashed 5 times while playing, stopped at "Bar 1 of 16", and Play works after it (`*-06`). Only one AudioContext exists afterwards, and there were no console errors.
+- **Switching songs mid-play: pass.** I played Groove 120 at 150% with drums muted, then navigated in-app to Multi Track. The new song opens at 100% with Play, "Bar 1 of", and Mute drums from settings, and the old one is silent (one `running` context) (`*-07`). Going back through history mid-play works too, as does switching six times without waiting for ready.
+- **Rotation: pass for playback; fails for layout (issue 1).** Rotating mid-play (390x844 to 844x390, 820x1180 to 1180x820, 1440x900 to 900x1440) keeps playing, and the bar keeps advancing. The layout switches between horizontal and page as expected (`*-08`, `tablet-09`). But after any width change that _narrows_ the page at 768 px or wider, the page scrolls sideways by 224 px.
+- **Slow network: pass.** Under CDP throttling at 1.6 Mbps down with 400 ms latency and the cache off, "Downloading the song…" shows first, then "Loading the score and sounds…", and Play enables after about 7.8 s for Multi Track (`*-15`, `*-16`).
+- **Song file download fails: pass.** With Storage requests aborted, "Couldn't download this song's file…" shows after about 3.4 s of query retries, and Try again recovers once the network is back (`*-12`).
+- **Soundfont fails: pass.** If the soundfont request is aborted, or answered with HTML (the SPA fallback case), "The drum sounds couldn't be loaded…" shows, Play stays disabled, and the notation still renders (`*-10`). If it is answered with junk bytes as `octet-stream`, the generic "couldn't be shown or played" copy shows (a known gap from Build) (`*-11`).
+- **Corrupt file in Storage: pass.** Garbage replaced the stored `.gp` behind the app's back. The page shows the fixed score copy, and alphaTab's text never reaches the UI. Before my fix, an empty white score box sat under the message (issue 4, fixed) (`*-17`).
+- **Offline:**
+  - Mid-play, going offline keeps playback running, and metronome and speed changes still apply.
+  - Reopening an already-downloaded song while offline shows the soundfont error, because the soundfont isn't cached yet (`*-13`). That's Unit 11's service worker; see issue 2.
+- **Settings fail: pass.** When `user_settings` returns 500, the amber "using the defaults" note shows once the query gives up (several seconds of retries), and the player works (`*-14`).
+- **Real export: pass.** The real Songsterr export (119 bars) is ready about 0.3 s after its page opens, from a warm cache. The JS heap is about 26 MB while it plays.
+
+**Issues**
+
+1. **Minor: the page scrolls sideways by 224 px after the window narrows on a song page, at 768 px or wider.**
+   - Repro:
+     1. Open a song at 1440x900 and resize to 900x900. Or open it at 390x844 and rotate to 844x390, or at 1180x820 and rotate an iPad to portrait (820x1180).
+     2. `document.documentElement.scrollWidth - clientWidth` is 224, the sidebar's width. The right 224 px of the controls and score sit off screen until you reload.
+   - Cause:
+     - `<main>` in `AppShell.tsx` is a flex item with `w-full` and the default `min-width: auto`.
+     - alphaTab's page-layout surface keeps its old rendered width, so `main` can't shrink, and alphaTab never sees a narrower container to re-render into.
+     - Loading fresh at the narrow width is fine. Other pages are fine.
+   - Fix (checked in the browser with an injected style): add `min-w-0` to `<main>`. 1440 to 900 and 390 to 844 then both give 0 overflow, and the score re-renders to fit (612 px and 556 px).
+   - I didn't apply it: it's a layout change to the Unit 03 shell, not cosmetic.
+2. **Minor: a soundfont failure has no retry.**
+   - The copy says "reload the page", but there's no Try again button. A song file failure has one.
+   - Offline, reloading fails too. Coming back online doesn't recover without a full reload.
+   - Repro: open a song with `/soundfont/*` blocked, unblock it, and nothing changes until you reload.
+   - Unit 11 caching makes this rarer. A retry, or retrying on `online`, would close it.
+3. **Cosmetic, not fixed: options stay enabled after a player error.**
+   - On a score or soundfont error, Play and Back to start are disabled, but Speed, Metronome, volume and Mute drums still respond (`*-10`, `*-17`).
+   - It's harmless, since the values apply if anything plays, but slightly odd. I left it because it changes control behaviour.
+4. **Cosmetic, fixed: an empty white box under a score or engine error.**
+   - `SongPage.tsx` now sets `hidden` on `score-viewport` when the error is `score` or `engine`.
+   - The box stays mounted, so alphaTab's refs and dispose are unchanged. On a soundfont error the notation still shows.
+   - `SongPage.test.tsx` asserts both cases.
+   - Side effect: a soundfont that downloads but won't decode (Build's known gap) also maps to `score`, so its notation is now hidden too.
+5. **Note, phone layout:**
+   - On a 390x844 phone the controls take about 290 px, and the 60dvh score box pushes the page into a scroll (`phone-02`).
+   - In landscape (844x390) the controls are two rows. The score box is only about 170 px visible above the fold (`phone-08`).
+   - That's usable, but Unit 06 (follow cursor, readable from the throne) should revisit the score height on short viewports. This is a known gap from Build, so I haven't given it a severity.
+
+**Human check (Shane)**
+
+These need ears. Nothing here was heard.
+
+- iPhone and iPad on the preview URL (HTTPS):
+  - Does the first tap on Play make sound?
+  - With the ringer switch on silent, is it still audible? (`audioSession` is set to playback.)
+  - Does the screen stay on through a long play, and go back to normal after pause?
+- Speed drag, metronome toggle and volume, and drum mute mid-play, on phone, tablet and laptop:
+  - no click, gap or restart heard
+  - the drums really go silent and come back
+  - metronome off is truly silent, and back on returns at the chosen volume
+- Leaving the song page mid-play, and switching songs mid-play (Library, then another song): sound stops at once, and the old song never plays over the new one.
+- Rotating the phone or iPad mid-play: no audio dropout.
+- 21 fast Play/Pause taps: no stuck notes or doubled playback.
+- The real Songsterr export with all six tracks: the drum sound quality, and start latency on the phone.
+
+**Results**
+
+- `npm run check`: green, 43 files, 546 tests. The two new assertions sit inside existing tests.
+- `npm run e2e`: 126 passed. Local Supabase was running.
+- Files changed by QA: `src/features/song/SongPage.tsx`, `src/features/song/SongPage.test.tsx`, this note, and `docs/units/05-shots/` (52 screenshots). Nothing is committed.
+
+**Verdict: PASS.** Both acceptance criteria pass. No blocker or major issues. Issues 1 and 2 are minor and can go to Build before Readability, or be carried forward. Issue 1 is a one-class fix.
