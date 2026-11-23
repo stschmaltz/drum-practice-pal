@@ -18,7 +18,7 @@ import {
   type CountInMode,
 } from '@/lib/schema';
 import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_LABELS } from './countInLabels';
-import { isRunning, type PlayerService, type PlayerSnapshot } from './PlayerService';
+import { isLoaded, isRunning, type PlayerService, type PlayerSnapshot } from './PlayerService';
 import { percentToRatio, ratioToPercent, SPEED_STEP_PERCENT } from './speed';
 
 const VOLUME_STEP_PERCENT = 5;
@@ -39,7 +39,7 @@ interface PlayerControlsProps extends PlayerViewProps {
 
 /** Whether Play can be pressed: the song is loaded (or already playing). */
 function canPlay(player: PlayerService | null, snapshot: PlayerSnapshot): boolean {
-  return player !== null && (snapshot.status === 'ready' || isRunning(snapshot.status));
+  return player !== null && isLoaded(snapshot.status);
 }
 
 /** Play/Pause. Part of `PlayerControls` unless the screen places it itself. */

@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LOOP_NAME_MAX_LENGTH } from '@/lib/schema';
 import {
+  applySavedLoopEdit,
   barsLabel,
+  changedLoopDetails,
   changedLoopFields,
   EMPTY_LOOP_FORM,
   formBarRange,
@@ -240,6 +242,80 @@ describe('changedLoopFields', () => {
     expect(changedLoopFields(loop({ speed_ratio: 0.8 }), { speed_ratio: 0.708333 })).toEqual({
       speed_ratio: 0.708333,
     });
+  });
+});
+
+describe('changedLoopDetails', () => {
+  const details = (overrides: Partial<Loop> = {}) => {
+    const { name, start_bar, end_bar, target_ratio } = loop(overrides);
+    return { name, start_bar, end_bar, target_ratio };
+  };
+
+  it('gives the details that differ, and never the speed', () => {
+    const saved = loop({ speed_ratio: 0.8, target_ratio: 1 });
+    expect(changedLoopDetails(saved, details({ name: 'Outro', end_bar: 9 }))).toEqual({
+      name: 'Outro',
+      end_bar: 9,
+    });
+    expect(changedLoopDetails(saved, details())).toEqual({});
+  });
+
+  it.each([
+    [0.855556, 0.86],
+    [0.864999, 0.86],
+    [0.708333, 0.71],
+    [1.996, 2],
+  ])('a saved target of %f under a typed %f is the same percent: not a change', (saved, typed) => {
+    expect(
+      changedLoopDetails(loop({ target_ratio: saved }), details({ target_ratio: typed })),
+    ).toEqual({});
+  });
+
+  it.each([
+    ['another percent', 0.855556, 0.87, 0.87],
+    ['the percent below', 0.855556, 0.85, 0.85],
+    ['cleared', 0.855556, null, null],
+    ['set where there was none', null, 0.86, 0.86],
+    ['a whole percent changed', 0.86, 0.9, 0.9],
+  ])('a target that is %s is sent', (_what, saved, typed, sent) => {
+    expect(
+      changedLoopDetails(loop({ target_ratio: saved }), details({ target_ratio: typed })),
+    ).toEqual({ target_ratio: sent });
+  });
+
+  it('no target on either side is no change', () => {
+    expect(
+      changedLoopDetails(loop({ target_ratio: null }), details({ target_ratio: null })),
+    ).toEqual({});
+  });
+});
+
+describe('applySavedLoopEdit', () => {
+  it('takes the server row for the fields the edit sent, and leaves every other field as cached', () => {
+    // Cached: this edit's speed and another pending edit's bars, both optimistic.
+    const current = loop({ start_bar: 9, end_bar: 12, speed_ratio: 0.9, name: 'Verse' });
+    // The server's row from before the other edit, with its own rounding of the speed.
+    const saved = loop({ start_bar: 5, end_bar: 8, speed_ratio: 0.900001, name: 'Renamed' });
+    expect(applySavedLoopEdit(current, saved, { speed_ratio: 0.9 })).toEqual({
+      ...current,
+      speed_ratio: 0.900001,
+    });
+  });
+
+  it('takes a null the server saved', () => {
+    // The cache was put back to 0.9 by something else while the clearing was on its way.
+    const current = loop({ target_ratio: 0.9 });
+    expect(
+      applySavedLoopEdit(current, loop({ target_ratio: null }), { target_ratio: null }),
+    ).toEqual({ ...current, target_ratio: null });
+  });
+
+  it('with nothing sent, changes nothing, and never changes the loop it was given', () => {
+    const current = loop({ name: 'Verse' });
+    const copy = { ...current };
+    expect(applySavedLoopEdit(current, loop({ name: 'Other' }), {})).toEqual(copy);
+    applySavedLoopEdit(current, loop({ name: 'Other' }), { name: 'Other' });
+    expect(current).toEqual(copy);
   });
 });
 

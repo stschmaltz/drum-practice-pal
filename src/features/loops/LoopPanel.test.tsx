@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { enginePlays } from '@/test/countInPlayer';
 import { resetFakeSupabase } from '@/test/fakeSupabase';
-import { startOfBar } from '@/test/fakePlayerEngine';
+import { startOfBar, straightBars, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable, type LoopTable } from '@/test/loopTable';
 import { testQueryClient, wrapperFor } from '@/test/render';
@@ -222,6 +222,36 @@ describe('LoopPanel list', () => {
     expect(view.play('Intro')).toBeEnabled();
     expect(view.panel.getByRole('button', { name: 'New loop' })).toBeEnabled();
     expect(view.item('Late').getByText(/50% \(45 BPM\)/)).toBeInTheDocument();
+  });
+
+  it('cannot play a loop while the sounds are still loading, though the score is there', async () => {
+    atWidth('phone');
+    const view = renderPanel({ loaded: false });
+    await waitFor(() => expect(view.names()).toEqual(['Intro', 'Late']));
+    // alphaTab has the score; the MIDI and the soundfont are still to come.
+    act(() =>
+      view.engine.fire('scoreLoaded', {
+        barCount: 16,
+        trackCount: 3,
+        barTempos: [...TEMPO_CHANGE_BAR_TEMPOS],
+        barMeters: Array.from({ length: 16 }, () => ({ beats: 4, beatValue: 4 })),
+      }),
+    );
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'loading', barCount: 16 });
+
+    // Play would not start, so nothing offers it; the bars and BPM are already known.
+    expect(view.play('Intro')).toBeDisabled();
+    expect(view.item('Late').getByText(/50% \(45 BPM\)/)).toBeInTheDocument();
+    expect(view.panel.getByRole('button', { name: 'New loop' })).toBeEnabled();
+    await view.user.click(view.play('Intro'));
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.player.getSnapshot().range).toBeNull();
+
+    act(() => {
+      view.engine.fire('ticksReady', { bars: straightBars(16) });
+      view.engine.fire('readyForPlayback', undefined);
+    });
+    expect(view.play('Intro')).toBeEnabled();
   });
 
   it('cannot play a loop once the player has failed', async () => {
@@ -584,6 +614,42 @@ describe('LoopPanel new and edited loops', () => {
     expect(view.player.getSnapshot().range).toBeNull();
     await view.press('Cancel');
     expect(view.names()).toEqual(['Intro', 'Late']);
+  });
+
+  it('while a save is on its way, the score picks no bars; a refused save gives them back', async () => {
+    const view = renderPanel();
+    const tap = (barNumber: number) =>
+      act(() => view.engine.fire('barTapped', { barIndex: barNumber - 1 }));
+    const drag = (fromBar: number, toBar: number) =>
+      act(() =>
+        view.engine.fire('barsDragged', {
+          fromBarIndex: fromBar - 1,
+          toBarIndex: toBar - 1,
+          done: true,
+        }),
+      );
+    const bars = () => [
+      view.panel.getByLabelText<HTMLInputElement>('First bar').value,
+      view.panel.getByLabelText<HTMLInputElement>('Last bar').value,
+    ];
+    await typeNewLoop(view, { first: '6', last: '7', name: 'Fill' });
+    view.table.failNext('insert', 'no');
+    const release = view.table.holdNext('insert');
+    await view.press('Save loop');
+    await view.panel.findByRole('button', { name: 'Saving…' });
+
+    // What was sent stays what is shown and highlighted.
+    tap(12);
+    drag(2, 3);
+    expect(bars()).toEqual(['6', '7']);
+    expect(view.player.getSnapshot().highlight).toEqual({ startBar: 6, endBar: 7 });
+
+    release();
+    expect(await view.panel.findByRole('alert')).toHaveTextContent("Couldn't save the loop");
+    drag(2, 3);
+    expect(bars()).toEqual(['2', '3']);
+    tap(12);
+    expect(bars()).toEqual(['12', '12']);
   });
 
   it('editing another loop leaves the playing loop playing', async () => {

@@ -105,11 +105,29 @@ function pointerEvent(
   return event;
 }
 
+/** Gives the scroll box a place in the window, as layout would: its border box and the client area inside it. */
+function placeBox(
+  box: HTMLElement,
+  { x, y, width, height }: { x: number; y: number; width: number; height: number },
+  border = 0,
+) {
+  // Configurable, so a test can place the box again.
+  const define = (name: string, value: number) =>
+    Object.defineProperty(box, name, { value, configurable: true });
+  define('clientWidth', width);
+  define('clientHeight', height);
+  define('clientLeft', border);
+  define('clientTop', border);
+  box.getBoundingClientRect = () => new DOMRect(x, y, width + 2 * border, height + 2 * border);
+}
+
 function setup() {
   const scrollElement = document.createElement('div');
   const element = document.createElement('div');
   scrollElement.appendChild(element);
   document.body.appendChild(scrollElement);
+  // jsdom lays nothing out: a box big enough to show the whole score, unless a test places it.
+  placeBox(scrollElement, { x: 0, y: 0, width: 1000, height: 1000 });
   // alphaTab renders into a surface inside its host element.
   const surface = document.createElement('div');
   surface.className = 'at-surface';
@@ -284,6 +302,24 @@ describe('a mouse drag across bars', () => {
     const start = middleOf(1);
     dragThrough([start, { x: start.x + 30, y: start.y + 4 }]);
     expect(drags).toEqual([
+      { fromBarIndex: 1, toBarIndex: 1, done: false },
+      { fromBarIndex: 1, toBarIndex: 1, done: true },
+    ]);
+    expect(taps).toEqual([]);
+  });
+
+  it('a drag that comes back to where it started ends as a drag, and the click after it is not a tap', () => {
+    const { press, move, release, click, drags, taps } = mounted();
+    const start = middleOf(1);
+    // Back inside the tap slop of the press: the click is as near as a real tap's.
+    const back = { x: start.x + 2, y: start.y + 1 };
+    press(start);
+    move(middleOf(2));
+    move(back);
+    release(back);
+    click(back);
+    expect(drags).toEqual([
+      { fromBarIndex: 1, toBarIndex: 2, done: false },
       { fromBarIndex: 1, toBarIndex: 1, done: false },
       { fromBarIndex: 1, toBarIndex: 1, done: true },
     ]);
@@ -527,12 +563,7 @@ describe('scrolling a bar into view', () => {
   function scrolledTo(left: number, top: number, { inset = { x: 0, y: 0 }, border = 0 } = {}) {
     const view = mounted();
     const box = view.element.parentElement!;
-    Object.defineProperty(box, 'clientWidth', { value: BOX.width });
-    Object.defineProperty(box, 'clientHeight', { value: BOX.height });
-    Object.defineProperty(box, 'clientLeft', { value: border });
-    Object.defineProperty(box, 'clientTop', { value: border });
-    box.getBoundingClientRect = () =>
-      new DOMRect(BOX.x, BOX.y, BOX.width + 2 * border, BOX.height + 2 * border);
+    placeBox(box, BOX, border);
     // Where the surface is in the window follows the box's scroll position, as in a browser.
     view.surface.getBoundingClientRect = () =>
       new DOMRect(
@@ -636,6 +667,45 @@ describe('scrolling a bar into view', () => {
     tap({ x: BOX.x + 150, y: BOX.y + 60 });
     expect(taps).toEqual([{ barIndex: 1 }]);
     expect(scroll()).toEqual({ left: 0, top: 0 });
+  });
+
+  // The score runs on under the box's edges, where it is clipped: bars nobody can see.
+  it.each([
+    // Bar index 4 is on the second line, which starts at the box's bottom edge.
+    ['below the box', { x: BOX.x + 160, y: BOX.y + BOX.height + 40 }],
+    // Bar index 2 starts 10 px past the box's right edge.
+    ['right of the box', { x: BOX.x + BOX.width + 40, y: BOX.y + 60 }],
+  ])('a drag that leaves the box %s stays on the last bar it reached inside', (_where, outside) => {
+    const { press, move, release, drags } = scrolledTo(0, 0);
+    const bar0 = { x: BOX.x + 60, y: BOX.y + 60 };
+    const bar1 = { x: BOX.x + 150, y: BOX.y + 60 };
+    press(bar0);
+    move(bar1);
+    move(outside);
+    release(outside);
+    expect(drags).toEqual([
+      { fromBarIndex: 0, toBarIndex: 1, done: false },
+      { fromBarIndex: 0, toBarIndex: 1, done: true },
+    ]);
+  });
+
+  it('a drag that leaves the box and comes back picks up the bar it comes back to', () => {
+    const { press, move, drags } = scrolledTo(0, 0);
+    press({ x: BOX.x + 60, y: BOX.y + 60 });
+    move({ x: BOX.x + 60, y: BOX.y + BOX.height + 40 });
+    move({ x: BOX.x + 150, y: BOX.y + 60 });
+    expect(drags).toEqual([
+      { fromBarIndex: 0, toBarIndex: 0, done: false },
+      { fromBarIndex: 0, toBarIndex: 1, done: false },
+    ]);
+  });
+
+  it('the box’s border is outside it too', () => {
+    const { press, move, drags } = scrolledTo(0, 0, { border: 4 });
+    press({ x: BOX.x + 4 + 60, y: BOX.y + 4 + 60 });
+    // On the bottom border, over where the second line carries on underneath.
+    move({ x: BOX.x + 4 + 160, y: BOX.y + 4 + BOX.height + 2 });
+    expect(drags).toEqual([{ fromBarIndex: 0, toBarIndex: 0, done: false }]);
   });
 
   it('drawing a highlight scrolls nothing', () => {

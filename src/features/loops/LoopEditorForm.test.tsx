@@ -34,6 +34,7 @@ function Form({
     loopId,
     bars: {},
     awaitingEnd: false,
+    saving: false,
     ...initialEditor,
   });
   if (loops.isPending || snapshot.barCount === null) return <p>Loading…</p>;
@@ -51,6 +52,9 @@ function Form({
           bars: { ...current.bars, ...bars },
           awaitingEnd: false,
         }))
+      }
+      onSavingChange={(saving) =>
+        setEditor((current) => (current.saving === saving ? current : { ...current, saving }))
       }
       onSaved={onSaved}
       onCancel={onCancel}
@@ -410,6 +414,38 @@ describe('LoopEditorForm editing a loop', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(view.table.sent('update')).toEqual([changes]);
     expect(view.table.rows()[0]).toMatchObject({ ...changes, speed_ratio: 0.708333 });
+  });
+
+  it('leaves alone a target that is not a whole percent unless the target is changed', async () => {
+    // 85.5556% is shown as 86; saving the name must not turn it into 0.86.
+    const fine = { ...chorus, target_ratio: 0.855556 };
+    const view = await renderForm({ editing: fine });
+    expect(view.target()).toHaveValue('86');
+    await replace(view, view.name(), 'Renamed');
+    await replace(view, view.lastBar(), '7');
+    // Typed over with what it already showed: still not a change.
+    await replace(view, view.target(), '86');
+    await view.user.click(view.save());
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(view.table.sent('update')).toEqual([{ name: 'Renamed', end_bar: 7 }]);
+    expect(view.table.rows()[0]).toMatchObject({ target_ratio: 0.855556 });
+  });
+
+  it('with only such a target on show and nothing changed, sends nothing', async () => {
+    const fine = { ...chorus, target_ratio: 0.855556 };
+    const view = await renderForm({ editing: fine });
+    await view.user.click(view.save());
+    expect(onSaved).toHaveBeenCalledWith(fine);
+    expect(view.table.sent('update')).toEqual([]);
+  });
+
+  it('a target changed to another percent is sent, whatever the saved one was', async () => {
+    const view = await renderForm({ editing: { ...chorus, target_ratio: 0.855556 } });
+    await replace(view, view.target(), '87');
+    await view.user.click(view.save());
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(view.table.sent('update')).toEqual([{ target_ratio: 0.87 }]);
   });
 
   it('never writes the speed, even when another speed is playing', async () => {

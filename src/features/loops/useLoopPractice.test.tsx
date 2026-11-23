@@ -551,6 +551,35 @@ describe('dragging across bars', () => {
     expect(practice().editor).toMatchObject({ loopId: outro.id, awaitingEnd: false });
   });
 
+  it('while the form is saving, taps and drags leave its bars as they were sent', async () => {
+    const { practice, tap, drag, fields, player } = await renderPractice();
+    act(() => practice().openEditor(outro));
+    drag(9, 12, true);
+    act(() => practice().setEditorSaving(true));
+
+    tap(2);
+    drag(3, 4, false);
+    drag(3, 6, true);
+    expect(fields()).toEqual({ startBar: '9', endBar: '12' });
+    expect(practice().editor).toMatchObject({ loopId: outro.id, awaitingEnd: false });
+    expect(player.getSnapshot().highlight).toEqual({ startBar: 9, endBar: 12 });
+
+    // The save failed: the form is still open, and the score picks bars again.
+    act(() => practice().setEditorSaving(false));
+    tap(2);
+    expect(fields()).toEqual({ startBar: '2', endBar: '2' });
+  });
+
+  it('a form opened after one that was saving starts unlocked', async () => {
+    const { practice, tap, fields } = await renderPractice();
+    act(() => practice().openEditor(outro));
+    act(() => practice().setEditorSaving(true));
+    act(() => practice().closeEditor());
+    act(() => practice().openEditor(null));
+    tap(3);
+    expect(fields()).toEqual({ startBar: '3', endBar: '3' });
+  });
+
   it('never seeks or changes the range', async () => {
     const { engine, drag, player } = await renderPractice();
     engine.setPlaybackRange.mockClear();

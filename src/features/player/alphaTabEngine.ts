@@ -27,7 +27,7 @@ interface Press {
   barIndex: number | null;
   /** Only a mouse drags a range: a finger dragging over the score scrolls it. */
   mouse: boolean;
-  /** The last bar a drag reported; null until the press has turned into a drag. */
+  /** The last bar a drag reported; null unless the press turned into a drag. */
   draggedTo: number | null;
 }
 
@@ -63,7 +63,7 @@ export function createAlphaTabEngine({
 
   // Read afresh each time: the bounds change with every layout, and are null until the first.
   const staffSystems = () => api.boundsLookup?.staffSystems ?? [];
-  const stopWatchingPointer = watchScorePointer(element, staffSystems, taps);
+  const stopWatchingPointer = watchScorePointer(element, scrollElement, staffSystems, taps);
   const highlight = createHighlightLayer(element, staffSystems);
   // Bounds change with every layout (resize, page or horizontal). alphaTab
   // renders lazily, so the layer is also redrawn as each part of the score
@@ -167,6 +167,7 @@ type StaffSystems = () => readonly SystemBoundsLike[];
  */
 function watchScorePointer(
   element: HTMLElement,
+  scrollElement: HTMLElement,
   staffSystems: StaffSystems,
   taps: Emitter<TapEvents>,
 ): () => void {
@@ -179,19 +180,19 @@ function watchScorePointer(
   };
 
   let press: Press | null = null;
-  // Where the last press went down, kept past its release for the click that follows it.
-  let lastDown: PointerPoint | null = null;
+  // The last press, kept past its release for the click that follows it.
+  let lastPress: Press | null = null;
 
   const onPointerDown = (event: PointerEvent) => {
     if (!event.isPrimary || event.button !== 0) return;
     const down = pointOf(event);
-    lastDown = down;
     press = {
       down,
       barIndex: barIndexAt(down),
       mouse: event.pointerType === 'mouse',
       draggedTo: null,
     };
+    lastPress = press;
   };
 
   /** Reports a mouse drag from the pressed bar as it reaches each new bar. */
@@ -199,8 +200,11 @@ function watchScorePointer(
     if (!press || !press.mouse || press.barIndex === null) return;
     const now = pointOf(event);
     if (press.draggedTo === null && !movedBeyondTap(press.down, now)) return;
+    // Moves are heard on the window, and the score runs on under the box's edges:
+    // outside the box there are bars to hit that nobody can see.
+    const reached = isInsideClientArea(scrollElement, now) ? barIndexAt(now) : null;
     // Over a margin or off the score, the drag stays on the last bar it reached.
-    const barIndex = barIndexAt(now) ?? press.draggedTo ?? press.barIndex;
+    const barIndex = reached ?? press.draggedTo ?? press.barIndex;
     if (barIndex === press.draggedTo) return;
     press.draggedTo = barIndex;
     taps.emit('barsDragged', { fromBarIndex: press.barIndex, toBarIndex: barIndex, done: false });
@@ -222,12 +226,13 @@ function watchScorePointer(
   };
 
   // click, not pointerdown: browsers don't fire it after a pan, so scrolling the score never seeks.
-  // They do fire it after a mouse drag that ends on the score, which is not a tap.
+  // They do fire it after a mouse drag that ends on the score, which is not a tap:
+  // not where it ends, and not when it comes back to end where it started.
   const onScoreClick = (event: MouseEvent) => {
     const at = pointOf(event);
-    const dragged = lastDown !== null && movedBeyondTap(lastDown, at);
-    lastDown = null;
-    if (dragged) return;
+    const pressed = lastPress;
+    lastPress = null;
+    if (pressed && (pressed.draggedTo !== null || movedBeyondTap(pressed.down, at))) return;
     const barIndex = barIndexAt(at);
     if (barIndex !== null) taps.emit('barTapped', { barIndex });
   };
@@ -386,6 +391,19 @@ function playedBars(api: alphaTab.AlphaTabApi): BarTicks[] {
     start: lookup.start,
     end: lookup.end,
   }));
+}
+
+/** Whether a point in the window is over the box's client area: inside its border, on show. */
+function isInsideClientArea(box: HTMLElement, point: PointerPoint): boolean {
+  const rect = box.getBoundingClientRect();
+  const left = rect.left + box.clientLeft;
+  const top = rect.top + box.clientTop;
+  return (
+    point.x >= left &&
+    point.x < left + box.clientWidth &&
+    point.y >= top &&
+    point.y < top + box.clientHeight
+  );
 }
 
 function pointOf(event: MouseEvent): PointerPoint {

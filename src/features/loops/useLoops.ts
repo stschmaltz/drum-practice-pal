@@ -2,16 +2,29 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { useSignedInUser } from '@/lib/auth';
 import { loopKeys } from './loopKeys';
 import { createLoop, deleteLoop, fetchLoops, updateLoop } from './loopsApi';
-import { revertLoopEdit, type Loop, type LoopEdit, type NewLoop } from './loopForm';
+import {
+  applySavedLoopEdit,
+  revertLoopEdit,
+  type Loop,
+  type LoopEdit,
+  type NewLoop,
+} from './loopForm';
+
+/**
+ * Whether a loop write other than the one settling is in flight. For onSuccess
+ * and onSettled, where the settling mutation still counts as pending.
+ */
+function anotherWriteIsPending(queryClient: QueryClient, userId: string): boolean {
+  return queryClient.isMutating({ mutationKey: loopKeys.writes(userId) }) > 1;
+}
 
 /**
  * Refetches the user's loops once the last loop write settles. A refetch while
  * another write is still pending would replace that write's optimistic value
- * with the old server row. Called from onSettled, where the settling mutation
- * still counts as pending, so more than one means another write is in flight.
+ * with the old server row. Called from onSettled.
  */
 function invalidateWhenIdle(queryClient: QueryClient, userId: string) {
-  if (queryClient.isMutating({ mutationKey: loopKeys.writes(userId) }) > 1) return;
+  if (anotherWriteIsPending(queryClient, userId)) return;
   return queryClient.invalidateQueries({ queryKey: loopKeys.forUser(userId) });
 }
 
@@ -79,9 +92,18 @@ export function useUpdateLoop(songId: string) {
         loops?.map((loop) => (loop.id === loopId ? revertLoopEdit(loop, before, changes) : loop)),
       );
     },
-    onSuccess: (saved) => {
+    // Two controls write one loop ("Save speed" and the edit form), so another
+    // edit of it may be pending. The server's row can be from before that edit:
+    // taken whole, its old bars would move the playing loop back until the edit
+    // lands. Then only the sent fields are taken; the refetch once every write
+    // has settled brings the rest.
+    onSuccess: (saved, { changes }) => {
+      const othersPending = anotherWriteIsPending(queryClient, user.id);
       queryClient.setQueryData<Loop[]>(queryKey, (loops) =>
-        loops?.map((loop) => (loop.id === saved.id ? { ...loop, ...saved } : loop)),
+        loops?.map((loop) => {
+          if (loop.id !== saved.id) return loop;
+          return othersPending ? applySavedLoopEdit(loop, saved, changes) : { ...loop, ...saved };
+        }),
       );
     },
     onSettled: () => invalidateWhenIdle(queryClient, user.id),

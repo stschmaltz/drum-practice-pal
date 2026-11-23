@@ -42,6 +42,11 @@ export function isRunning(status: PlayerStatus): boolean {
   return status === 'playing' || status === 'countingIn';
 }
 
+/** The song can be played or is playing: Play, or anything else that starts playback, will work. */
+export function isLoaded(status: PlayerStatus): boolean {
+  return status === 'ready' || isRunning(status);
+}
+
 /** Where a running count-in is, for the on-screen counter. All 1-based. */
 export interface CountInBeat {
   bar: number;
@@ -715,8 +720,7 @@ export class PlayerService {
   }
 
   private isLoaded(): boolean {
-    const { status } = this.snapshot;
-    return status === 'ready' || isRunning(status);
+    return isLoaded(this.snapshot.status);
   }
 
   /** Pushes every option to the engine, for when alphaTab has (re)loaded and may have reset them. */

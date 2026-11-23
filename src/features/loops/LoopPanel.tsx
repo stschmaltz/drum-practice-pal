@@ -6,7 +6,7 @@ import {
   pressedButtonClass,
   primaryButtonClass,
 } from '@/components/styles';
-import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
+import { isLoaded, type PlayerService, type PlayerSnapshot } from '@/features/player/PlayerService';
 import { barsLabel, sortLoops, type Loop } from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';
 import { speedLabel } from './loopLabels';
@@ -129,6 +129,7 @@ function LoopPanelBody({
         player={player}
         snapshot={snapshot}
         onBarsChange={practice.setEditorBars}
+        onSavingChange={practice.setEditorSaving}
         onSaved={(saved) => {
           practice.closeEditor();
           // A new loop is what the user wants to practice next; an edit leaves playback as it is.
@@ -242,7 +243,9 @@ function LoopList({ songId, player, snapshot, practice, loops, onPlayLoop }: Loo
           active={loop.id === practice.activeLoop?.id}
           // Null until the score loads: the item then shows the percent alone.
           tempo={player?.tempoAtBar(loop.start_bar) ?? null}
-          canPlay={player !== null && snapshot.barCount !== null && snapshot.status !== 'error'}
+          // Not on the bar count alone: the score loads before the MIDI and the
+          // soundfont, and until those are in play() does nothing.
+          canPlay={player !== null && isLoaded(snapshot.status)}
           onPlay={() => onPlayLoop(loop)}
           onEdit={() => practice.openEditor(loop)}
         />

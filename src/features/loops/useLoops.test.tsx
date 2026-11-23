@@ -285,6 +285,55 @@ describe('loop writes alongside each other', () => {
     await waitFor(() => expect(view.result.current.update.isSuccess).toBe(true));
   });
 
+  it('a saved edit leaves alone the fields of another edit of the same loop that is still pending', async () => {
+    const view = await renderLoaded([loopRow('a', { start_bar: 5, end_bar: 8, speed_ratio: 1 })]);
+    const speed = deferred();
+    const bars = deferred();
+    queryResult.mockReturnValueOnce(speed.promise).mockReturnValueOnce(bars.promise);
+    const final = loopRow('a', { start_bar: 9, end_bar: 12, speed_ratio: 0.9 });
+    queryResult.mockResolvedValue(ok([final]));
+
+    // "Save speed", then the edit form's new range before the speed's answer is back.
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    act(() =>
+      view.result.current.update.mutate({ loopId: 'a', changes: { start_bar: 9, end_bar: 12 } }),
+    );
+    await waitFor(() =>
+      expect(view.cached()?.[0]).toMatchObject({ start_bar: 9, end_bar: 12, speed_ratio: 0.9 }),
+    );
+    const seen: Loop[] = [];
+    const stop = view.queryClient.getQueryCache().subscribe(() => {
+      const loop = view.cached()?.[0];
+      if (loop) seen.push(loop);
+    });
+
+    // The server answered the speed before it had the range: its row has the old bars.
+    speed.resolve(ok(loopRow('a', { start_bar: 5, end_bar: 8, speed_ratio: 0.9 })));
+    await waitFor(() => expect(view.queryClient.isMutating()).toBe(1));
+    bars.resolve(ok(final));
+    await waitFor(() => expect(view.queryClient.isMutating()).toBe(0));
+    stop();
+
+    expect(view.cached()).toEqual([final]);
+    // Never back on the old bars on the way: the playing loop's range follows this cache.
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter((loop) => loop.start_bar !== 9 || loop.end_bar !== 12)).toEqual([]);
+  });
+
+  it('a saved edit takes the whole server row once no other write is pending', async () => {
+    const view = await renderLoaded([loopRow('a', { name: 'Old' })]);
+    // Another device renamed it; the server's row after this save says so.
+    const saved = loopRow('a', { name: 'Renamed elsewhere', speed_ratio: 0.9 });
+    const update = deferred();
+    queryResult.mockReturnValueOnce(update.promise);
+    // The refetch that follows never lands, so only onSuccess can have set the name.
+    queryResult.mockReturnValue(new Promise<FakeResult>(() => {}));
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    update.resolve(ok(saved));
+    await waitFor(() => expect(view.cached()).toEqual([saved]));
+  });
+
   it('a failed edit does not bring back a loop deleted while it was pending', async () => {
     const view = await renderLoaded([loopRow('a'), loopRow('b')]);
     const update = deferred();

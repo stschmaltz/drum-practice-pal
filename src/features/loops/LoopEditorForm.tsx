@@ -1,11 +1,11 @@
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { buttonClass, inputClass, primaryButtonClass } from '@/components/styles';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { percentToRatio } from '@/features/player/speed';
 import { randomUuid } from '@/lib/randomUuid';
 import {
-  changedLoopFields,
+  changedLoopDetails,
   EMPTY_LOOP_FORM,
   formBarRange,
   loopFormValues,
@@ -36,6 +36,7 @@ export function LoopEditorForm({
   player,
   snapshot,
   onBarsChange,
+  onSavingChange,
   onSaved,
   onCancel,
 }: {
@@ -47,6 +48,8 @@ export function LoopEditorForm({
   player: PlayerService | null;
   snapshot: PlayerSnapshot;
   onBarsChange: (bars: Partial<LoopBarFields>) => void;
+  /** The save started or settled. While it is pending the page lets the score pick no bars. */
+  onSavingChange: (saving: boolean) => void;
   onSaved: (saved: Loop) => void;
   onCancel: () => void;
 }) {
@@ -61,6 +64,8 @@ export function LoopEditorForm({
   // Locked while saving: an edit would reset() the mutation, so the form would
   // stop showing its progress or error and allow a second save alongside it.
   const saving = mutation.isPending;
+  // The bars are the page's state, and the score changes them without passing through this form.
+  useEffect(() => onSavingChange(saving), [saving, onSavingChange]);
 
   const range = formBarRange(values, barCount);
   const hint = selectionHint(
@@ -101,7 +106,7 @@ export function LoopEditorForm({
       );
       return;
     }
-    const changes = changedLoopFields(loop, parsed.details);
+    const changes = changedLoopDetails(loop, parsed.details);
     if (Object.keys(changes).length === 0) {
       onSaved(loop);
       return;

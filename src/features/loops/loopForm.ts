@@ -165,6 +165,39 @@ export function changedLoopFields(saved: LoopEdit, edit: Partial<LoopEdit>): Par
 }
 
 /**
+ * What saving the edit form sends: the details that differ from the saved loop.
+ * A target that shows as the saved one's percent is not a change. The field
+ * holds whole percents, so reading it back would rewrite a finer target
+ * (85.5556% shows as 86) that the user never touched.
+ */
+export function changedLoopDetails(saved: LoopEdit, details: LoopDetails): Partial<LoopEdit> {
+  const changes = changedLoopFields(saved, details);
+  if (showsAsSameTarget(saved.target_ratio, details.target_ratio)) delete changes.target_ratio;
+  return changes;
+}
+
+function showsAsSameTarget(saved: number | null, typed: number | null): boolean {
+  return saved !== null && typed !== null && ratioToPercent(saved) === ratioToPercent(typed);
+}
+
+/**
+ * The server's answer to an edit, taken for the fields that edit sent and no
+ * others. For while another write is pending: the server's row may be from
+ * before that write, and its other fields would undo the optimistic values.
+ */
+export function applySavedLoopEdit<T extends LoopEdit>(
+  current: T,
+  saved: LoopEdit,
+  changes: Partial<LoopEdit>,
+): T {
+  const merged = { ...current };
+  for (const field of LOOP_EDIT_FIELDS) {
+    if (changes[field] !== undefined) assign(merged, field, saved[field]);
+  }
+  return merged;
+}
+
+/**
  * Undoes a failed optimistic edit on the current cached loop: each sent field
  * goes back to its value before the edit, but only while it still holds the
  * optimistic value, so a newer edit or refetch of that field survives.

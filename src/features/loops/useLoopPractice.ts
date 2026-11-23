@@ -20,6 +20,21 @@ export interface LoopEditor {
   bars: Partial<LoopBarFields>;
   /** The first bar has been tapped; the next tap picks the other end. */
   awaitingEnd: boolean;
+  /**
+   * The form's save is on its way. Its bars are then what was sent: the score
+   * picks none until the save settles, as the form's own fields are locked.
+   */
+  saving: boolean;
+}
+
+/** The open form with bars picked on the score, or as it was while its save is on its way. */
+function withPickedBars(
+  editor: LoopEditor | null,
+  range: BarRange,
+  awaitingEnd: boolean,
+): LoopEditor | null {
+  if (!editor || editor.saving) return editor;
+  return { ...editor, bars: barFieldsOf(range), awaitingEnd };
 }
 
 /** The form's bar fields: what the user touched over the saved loop's bars, or empty for a new loop. */
@@ -118,7 +133,7 @@ export function useLoopPractice(
   // --- The loop form's bars ---
 
   const openEditor = useCallback((loop: Loop | null) => {
-    setEditor({ loopId: loop?.id ?? null, bars: {}, awaitingEnd: false });
+    setEditor({ loopId: loop?.id ?? null, bars: {}, awaitingEnd: false, saving: false });
   }, []);
 
   const closeEditor = useCallback(() => setEditor(null), []);
@@ -127,6 +142,14 @@ export function useLoopPractice(
   const setEditorBars = useCallback((bars: Partial<LoopBarFields>) => {
     setEditor((current) =>
       current ? { ...current, bars: { ...current.bars, ...bars }, awaitingEnd: false } : current,
+    );
+  }, []);
+
+  /** From the form, as its save starts and settles. */
+  const setEditorSaving = useCallback((saving: boolean) => {
+    // The same object when nothing changes: the form reports on every change of its callback too.
+    setEditor((current) =>
+      current && current.saving !== saving ? { ...current, saving } : current,
     );
   }, []);
 
@@ -144,9 +167,7 @@ export function useLoopPractice(
           ? { startBar: selectedStart, endBar: selectedEnd, awaitingEnd }
           : null;
       const next = tapBar(current, barNumber);
-      setEditor((open) =>
-        open ? { ...open, bars: barFieldsOf(next), awaitingEnd: next.awaitingEnd } : open,
-      );
+      setEditor((open) => withPickedBars(open, next, next.awaitingEnd));
     });
   }, [player, editorOpen, awaitingEnd, selectedStart, selectedEnd]);
 
@@ -156,9 +177,7 @@ export function useLoopPractice(
     return player.on('barsDragged', ({ startBar, endBar, done }) => {
       const range = { startBar, endBar };
       if (editorOpen) {
-        setEditor((open) =>
-          open ? { ...open, bars: barFieldsOf(range), awaitingEnd: false } : open,
-        );
+        setEditor((open) => withPickedBars(open, range, false));
         return;
       }
       // The form opens on release: opening it mid-drag would move the score under the pointer.
@@ -169,7 +188,7 @@ export function useLoopPractice(
       setDragPreview(null);
       // A wobble inside one bar while clicking is not a wish for a new loop.
       if (startBar === endBar) return;
-      setEditor({ loopId: null, bars: barFieldsOf(range), awaitingEnd: false });
+      setEditor({ loopId: null, bars: barFieldsOf(range), awaitingEnd: false, saving: false });
     });
   }, [player, editorOpen]);
 
@@ -199,6 +218,7 @@ export function useLoopPractice(
     openEditor,
     closeEditor,
     setEditorBars,
+    setEditorSaving,
   };
 }
 
