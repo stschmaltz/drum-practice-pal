@@ -62,6 +62,15 @@ const CASES: Case[] = METERS.flatMap((meter) =>
   ),
 );
 
+/** One bar of 4/4 at 120 BPM and 100%, from time zero; tests change one field at a time. */
+const BASE: CountInRequest = {
+  bars: 1,
+  meter: COMMON_TIME,
+  tempo: 120,
+  speedRatio: 1,
+  startTime: 0,
+};
+
 /** One beat, worked out the long way: quarter notes a minute, then the beat's share of a quarter. */
 function expectedBeatSeconds({ meter, tempo, speedRatio }: CountInRequest): number {
   const quartersPerSecond = (tempo * speedRatio) / 60;
@@ -114,15 +123,8 @@ describe(`countInSchedule over ${CASES.length} combinations`, () => {
 });
 
 describe('countInSchedule scaling rules', () => {
-  const base: CountInRequest = {
-    bars: 1,
-    meter: COMMON_TIME,
-    tempo: 120,
-    speedRatio: 1,
-    startTime: 0,
-  };
   const length = (patch: Partial<CountInRequest>) => {
-    const schedule = countInSchedule({ ...base, ...patch });
+    const schedule = countInSchedule({ ...BASE, ...patch });
     if (!schedule) throw new Error('No schedule');
     return schedule.downbeat;
   };
@@ -144,8 +146,8 @@ describe('countInSchedule scaling rules', () => {
   });
 
   it('a bar of 6/8 lasts as long as a bar of 3/4 at the same tempo, in twice the clicks', () => {
-    const waltz = countInSchedule({ ...base, meter: { beats: 3, beatValue: 4 } });
-    const sixEight = countInSchedule({ ...base, meter: { beats: 6, beatValue: 8 } });
+    const waltz = countInSchedule({ ...BASE, meter: { beats: 3, beatValue: 4 } });
+    const sixEight = countInSchedule({ ...BASE, meter: { beats: 6, beatValue: 8 } });
     expect(sixEight?.downbeat).toBeCloseTo(waltz?.downbeat ?? -1, 9);
     expect(sixEight?.clicks).toHaveLength(2 * (waltz?.clicks.length ?? 0));
   });
@@ -156,8 +158,8 @@ describe('countInSchedule scaling rules', () => {
   });
 
   it('moving the start moves every click and the downbeat by the same amount', () => {
-    const early = countInSchedule({ ...base, bars: 2, startTime: 1 });
-    const late = countInSchedule({ ...base, bars: 2, startTime: 101 });
+    const early = countInSchedule({ ...BASE, bars: 2, startTime: 1 });
+    const late = countInSchedule({ ...BASE, bars: 2, startTime: 101 });
     expect(late?.clicks.map((click) => click.time - 100)).toEqual(
       early?.clicks.map((click) => click.time),
     );
@@ -179,21 +181,13 @@ describe('countInSchedule scaling rules', () => {
   });
 
   it('accepts a negative start time (a clock that has not reached zero)', () => {
-    const schedule = countInSchedule({ ...base, startTime: -1 });
+    const schedule = countInSchedule({ ...BASE, startTime: -1 });
     expect(schedule?.clicks.map((click) => click.time)).toEqual([-1, -0.5, 0, 0.5]);
     expect(schedule?.downbeat).toBe(1);
   });
 });
 
 describe('countInSchedule with nothing to count or bad input', () => {
-  const base: CountInRequest = {
-    bars: 1,
-    meter: COMMON_TIME,
-    tempo: 120,
-    speedRatio: 1,
-    startTime: 0,
-  };
-
   it.each<[string, Partial<CountInRequest>]>([
     ['count-in off (0 bars)', { bars: 0 }],
     ['a negative bar count', { bars: -1 }],
@@ -224,7 +218,7 @@ describe('countInSchedule with nothing to count or bad input', () => {
     ['a NaN start time', { startTime: Number.NaN }],
     ['an infinite start time', { startTime: Number.POSITIVE_INFINITY }],
   ])('returns null for %s', (_name, patch) => {
-    expect(countInSchedule({ ...base, ...patch })).toBeNull();
+    expect(countInSchedule({ ...BASE, ...patch })).toBeNull();
   });
 
   it('never returns a click at a time that is not a number', () => {

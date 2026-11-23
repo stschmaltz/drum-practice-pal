@@ -35,6 +35,11 @@ import { screenWakeLock, type WakeLockControl } from './wakeLock';
  */
 export type PlayerStatus = 'loading' | 'ready' | 'countingIn' | 'playing' | 'error';
 
+/** Play has been pressed and Pause undoes it: playing, or counting in to it. */
+export function isRunning(status: PlayerStatus): boolean {
+  return status === 'playing' || status === 'countingIn';
+}
+
 /** Where a running count-in is, for the on-screen counter. All 1-based. */
 export interface CountInBeat {
   bar: number;
@@ -234,7 +239,7 @@ export class PlayerService {
   }
 
   togglePlay(): void {
-    if (this.snapshot.status === 'playing' || this.snapshot.status === 'countingIn') this.pause();
+    if (isRunning(this.snapshot.status)) this.pause();
     else this.play();
   }
 
@@ -524,7 +529,7 @@ export class PlayerService {
 
   private isLoaded(): boolean {
     const { status } = this.snapshot;
-    return status === 'ready' || status === 'countingIn' || status === 'playing';
+    return status === 'ready' || isRunning(status);
   }
 
   /** Pushes every option to the engine, for when alphaTab has (re)loaded and may have reset them. */

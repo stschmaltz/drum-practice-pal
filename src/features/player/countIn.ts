@@ -79,11 +79,11 @@ export function beatSeconds(meter: Meter, tempo: number, speedRatio: number): nu
  */
 export function countInSchedule(request: CountInRequest): CountInSchedule | null {
   const { bars, meter, tempo, speedRatio, startTime } = request;
-  const seconds = beatSeconds(meter, tempo, speedRatio);
   if (!Number.isInteger(bars) || bars < 1) return null;
   if (!Number.isInteger(meter.beats) || meter.beats < 1) return null;
   // Checked one by one: two negatives would otherwise multiply into a usable-looking beat.
   if (!(tempo > 0) || !(speedRatio > 0) || !(meter.beatValue > 0)) return null;
+  const seconds = beatSeconds(meter, tempo, speedRatio);
   if (!Number.isFinite(seconds) || seconds <= 0 || !Number.isFinite(startTime)) return null;
 
   const clicks: CountInClick[] = [];

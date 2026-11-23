@@ -1,19 +1,15 @@
 import { act, render, screen } from '@testing-library/react';
 import { useSyncExternalStore } from 'react';
-import { FakeClickOutput, FakePlayerEngine } from '@/test/fakePlayerEngine';
+import { setupCountIn, START_DELAY_MS } from '@/test/countInPlayer';
 import type { Meter } from './countIn';
 import { CountInCounter } from './CountInCounter';
-import { COUNT_IN_START_DELAY_SECONDS } from './countInRunner';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
 import {
   initialPlayerSnapshot,
-  PlayerService,
   type CountInBeat,
   type PlayerSnapshot,
   type PlayerStatus,
 } from './PlayerService';
-
-const START_DELAY_MS = COUNT_IN_START_DELAY_SECONDS * 1000;
 
 const snapshotWith = (status: PlayerStatus, countIn: CountInBeat | null): PlayerSnapshot => ({
   ...initialPlayerSnapshot(0, DEFAULT_PLAYER_OPTIONS),
@@ -103,21 +99,12 @@ describe('CountInCounter from a snapshot', () => {
 describe('CountInCounter driven by the player', () => {
   /** The counter over a real PlayerService with a fake engine and click output. */
   function setup(options: Partial<PlayerOptions>, meter?: Meter) {
-    const engine = new FakePlayerEngine();
-    const player = new PlayerService(engine, {
-      drumTrackIndex: 0,
-      options: { ...DEFAULT_PLAYER_OPTIONS, ...options },
-      wakeLock: { setActive: vi.fn(), dispose: vi.fn() },
-      unlockAudio: vi.fn(),
-      clicks: new FakeClickOutput(),
-    });
+    const { engine, service: player } = setupCountIn({ options, meter });
     function Harness() {
       const snapshot = useSyncExternalStore(player.subscribe, player.getSnapshot);
       return <CountInCounter snapshot={snapshot} />;
     }
-    player.load(new Uint8Array([1]));
     render(<Harness />);
-    act(() => engine.finishLoading({ meter }));
     return { engine, player };
   }
 

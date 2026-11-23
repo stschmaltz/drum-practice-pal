@@ -1,14 +1,18 @@
 /// <reference lib="dom" />
-import type { Page } from '@playwright/test';
+import type { JSHandle, Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
 import {
+  barCursorBox,
   barNumber,
+  boxOf,
   controls,
   openFixture,
   playButton,
+  scoreBox,
+  scrollScoreToStart,
   speedSlider,
   status,
-  viewport,
+  windowScrollSettled,
 } from './playerPage';
 
 // Unit 07: count-in. Nothing here listens to audio; whether the clicks and the
@@ -50,15 +54,23 @@ interface DebugWindow {
   __shownBeats: string[];
 }
 
+/** The mounted player, which the app exposes outside production builds (debugPlayer.ts). */
+function debugPlayer(page: Page): Promise<JSHandle<DebugPlayer>> {
+  return page.evaluateHandle(() => {
+    const player = (window as unknown as DebugWindow).__drumPalPlayer;
+    if (!player) throw new Error('No player on window.__drumPalPlayer');
+    return player;
+  });
+}
+
 /**
  * Records every status and count-in beat the player goes through, starting
- * with its current status, from the player the app exposes outside production builds (debugPlayer.ts).
+ * with its current status.
  */
 async function recordPlayer(page: Page): Promise<void> {
-  await page.evaluate(() => {
+  const handle = await debugPlayer(page);
+  await handle.evaluate((player) => {
     const debug = window as unknown as DebugWindow;
-    const player = debug.__drumPalPlayer;
-    if (!player) throw new Error('No player on window.__drumPalPlayer');
     // Seeded with where it starts, so an unrelated first change (a position echo) adds nothing.
     const recording: Recording = { statuses: [player.getSnapshot().status], beats: [] };
     debug.__recording = recording;
@@ -103,9 +115,8 @@ const shownBeats = (page: Page) =>
 
 /** Moves playback to a bar on the player itself; tapping bars is jam.spec.ts's subject. */
 async function seekToBar(page: Page, bar: number): Promise<void> {
-  await page.evaluate((barNumber) => {
-    const player = (window as unknown as DebugWindow).__drumPalPlayer;
-    if (!player) throw new Error('No player on window.__drumPalPlayer');
+  const handle = await debugPlayer(page);
+  await handle.evaluate((player, barNumber) => {
     player.seekToBar(barNumber);
   }, bar);
   await expect(status(page)).toContainText(`Bar ${bar} of`);
@@ -116,9 +127,8 @@ async function seekToBar(page: Page, bar: number): Promise<void> {
  * UI is Unit 08's; until then a range is set on the player itself.
  */
 async function loopBarFiveAtDoubleSpeed(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const player = (window as unknown as DebugWindow).__drumPalPlayer;
-    if (!player) throw new Error('No player on window.__drumPalPlayer');
+  const handle = await debugPlayer(page);
+  await handle.evaluate((player) => {
     player.setRange({ startBar: 5, endBar: 5 });
     player.setLooping(true);
     player.setSpeed(2);
@@ -274,13 +284,13 @@ test('the counter is big, sits over the score on screen and shows each beat', as
   expect(fontPx).toBeGreaterThanOrEqual(130);
 
   // It covers the score box and nothing else: Pause stays reachable.
-  const counterBox = await countIn(page).boundingBox();
-  const scoreBox = await viewport(page).boundingBox();
-  if (!counterBox || !scoreBox) throw new Error('No counter or score box');
-  expect(Math.abs(counterBox.x - scoreBox.x)).toBeLessThan(2);
-  expect(Math.abs(counterBox.y - scoreBox.y)).toBeLessThan(2);
-  expect(Math.abs(counterBox.width - scoreBox.width)).toBeLessThan(2);
-  expect(Math.abs(counterBox.height - scoreBox.height)).toBeLessThan(2);
+  // Play scrolls the window to the score; two boxes read mid-scroll would differ by the scroll.
+  await windowScrollSettled(page);
+  const counter = await boxOf(countIn(page), 'counter');
+  const score = await scoreBox(page);
+  for (const side of ['x', 'y', 'width', 'height'] as const) {
+    expect(Math.abs(counter[side] - score[side])).toBeLessThan(2);
+  }
   await expect(playButton(page)).toBeInViewport({ ratio: 1 });
 
   // Two bars at 60 BPM: eight seconds.
@@ -353,14 +363,11 @@ test('tapping a bar during the count-in starts the count again for that bar', as
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  const scrollScoreToStart = () =>
-    viewport(page).evaluate((box) => box.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
 
   // Where bar 1 is inside the score box, from alphaTab's bar cursor while it is on bar 1.
-  await scrollScoreToStart();
-  const cursorBox = await viewport(page).locator('.at-cursor-bar').boundingBox();
-  const boxBefore = await viewport(page).boundingBox();
-  if (!cursorBox || !boxBefore || cursorBox.width < 2) throw new Error('No bar cursor');
+  await scrollScoreToStart(page);
+  const cursorBox = await barCursorBox(page);
+  const boxBefore = await scoreBox(page);
   const bar1 = {
     x: cursorBox.x + cursorBox.width / 2 - boxBefore.x,
     y: cursorBox.y + cursorBox.height / 2 - boxBefore.y,
@@ -375,16 +382,9 @@ test('tapping a bar during the count-in starts the count again for that bar', as
   await expect(countInBeat(page)).toHaveText('2', { timeout: 5000 });
 
   // Play scrolled the window to the score; measure once that has stopped.
-  await expect
-    .poll(async () => {
-      const first = await page.evaluate(() => window.scrollY);
-      await page.waitForTimeout(150);
-      return (await page.evaluate(() => window.scrollY)) === first;
-    })
-    .toBe(true);
-  await scrollScoreToStart();
-  const box = await viewport(page).boundingBox();
-  if (!box) throw new Error('No score box');
+  await windowScrollSettled(page);
+  await scrollScoreToStart(page);
+  const box = await scoreBox(page);
   // The counter lies over the score but must not take the tap.
   await page.mouse.click(box.x + bar1.x, box.y + bar1.y);
 

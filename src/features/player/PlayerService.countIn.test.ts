@@ -1,62 +1,19 @@
 import {
-  FakeClickOutput,
-  FakePlayerEngine,
-  TEMPO_CHANGE_BAR_TEMPOS,
-  TICKS_PER_BAR,
-} from '@/test/fakePlayerEngine';
+  BAR_MS,
+  clickOffsets,
+  engineFinishesPass,
+  enginePlays,
+  EVERY_REPEAT,
+  LOOP_START_TICK,
+  loopingBars5To8,
+  setupCountIn,
+  START_DELAY_MS,
+  START_ONLY,
+} from '@/test/countInPlayer';
+import { TEMPO_CHANGE_BAR_TEMPOS, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
 import type { Meter } from './countIn';
-import { COUNT_IN_START_DELAY_SECONDS } from './countInRunner';
-import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
-import { PlayerService } from './PlayerService';
-import type { WakeLockControl } from './wakeLock';
 
-const START_DELAY_MS = COUNT_IN_START_DELAY_SECONDS * 1000;
-/** One bar of 4/4 at 120 BPM and 100%. */
-const BAR_MS = 2000;
 const WALTZ: Meter = { beats: 3, beatValue: 4 };
-
-interface SetupOptions {
-  options?: Partial<PlayerOptions>;
-  barTempos?: readonly number[];
-  meter?: Meter;
-}
-
-/** A loaded song, stopped at bar 1, with a fake click output on the fake-timer clock. */
-function setup({ options, barTempos, meter }: SetupOptions = {}) {
-  const engine = new FakePlayerEngine();
-  const clicks = new FakeClickOutput();
-  const wakeLock = { setActive: vi.fn(), dispose: vi.fn() } satisfies WakeLockControl;
-  const service = new PlayerService(engine, {
-    drumTrackIndex: 0,
-    wakeLock,
-    unlockAudio: vi.fn(),
-    clicks,
-    options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1, ...options },
-  });
-  service.load(new Uint8Array([1]));
-  engine.finishLoading({ barTempos, meter });
-  engine.setLooping.mockClear();
-  // So restartCalls() counts only what the test itself causes.
-  engine.loadScore.mockClear();
-  return { engine, clicks, wakeLock, service };
-}
-
-/** What alphaTab reports once play() takes effect. */
-function enginePlays(engine: FakePlayerEngine) {
-  engine.fire('stateChanged', { playing: true });
-}
-
-/** What alphaTab does at the end of a pass with its own looping off: finished, then stopped. */
-function engineFinishesPass(engine: FakePlayerEngine, rangeStartTick = 0) {
-  engine.fire('finished', undefined);
-  engine.fire('stateChanged', { playing: false });
-  engine.fire('position', { tick: rangeStartTick });
-}
-
-const clickOffsets = (clicks: FakeClickOutput) => {
-  const first = clicks.scheduled[0]?.click.time ?? 0;
-  return clicks.scheduled.map(({ click }) => Number((click.time - first).toFixed(6)));
-};
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -68,7 +25,7 @@ afterEach(() => {
 
 describe('PlayerService count-in at the start', () => {
   it('plays straight away with the count-in off', () => {
-    const { engine, service, clicks } = setup({ options: { countInBars: 0 } });
+    const { engine, service, clicks } = setupCountIn({ options: { countInBars: 0 } });
     service.play();
     expect(engine.play).toHaveBeenCalledTimes(1);
     expect(clicks.scheduled).toHaveLength(0);
@@ -76,7 +33,7 @@ describe('PlayerService count-in at the start', () => {
   });
 
   it('counts one bar, then starts the engine on the downbeat', () => {
-    const { engine, service, clicks } = setup();
+    const { engine, service, clicks } = setupCountIn();
     service.play();
 
     expect(service.getSnapshot().status).toBe('countingIn');
@@ -94,14 +51,14 @@ describe('PlayerService count-in at the start', () => {
   });
 
   it('wakes both audio outputs inside the play call, before anything is awaited', () => {
-    const { engine, service, clicks } = setup();
+    const { engine, service, clicks } = setupCountIn();
     service.play();
     expect(clicks.unlock).toHaveBeenCalledTimes(1);
     expect(engine.unlockAudio).toHaveBeenCalledTimes(1);
   });
 
   it('counts two bars when asked', () => {
-    const { engine, service, clicks } = setup({ options: { countInBars: 2 } });
+    const { engine, service, clicks } = setupCountIn({ options: { countInBars: 2 } });
     service.play();
     expect(clicks.scheduled).toHaveLength(8);
     expect(clicks.scheduled.filter(({ click }) => click.accent)).toHaveLength(2);
@@ -113,7 +70,7 @@ describe('PlayerService count-in at the start', () => {
   });
 
   it('shows each beat in the snapshot', () => {
-    const { service } = setup({ options: { countInBars: 2 } });
+    const { service } = setupCountIn({ options: { countInBars: 2 } });
     service.play();
     expect(service.getSnapshot().countIn).toBeNull();
 
@@ -128,21 +85,21 @@ describe('PlayerService count-in at the start', () => {
   });
 
   it('follows the meter: three clicks a bar in 3/4', () => {
-    const { service, clicks } = setup({ meter: WALTZ });
+    const { service, clicks } = setupCountIn({ meter: WALTZ });
     service.play();
     expect(clickOffsets(clicks)).toEqual([0, 0.5, 1]);
     expect(clicks.scheduled.map(({ click }) => click.accent)).toEqual([true, false, false]);
   });
 
   it('follows the speed', () => {
-    const { service, clicks } = setup();
+    const { service, clicks } = setupCountIn();
     service.setSpeed(0.5);
     service.play();
     expect(clickOffsets(clicks)).toEqual([0, 1, 2, 3]);
   });
 
   it('uses the tempo of the bar playback starts on, after a tempo change', () => {
-    const { service, clicks } = setup({ barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    const { service, clicks } = setupCountIn({ barTempos: TEMPO_CHANGE_BAR_TEMPOS });
     service.seekToBar(9);
     service.play();
     // 90 BPM: two thirds of a second per beat.
@@ -150,33 +107,35 @@ describe('PlayerService count-in at the start', () => {
   });
 
   it('clicks at the metronome volume even with the metronome off', () => {
-    const { service, clicks } = setup({ options: { metronomeOn: false, metronomeVolume: 0.4 } });
+    const { service, clicks } = setupCountIn({
+      options: { metronomeOn: false, metronomeVolume: 0.4 },
+    });
     service.play();
     expect(clicks.scheduled.every(({ volume }) => volume === 0.4)).toBe(true);
   });
 
   it('goes back to the start of the bar when paused part-way through it', () => {
-    const { engine, service } = setup();
+    const { engine, service } = setupCountIn();
     engine.fire('position', { tick: 2 * TICKS_PER_BAR + 900 });
     service.play();
     expect(engine.seek).toHaveBeenCalledWith(2 * TICKS_PER_BAR);
   });
 
   it('does not seek when already on a bar line', () => {
-    const { engine, service } = setup();
+    const { engine, service } = setupCountIn();
     engine.fire('position', { tick: 2 * TICKS_PER_BAR });
     service.play();
     expect(engine.seek).not.toHaveBeenCalled();
   });
 
   it('holds the wake lock through the count-in', () => {
-    const { service, wakeLock } = setup();
+    const { service, wakeLock } = setupCountIn();
     service.play();
     expect(wakeLock.setActive).toHaveBeenLastCalledWith(true);
   });
 
   it('plays at once when the bar has no usable tempo', () => {
-    const { engine, service } = setup({ barTempos: Array<number>(16).fill(0) });
+    const { engine, service } = setupCountIn({ barTempos: Array<number>(16).fill(0) });
     service.play();
     expect(engine.play).toHaveBeenCalledTimes(1);
     expect(service.getSnapshot().status).toBe('ready');
@@ -185,7 +144,7 @@ describe('PlayerService count-in at the start', () => {
 
 describe('PlayerService count-in interruptions', () => {
   it('pause calls the count-in off without touching the engine', () => {
-    const { engine, service, clicks, wakeLock } = setup();
+    const { engine, service, clicks, wakeLock } = setupCountIn();
     service.play();
     vi.advanceTimersByTime(START_DELAY_MS + 600);
 
@@ -200,7 +159,7 @@ describe('PlayerService count-in interruptions', () => {
   });
 
   it('togglePlay during a count-in cancels it, and again starts a new one', () => {
-    const { service, clicks } = setup();
+    const { service, clicks } = setupCountIn();
     service.togglePlay();
     service.togglePlay();
     expect(service.getSnapshot().status).toBe('ready');
@@ -210,7 +169,7 @@ describe('PlayerService count-in interruptions', () => {
   });
 
   it('pauses the engine when Pause lands between the downbeat and alphaTab reporting play', () => {
-    const { engine, service } = setup();
+    const { engine, service } = setupCountIn();
     service.play();
     vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
     expect(engine.play).toHaveBeenCalledTimes(1);
@@ -221,7 +180,7 @@ describe('PlayerService count-in interruptions', () => {
   });
 
   it('stop calls the count-in off and rewinds', () => {
-    const { engine, service } = setup();
+    const { engine, service } = setupCountIn();
     service.play();
     service.stop();
     vi.advanceTimersByTime(5000);
@@ -231,7 +190,7 @@ describe('PlayerService count-in interruptions', () => {
   });
 
   it('seeking during a count-in counts in again for the new bar', () => {
-    const { engine, service, clicks } = setup({ barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    const { engine, service, clicks } = setupCountIn({ barTempos: TEMPO_CHANGE_BAR_TEMPOS });
     service.play();
     vi.advanceTimersByTime(START_DELAY_MS + 600);
 
@@ -247,7 +206,7 @@ describe('PlayerService count-in interruptions', () => {
   });
 
   it('setting a range calls the count-in off', () => {
-    const { engine, service } = setup();
+    const { engine, service } = setupCountIn();
     service.play();
     service.setRange({ startBar: 5, endBar: 8 });
     vi.advanceTimersByTime(5000);
@@ -256,7 +215,7 @@ describe('PlayerService count-in interruptions', () => {
   });
 
   it('changing speed or the count-in settings mid count-in neither restarts nor cancels it', () => {
-    const { engine, service, clicks } = setup();
+    const { engine, service, clicks } = setupCountIn();
     service.play();
     service.setSpeed(0.5);
     service.setCountInBars(2);
@@ -270,7 +229,7 @@ describe('PlayerService count-in interruptions', () => {
   });
 
   it('a failure during the count-in stops it', () => {
-    const { engine, service } = setup();
+    const { engine, service } = setupCountIn();
     service.play();
     engine.fire('error', { error: new Error('render failed') });
     vi.advanceTimersByTime(5000);
@@ -279,7 +238,7 @@ describe('PlayerService count-in interruptions', () => {
   });
 
   it('dispose stops the count-in and closes the click output', () => {
-    const { engine, service, clicks } = setup();
+    const { engine, service, clicks } = setupCountIn();
     service.play();
     service.dispose();
     vi.advanceTimersByTime(5000);
@@ -290,7 +249,7 @@ describe('PlayerService count-in interruptions', () => {
   });
 
   it('loading another file stops the count-in', () => {
-    const { engine, service } = setup();
+    const { engine, service } = setupCountIn();
     service.play();
     service.load(new Uint8Array([2]));
     vi.advanceTimersByTime(5000);
@@ -300,29 +259,13 @@ describe('PlayerService count-in interruptions', () => {
 });
 
 describe('PlayerService count-in before every repeat', () => {
-  const everyRepeat = { options: { countInBars: 1, countInMode: 'every_repeat' } } as const;
-
-  /** Looping bars 5 to 8 and playing, the first count-in done. */
-  function looping(config: SetupOptions = everyRepeat) {
-    const ctx = setup(config);
-    ctx.service.setRange({ startBar: 5, endBar: 8 });
-    ctx.service.setLooping(true);
-    ctx.engine.fire('position', { tick: 4 * TICKS_PER_BAR });
-    ctx.service.play();
-    vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
-    enginePlays(ctx.engine);
-    ctx.engine.play.mockClear();
-    ctx.clicks.scheduled = [];
-    return ctx;
-  }
-
   it('keeps the engine from looping by itself, so it stops at the end of each pass', () => {
-    const { engine } = looping();
+    const { engine } = loopingBars5To8(EVERY_REPEAT);
     expect(engine.setLooping).toHaveBeenLastCalledWith(false);
   });
 
   it('lets the engine loop natively when the count-in is at the start only', () => {
-    const { engine, service } = looping({ options: { countInBars: 1, countInMode: 'start' } });
+    const { engine, service } = loopingBars5To8(START_ONLY);
     expect(engine.setLooping).toHaveBeenLastCalledWith(true);
 
     engine.fire('finished', undefined);
@@ -331,11 +274,11 @@ describe('PlayerService count-in before every repeat', () => {
   });
 
   it('counts in at the end of a pass and resumes on the downbeat', () => {
-    const { engine, service, clicks } = looping();
+    const { engine, service, clicks } = loopingBars5To8(EVERY_REPEAT);
     const wrapped = vi.fn();
     service.on('loopWrapped', wrapped);
 
-    engineFinishesPass(engine, 4 * TICKS_PER_BAR);
+    engineFinishesPass(engine, LOOP_START_TICK);
 
     expect(wrapped).toHaveBeenCalledTimes(1);
     // alphaTab stopping for the count-in must not read as a pause.
@@ -350,9 +293,9 @@ describe('PlayerService count-in before every repeat', () => {
   });
 
   it('counts in before every pass, not just the first repeat', () => {
-    const { engine } = looping();
+    const { engine } = loopingBars5To8(EVERY_REPEAT);
     for (let pass = 0; pass < 3; pass++) {
-      engineFinishesPass(engine, 4 * TICKS_PER_BAR);
+      engineFinishesPass(engine, LOOP_START_TICK);
       vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
       enginePlays(engine);
     }
@@ -361,7 +304,7 @@ describe('PlayerService count-in before every repeat', () => {
 
   it('counts the repeat at the tempo of the loop’s first bar, not the bar it ended on', () => {
     // Bars 7 to 10 cross the change: the pass ends at 90 BPM but restarts at 120.
-    const ctx = setup({ ...everyRepeat, barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    const ctx = setupCountIn({ ...EVERY_REPEAT, barTempos: TEMPO_CHANGE_BAR_TEMPOS });
     ctx.service.setRange({ startBar: 7, endBar: 10 });
     ctx.service.setLooping(true);
     ctx.service.play();
@@ -375,13 +318,13 @@ describe('PlayerService count-in before every repeat', () => {
   });
 
   it('holds the wake lock between passes', () => {
-    const { engine, wakeLock } = looping();
-    engineFinishesPass(engine, 4 * TICKS_PER_BAR);
+    const { engine, wakeLock } = loopingBars5To8(EVERY_REPEAT);
+    engineFinishesPass(engine, LOOP_START_TICK);
     expect(wakeLock.setActive).toHaveBeenLastCalledWith(true);
   });
 
   it('works for a whole-song loop with no range', () => {
-    const ctx = setup(everyRepeat);
+    const ctx = setupCountIn(EVERY_REPEAT);
     ctx.service.setLooping(true);
     ctx.service.play();
     vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
@@ -395,7 +338,7 @@ describe('PlayerService count-in before every repeat', () => {
   });
 
   it('does not count in or restart when looping is off', () => {
-    const ctx = setup(everyRepeat);
+    const ctx = setupCountIn(EVERY_REPEAT);
     const finished = vi.fn();
     ctx.service.on('finished', finished);
     ctx.service.play();
@@ -411,8 +354,8 @@ describe('PlayerService count-in before every repeat', () => {
   });
 
   it('Pause during a repeat’s count-in stops the loop there', () => {
-    const { engine, service } = looping();
-    engineFinishesPass(engine, 4 * TICKS_PER_BAR);
+    const { engine, service } = loopingBars5To8(EVERY_REPEAT);
+    engineFinishesPass(engine, LOOP_START_TICK);
     service.pause();
     vi.advanceTimersByTime(5000);
     expect(engine.play).not.toHaveBeenCalled();
@@ -420,7 +363,7 @@ describe('PlayerService count-in before every repeat', () => {
   });
 
   it('switches between native looping and counted repeats live, as a property change only', () => {
-    const { engine, service } = looping();
+    const { engine, service } = loopingBars5To8(EVERY_REPEAT);
     engine.setLooping.mockClear();
 
     service.setCountInMode('start');
@@ -439,7 +382,7 @@ describe('PlayerService count-in before every repeat', () => {
   });
 
   it('applies the looping choice again when alphaTab reloads its MIDI', () => {
-    const { engine } = looping();
+    const { engine } = loopingBars5To8(EVERY_REPEAT);
     engine.setLooping.mockClear();
     engine.fire('ticksReady', { bars: [] });
     expect(engine.setLooping).toHaveBeenLastCalledWith(false);
@@ -448,12 +391,12 @@ describe('PlayerService count-in before every repeat', () => {
 
 describe('PlayerService count-in options', () => {
   it('starts from the options it was given', () => {
-    const { service } = setup({ options: { countInBars: 2, countInMode: 'every_repeat' } });
+    const { service } = setupCountIn({ options: { countInBars: 2, countInMode: 'every_repeat' } });
     expect(service.getSnapshot()).toMatchObject({ countInBars: 2, countInMode: 'every_repeat' });
   });
 
   it('wakes the click output when a count-in is turned on, since that tap may be the only one', () => {
-    const { service, clicks } = setup({ options: { countInBars: 0 } });
+    const { service, clicks } = setupCountIn({ options: { countInBars: 0 } });
     service.setCountInMode('every_repeat');
     expect(clicks.unlock).not.toHaveBeenCalled();
     service.setCountInBars(1);

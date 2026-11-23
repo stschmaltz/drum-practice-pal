@@ -1,12 +1,8 @@
+import { LEAD_MS, START_DELAY_MS } from '@/test/countInPlayer';
 import { FakeClickOutput } from '@/test/fakePlayerEngine';
 import type { ClickOutput, ClickSession } from './clickOutput';
 import { COMMON_TIME, type CountInClick } from './countIn';
-import {
-  COUNT_IN_START_DELAY_SECONDS,
-  PLAY_START_LEAD_SECONDS,
-  startCountIn,
-  type CountInRun,
-} from './countInRunner';
+import { COUNT_IN_START_DELAY_SECONDS, startCountIn, type CountInRun } from './countInRunner';
 
 const ONE_BAR_AT_120: CountInRun = {
   bars: 1,
@@ -15,9 +11,6 @@ const ONE_BAR_AT_120: CountInRun = {
   speedRatio: 1,
   volume: 0.8,
 };
-
-const START_DELAY_MS = COUNT_IN_START_DELAY_SECONDS * 1000;
-const LEAD_MS = PLAY_START_LEAD_SECONDS * 1000;
 
 function run(request: CountInRun = ONE_BAR_AT_120, output: ClickOutput = new FakeClickOutput()) {
   const beats: CountInClick[] = [];

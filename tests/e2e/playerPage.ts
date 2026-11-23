@@ -1,10 +1,10 @@
 /// <reference lib="dom" />
 /**
- * Locators and steps for the song page's player, shared by player.spec.ts
- * and jam.spec.ts.
+ * Locators and steps for the song page's player, shared by player.spec.ts,
+ * jam.spec.ts and count-in.spec.ts.
  */
 import { join } from 'node:path';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, signIn, type E2eUser } from './auth';
 
 /** Mirrors layout.ts: page layout from this width, horizontal below. */
@@ -47,3 +47,47 @@ export async function barNumber(page: Page): Promise<number> {
   if (!match?.[1]) throw new Error(`No bar in "${text}"`);
   return Number(match[1]);
 }
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface Box extends Point {
+  width: number;
+  height: number;
+}
+
+export async function boxOf(locator: Locator, what: string): Promise<Box> {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error(`No ${what}`);
+  return box;
+}
+
+export const scoreBox = (page: Page) => boxOf(viewport(page), 'score box');
+
+/** alphaTab's bar cursor: the highlighted box over the current bar. */
+export async function barCursorBox(page: Page): Promise<Box> {
+  const box = await viewport(page).locator('.at-cursor-bar').boundingBox();
+  if (!box || box.width < 2) throw new Error('No bar cursor');
+  return box;
+}
+
+/** Polls `read` until it gives the same value twice running, and returns that value. */
+export async function untilStill<T>(read: () => Promise<T>): Promise<T> {
+  const reads: T[] = [];
+  await expect
+    .poll(async () => {
+      reads.push(await read());
+      return reads.length > 1 && reads.at(-1) === reads.at(-2);
+    })
+    .toBe(true);
+  return reads.at(-1) as T;
+}
+
+/** Waits until the window stops scrolling (Play's smooth scroll has ended); returns `scrollY`. */
+export const windowScrollSettled = (page: Page) =>
+  untilStill(() => page.evaluate(() => window.scrollY));
+
+export const scrollScoreToStart = (page: Page) =>
+  viewport(page).evaluate((box) => box.scrollTo({ top: 0, left: 0, behavior: 'instant' }));

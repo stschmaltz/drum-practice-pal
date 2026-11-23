@@ -5,11 +5,22 @@ import {
   countInSchedule,
   countsInEveryRepeat,
   meterAtBar,
+  type CountInRequest,
   type Meter,
 } from './countIn';
 
 const WALTZ: Meter = { beats: 3, beatValue: 4 };
 const SIX_EIGHT: Meter = { beats: 6, beatValue: 8 };
+
+/** One bar of 4/4 at 120 BPM and 100%, from time zero, with `patch` on top. */
+const request = (patch: Partial<CountInRequest> = {}): CountInRequest => ({
+  bars: 1,
+  meter: COMMON_TIME,
+  tempo: 120,
+  speedRatio: 1,
+  startTime: 0,
+  ...patch,
+});
 
 const times = (schedule: ReturnType<typeof countInSchedule>) =>
   schedule?.clicks.map((click) => click.time) ?? [];
@@ -32,26 +43,14 @@ describe('beatSeconds', () => {
 
 describe('countInSchedule', () => {
   it('clicks four beats for one bar of 4/4 at 120 and lands on the downbeat', () => {
-    const schedule = countInSchedule({
-      bars: 1,
-      meter: COMMON_TIME,
-      tempo: 120,
-      speedRatio: 1,
-      startTime: 10,
-    });
+    const schedule = countInSchedule(request({ startTime: 10 }));
     expect(times(schedule)).toEqual([10, 10.5, 11, 11.5]);
     expect(schedule?.downbeat).toBe(12);
     expect(schedule?.beatSeconds).toBe(0.5);
   });
 
   it('accents the first beat of every counted bar', () => {
-    const schedule = countInSchedule({
-      bars: 2,
-      meter: COMMON_TIME,
-      tempo: 120,
-      speedRatio: 1,
-      startTime: 0,
-    });
+    const schedule = countInSchedule(request({ bars: 2 }));
     expect(schedule?.clicks.map((click) => click.accent)).toEqual([
       true,
       false,
@@ -76,38 +75,20 @@ describe('countInSchedule', () => {
   });
 
   it('clicks three beats a bar in 3/4', () => {
-    const schedule = countInSchedule({
-      bars: 2,
-      meter: WALTZ,
-      tempo: 120,
-      speedRatio: 1,
-      startTime: 0,
-    });
+    const schedule = countInSchedule(request({ bars: 2, meter: WALTZ }));
     expect(schedule?.clicks).toHaveLength(6);
     expect(schedule?.clicks.filter((click) => click.accent)).toHaveLength(2);
     expect(schedule?.downbeat).toBe(3);
   });
 
   it('clicks six eighths in 6/8', () => {
-    const schedule = countInSchedule({
-      bars: 1,
-      meter: SIX_EIGHT,
-      tempo: 120,
-      speedRatio: 1,
-      startTime: 0,
-    });
+    const schedule = countInSchedule(request({ meter: SIX_EIGHT }));
     expect(times(schedule)).toEqual([0, 0.25, 0.5, 0.75, 1, 1.25]);
     expect(schedule?.downbeat).toBe(1.5);
   });
 
   it('uses the tempo it is given, such as the one after a tempo change', () => {
-    const schedule = countInSchedule({
-      bars: 1,
-      meter: COMMON_TIME,
-      tempo: 90,
-      speedRatio: 1,
-      startTime: 0,
-    });
+    const schedule = countInSchedule(request({ tempo: 90 }));
     expect(schedule?.beatSeconds).toBeCloseTo(2 / 3);
     expect(schedule?.downbeat).toBeCloseTo(8 / 3);
   });
@@ -118,13 +99,7 @@ describe('countInSchedule', () => {
     [1.5, 1 / 3],
     [2, 0.25],
   ])('scales with speed: at ratio %s a 120 BPM beat lasts %s s', (speedRatio, expected) => {
-    const schedule = countInSchedule({
-      bars: 1,
-      meter: COMMON_TIME,
-      tempo: 120,
-      speedRatio,
-      startTime: 0,
-    });
+    const schedule = countInSchedule(request({ speedRatio }));
     expect(schedule?.beatSeconds).toBeCloseTo(expected);
     expect(schedule?.downbeat).toBeCloseTo(expected * 4);
   });
@@ -152,16 +127,7 @@ describe('countInSchedule', () => {
     ['a meter with no beat value', { meter: { beats: 4, beatValue: 0 } }],
     ['a start time that is not a number', { startTime: Number.NaN }],
   ])('returns null for %s', (_name, patch) => {
-    expect(
-      countInSchedule({
-        bars: 1,
-        meter: COMMON_TIME,
-        tempo: 120,
-        speedRatio: 1,
-        startTime: 0,
-        ...patch,
-      }),
-    ).toBeNull();
+    expect(countInSchedule(request(patch))).toBeNull();
   });
 });
 

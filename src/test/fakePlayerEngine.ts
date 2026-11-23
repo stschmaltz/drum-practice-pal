@@ -62,25 +62,29 @@ export class FakePlayerEngine implements PlayerEngine {
 
   /**
    * What alphaTab does after a successful load of a song with `barCount`
-   * straight bars. Every bar is 4/4 at 120 BPM unless `meter` or `barTempos` says otherwise.
+   * straight bars. Every bar is 4/4 at 120 BPM unless `meter`, `barMeters` or
+   * `barTempos` says otherwise.
    */
   finishLoading({
     barCount = 16,
     trackCount = 3,
     barTempos = Array.from({ length: barCount }, () => 120),
     meter = COMMON_TIME,
+    barMeters = Array.from({ length: barCount }, () => meter),
   }: {
     barCount?: number;
     trackCount?: number;
     barTempos?: readonly number[];
     /** Every bar's time signature. */
     meter?: Meter;
+    /** One meter per bar, for a song whose time signature changes; pass a matching `barCount`. */
+    barMeters?: readonly Meter[];
   } = {}): void {
     this.fire('scoreLoaded', {
       barCount,
       trackCount,
       barTempos: [...barTempos],
-      barMeters: Array.from({ length: barCount }, () => meter),
+      barMeters: [...barMeters],
     });
     this.fire('ticksReady', { bars: straightBars(barCount) });
     this.fire('readyForPlayback', undefined);

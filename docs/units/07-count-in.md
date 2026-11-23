@@ -222,3 +222,41 @@ Every repeat was reached through `window.__drumPalPlayer` (`setRange`, `setLoopi
 - `npm run check`: typecheck and lint clean; 54 test files, 2334 tests passing. `format:check` passes for the repo but fails on this machine on one file in the untracked `.claude/worktrees/` folder (`project-pass/public/soundfont/README.md`), which isn't part of the branch and which QA was told to leave alone. `npx prettier --check . '!.claude/**'` is clean. QA changed only this note and added screenshots.
 - `tests/e2e/count-in.spec.ts`: 30 passed against the same build. The full `npm run e2e` was not re-run, since no code changed.
 - The throwaway specs and their users were removed.
+
+## Readability
+
+**Summary.** No behaviour change. The app code from Build was already in the shape AGENTS.md asks for (pure scheduler, runner, click output, service, thin components), so the changes there are small. Most of the work was in the tests: the two `PlayerService` count-in files each carried their own copy of the same setup, and the e2e spec repeated helpers that `jam.spec.ts` already had.
+
+**App code**
+
+- `PlayerService.ts`: new exported `isRunning(status)` (playing or counting in). It replaces the same two-status test written out in `togglePlay`, `isLoaded`, `PlayerControls` (which had a private `isRunning`) and `SongPage`.
+- `countIn.ts`: `countInSchedule` works out the beat length after the input checks it depends on, not before them.
+- `clickOutput.ts`: the two bare numbers in `scheduleClick` are named (`SILENT_GAIN`, `STOP_TAIL_SECONDS`) with the reason for each.
+
+**Tests**
+
+- `src/test/countInPlayer.ts` (new): the one setup for count-in service tests. `setupCountIn`, `loopingBars5To8`, `enginePlays`, `engineFinishesPass`, `clickOffsets`, `EVERY_REPEAT` / `START_ONLY`, and the timing constants (`START_DELAY_MS`, `LEAD_MS`, `BAR_MS`, `LOOP_START_TICK`). `PlayerService.countIn.test.ts`, `PlayerService.countInEdges.test.ts`, `CountInCounter.test.tsx` and `countInRunner.test.ts` use it instead of their own copies.
+- `FakePlayerEngine.finishLoading` takes `barMeters`, so a song whose meter changes no longer needs the three engine events fired by hand.
+- `PlayerService.countInEdges.test.ts`: the meter-change song (`MIXED_METERS`) and the three interruption moments (`MOMENTS`) were each written out twice; now once. The "before the song has loaded" test uses `setupCountIn({ loaded: false })`.
+- `countIn.test.ts` / `countIn.table.test.ts`: the repeated "one bar of 4/4 at 120" request literal is one `request(patch)` helper and one `BASE` constant.
+- `tests/e2e/playerPage.ts` now holds the score-box helpers that were private to `jam.spec.ts` (`Point`, `Box`, `boxOf`, `scoreBox`, `barCursorBox`, `untilStill`, `windowScrollSettled`, `scrollScoreToStart`). `count-in.spec.ts` uses them in place of its inline copies, and reaches `window.__drumPalPlayer` through one `debugPlayer(page)` handle rather than three copies of the lookup and its error.
+
+**Left alone, on purpose**
+
+- **The count-in state machine stays in `PlayerService`.** It is about 100 of the file's 580 lines, in one marked section, and every step of it reads or writes the service's own status, wake lock, last tick and engine. Pulling it into its own class would mean handing all of those across an interface for no fewer moving parts. Worth another look if Unit 08 or 09 adds a third thing that starts playback from a timer.
+- **`countIn.ts` / `countInRunner.ts` / `clickOutput.ts` stay three files.** Each has one job and its own test file: arithmetic with no clock, timers against a clock, and Web Audio. The dependencies run one way.
+- **`countIn.test.ts` and `countIn.table.test.ts` both stay, as do the two service files.** They overlap in a few null-input and option cases, but one is the worked examples a reader starts with and the other the exhaustive table; no test was removed or merged, so the counts are unchanged.
+- **The count-in locators (`countIn`, `countInSelect`, ...) stay in `count-in.spec.ts`**: one spec uses them. Move them to `playerPage.ts` when a second one does.
+- **QA's six minor issues** are behaviour changes and remain logged as they were.
+
+**Notes**
+
+- In `PlayerService.countIn.test.ts` the looping setup now waits two bars before the first pass (the edges file's version, long enough for a two-bar count-in) where its own copy waited one. Nothing in that file asserts on that interval.
+- In the e2e tap test, "the window has stopped scrolling" is now `windowScrollSettled` (two equal reads under `expect.poll`) rather than a fixed 150 ms between two reads. Same condition, same helper as `jam.spec.ts`.
+- `AGENTS.md`: `isRunning`, `src/test/countInPlayer.ts`, the score-box helpers in `playerPage.ts`, and `debugPlayer(page)`.
+
+**Results**
+
+- `npm run check`: typecheck and lint clean; 54 test files, 2334 tests passing, the same counts as before. As QA found, `format:check` fails on this machine only on `.claude/worktrees/project-pass/public/soundfont/README.md`, an untracked folder outside the branch, so `npm run check` stops there; `npx prettier --check . '!.claude/**'` is clean and `npm test` was run on its own. Same before and after.
+- `npm run e2e`: 198 tests; 191 passed, 7 skipped (the device-only skips in `jam.spec.ts`), 0 failed, before and after.
+- **One test race fixed on the way.** "the counter is big, sits over the score..." compared the counter's box with the score's box from two separate reads while Play was still smooth-scrolling the window, so on the phone the two could differ by the distance scrolled (17 px seen). It passed in the Test and QA runs and in this stage's first full run, then failed in the second; run alone on the phone profile, the spec as committed failed 4 times in 8. It now waits for `windowScrollSettled` before reading the boxes: 30 of 30 across the three sizes. Test code only.

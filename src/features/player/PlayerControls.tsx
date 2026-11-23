@@ -18,7 +18,7 @@ import {
   type CountInMode,
 } from '@/lib/schema';
 import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_LABELS } from './countInLabels';
-import type { PlayerService, PlayerSnapshot } from './PlayerService';
+import { isRunning, type PlayerService, type PlayerSnapshot } from './PlayerService';
 import { percentToRatio, ratioToPercent, SPEED_STEP_PERCENT } from './speed';
 
 const VOLUME_STEP_PERCENT = 5;
@@ -37,14 +37,9 @@ interface PlayerControlsProps extends PlayerViewProps {
   showPlayButton?: boolean;
 }
 
-/** Playing or counting in: Play has been pressed and Pause undoes it. */
-function isRunning(snapshot: PlayerSnapshot): boolean {
-  return snapshot.status === 'playing' || snapshot.status === 'countingIn';
-}
-
 /** Whether Play can be pressed: the song is loaded (or already playing). */
 function canPlay(player: PlayerService | null, snapshot: PlayerSnapshot): boolean {
-  return player !== null && (snapshot.status === 'ready' || isRunning(snapshot));
+  return player !== null && (snapshot.status === 'ready' || isRunning(snapshot.status));
 }
 
 /** Play/Pause. Part of `PlayerControls` unless the screen places it itself. */
@@ -57,7 +52,7 @@ export function PlayPauseButton({ player, snapshot }: PlayerViewProps) {
       // No await before this: iOS only starts audio inside the tap itself.
       onClick={() => player?.togglePlay()}
     >
-      {isRunning(snapshot) ? 'Pause' : 'Play'}
+      {isRunning(snapshot.status) ? 'Pause' : 'Play'}
     </button>
   );
 }

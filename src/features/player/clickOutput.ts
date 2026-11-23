@@ -34,6 +34,10 @@ const BEAT_HZ = 1000;
 /** The accent is louder as well as higher, so beat one stands out over a kit. */
 const BEAT_GAIN = 0.65;
 const CLICK_SECONDS = 0.05;
+/** Where a click's decay ends: an exponential ramp can't reach zero. */
+const SILENT_GAIN = 0.001;
+/** The oscillator runs this much past the decay, so stopping it is never heard. */
+const STOP_TAIL_SECONDS = 0.01;
 
 /** The parts of the browser this uses, so tests can pass fakes. */
 export interface ClickEnv {
@@ -155,9 +159,9 @@ function scheduleClick(ctx: AudioContext, click: CountInClick, volume: number): 
   oscillator.frequency.value = click.accent ? ACCENT_HZ : BEAT_HZ;
   gain.gain.setValueAtTime(volume * (click.accent ? 1 : BEAT_GAIN), click.time);
   // A short decay rather than a hard stop, which would itself click.
-  gain.gain.exponentialRampToValueAtTime(0.001, click.time + CLICK_SECONDS);
+  gain.gain.exponentialRampToValueAtTime(SILENT_GAIN, click.time + CLICK_SECONDS);
   oscillator.connect(gain).connect(ctx.destination);
   oscillator.start(click.time);
-  oscillator.stop(click.time + CLICK_SECONDS + 0.01);
+  oscillator.stop(click.time + CLICK_SECONDS + STOP_TAIL_SECONDS);
   return oscillator;
 }

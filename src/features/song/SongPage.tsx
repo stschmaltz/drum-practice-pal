@@ -13,7 +13,11 @@ import {
   playerOptionsFromSettings,
   type PlayerOptions,
 } from '@/features/player/playerOptions';
-import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
+import {
+  isRunning,
+  type PlayerService,
+  type PlayerSnapshot,
+} from '@/features/player/PlayerService';
 import { ratioToPercent } from '@/features/player/speed';
 import { bpmAtSpeed } from '@/features/player/tempo';
 import { usePlayer } from '@/features/player/usePlayer';
@@ -105,8 +109,7 @@ function SongPlayer({
   });
   const stickyBarRef = useRef<HTMLDivElement>(null);
   // The count-in counter sits over the score, so the score comes on screen for it too.
-  const running = snapshot.status === 'playing' || snapshot.status === 'countingIn';
-  useJamMode(player, { scrollRef, stickyBarRef }, running);
+  useJamMode(player, { scrollRef, stickyBarRef }, isRunning(snapshot.status));
   // A soundfont failure still leaves readable notation; these leave an empty white box.
   const nothingToShow = snapshot.error === 'score' || snapshot.error === 'engine';
 
