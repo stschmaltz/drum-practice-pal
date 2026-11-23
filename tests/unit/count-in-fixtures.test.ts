@@ -59,3 +59,59 @@ describe('the tempo-change fixture (120 to 90 at bar 9)', () => {
     expect(oneBarFrom(9, 0.75)?.beatSeconds).toBeCloseTo(60 / 67.5);
   });
 });
+
+describe.each(fixtures)('count-in for fixture $name at every setting', ({ name, expected }) => {
+  const score = loadScoreFile(join(gpDir, `${name}.gp`));
+  const meters = barMeters(score);
+  const tempos = barStartTempos(score);
+  const [beats, beatValue] = expected.timeSignature;
+
+  /** The tempo sources.ts says a bar starts at: the last change at or before it. */
+  const expectedTempo = (barNumber: number) => {
+    const changes = Object.entries(expected.tempoChanges ?? {})
+      .map(([bar, tempo]) => ({ bar: Number(bar), tempo }))
+      .filter((change) => change.bar <= barNumber)
+      .sort((a, b) => a.bar - b.bar);
+    return changes.at(-1)?.tempo ?? expected.tempoAtBar1;
+  };
+
+  const settings = [1, 2].flatMap((bars) =>
+    [0.25, 0.5, 1, 2].map((speedRatio) => ({ bars, speedRatio })),
+  );
+
+  it.each(settings)(
+    '$bars bar(s) at speed $speedRatio, from every bar of the song',
+    ({ bars, speedRatio }) => {
+      for (let barNumber = 1; barNumber <= expected.barCount; barNumber++) {
+        const meter = meterAtBar(meters, barNumber);
+        const tempo = tempoAtBar(tempos, barNumber);
+        if (!meter || tempo === null) throw new Error(`No bar ${barNumber}`);
+        const schedule = countInSchedule({ bars, meter, tempo, speedRatio, startTime: 0 });
+
+        const beat = (60 / (expectedTempo(barNumber) * speedRatio)) * (4 / beatValue);
+        expect(schedule?.clicks).toHaveLength(bars * beats);
+        expect(schedule?.beatSeconds).toBeCloseTo(beat, 9);
+        expect(schedule?.downbeat).toBeCloseTo(bars * beats * beat, 9);
+        expect(schedule?.clicks.filter((click) => click.accent)).toHaveLength(bars);
+      }
+    },
+  );
+
+  it('has nothing to count with the count-in off', () => {
+    const meter = meterAtBar(meters, 1);
+    if (!meter) throw new Error('No meter for bar 1');
+    expect(
+      countInSchedule({
+        bars: 0,
+        meter,
+        tempo: expected.tempoAtBar1,
+        speedRatio: 1,
+        startTime: 0,
+      }),
+    ).toBeNull();
+  });
+
+  it('has no meter past the last bar', () => {
+    expect(meterAtBar(meters, expected.barCount + 1)).toBeNull();
+  });
+});

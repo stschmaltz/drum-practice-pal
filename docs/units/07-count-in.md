@@ -91,3 +91,62 @@ Following the Unit 05 pattern, the new alphaTab pieces went into the engine inte
 - 3/4 (`waltz-34`) and after the tempo change (`tempo-change`, bar 9): does the count-in match what follows?
 - iPhone and iPad: with a count-in on, does the first Play tap make the clicks audible and does playback then start by itself? With the ringer switch on silent? As an installed PWA?
 - Is the counter readable from the throne on each device?
+
+## Test
+
+**Summary.** The Build tests already walked the main paths, so this stage went wide: the scheduler as a table over every meter, tempo, speed bound and bar count; every way a count-in can be called off, at the start and before a repeat, with nothing left behind; settings changed in the middle of a loop; the counter as a component; and the user flows at phone, tablet and desktop. One small bug was fixed (below). Nothing was heard: the Human checks in the Build section still stand.
+
+**Tests added.** 1,636 unit and component tests (1,376 of them the scheduler table), and 6 new e2e tests run at 3 sizes, plus timing assertions in an existing one.
+
+- `src/features/player/countIn.table.test.ts` (new, 1376). The scheduler, table-driven: 13 meters (4/4, 3/4, 2/4, 5/4, 7/4, 2/2, 3/8, 6/8, 7/8, 9/8, 12/8, 5/16, 1/4) x 5 tempos x 5 speeds (0.25 and 2.0 included) x 1 and 2 bars x 2 start times. Each case checks one click per beat, even spacing at tempo x speed, the accent on beat one only, bar and beat numbers, and the downbeat one beat after the last click. Then scaling rules (bars, speed, 6/8 against 3/4, no drift), 25 kinds of bad input returning null, no schedule ever holding a non-finite time, `meterAtBar` over a meter change, and `countsInEveryRepeat` for all six settings.
+- `tests/unit/count-in-fixtures.test.ts` (+50). The same over real alphaTab scores: every generated fixture, from every bar, 1 and 2 bars, speeds 0.25 to 2, against the tempo `sources.ts` says the bar has (so bars 9 to 16 of `tempo-change` at 90, and `waltz-34` in threes).
+- `src/features/player/countInRunner.test.ts` (+11). Beats then downbeat in order for two bars of 3/4; the downbeat no sooner than the bar at 0.25 and 2.0; zero volume still counts; cancel twice, before the first click, and from inside a beat handler; a stalled audio clock holds the count and moves the downbeat back by the stall; nothing to count opens no output and sets no timer.
+- `src/features/player/PlayerService.countInEdges.test.ts` (new, 157). The service state machine with `FakePlayerEngine`, `FakeClickOutput` and fake timers:
+  - 80 meter x tempo x speed x bars cases end to end: clicks, accents, `engine.play()` on the downbeat and not before, the counter's beats, no timer left.
+  - A song whose meter changes, at the start and for a repeat.
+  - Seven cancel paths (pause, togglePlay, stop, setRange, setRange(null), load, engine error) at three moments each, and each again before a repeat: nothing plays, the clicks are silenced, no timers, wake lock off.
+  - Dispose at each moment, after a finished count-in, twice, and engine events after dispose.
+  - Seek during a count-in: new meter and tempo, one play on the new downbeat, status never leaves `countingIn`, a bar the song lacks is ignored, repeated seeks leave one count-in.
+  - Mode, bar count, count-in off and speed changed mid-loop and mid-count-in, with `engine.restartCalls()` at 0.
+  - Start only counts in once over five wraps. Every repeat over four passes never reads `ready`; a pass end reported twice; a single-bar loop.
+- `src/features/player/CountInCounter.test.tsx` (new, 21). Nothing outside a count-in; blank before the first click; the right number for each beat (3/4, 6/8, 12/8); "Bar n of 2" only for two bars; `aria-hidden`. Driven by the real service: 1 2 3 4 on the beat, 1 2 3 twice in 3/4, a full second per number at 50%, gone on pause, back from 1 before a repeat, never with the count-in off.
+- `src/features/player/PlayerControls.test.tsx` (+12). The two selects: disabled with their values before the player exists, usable while loading, each option sets the player, the mode is kept while off, the choice is what the next Play counts, changing either mid count-in leaves it running with no restart, Back to start calls it off, both have accessible names.
+- `src/features/song/SongPage.test.tsx` (+9). Defaults from `user_settings` for four saved combinations; off means no counter; an override sends no write to the server and the next song opens on the saved defaults; the counter sits in the score box; the score scrolls on screen once when the count-in starts; leaving the page mid count-in disposes the player and nothing plays.
+- `tests/e2e/count-in.spec.ts` (+6, each at 390x844, 820x1180 and 1440x900):
+  - **Count-in off.** Play goes `ready` to `playing`, with no counter ever in the DOM.
+  - **The counter.** Font at least 35% of the window's short side, wholly on screen, exactly covering the score box, Pause still reachable; the DOM shows 1 2 3 4 1 2 3 4 with "Bar 1 of 2" then "Bar 2 of 2".
+  - **Speed and tempo change** (`tempo-change`). The beat measured in the page is 500 ms from bar 1, 667 ms from bar 9, 1333 ms from bar 9 at 50% and 250 ms at 200% (median gap, within 15%). Playback is reported no earlier than four beats after the first, and starts on the bar counted for.
+  - **Tap during a count-in.** A real tap on bar 1, through the counter overlay, restarts the count for bar 1 without leaving `countingIn`.
+  - **Start only against every repeat.** With a loop, start only counts in once over 4+ passes; switching to every repeat mid-loop counts each pass in with no `ready` in between; switching back stops the count-ins, again without stopping.
+  - **Settings.** Defaults saved on the Settings page open in the controls bar and are what Play counts; an override lasts until the song is reopened; the saved settings are unchanged afterwards.
+  - The existing every-repeat test now also checks that each repeat's count-in lasts its full bar before playback is reported.
+
+**Criteria**
+
+| Criterion                                                           | Proved by                                                                                                |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Matches meter and speed, including 3/4 and after a tempo change     | `countIn.table`, `count-in-fixtures`, the 80-case service table, e2e speed and tempo change, e2e 3/4     |
+| Accented first beat; off, 1 and 2 bars                              | `countIn.table`, the service table (accents per bar), e2e count-in off and the two-bar tests             |
+| Every repeat pauses at loop end, counts in, resumes on the downbeat | `PlayerService.countInEdges` (many passes, when `engine.play()` is called), e2e every repeat with timing |
+| Start only counts in once                                           | `PlayerService.countInEdges` (five wraps), e2e start only                                                |
+| Defaults from `user_settings`, overridable for the open song only   | `SongPage.test`, `PlayerControls.test`, e2e Settings                                                     |
+| Big beat counter shows the right beat                               | `CountInCounter.test`, e2e counter                                                                       |
+| No restart on live changes; nothing leaked                          | `restartCalls()` and `vi.getTimerCount()` assertions throughout `countInEdges` and the runner tests      |
+
+**Bugs found**
+
+- **Fixed (low).** `countInSchedule` accepted a negative tempo together with a negative speed (or a negative beat value with either): the signs cancelled into a positive beat length and it returned a schedule. The UI can't reach it, since the service clamps speed, but a damaged file can carry any tempo. Two lines in `countIn.ts` now check that tempo, speed and beat value are each above zero. Covered by "returns null for a negative tempo and a negative speed".
+- Nothing logged as open.
+
+**Notes for QA and later stages**
+
+- The runner fires a beat up to 2 ms early (`TIMER_SLACK_SECONDS`), so tests that step time leave a 10 ms margin around a beat instead of asserting on the exact millisecond.
+- If the audio clock jumps forward past the downbeat (rather than stalling), the runner starts playback and the skipped beats never show on the counter. That looks like the right priority and no test asserts otherwise; it is noted so it isn't mistaken for a bug.
+- Turning looping off during a repeat's count-in lets that count-in finish and plays one more pass. No criterion covers it, so there is no test either way; Unit 08's loop UI should decide.
+- The e2e timing checks measure the on-screen counter, not sound. They held with the whole suite running in parallel on 16 workers, but they are the first place to look if CI is slow: the tolerance is 15% of a beat.
+- There is still no fixture with a time-signature change; the service tests cover it with hand-built bar meters.
+
+**Results**
+
+- `npm run check`: typecheck, lint and format clean; 54 test files, 2334 tests, all passing.
+- `npm run e2e` (local Supabase running): 198 tests; 191 passed, 7 skipped (the existing device-only skips in `jam.spec.ts`), 0 failed. `count-in.spec.ts` alone: 30 passed.

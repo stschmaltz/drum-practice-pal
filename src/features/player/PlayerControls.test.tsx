@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useSyncExternalStore } from 'react';
-import { FakePlayerEngine } from '@/test/fakePlayerEngine';
+import { FakeClickOutput, FakePlayerEngine } from '@/test/fakePlayerEngine';
 import { PlayerControls, PlayPauseButton } from './PlayerControls';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
 import { initialPlayerSnapshot, PlayerService } from './PlayerService';
@@ -18,6 +18,7 @@ function setup({
   drumTrackIndex = DRUMS as number | null,
   options = DEFAULT_PLAYER_OPTIONS as PlayerOptions,
   loaded = true,
+  clicks = undefined as FakeClickOutput | undefined,
 } = {}) {
   const engine = new FakePlayerEngine();
   const player = new PlayerService(engine, {
@@ -25,6 +26,7 @@ function setup({
     options,
     wakeLock: { setActive: vi.fn(), dispose: vi.fn() },
     unlockAudio: vi.fn(),
+    clicks,
   });
   player.load(new Uint8Array([1]));
   render(<Harness player={player} />);
@@ -269,6 +271,137 @@ describe('PlayerControls count-in', () => {
     expect(player.getSnapshot()).toMatchObject({ countInBars: 1, countInMode: 'every_repeat' });
     expect(countIn()).toHaveValue('1');
     expect(engine.restartCalls()).toBe(0);
+  });
+
+  it('shows the starting values, disabled, before the player exists', () => {
+    render(
+      <PlayerControls
+        player={null}
+        snapshot={initialPlayerSnapshot(DRUMS, {
+          ...DEFAULT_PLAYER_OPTIONS,
+          countInBars: 1,
+          countInMode: 'every_repeat',
+        })}
+      />,
+    );
+    expect(countIn()).toHaveValue('1');
+    expect(countIn()).toBeDisabled();
+    expect(countInMode()).toHaveValue('every_repeat');
+    expect(countInMode()).toBeDisabled();
+  });
+
+  it('can be set while the song is still loading', async () => {
+    const { player, user } = setup({ loaded: false });
+    expect(countIn()).toBeEnabled();
+    await user.selectOptions(countIn(), '2 bars');
+    expect(player.getSnapshot().countInBars).toBe(2);
+    expect(countInMode()).toBeEnabled();
+  });
+
+  it.each([
+    ['Off', 0],
+    ['1 bar', 1],
+    ['2 bars', 2],
+  ])('choosing "%s" sets the player to %s bar(s)', async (label, bars) => {
+    const { player, user } = setup({
+      // Start from a different value so each choice is a change.
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: bars === 1 ? 2 : 1 },
+    });
+    await user.selectOptions(countIn(), label);
+    expect(player.getSnapshot().countInBars).toBe(bars);
+    expect(countIn()).toHaveValue(String(bars));
+    expect(countIn()).toHaveDisplayValue(label);
+  });
+
+  it.each([
+    ['At the start only', 'start', 'every_repeat'],
+    ['Before every loop repeat', 'every_repeat', 'start'],
+  ] as const)('choosing "%s" sets the mode to %s', async (label, mode, from) => {
+    const { player, user } = setup({
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1, countInMode: from },
+    });
+    await user.selectOptions(countInMode(), label);
+    expect(player.getSnapshot().countInMode).toBe(mode);
+    expect(countInMode()).toHaveDisplayValue(label);
+  });
+
+  it('keeps the chosen mode while the count-in is off, and offers it again when it is back on', async () => {
+    const { player, user } = setup({
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1, countInMode: 'every_repeat' },
+    });
+    await user.selectOptions(countIn(), 'Off');
+    expect(countInMode()).toBeDisabled();
+    expect(countInMode()).toHaveValue('every_repeat');
+
+    await user.selectOptions(countIn(), '2 bars');
+    expect(countInMode()).toBeEnabled();
+    expect(countInMode()).toHaveValue('every_repeat');
+    expect(player.getSnapshot()).toMatchObject({ countInBars: 2, countInMode: 'every_repeat' });
+  });
+
+  it('the choice made in the bar is what the next Play counts', async () => {
+    const clicks = new FakeClickOutput();
+    const { engine, player, user } = setup({ clicks });
+
+    // Off: Play starts the engine straight away.
+    await user.click(playButton());
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(clicks.scheduled).toHaveLength(0);
+    act(() => engine.fire('stateChanged', { playing: true }));
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: false }));
+
+    await user.selectOptions(countIn(), '2 bars');
+    await user.click(playButton());
+    expect(player.getSnapshot().status).toBe('countingIn');
+    // Two bars of 4/4: eight clicks, two of them accented.
+    expect(clicks.scheduled).toHaveLength(8);
+    expect(clicks.scheduled.filter(({ click }) => click.accent)).toHaveLength(2);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+
+    await user.click(playButton());
+    expect(player.getSnapshot().status).toBe('ready');
+  });
+
+  it('changing either select during a count-in leaves it running', async () => {
+    const clicks = new FakeClickOutput();
+    const { engine, player, user } = setup({
+      clicks,
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2 },
+    });
+    await user.click(playButton());
+    expect(player.getSnapshot().status).toBe('countingIn');
+    const restartsBefore = engine.restartCalls();
+
+    await user.selectOptions(countInMode(), 'Before every loop repeat');
+    await user.selectOptions(countIn(), '1 bar');
+
+    expect(player.getSnapshot().status).toBe('countingIn');
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(clicks.cancelSession).not.toHaveBeenCalled();
+    expect(clicks.scheduled).toHaveLength(8);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+
+    await user.click(playButton());
+  });
+
+  it('Back to start calls a count-in off', async () => {
+    const { engine, player, user } = setup({
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2 },
+    });
+    await user.click(playButton());
+    expect(playButton()).toHaveTextContent('Pause');
+
+    await user.click(backToStart());
+    expect(playButton()).toHaveTextContent('Play');
+    expect(player.getSnapshot()).toMatchObject({ status: 'ready', countIn: null });
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it('both selects have an accessible name', () => {
+    setup();
+    expect(screen.getByLabelText('Count-in')).toBe(countIn());
+    expect(screen.getByLabelText('When to count in')).toBe(countInMode());
   });
 
   it('shows Pause during a count-in, and Pause calls it off', async () => {
