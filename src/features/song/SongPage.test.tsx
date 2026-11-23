@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, Outlet, Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
@@ -13,7 +13,7 @@ import {
   type FakeResult,
   type StorageCall,
 } from '@/test/fakeSupabase';
-import { FakePlayerEngine } from '@/test/fakePlayerEngine';
+import { FakePlayerEngine, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
 import { renderRoutes, RouteMarker } from '@/test/render';
 import { SongPage } from './SongPage';
 
@@ -104,10 +104,13 @@ const playButton = () => screen.getByRole('button', { name: /^(Play|Pause)$/ });
 const downloads = () => storageResult.mock.calls.filter(([call]) => call.method === 'download');
 
 /** Waits for the player to mount its engine, then finishes alphaTab's loading. */
-async function loadPlayer(index = 0, { barCount = 16 } = {}) {
+async function loadPlayer(
+  index = 0,
+  { barCount = 16, barTempos }: { barCount?: number; barTempos?: number[] } = {},
+) {
   await waitFor(() => expect(engines[index]?.loadScore).toHaveBeenCalled());
   const engine = engines[index]!;
-  act(() => engine.finishLoading({ barCount, trackCount: 3 }));
+  act(() => engine.finishLoading({ barCount, trackCount: 3, barTempos }));
   await waitFor(() => expect(playButton()).toBeEnabled());
   return engine;
 }
@@ -344,5 +347,70 @@ describe('SongPage disposal on route change', () => {
     );
     expect(playButton()).toHaveTextContent('Play');
     expect(status()).toHaveTextContent('Bar 1 of 12');
+  });
+});
+
+describe('SongPage jam mode', () => {
+  /** Like the tempo-change fixture: 120 BPM for bars 1 to 8, 90 from bar 9. */
+  const tempoChange = Array.from({ length: 16 }, (_, barIndex) => (barIndex < 8 ? 120 : 90));
+  const speedReadout = () => screen.getByTestId('jam-speed');
+  const bpmReadout = () => screen.getByTestId('jam-bpm');
+
+  it('shows speed and the BPM at the current bar, following tempo changes', async () => {
+    serve();
+    renderSong(SONG_A);
+    expect(await screen.findByTestId('jam-bpm')).toHaveTextContent('–');
+    const engine = await loadPlayer(0, { barTempos: tempoChange });
+    expect(speedReadout()).toHaveTextContent('100%');
+    expect(bpmReadout()).toHaveTextContent('120');
+
+    act(() => engine.fire('position', { tick: 8 * TICKS_PER_BAR + 1 }));
+    expect(bpmReadout()).toHaveTextContent('90');
+    expect(status()).toHaveTextContent('Bar 9 of 16');
+  });
+
+  it('recomputes BPM from the speed slider', async () => {
+    serve();
+    renderSong(SONG_A);
+    const engine = await loadPlayer(0, { barTempos: tempoChange });
+    act(() => engine.fire('position', { tick: 8 * TICKS_PER_BAR + 1 }));
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '75' } });
+    expect(speedReadout()).toHaveTextContent('75%');
+    expect(bpmReadout()).toHaveTextContent('68'); // 90 x 0.75 = 67.5
+  });
+
+  it('seeks to a tapped bar, paused or playing, without restarting', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer(0, { barTempos: tempoChange });
+
+    act(() => engine.fire('barTapped', { barIndex: 11 }));
+    expect(engine.seek).toHaveBeenLastCalledWith(11 * TICKS_PER_BAR);
+    expect(status()).toHaveTextContent('Bar 12 of 16');
+    expect(bpmReadout()).toHaveTextContent('90');
+
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: true }));
+    const restartsBefore = engine.restartCalls();
+    act(() => engine.fire('barTapped', { barIndex: 2 }));
+    expect(engine.seek).toHaveBeenLastCalledWith(2 * TICKS_PER_BAR);
+    expect(status()).toHaveTextContent('Bar 3 of 16');
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('opens every song at 100%, whatever speed the last one played at', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    await loadPlayer(0);
+    fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '200' } });
+    expect(speedReadout()).toHaveTextContent('200%');
+
+    await user.click(screen.getByRole('link', { name: 'Song B' }));
+    await waitFor(() => expect(engines).toHaveLength(2));
+    const second = await loadPlayer(1);
+    expect(speedReadout()).toHaveTextContent('100%');
+    expect(second.setSpeed).toHaveBeenLastCalledWith(1);
   });
 });

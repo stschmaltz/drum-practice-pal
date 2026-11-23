@@ -51,9 +51,16 @@ export class FakePlayerEngine implements PlayerEngine {
     this.emitter.emit(event, payload);
   }
 
-  /** What alphaTab does after a successful load of a song with `barCount` straight bars. */
-  finishLoading({ barCount = 16, trackCount = 3 } = {}): void {
-    this.fire('scoreLoaded', { barCount, trackCount });
+  /**
+   * What alphaTab does after a successful load of a song with `barCount`
+   * straight bars. Every bar is at 120 BPM unless `barTempos` says otherwise.
+   */
+  finishLoading({
+    barCount = 16,
+    trackCount = 3,
+    barTempos = Array.from({ length: barCount }, () => 120),
+  }: { barCount?: number; trackCount?: number; barTempos?: number[] } = {}): void {
+    this.fire('scoreLoaded', { barCount, trackCount, barTempos });
     this.fire('ticksReady', { bars: straightBars(barCount) });
     this.fire('readyForPlayback', undefined);
   }

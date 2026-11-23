@@ -1,1 +1,24 @@
 @import 'tailwindcss';
+
+/*
+ * alphaTab draws its cursors as bare elements with no styles of its own, so
+ * without these the playing bar and beat are invisible. Colours are picked
+ * for the score box, which is always white.
+ */
+.jam-score .at-cursor-bar {
+  background: rgb(250 204 21 / 0.25);
+}
+.jam-score .at-cursor-beat {
+  background: rgb(2 132 199 / 0.85);
+  width: 3px;
+}
+.jam-score .at-highlight * {
+  fill: rgb(2 132 199);
+  stroke: rgb(2 132 199);
+}
+
+/* Bars are tappable (jam mode seeks there); alphaTab's own style says cursor: default. */
+.jam-score .at-surface,
+.jam-score .at-surface * {
+  cursor: pointer;
+}

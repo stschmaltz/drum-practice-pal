@@ -15,6 +15,7 @@ import type { PlayerEngine } from './playerEngine';
 import { clampVolume, effectiveMetronomeVolume, type PlayerOptions } from './playerOptions';
 import { PLAYER_SOUND_FONT_URL } from './soundFont';
 import { clampSpeedRatio } from './speed';
+import { tempoAtBar } from './tempo';
 import { screenWakeLock, type WakeLockControl } from './wakeLock';
 
 /**
@@ -39,6 +40,8 @@ export interface PlayerSnapshot extends PlayerOptions {
   barCount: number | null;
   /** The bar playing now, or where playback will resume. */
   barNumber: number | null;
+  /** The tempo `barNumber` starts at, in the file's BPM (before speed). Null until the score loads. */
+  barTempo: number | null;
   hasDrumTrack: boolean;
   range: BarRange | null;
   looping: boolean;
@@ -51,6 +54,8 @@ export type PlayerEvents = {
   loopWrapped: undefined;
   /** Playback reached the end with looping off, and stopped. */
   finished: undefined;
+  /** The user tapped a bar in the score. Jam mode seeks there; nothing happens by itself. */
+  barTapped: { barNumber: number };
 };
 
 export interface PlayerServiceConfig {
@@ -77,6 +82,7 @@ export function initialPlayerSnapshot(
     error: null,
     barCount: null,
     barNumber: null,
+    barTempo: null,
     hasDrumTrack: drumTrackIndex !== null,
     range: null,
     looping: false,
@@ -94,6 +100,8 @@ export class PlayerService {
   /** Mute state per track index, kept across loads and applied once tracks exist. */
   private readonly mutedTracks = new Map<number, boolean>();
   private bars: BarTicks[] = [];
+  /** By 0-based bar index, from the score. */
+  private barTempos: number[] = [];
   private trackCount = 0;
   private soundFontRequested = false;
   private disposed = false;
@@ -135,8 +143,15 @@ export class PlayerService {
     if (this.disposed) return;
     if (this.isLoaded()) this.engine.stop();
     this.bars = [];
+    this.barTempos = [];
     this.trackCount = 0;
-    this.update({ status: 'loading', error: null, barCount: null, barNumber: null });
+    this.update({
+      status: 'loading',
+      error: null,
+      barCount: null,
+      barNumber: null,
+      barTempo: null,
+    });
     this.wakeLock.setActive(false);
     if (!this.soundFontRequested) {
       this.soundFontRequested = true;
@@ -180,7 +195,14 @@ export class PlayerService {
     const tick = startTickOfBar(this.bars, barNumber);
     if (tick === null) return false;
     this.engine.seek(tick);
+    // Shown at once: while paused, alphaTab's position echo arrives a moment later from its worker.
+    this.moveToBar(barNumber);
     return true;
+  }
+
+  /** The tempo a 1-based bar starts at, in the file's BPM; null before the score loads or for no such bar. */
+  tempoAtBar(barNumber: number): number | null {
+    return tempoAtBar(this.barTempos, barNumber);
   }
 
   // --- Range and looping ---
@@ -266,10 +288,11 @@ export class PlayerService {
   private wireEngine(): void {
     // Every handler checks `disposed`: alphaTab's worker can still post after destroy().
     const engine = this.engine;
-    engine.on('scoreLoaded', ({ barCount, trackCount }) => {
+    engine.on('scoreLoaded', ({ barCount, trackCount, barTempos }) => {
       if (this.disposed) return;
       this.trackCount = trackCount;
-      this.update({ barCount, barNumber: 1 });
+      this.barTempos = barTempos;
+      this.update({ barCount, barNumber: 1, barTempo: tempoAtBar(barTempos, 1) });
       this.applyMutes();
     });
     engine.on('ticksReady', ({ bars }) => {
@@ -294,10 +317,7 @@ export class PlayerService {
       const barIndex = barIndexAtTick(this.bars, tick);
       const barNumber = barIndex === null ? this.snapshot.barNumber : barIndex + 1;
       this.events.emit('position', { tick, barNumber });
-      if (barNumber !== this.snapshot.barNumber) {
-        this.update({ barNumber });
-        this.events.emit('barChanged', { barNumber });
-      }
+      this.moveToBar(barNumber);
     });
     engine.on('finished', () => {
       if (this.disposed) return;
@@ -307,6 +327,20 @@ export class PlayerService {
       if (this.disposed) return;
       this.fail('score');
     });
+    engine.on('barTapped', ({ barIndex }) => {
+      if (this.disposed || !this.isLoaded()) return;
+      this.events.emit('barTapped', { barNumber: barIndex + 1 });
+    });
+  }
+
+  /** Updates the current bar and its tempo, and tells listeners when the bar changed. */
+  private moveToBar(barNumber: number | null): void {
+    if (barNumber === this.snapshot.barNumber) return;
+    this.update({
+      barNumber,
+      barTempo: barNumber === null ? null : tempoAtBar(this.barTempos, barNumber),
+    });
+    this.events.emit('barChanged', { barNumber });
   }
 
   private fail(error: PlayerError): void {

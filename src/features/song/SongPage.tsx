@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
@@ -12,13 +13,18 @@ import {
   type PlayerOptions,
 } from '@/features/player/playerOptions';
 import type { PlayerSnapshot } from '@/features/player/PlayerService';
+import { ratioToPercent } from '@/features/player/speed';
+import { bpmAtSpeed } from '@/features/player/tempo';
 import { usePlayer } from '@/features/player/usePlayer';
 import { useSettings } from '@/features/settings/useSettings';
 import { isUuid } from '@/lib/randomUuid';
+import { useJamMode } from './useJamMode';
 
 /**
- * /songs/:id. Lazy-loaded from App.tsx with the player. Unit 05 wires the
- * player in; jam mode (06), count-in (07) and loops (08) build on this page.
+ * /songs/:id. Lazy-loaded from App.tsx with the player. Opens in jam mode
+ * (Unit 06): the whole song with a following cursor, tap a bar to go there,
+ * and the speed and BPM at the current bar. Count-in (07) and loops (08)
+ * build on this page.
  */
 export function SongPage() {
   const { id = '' } = useParams();
@@ -69,7 +75,8 @@ function SongBody({ song }: { song: Song }) {
         </p>
       )}
       <SongPlayer
-        // A new song means a new player: usePlayer reads its inputs once.
+        // A new song means a new player: usePlayer reads its inputs once. That
+        // also opens every song at 100%, whatever speed the last one was at.
         key={song.id}
         fileBytes={file.data}
         drumTrackIndex={song.drum_track_index}
@@ -95,11 +102,13 @@ function SongPlayer({
     drumTrackIndex,
     initialOptions,
   });
+  useJamMode(player, scrollRef, snapshot.status === 'playing');
   // A soundfont failure still leaves readable notation; these leave an empty white box.
   const nothingToShow = snapshot.error === 'score' || snapshot.error === 'engine';
 
   return (
     <div className="flex flex-col gap-3">
+      <JamReadout snapshot={snapshot} />
       <PlayerControls player={player} snapshot={snapshot} />
       <PlayerStatusLine snapshot={snapshot} />
       {/* Both layouts scroll inside this box, so the cursor's auto-scroll is one code path. */}
@@ -108,10 +117,49 @@ function SongPlayer({
         data-testid="score-viewport"
         // Hidden, not unmounted: alphaTab keeps its elements until the player is disposed.
         hidden={nothingToShow}
-        className="relative h-[60dvh] overflow-auto rounded-lg bg-white text-black"
+        // jam-score: the cursor and tap styles in index.css. The scroll margin keeps
+        // the box clear of the phone's fixed tab bar when playback scrolls it into view.
+        className="jam-score relative h-[60dvh] scroll-mb-[calc(4.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-lg bg-white text-black md:scroll-mb-4"
       >
         <div ref={scoreRef} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Speed and the BPM it gives at the current bar, big enough to read from the
+ * throne. BPM follows the bar, so it changes as playback crosses a tempo change.
+ */
+function JamReadout({ snapshot }: { snapshot: PlayerSnapshot }) {
+  const { speedRatio, barTempo } = snapshot;
+  return (
+    <dl aria-label="Tempo" className="flex items-baseline gap-6 tabular-nums">
+      <ReadoutValue label="Speed" testId="jam-speed">
+        {ratioToPercent(speedRatio)}%
+      </ReadoutValue>
+      <ReadoutValue label="BPM" testId="jam-bpm">
+        {barTempo === null ? '–' : bpmAtSpeed(barTempo, speedRatio)}
+      </ReadoutValue>
+    </dl>
+  );
+}
+
+function ReadoutValue({
+  label,
+  testId,
+  children,
+}: {
+  label: string;
+  testId: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <dt className="text-sm text-neutral-400">{label}</dt>
+      <dd className="text-3xl font-semibold" data-testid={testId}>
+        {children}
+      </dd>
     </div>
   );
 }
