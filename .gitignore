@@ -11,6 +11,8 @@ blob-report
 # Real Songsterr exports: local only, never committed
 tests/fixtures/real/*
 !tests/fixtures/real/.gitkeep
+# Claude Code worktrees: full copies of the repo
+.claude/worktrees
 # Supabase local state
 supabase/.branches
 supabase/.temp

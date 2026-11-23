@@ -9,7 +9,7 @@ import {
   uploadSong,
   type UploadOptions,
 } from './songsApi';
-import { revertSongEdit, type LibrarySong, type SongEdit } from './songForm';
+import { revertSongEdit, type LibrarySong, type Song, type SongEdit } from './songForm';
 
 /** Keyed by user id, so switching accounts never shows the previous user's cache. */
 export const songKeys = {
@@ -129,10 +129,15 @@ export function useUpdateSong() {
         songs?.map((song) => (song.id === songId ? revertSongEdit(song, before, changes) : song)),
       );
     },
-    onSuccess: (saved) =>
+    onSuccess: (saved) => {
       queryClient.setQueryData<LibrarySong[]>(queryKey, (songs) =>
         songs?.map((song) => (song.id === saved.id ? { ...song, ...saved } : song)),
-      ),
+      );
+      // The song page reads its own entry; without this it would open with the old title.
+      queryClient.setQueryData<Song | null>(songKeys.detail(user.id, saved.id), (song) =>
+        song ? { ...song, ...saved } : song,
+      );
+    },
     onSettled: () => invalidateWhenIdle(queryClient, user.id),
   });
 }
@@ -149,10 +154,15 @@ export function useDeleteSong() {
   return useMutation({
     mutationKey: songKeys.writes(user.id),
     mutationFn: (songId: string) => deleteSong(user.id, songId),
-    onSuccess: (_result, songId) =>
+    onSuccess: (_result, songId) => {
       queryClient.setQueryData<LibrarySong[]>(queryKey, (songs) =>
         songs?.filter((song) => song.id !== songId),
-      ),
+      );
+      // Going back to the song's page must not open the player on its cached
+      // row and bytes while the refetch that finds it gone is still on its way.
+      queryClient.setQueryData<Song | null>(songKeys.detail(user.id, songId), null);
+      queryClient.removeQueries({ queryKey: songFileKeys.forSong(user.id, songId) });
+    },
     onSettled: () => invalidateWhenIdle(queryClient, user.id),
   });
 }
