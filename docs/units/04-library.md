@@ -131,3 +131,67 @@
 - `npm run check`: green, 33 files, 426 tests (was 29 and 384).
 - `npm run e2e`: 102 passed (was 90). Local Supabase was running.
 - `npm run test:db`: not re-run; no DB tests were added.
+
+## QA
+
+**Setup:** I ran local Supabase from `npm run db:start`. The app was the production build (`--mode development`) on `vite preview` at :4173. A throwaway Playwright suite (removed afterwards) drove it at phone 390x844, tablet 820x1180 and desktop 1440x900, with a fresh user per test. Screenshots are in `docs/units/04-shots/`, named `<size>-NN-<what>.png`. The edge-case files were generated outside the repo:
+
+- empty, plain text renamed `.gp`, the first half of a `.gp`, a zip with no score
+- fake GP5 and GPX headers followed by random bytes
+- the real Songsterr `.mid` renamed `.gp`
+- valid GP7 files padded to 300 KB, 1 MB, 15 MB, 19.8 MB and 21 MB
+- scores with a 500-character title and 350-character artist, an HTML/accented title, and an empty title
+
+I also used the real Songsterr export in `tests/fixtures/real/` (not committed).
+
+**Acceptance criteria**
+
+| Criterion                                                        | Result | Evidence                                                                                                                                                                                                                             |
+| ---------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A Songsterr GP export uploads with correct metadata              | Pass   | The real export ("Little Sister", Queens of the Stone Age) uploads at every size with 155 BPM, 119 bars and `drum_track_index` 5, plus one file at `{user}/{song}.gp` (`*-02`). All five fixtures match their sources (`*-03`).      |
+| A non-GP or corrupt file shows a clear error and creates nothing | Pass   | Each bad file gets its fixed message within about 100 ms, and the DB and bucket stay empty (`*-05-bad-*`). A good file still uploads after them. The real `.mid` and a `.mid` renamed `.gp` both get the Songsterr pointer (`*-04`). |
+| No drum track: null index and a note in the UI                   | Pass   | `no-drums.gp` shows the amber note after upload and on its entry (`phone-03`).                                                                                                                                                       |
+
+**QA focus**
+
+- **Big files: pass.** The 15 MB and 19.8 MB files upload in about 1.3 s and 1.5 s locally (`*-06`). The 21 MB file is refused before anything is sent. A 500-character title and 350-character artist are cut to 300 and wrap without sideways scroll (`*-07`). No title falls back to the file name.
+- **Slow network: pass.** With CDP throttling at 400 kbps and 400 ms latency, a 300 KB file finishes in about 15 s, including the lazy alphaTab chunk. The step label moves Reading, then Uploading (`*-10`, `*-11`). If the server can't be reached while the browser thinks it's online, the upload says "Couldn't upload x: Failed to fetch" (`*-17`). A delete in the same state says "Couldn't delete the song: Failed to fetch" and keeps the row (`*-18`).
+- **Cancel mid-upload: pass.** Cancelling during a throttled 1 MB upload takes about 22 s, because it waits for the request (a known gap). It ends with "Upload cancelled. Nothing was saved." with no row and no file (`*-12`, `*-13`). An early cancel during Reading also ends cancelled.
+- **Phone file picker: pass in Chromium; a real device is a Human check.**
+  - Tapping the button opens a single-file chooser with no `accept` filter, and the button is 44 px tall.
+  - A dropped file uploads. Dropping two shows "Drop one file at a time." (`*-27`).
+  - Leaving the page mid-upload still adds the song (`*-29`).
+- **Duplicates: pass.** The same bytes show the amber warning and an Open link (`*-19`). Two devices uploading the same new file at once end with one "Added" and one "already uploaded", one row and one file (`*-20`). Re-uploading a deleted song's file adds it again.
+- **Search, sort, edit, delete: pass.**
+  - Search matches title or artist, ignoring case and accents ("beyonce motley"; `*-08`). A `<script>` query shows the fixed no-match copy, and no dialog fires (`*-09`). An HTML title renders as text.
+  - Search and sort survive a reload and a round trip to the song page (`*-23`, `*-24`).
+  - A blank title and over-300 title and artist get inline errors (`*-22`). An emoji title with padding is saved trimmed.
+  - Delete confirm, Keep it, and Delete song work, and the file is removed (`*-25`, `*-26`).
+
+**Issues**
+
+1. **Minor: an upload started offline sits at "Reading <file>…" with no feedback, and Cancel doesn't clear it.** TanStack Query's default `networkMode: 'online'` pauses the mutation before `uploadSong` runs.
+   - The status claims it's reading. This happens even for a MIDI or empty file, which needs no network to refuse.
+   - The picker stays disabled, and Cancel changes nothing until the connection returns. Then the upload either runs and adds the song, or, if cancelled, ends "Upload cancelled".
+   - Edit and delete pause the same way, showing "Saving…" or "Deleting…" until reconnect, then completing.
+   - Nothing is lost or duplicated, but it reads as a hang.
+   - Repro: open Library, go offline (DevTools > Network > Offline), pick any file, wait, then press Cancel (`*-14`, `*-31`).
+   - Suggestion for Unit 11, which owns the offline banner and disabling uploads: disable the picker offline, or give `useUploadSong` `networkMode: 'always'` so local refusals and network errors show at once.
+2. **Minor: network failures show raw text.** For example "Couldn't upload pad-300kb.gp: Failed to fetch". The message is clear enough, but it isn't fixed copy. Unit 12's error-state polish could map fetch failures to "Check your connection and try again".
+3. **Minor (known gap): cancelling during Uploading waits for the request to finish.** That was about 22 s for 1 MB on a slow link. Nothing is left behind.
+4. **Cosmetic (fixed): the upload button wrapped to two lines at tablet width.** It was 64 px tall beside the hint text. I added `shrink-0` to the label in `UploadPanel.tsx`.
+5. **Cosmetic (fixed): keyboard focus on the upload button was invisible.** The focused element is the visually hidden input. The label now shows the shared sky focus ring with `has-[:focus-visible]` (`desktop-30`).
+6. **Cosmetic (not fixed, a11y):** the edit form's inline errors aren't linked to their inputs with `aria-describedby`; only `aria-invalid` is set. Left for Readability or Unit 12.
+
+**Not covered:** expired or revoked sessions during upload (Unit 03 QA issue 3 still applies: a 401 isn't treated as signed out). There's also no real `.gp5`, `.gpx`, `.gp4` or `.gp3` file on hand, so those importers were only checked against their headers. Random bytes after a valid GP5 or GPX header are refused as damaged.
+
+**Human check (Shane)**
+
+- On an iPhone and an Android phone on the LAN (`http://<laptop IP>:5173`), upload a Songsterr `.gp` from Files or Downloads with the picker. Check that `.gp` isn't greyed out, and the non-secure-context hash and id fallbacks work.
+- Try a real `.gp5` or `.gpx` export if you have one.
+
+**Results**
+
+- `npm run check`: green, 33 files, 426 tests.
+- `npm run e2e`: 102 passed.
+- App change: `src/features/library/UploadPanel.tsx`, upload label classes only.

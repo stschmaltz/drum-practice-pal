@@ -89,7 +89,8 @@ export function UploadPanel() {
         }`}
       >
         <label
-          className={`${primaryButtonClass} inline-flex cursor-pointer items-center has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50`}
+          // The real input is visually hidden, so the label shows its focus ring.
+          className={`${primaryButtonClass} inline-flex shrink-0 cursor-pointer items-center has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-sky-400`}
         >
           Upload a Guitar Pro file
           <input
