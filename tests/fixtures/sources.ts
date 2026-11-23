@@ -115,4 +115,23 @@ export const fixtures: FixtureSource[] = [
       timeSignature: [3, 4],
     },
   },
+  {
+    // No percussion track: uploads with drum_track_index null (Unit 04).
+    name: 'no-drums',
+    tex: [
+      '\\title "No Drums"',
+      '\\artist "Fixture"',
+      '\\tempo 110',
+      '\\track "Guitar" \\instrument 30 \\tuning (E4 B3 G3 D3 A2 E2)',
+      repeat('(0.6 2.5 2.4).4 (0.6 2.5 2.4) (3.6 5.5 5.4) (5.6 7.5 7.4) |', 4),
+    ].join('\n'),
+    expected: {
+      title: 'No Drums',
+      barCount: 4,
+      tempoAtBar1: 110,
+      trackCount: 1,
+      drumTrackIndex: null,
+      timeSignature: [4, 4],
+    },
+  },
 ];

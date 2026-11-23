@@ -4,8 +4,9 @@
  *   vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
  *
  * then script answers per test: `fakeSupabase.auth.signInWithOtp.mockResolvedValue(...)`,
- * or `queryResult.mockResolvedValue({ data, error: null })` for table queries.
- * Call `resetFakeSupabase()` in `beforeEach`.
+ * or `queryResult.mockResolvedValue({ data, error: null })` for table queries
+ * and `storageResult` for Storage calls (these answer `{ data: {}, error: null }`
+ * unless scripted). Call `resetFakeSupabase()` in `beforeEach`.
  */
 import type { Session } from '@supabase/supabase-js';
 
@@ -22,13 +23,26 @@ export interface QueryCall {
 
 export interface FakeResult {
   data: unknown;
-  error: { message: string } | null;
+  /** `code` is the Postgres error code PostgREST passes on, e.g. '23505'. */
+  error: { message: string; code?: string } | null;
 }
 
 type AuthCallback = (event: string, session: Session | null) => void;
 
-/** Resolves every `.single()`; inspect `mock.calls` to see what was sent. */
+/**
+ * Resolves every `.single()`, `.maybeSingle()` and awaited chain (a list
+ * select, a delete); inspect `mock.calls` to see what was sent.
+ */
 export const queryResult = vi.fn<(call: QueryCall) => Promise<FakeResult>>();
+
+/** One Storage call, e.g. storage.from('gp-files').upload(path, bytes, options). */
+export interface StorageCall {
+  bucket: string;
+  method: 'upload' | 'remove';
+  args: unknown[];
+}
+
+export const storageResult = vi.fn<(call: StorageCall) => Promise<FakeResult>>();
 
 let authListeners: AuthCallback[] = [];
 
@@ -42,11 +56,29 @@ function queryBuilder(table: string) {
   };
   const builder = {
     select: chain('select'),
+    insert: chain('insert'),
     update: chain('update'),
+    delete: chain('delete'),
     eq: chain('eq'),
+    order: chain('order'),
+    limit: chain('limit'),
+    range: chain('range'),
     single: () => queryResult(call),
+    maybeSingle: () => queryResult(call),
+    // supabase-js builders are thenables: awaiting the chain runs the query.
+    then: <T, E = never>(
+      onFulfilled?: (result: FakeResult) => T | PromiseLike<T>,
+      onRejected?: (reason: unknown) => E | PromiseLike<E>,
+    ) => queryResult(call).then(onFulfilled, onRejected),
   };
   return builder;
+}
+
+function storageBucket(bucket: string) {
+  const call = (method: StorageCall['method']) => {
+    return (...args: unknown[]) => storageResult({ bucket, method, args });
+  };
+  return { upload: call('upload'), remove: call('remove') };
 }
 
 export const fakeSupabase = {
@@ -68,6 +100,7 @@ export const fakeSupabase = {
     }),
   },
   from: vi.fn(queryBuilder),
+  storage: { from: vi.fn(storageBucket) },
 };
 
 export const fakeSupabaseModule = { supabase: fakeSupabase, supabaseConfigError: null };
@@ -99,7 +132,9 @@ export function opArgs(call: QueryCall, method: string): unknown[] | undefined {
 export function resetFakeSupabase(): void {
   authListeners = [];
   queryResult.mockReset();
+  storageResult.mockReset().mockResolvedValue({ data: {}, error: null });
   fakeSupabase.from.mockClear();
+  fakeSupabase.storage.from.mockClear();
   fakeSupabase.auth.onAuthStateChange.mockClear();
   const ok = { data: {}, error: null };
   fakeSupabase.auth.signInWithOtp.mockReset().mockResolvedValue(ok);

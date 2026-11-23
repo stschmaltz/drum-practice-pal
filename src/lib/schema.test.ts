@@ -4,9 +4,11 @@ import {
   COUNT_IN_BAR_OPTIONS,
   COUNT_IN_MODES,
   GP_FILES_BUCKET,
+  GP_FILE_MAX_BYTES,
   METRONOME_VOLUME_MAX,
   METRONOME_VOLUME_MIN,
   LOOP_NAME_MAX_LENGTH,
+  SONG_TEMPO_MAX,
   SONG_TEXT_MAX_LENGTH,
   SPEED_RATIO_MAX,
   SPEED_RATIO_MIN,
@@ -118,7 +120,13 @@ describe('matches the migrations', () => {
     expect(schema).toContain(`char_length(name) between 1 and ${LOOP_NAME_MAX_LENGTH}`);
   });
 
-  it('bucket name', () => {
+  it('bucket name and file size limit', () => {
     expect(storage).toContain(`values ('${GP_FILES_BUCKET}', '${GP_FILES_BUCKET}'`);
+    const megabytes = /false, (\d+) \* 1024 \* 1024\)/.exec(storage)?.[1];
+    expect(Number(megabytes) * 1024 * 1024).toBe(GP_FILE_MAX_BYTES);
+  });
+
+  it('song tempo bound', () => {
+    expect(schema).toContain(`original_tempo > 0 and original_tempo <= ${SONG_TEMPO_MAX}`);
   });
 });
