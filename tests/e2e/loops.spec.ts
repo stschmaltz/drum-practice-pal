@@ -452,3 +452,415 @@ test('the loop panel is a bottom sheet on a phone and a side panel from a tablet
     await expect(viewport(page).locator('svg').first()).toBeVisible();
   }
 });
+
+// --- Added by the Unit 08 Test stage ---
+
+/** Reads the current bar every 50 ms for `ms` and gives the bars in the order they came up. */
+async function barSequenceFor(page: Page, ms: number): Promise<number[]> {
+  const sequence: number[] = [];
+  const started = Date.now();
+  while (Date.now() - started < ms) {
+    const bar = await barNumber(page);
+    if (sequence.at(-1) !== bar) sequence.push(bar);
+    await page.waitForTimeout(50);
+  }
+  return sequence;
+}
+
+/** A tap as the device makes it: a finger on the phone and tablet projects, a mouse click on desktop. */
+async function tapScore(page: Page, point: Point, touch: boolean): Promise<void> {
+  if (touch) await page.touchscreen.tap(point.x, point.y);
+  else await page.mouse.click(point.x, point.y);
+}
+
+/** Taps the bar after the cursor's (jam mode) and waits for the cursor to get there. */
+async function seekToNextBar(page: Page): Promise<number> {
+  const from = await barNumber(page);
+  await scrollScoreToCursor(page);
+  const next = await nextBarPoint(page);
+  const landed = await tapAndWaitForBar(page, next, from);
+  await expect.poll(async () => contains(await barCursorBox(page), next)).toBe(true);
+  return landed;
+}
+
+interface StatusWindow {
+  __drumPalPlayer?: { getSnapshot(): { status: string }; subscribe(listener: () => void): void };
+  __statuses?: string[];
+}
+
+/** Records every status the player goes through from now on, starting with the one it is in. */
+async function recordStatuses(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const debug = window as unknown as StatusWindow;
+    const player = debug.__drumPalPlayer;
+    if (!player) throw new Error('No player on window.__drumPalPlayer');
+    const statuses = [player.getSnapshot().status];
+    debug.__statuses = statuses;
+    player.subscribe(() => {
+      const { status } = player.getSnapshot();
+      if (statuses.at(-1) !== status) statuses.push(status);
+    });
+  });
+}
+
+const recordedStatuses = (page: Page) =>
+  page.evaluate(() => (window as unknown as StatusWindow).__statuses ?? []);
+
+/** The bar and the big BPM readout, read in one go so they belong to the same moment. */
+const barAndBpm = (page: Page) =>
+  page.evaluate(() => {
+    const text = (testId: string) =>
+      document.querySelector(`[data-testid="${testId}"]`)?.textContent ?? '';
+    const bar = /Bar (\d+) of/.exec(text('player-status'))?.[1];
+    return { bar: Number(bar), bpm: text('jam-bpm') };
+  });
+
+test('a loop across the tempo change opens on another device with BPM from its first bar, and keeps it past the change', async ({
+  user,
+  page,
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  // Bars 7 and 8 are at 120 in the file, bars 9 and 10 at 90.
+  await openFixture(page, user, 'tempo-change', 'Tempo Change');
+  await saveNewLoop(page, { name: 'Across the change', firstBar: 7, lastBar: 10, target: 110 });
+  await expect(status(page)).toHaveText('Bar 7 of 16');
+  await expect(bpm(page)).toHaveText('120');
+
+  // 85 of bar 7's 120 is 70.8333%.
+  await commit(loopBpmField(page), '85');
+  await expect(loopPercentField(page)).toHaveValue('71');
+  await saveSpeedButton(page).click();
+  await expect(savedSpeed(page)).toHaveText('Saved: 71% (85 BPM)');
+  const songPath = new URL(page.url()).pathname;
+
+  const context = await browser.newContext();
+  try {
+    const other = await context.newPage();
+    await signIn(other, user, songPath);
+    await expect(playButton(other)).toBeEnabled({ timeout: 20_000 });
+    await openLoopPanel(other);
+    // Speed and target both in the BPM of the loop's first bar.
+    await expect(loopItem(other, 'Across the change')).toContainText(
+      'Bars 7 to 10 · 71% (85 BPM) · target 110% (132 BPM)',
+    );
+
+    await playLoopButton(other, 'Across the change').click();
+    await expect(playButton(other)).toHaveText('Pause');
+    await expect(activeLoopLine(other)).toContainText('Across the change · Bars 7 to 10');
+    await expect(speed(other)).toHaveText('71%');
+    await expect(bpm(other)).toHaveText('85');
+    await expect(loopBpmField(other)).toHaveValue('85');
+
+    // Faster, to get past the change soon: 200% of 120.
+    await commit(loopPercentField(other), '200');
+    await expect(bpm(other)).toHaveText('240');
+    // In bars 9 and 10 the file is at 90, and jam mode would read 180. The loop's BPM stays 240.
+    await expect
+      .poll(
+        async () => {
+          const now = await barAndBpm(other);
+          return now.bar >= 9 ? now.bpm : 'not there yet';
+        },
+        { timeout: 15_000, intervals: [100] },
+      )
+      .toBe('240');
+    await expect(loopBpmField(other)).toHaveValue('240');
+    const bars = await barsPlayedFor(other, 6000);
+    expect([...bars].sort((a, b) => a - b)).toEqual([7, 8, 9, 10]);
+
+    // Out of the loop it is jam mode again: BPM follows the bar playing.
+    await activeLoopLine(other).getByRole('button', { name: 'Exit loop' }).click();
+    await expect
+      .poll(
+        async () => {
+          const now = await barAndBpm(other);
+          return now.bar >= 11 ? now.bpm : 'not there yet';
+        },
+        { timeout: 15_000, intervals: [100] },
+      )
+      .toBe('180');
+    await expect(playButton(other)).toHaveText('Pause');
+    await playButton(other).click();
+    await expect(playButton(other)).toHaveText('Play');
+  } finally {
+    await context.close();
+  }
+});
+
+test('the last bar can be tapped first, a third tap starts over, and taps seek again once the form is closed', async ({
+  user,
+  page,
+}, testInfo) => {
+  const touch = testInfo.project.use.hasTouch === true;
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await putCursorOnBar2(page);
+  await openLoopPanel(page);
+  await newLoopButton(page).click();
+  await windowScrollSettled(page);
+  await scrollScoreToCursor(page);
+  const bar2 = await cursorBarPoint(page);
+  const bar3 = await nextBarPoint(page);
+
+  // The later bar first, then the earlier one: the range still comes out in order.
+  await tapScore(page, bar3, touch);
+  await expect(firstBarField(page)).toHaveValue('3');
+  await expect(lastBarField(page)).toHaveValue('3');
+  await tapScore(page, bar2, touch);
+  await expect(firstBarField(page)).toHaveValue('2');
+  await expect(lastBarField(page)).toHaveValue('3');
+  await expect(barsHint(page)).toContainText('Tap a bar to start again');
+  await expect.poll(() => highlighted(page, bar2)).toBe(true);
+  expect(await highlighted(page, bar3)).toBe(true);
+
+  // A third tap starts a new selection from that bar; the same bar again makes a one-bar loop.
+  await tapScore(page, bar3, touch);
+  await expect(firstBarField(page)).toHaveValue('3');
+  await expect(lastBarField(page)).toHaveValue('3');
+  await expect(barsHint(page)).toContainText('Now tap the last bar');
+  await expect.poll(() => highlighted(page, bar2)).toBe(false);
+  await tapScore(page, bar3, touch);
+  await expect(firstBarField(page)).toHaveValue('3');
+  await expect(lastBarField(page)).toHaveValue('3');
+  await expect(barsHint(page)).toContainText('Tap a bar to start again');
+
+  // Four taps, and playback has not moved.
+  await expect(status(page)).toHaveText('Bar 2 of 16');
+  await expect(playButton(page)).toHaveText('Play');
+
+  // Closed without saving: nothing is highlighted or saved, and a tap is a seek again.
+  await loopForm(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(loopForm(page)).toHaveCount(0);
+  expect(await highlightBoxes(page)).toEqual([]);
+  await expect(loopPanel(page).getByRole('listitem')).toHaveCount(0);
+  await scrollScoreToCursor(page);
+  const next = await nextBarPoint(page);
+  await tapScore(page, next, touch);
+  await expect(status(page)).toHaveText('Bar 3 of 16');
+  await expect(loopForm(page)).toHaveCount(0);
+});
+
+test('while a loop is being edited taps pick its new bars; saving moves the loop there', async ({
+  user,
+  page,
+}, testInfo) => {
+  const touch = testInfo.project.use.hasTouch === true;
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  // Saving the loop moves playback, and the cursor, to its first bar.
+  await saveNewLoop(page, { name: 'Late', firstBar: 9, lastBar: 12 });
+  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
+  await expect(status(page)).toHaveText('Bar 9 of 16');
+
+  await openLoopPanel(page);
+  await loopItem(page, 'Late').getByRole('button', { name: 'Edit Late' }).click();
+  await expect(firstBarField(page)).toHaveValue('9');
+  await expect(lastBarField(page)).toHaveValue('12');
+  await windowScrollSettled(page);
+  // The cursor is on bar 9 now; the two bars tapped are 9 and 10, wherever they are laid out.
+  await expect.poll(async () => (await barCursorBox(page)).width).toBeGreaterThan(2);
+  await scrollScoreToCursor(page);
+  const bar9 = await cursorBarPoint(page);
+  const bar10 = await nextBarPoint(page);
+
+  // Tapping the bar after first, then the cursor's: a new selection replaces the saved 9 to 12.
+  await tapScore(page, bar10, touch);
+  await expect(firstBarField(page)).toHaveValue('10');
+  await expect(lastBarField(page)).toHaveValue('10');
+  await tapScore(page, bar9, touch);
+  await expect(firstBarField(page)).toHaveValue('9');
+  await expect(lastBarField(page)).toHaveValue('10');
+  // The name wasn't touched and is still the saved one.
+  await expect(loopNameField(page)).toHaveValue('Late');
+  await expect(status(page)).toHaveText('Bar 9 of 16');
+
+  await saveLoopButton(page).click();
+  await expect(loopForm(page)).toHaveCount(0);
+  await expect(loopItem(page, 'Late')).toContainText('Bars 9 to 10 · 100% (120 BPM)');
+  // It wasn't the loop playing, so nothing is looping after the edit.
+  await expect(activeLoopLine(page)).toHaveCount(0);
+  expect(await highlightBoxes(page)).toEqual([]);
+});
+
+test('the highlight stays on the loop’s bars when the score is laid out again', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Bars two and three', firstBar: 2, lastBar: 3 });
+  await closeLoopPanel(page);
+  await expect(status(page)).toHaveText('Bar 2 of 16');
+
+  /** The highlight covers the cursor's bar (bar 2, where the loop starts) and the bar after it. */
+  const coversTheLoop = async () => {
+    const boxes = await highlightBoxes(page);
+    const cursor = await barCursorBox(page);
+    const middle = { x: cursor.x + cursor.width / 2, y: cursor.y + cursor.height / 2 };
+    return boxes.some((box) => contains(box, middle));
+  };
+  await expect.poll(coversTheLoop).toBe(true);
+  const before = await highlightBoxes(page);
+
+  // Across the 768 px breakpoint, so alphaTab switches between page and horizontal layout.
+  const size = page.viewportSize();
+  if (!size) throw new Error('No viewport size');
+  const wasPage = expectedLayout(page) === 'page';
+  await page.setViewportSize(wasPage ? { width: 600, height: 900 } : { width: 900, height: 700 });
+  expect(expectedLayout(page)).toBe(wasPage ? 'horizontal' : 'page');
+
+  // Drawn again from the new layout's bounds, not left where it was.
+  await expect.poll(async () => (await highlightBoxes(page)).length).toBeGreaterThan(0);
+  await expect
+    .poll(async () => JSON.stringify(await highlightBoxes(page)) !== JSON.stringify(before))
+    .toBe(true);
+  await expect.poll(coversTheLoop).toBe(true);
+  await expect(activeLoopLine(page)).toContainText('Bars 2 to 3');
+
+  // And back again.
+  await page.setViewportSize(size);
+  await expect.poll(coversTheLoop).toBe(true);
+});
+
+test('switching, editing and deleting the playing loop never stop playback', async ({
+  user,
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'First', firstBar: 1, lastBar: 2 });
+  await saveNewLoop(page, { name: 'Second', firstBar: 5, lastBar: 6 });
+
+  await playLoopButton(page, 'First').click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect.poll(async () => (await barAndBpm(page)).bar).toBeLessThanOrEqual(2);
+  await recordStatuses(page);
+  // The loop's speed fields are live: no restart for a new speed.
+  await commit(loopPercentField(page), '200');
+  await expect(bpm(page)).toHaveText('240');
+
+  // Another loop, mid-play: its bars at its saved speed.
+  await playLoopButton(page, 'Second').click();
+  await expect(activeLoopLine(page)).toContainText('Second · Bars 5 to 6');
+  await expect(speed(page)).toHaveText('100%');
+  await commit(loopPercentField(page), '200');
+  expect([...(await barsPlayedFor(page, 3000))].sort((a, b) => a - b)).toEqual([5, 6]);
+
+  // Its bars edited while it plays: the loop moves there.
+  await loopItem(page, 'Second').getByRole('button', { name: 'Edit Second' }).click();
+  await firstBarField(page).fill('9');
+  await lastBarField(page).fill('10');
+  await saveLoopButton(page).click();
+  await expect(activeLoopLine(page)).toContainText('Second · Bars 9 to 10');
+  await expect.poll(() => barNumber(page)).toBeGreaterThanOrEqual(9);
+  expect([...(await barsPlayedFor(page, 3000))].sort((a, b) => a - b)).toEqual([9, 10]);
+
+  // Deleted while it plays: the song carries on past its last bar.
+  await loopItem(page, 'Second').getByRole('button', { name: 'Delete Second' }).click();
+  await loopPanel(page)
+    .getByRole('group', { name: 'Delete Second' })
+    .getByRole('button', { name: 'Delete loop' })
+    .click();
+  await expect(activeLoopLine(page)).toHaveCount(0);
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(10);
+
+  // Through all of it the player was only ever playing.
+  await expect(playButton(page)).toHaveText('Pause');
+  expect(await recordedStatuses(page)).toEqual(['playing']);
+  // The recorder does hear a change when there is one.
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  expect((await recordedStatuses(page)).length).toBeGreaterThan(1);
+});
+
+test('in a song with a repeat, taps seek by bar number and a loop out of the repeat plays it as written', async ({
+  user,
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await openFixture(page, user, 'repeats', 'Repeats');
+  await expect(status(page)).toHaveText('Bar 1 of 8');
+
+  // Tap to seek, bar by bar, through the repeated bars and out the other side.
+  expect(await seekToNextBar(page)).toBe(2);
+  expect(await seekToNextBar(page)).toBe(3);
+  expect(await seekToNextBar(page)).toBe(4);
+  expect(await seekToNextBar(page)).toBe(5);
+
+  // Played straight through from the top, the current bar revisits 3 and 4.
+  await page.getByRole('button', { name: 'Back to start' }).click();
+  await expect(status(page)).toHaveText('Bar 1 of 8');
+  await speedSlider(page).fill('200');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  // Ten bars at 240 BPM are ten seconds.
+  const through = await barSequenceFor(page, 8500);
+  expect(through.slice(0, 8)).toEqual([1, 2, 3, 4, 3, 4, 5, 6]);
+  if ((await playButton(page).textContent()) === 'Pause') await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+
+  // A loop from inside the repeat to the bar after it: 3, 4, 3, 4, 5, and round again.
+  await saveNewLoop(page, { name: 'Out of the repeat', firstBar: 3, lastBar: 5 });
+  await expect(status(page)).toHaveText('Bar 3 of 8');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  // One pass is five seconds at 200%.
+  const looped = await barSequenceFor(page, 11_500);
+  expect(new Set(looped)).toEqual(new Set([3, 4, 5]));
+  expect(looped.join(' ')).toContain('3 4 3 4 5 3 4 3 4 5');
+  await expect(status(page)).toContainText(/Bar [345] of 8/);
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+});
+
+test('a finger dragged across the score scrolls it: it picks no bars and never seeks', async ({
+  user,
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.use.hasTouch !== true, 'touch only; the mouse drag has its own test');
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await putCursorOnBar2(page);
+  const touches = await page.context().newCDPSession(page);
+  const scrolled = () =>
+    viewport(page).evaluate((box) => box.scrollLeft + box.scrollTop + window.scrollY);
+
+  /** A pan from the bar after the cursor's: leftwards in the horizontal layout, upwards in the page layout. */
+  async function swipeFromNextBar(): Promise<void> {
+    const from = await nextBarPoint(page);
+    const sideways = expectedLayout(page) === 'horizontal';
+    const at = (step: number) => ({
+      x: Math.round(from.x - (sideways ? step * 15 : 0)),
+      y: Math.round(from.y - (sideways ? 0 : step * 15)),
+    });
+    await touches.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at(0)] });
+    for (let step = 1; step <= 10; step++) {
+      await touches.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [at(step)],
+      });
+      await page.waitForTimeout(16);
+    }
+    await touches.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  }
+
+  // Jam mode: the pan moves the score (or the page), and playback stays on bar 2.
+  const before = await scrolled();
+  await swipeFromNextBar();
+  await expect.poll(scrolled).not.toBe(before);
+  await page.waitForTimeout(400);
+  await expect(status(page)).toHaveText('Bar 2 of 16');
+  await expect(loopForm(page)).toHaveCount(0);
+
+  // With the loop form open: still a scroll, and no bars are picked.
+  await openLoopPanel(page);
+  await newLoopButton(page).click();
+  await windowScrollSettled(page);
+  await scrollScoreToCursor(page);
+  const beforeSecond = await scrolled();
+  await swipeFromNextBar();
+  await expect.poll(scrolled).not.toBe(beforeSecond);
+  await page.waitForTimeout(400);
+  await expect(firstBarField(page)).toHaveValue('');
+  await expect(lastBarField(page)).toHaveValue('');
+  expect(await highlightBoxes(page)).toEqual([]);
+  await expect(status(page)).toHaveText('Bar 2 of 16');
+});

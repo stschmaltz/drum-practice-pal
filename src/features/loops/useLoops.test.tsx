@@ -223,3 +223,175 @@ describe('useDeleteLoop', () => {
     expect(view.cached()?.map((l) => l.id)).toEqual(['a']);
   });
 });
+
+// Added by the Unit 08 Test stage: writes of different kinds in flight together.
+describe('loop writes alongside each other', () => {
+  const listReads = () =>
+    queryResult.mock.calls.filter(
+      ([call]) => !opArgs(call, 'update') && !opArgs(call, 'insert') && !opArgs(call, 'delete'),
+    ).length;
+
+  it('create, update and delete share one mutation key per user', async () => {
+    const view = await renderLoaded([loop('a'), loop('b')]);
+    const held = [deferred(), deferred(), deferred()];
+    for (const each of held) queryResult.mockReturnValueOnce(each.promise);
+    queryResult.mockResolvedValue(ok([loop('a')]));
+    const pending = (userId: string) =>
+      view.queryClient.isMutating({ mutationKey: loopKeys.writes(userId) });
+
+    act(() => view.result.current.create.mutate(newLoop));
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { name: 'A2' } }));
+    act(() => view.result.current.remove.mutate('b'));
+
+    await waitFor(() => expect(pending('user-1')).toBe(3));
+    // Another account's writes are another key.
+    expect(pending('user-2')).toBe(0);
+
+    held[0]!.resolve(ok(loop('new')));
+    held[1]!.resolve(ok(loop('a', { name: 'A2' })));
+    held[2]!.resolve(ok(null));
+    await waitFor(() => expect(pending('user-1')).toBe(0));
+  });
+
+  it('a create that settles while an edit is pending does not refetch over the edit', async () => {
+    const view = await renderLoaded([loop('a')]);
+    const insert = deferred();
+    const update = deferred();
+    queryResult.mockImplementation((call) => {
+      if (opArgs(call, 'insert')) return insert.promise;
+      if (opArgs(call, 'update')) return update.promise;
+      // The server hasn't seen the rename yet.
+      return Promise.resolve(ok([loop('a'), loop('new')]));
+    });
+    const before = listReads();
+
+    act(() => view.result.current.create.mutate(newLoop));
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { name: 'A2' } }));
+    await waitFor(() => expect(view.cached()?.[0]?.name).toBe('A2'));
+
+    insert.resolve(ok(loop('new')));
+    await waitFor(() => expect(view.cached()?.map((l) => l.id)).toEqual(['a', 'new']));
+    expect(view.cached()?.[0]?.name).toBe('A2');
+    expect(listReads()).toBe(before);
+
+    update.resolve(ok(loop('a', { name: 'A2' })));
+    // Idle now: one refetch brings the list in line with the server.
+    await waitFor(() => expect(listReads()).toBe(before + 1));
+  });
+
+  it('a failed edit rolls back only its own loop, keeping another loop’s pending edit', async () => {
+    const view = await renderLoaded([loop('a', { name: 'A' }), loop('b', { name: 'B' })]);
+    const first = deferred();
+    const second = deferred();
+    queryResult.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    queryResult.mockResolvedValue(ok([loop('a', { name: 'A' }), loop('b', { name: 'B2' })]));
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { name: 'A2' } }));
+    act(() => view.result.current.update.mutate({ loopId: 'b', changes: { name: 'B2' } }));
+    await waitFor(() => expect(view.cached()?.map((l) => l.name)).toEqual(['A2', 'B2']));
+
+    first.resolve(fail('permission denied'));
+    await waitFor(() => expect(view.cached()?.[0]?.name).toBe('A'));
+    expect(view.cached()?.[1]?.name).toBe('B2');
+
+    second.resolve(ok(loop('b', { name: 'B2' })));
+    await waitFor(() => expect(view.result.current.update.isSuccess).toBe(true));
+  });
+
+  it('a failed edit does not bring back a loop deleted while it was pending', async () => {
+    const view = await renderLoaded([loop('a'), loop('b')]);
+    const update = deferred();
+    queryResult.mockImplementation((call) => {
+      if (opArgs(call, 'update')) return update.promise;
+      if (opArgs(call, 'delete')) return Promise.resolve(ok(null));
+      return Promise.resolve(ok([loop('b')]));
+    });
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.5 } }));
+    await waitFor(() => expect(view.cached()?.[0]?.speed_ratio).toBe(0.5));
+    act(() => view.result.current.remove.mutate('a'));
+    await waitFor(() => expect(view.cached()?.map((l) => l.id)).toEqual(['b']));
+
+    update.resolve(fail('gone'));
+    await waitFor(() => expect(view.result.current.update.isError).toBe(true));
+    expect(view.cached()?.map((l) => l.id)).toEqual(['b']);
+  });
+
+  it('a failed edit keeps a loop created while it was pending', async () => {
+    const view = await renderLoaded([loop('a')]);
+    const update = deferred();
+    queryResult.mockImplementation((call) => {
+      if (opArgs(call, 'update')) return update.promise;
+      if (opArgs(call, 'insert')) return Promise.resolve(ok(loop('new')));
+      return Promise.resolve(ok([loop('a'), loop('new')]));
+    });
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { end_bar: 12 } }));
+    await waitFor(() => expect(view.cached()?.[0]?.end_bar).toBe(12));
+    act(() => view.result.current.create.mutate(newLoop));
+    await waitFor(() => expect(view.cached()?.map((l) => l.id)).toEqual(['a', 'new']));
+
+    update.resolve(fail('end_bar 12 is past the last bar'));
+    await waitFor(() => expect(view.result.current.update.isError).toBe(true));
+    expect(view.cached()).toEqual([loop('a'), loop('new')]);
+  });
+
+  it('the rollback leaves a field alone once something newer has changed it', async () => {
+    const view = await renderLoaded([loop('a', { speed_ratio: 0.8 })]);
+    const update = deferred();
+    queryResult.mockReturnValueOnce(update.promise);
+    queryResult.mockResolvedValue(ok([loop('a', { speed_ratio: 0.95 })]));
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    await waitFor(() => expect(view.cached()?.[0]?.speed_ratio).toBe(0.9));
+    // Saved from another device and refetched meanwhile.
+    view.queryClient.setQueryData<Loop[]>(loopKeys.forSong('user-1', SONG), [
+      loop('a', { speed_ratio: 0.95 }),
+    ]);
+
+    update.resolve(fail('network'));
+    await waitFor(() => expect(view.result.current.update.isError).toBe(true));
+    expect(view.cached()?.[0]?.speed_ratio).toBe(0.95);
+  });
+
+  it('an edit of a loop that is not in the list makes nothing up', async () => {
+    const view = await renderLoaded([loop('a')]);
+    queryResult.mockResolvedValueOnce(fail('no rows'));
+    queryResult.mockResolvedValue(ok([loop('a')]));
+
+    act(() => view.result.current.update.mutate({ loopId: 'ghost', changes: { name: 'Boo' } }));
+    await waitFor(() => expect(view.result.current.update.isError).toBe(true));
+    expect(view.cached()).toEqual([loop('a')]);
+  });
+
+  it('a saved row replaces a loop of the same id rather than listing it twice', async () => {
+    const view = await renderLoaded([loop('new', { name: 'First answer' })]);
+    queryResult.mockResolvedValueOnce(ok(loop('new', { name: 'Chorus fill' })));
+    queryResult.mockResolvedValue(ok([loop('new', { name: 'Chorus fill' })]));
+
+    // The same variables sent again (a retry after a lost response).
+    act(() => view.result.current.create.mutate(newLoop));
+    await waitFor(() => expect(view.result.current.create.isSuccess).toBe(true));
+    expect(view.cached()?.map((l) => l.name)).toEqual(['Chorus fill']);
+  });
+
+  it("one song's writes leave another song's list as it is, and mark it for a refetch", async () => {
+    const queryClient = testQueryClient();
+    const otherKey = loopKeys.forSong('user-1', 'song-2');
+    queryClient.setQueryData<Loop[]>(otherKey, [loop('z', { song_id: 'song-2' })]);
+    queryResult.mockResolvedValueOnce(ok([loop('a')]));
+    const { result } = renderHook(() => ({ loops: useLoops(SONG), remove: useDeleteLoop(SONG) }), {
+      wrapper: wrapperFor(queryClient, signedInAs('user-1')),
+    });
+    await waitFor(() => expect(result.current.loops.isSuccess).toBe(true));
+    queryResult.mockResolvedValueOnce(ok(null));
+    queryResult.mockResolvedValue(ok([]));
+
+    act(() => result.current.remove.mutate('a'));
+    await waitFor(() => expect(result.current.remove.isSuccess).toBe(true));
+
+    expect(queryClient.getQueryData<Loop[]>(otherKey)?.map((l) => l.id)).toEqual(['z']);
+    // Under loopKeys.forUser, so the same invalidation marks it stale.
+    await waitFor(() => expect(queryClient.getQueryState(otherKey)?.isInvalidated).toBe(true));
+  });
+});
