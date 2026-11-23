@@ -35,10 +35,14 @@ export function barRangeToTicks(
   return { startTick: startBar.start, endTick: endBar.end };
 }
 
+/** The played bar `tick` falls in (the right playthrough of a repeated bar), or null outside the song. */
+export function barAtTick(bars: readonly BarTicks[], tick: number): BarTicks | null {
+  return bars.find((bar) => tick >= bar.start && tick < bar.end) ?? null;
+}
+
 /** 0-based bar index playing at `tick`, or null outside the song. */
 export function barIndexAtTick(bars: readonly BarTicks[], tick: number): number | null {
-  const bar = bars.find((b) => tick >= b.start && tick < b.end);
-  return bar ? bar.barIndex : null;
+  return barAtTick(bars, tick)?.barIndex ?? null;
 }
 
 /** Tick where 1-based `barNumber` first starts, or null when the bar doesn't exist. */

@@ -1,4 +1,5 @@
 import { FakePlayerEngine, TEMPO_CHANGE_BAR_TEMPOS, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
+import { COMMON_TIME, type Meter } from './countIn';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
 import { PlayerService, type PlayerServiceConfig } from './PlayerService';
 import type { WakeLockControl } from './wakeLock';
@@ -61,6 +62,7 @@ describe('PlayerService loading', () => {
       barCount: 16,
       trackCount: 3,
       barTempos: Array<number>(16).fill(120),
+      barMeters: Array<Meter>(16).fill(COMMON_TIME),
     });
     expect(service.getSnapshot()).toMatchObject({ status: 'loading', barCount: 16, barNumber: 1 });
 

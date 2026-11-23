@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { exposePlayerForDebugging } from './debugPlayer';
 import type { EngineFactory, EngineMount, PlayerEngine } from './playerEngine';
 import type { PlayerOptions } from './playerOptions';
 import { initialPlayerSnapshot, PlayerService, type PlayerSnapshot } from './PlayerService';
@@ -76,6 +77,7 @@ export function usePlayer({
         });
         created.load(inputs.fileBytes);
         setPlayer(created);
+        exposePlayerForDebugging(created);
       },
       () => {
         if (!mount.signal.aborted) setEngineFailed(true);
@@ -86,6 +88,7 @@ export function usePlayer({
       mount.abort();
       created?.dispose();
       setPlayer(null);
+      if (created) exposePlayerForDebugging(null);
     };
   }, []);
 

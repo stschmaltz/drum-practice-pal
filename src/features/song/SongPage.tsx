@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { buttonClass } from '@/components/styles';
 import type { Song } from '@/features/library/songForm';
 import { useSong, useSongFile } from '@/features/library/useSongs';
+import { CountInCounter } from '@/features/player/CountInCounter';
 import { PlayerControls, PlayPauseButton } from '@/features/player/PlayerControls';
 import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
 import {
@@ -23,8 +24,8 @@ import { useJamMode } from './useJamMode';
 /**
  * /songs/:id. Lazy-loaded from App.tsx with the player. Opens in jam mode
  * (Unit 06): the whole song with a following cursor, tap a bar to go there,
- * and the speed and BPM at the current bar. Count-in (07) and loops (08)
- * build on this page.
+ * and the speed and BPM at the current bar, with the count-in (Unit 07)
+ * counted over the score. Loops (08) build on this page.
  */
 export function SongPage() {
   const { id = '' } = useParams();
@@ -103,7 +104,9 @@ function SongPlayer({
     initialOptions,
   });
   const stickyBarRef = useRef<HTMLDivElement>(null);
-  useJamMode(player, { scrollRef, stickyBarRef }, snapshot.status === 'playing');
+  // The count-in counter sits over the score, so the score comes on screen for it too.
+  const running = snapshot.status === 'playing' || snapshot.status === 'countingIn';
+  useJamMode(player, { scrollRef, stickyBarRef }, running);
   // A soundfont failure still leaves readable notation; these leave an empty white box.
   const nothingToShow = snapshot.error === 'score' || snapshot.error === 'engine';
 
@@ -112,18 +115,22 @@ function SongPlayer({
       <JamBar ref={stickyBarRef} player={player} snapshot={snapshot} />
       <PlayerControls player={player} snapshot={snapshot} showPlayButton={false} />
       <PlayerStatusLine snapshot={snapshot} />
-      {/* Both layouts scroll inside this box, so the cursor's auto-scroll is one code path. */}
-      <div
-        ref={scrollRef}
-        data-testid="score-viewport"
-        // Hidden, not unmounted: alphaTab keeps its elements until the player is disposed.
-        hidden={nothingToShow}
-        // jam-score: the cursor and tap styles in index.css. The bottom scroll margin keeps
-        // the box clear of the phone's fixed tab bar when playback scrolls it into view
-        // (useJamMode sets the top one from the sticky bar's height).
-        className="jam-score relative h-[60dvh] scroll-mb-[calc(4.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-lg bg-white text-black md:scroll-mb-4"
-      >
-        <div ref={scoreRef} />
+      {/* The counter covers the score box without scrolling with what's inside it. */}
+      <div className="relative">
+        <CountInCounter snapshot={snapshot} />
+        {/* Both layouts scroll inside this box, so the cursor's auto-scroll is one code path. */}
+        <div
+          ref={scrollRef}
+          data-testid="score-viewport"
+          // Hidden, not unmounted: alphaTab keeps its elements until the player is disposed.
+          hidden={nothingToShow}
+          // jam-score: the cursor and tap styles in index.css. The bottom scroll margin keeps
+          // the box clear of the phone's fixed tab bar when playback scrolls it into view
+          // (useJamMode sets the top one from the sticky bar's height).
+          className="jam-score relative h-[60dvh] scroll-mb-[calc(4.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-lg bg-white text-black md:scroll-mb-4"
+        >
+          <div ref={scoreRef} />
+        </div>
       </div>
     </div>
   );
@@ -202,6 +209,7 @@ function PlayerStatusLine({ snapshot }: { snapshot: PlayerSnapshot }) {
       {snapshot.status === 'loading'
         ? 'Loading the score and sounds…'
         : `Bar ${snapshot.barNumber ?? 1} of ${snapshot.barCount ?? '?'}`}
+      {snapshot.status === 'countingIn' && ' · Counting in…'}
     </p>
   );
 }

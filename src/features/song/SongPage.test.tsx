@@ -525,3 +525,43 @@ describe('SongPage jam mode', () => {
     });
   });
 });
+
+describe('SongPage count-in', () => {
+  it('takes the count-in defaults from settings and counts in over the score before playing', async () => {
+    serve({
+      settings: ok({ ...settingsRow, count_in_bars: 2, count_in_mode: 'every_repeat' }),
+    });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    expect(screen.getByRole('combobox', { name: 'Count-in' })).toHaveValue('2');
+    expect(screen.getByRole('combobox', { name: 'When to count in' })).toHaveValue('every_repeat');
+    expect(screen.queryByTestId('count-in')).not.toBeInTheDocument();
+
+    await user.click(playButton());
+
+    // Two bars at 120 BPM is four seconds, so the count is still on beat one here.
+    await waitFor(() => expect(screen.getByTestId('count-in-beat')).toHaveTextContent('1'));
+    expect(screen.getByTestId('count-in-bar')).toHaveTextContent('Bar 1 of 2');
+    expect(status()).toHaveTextContent('Counting in…');
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(engine.play).not.toHaveBeenCalled();
+
+    await user.click(playButton());
+    expect(screen.queryByTestId('count-in')).not.toBeInTheDocument();
+    expect(playButton()).toHaveTextContent('Play');
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it('hides the counter once playback starts', async () => {
+    serve({ settings: ok({ ...settingsRow, count_in_bars: 1 }) });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    await user.click(playButton());
+    expect(await screen.findByTestId('count-in')).toBeInTheDocument();
+
+    act(() => engine.fire('stateChanged', { playing: true }));
+    expect(screen.queryByTestId('count-in')).not.toBeInTheDocument();
+    expect(status()).not.toHaveTextContent('Counting in');
+  });
+});

@@ -230,3 +230,58 @@ describe('PlayPauseButton', () => {
     expect(engine.play).toHaveBeenCalled();
   });
 });
+
+describe('PlayerControls count-in', () => {
+  const countIn = () => screen.getByRole('combobox', { name: 'Count-in' });
+  const countInMode = () => screen.getByRole('combobox', { name: 'When to count in' });
+
+  it('starts from the options it is given', () => {
+    setup({
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2, countInMode: 'every_repeat' },
+    });
+    expect(countIn()).toHaveValue('2');
+    expect(countInMode()).toHaveValue('every_repeat');
+    expect(countInMode()).toBeEnabled();
+  });
+
+  it('offers off, 1 bar and 2 bars, with the mode disabled while off', () => {
+    setup();
+    expect(countIn()).toHaveValue('0');
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Off',
+      '1 bar',
+      '2 bars',
+      'At the start only',
+      'Before every loop repeat',
+    ]);
+    expect(countInMode()).toBeDisabled();
+  });
+
+  it('changes the player without restarting playback', async () => {
+    const { engine, player, user } = setup();
+    await startPlaying(engine, user);
+    engine.play.mockClear();
+    engine.loadScore.mockClear();
+
+    await user.selectOptions(countIn(), '1 bar');
+    await user.selectOptions(countInMode(), 'Before every loop repeat');
+
+    expect(player.getSnapshot()).toMatchObject({ countInBars: 1, countInMode: 'every_repeat' });
+    expect(countIn()).toHaveValue('1');
+    expect(engine.restartCalls()).toBe(0);
+  });
+
+  it('shows Pause during a count-in, and Pause calls it off', async () => {
+    const { engine, player, user } = setup({
+      options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2 },
+    });
+    await user.click(playButton());
+    expect(player.getSnapshot().status).toBe('countingIn');
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(engine.play).not.toHaveBeenCalled();
+
+    await user.click(playButton());
+    expect(playButton()).toHaveTextContent('Play');
+    expect(player.getSnapshot().status).toBe('ready');
+  });
+});

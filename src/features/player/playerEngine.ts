@@ -5,6 +5,7 @@
  * file pulls in nothing.
  */
 import type { BarTicks, TickRange } from './barTicks';
+import type { Meter } from './countIn';
 import type { LayoutChoice } from './layout';
 
 export type EngineEvents = {
@@ -14,6 +15,8 @@ export type EngineEvents = {
     trackCount: number;
     /** The tempo each bar starts at, by 0-based bar index (see tempo.ts). */
     barTempos: number[];
+    /** Each bar's time signature, by 0-based bar index (see countIn.ts). */
+    barMeters: Meter[];
   };
   /** The MIDI was generated, so ticks can be mapped to bars. May repeat. */
   ticksReady: { bars: BarTicks[] };
@@ -39,6 +42,11 @@ export interface PlayerEngine {
   setLayout(layout: LayoutChoice): void;
   /** Must start audio synchronously: on iOS this has to run inside the tap. */
   play(): void;
+  /**
+   * Wakes the audio output without playing. Called inside the tap when a
+   * count-in comes first, since play() then runs later, outside the gesture.
+   */
+  unlockAudio(): void;
   pause(): void;
   /** Stops and rewinds to the start of the song or range. */
   stop(): void;
