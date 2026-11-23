@@ -172,7 +172,7 @@ docs/
 
 Each unit runs Build, Test, QA, Readability, Review (see `docs/plan.md`). Each stage:
 
-1. Reads this file, its unit section in `docs/plan.md`, and earlier notes in `docs/units/`.
+1. Reads this file, its unit section in `docs/plan.md`, earlier notes in `docs/units/`, and `docs/review-checklist.md` (the defect classes outside reviewers keep finding: interleavings, gates, gestures, round trips, validated paths). Build designs against it, Test proves its rows, Review walks every row.
 2. Stays inside its unit's scope.
 3. Ends with `npm run check` green (and `npm run e2e` from Unit 03 on).
 4. Appends its section to `docs/units/NN-name.md`.
