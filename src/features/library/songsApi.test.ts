@@ -1,4 +1,4 @@
-import { songFilePath } from '@/lib/schema';
+import { GP_FILE_MAX_BYTES, songFilePath } from '@/lib/schema';
 import {
   opArgs,
   queryResult,
@@ -108,6 +108,16 @@ describe('uploadSong', () => {
     await expect(upload).rejects.toBeInstanceOf(SongFileError);
     await expect(upload).rejects.toThrow(message);
     expect(parseScore).not.toHaveBeenCalled();
+    expect(queryResult).not.toHaveBeenCalled();
+    expect(storageResult).not.toHaveBeenCalled();
+  });
+
+  it('refuses an oversized file without reading it into memory', async () => {
+    const file = gpFile('huge.gp');
+    Object.defineProperty(file, 'size', { value: GP_FILE_MAX_BYTES + 1 });
+    const read = vi.spyOn(file, 'arrayBuffer');
+    await expect(uploadSong(USER, file)).rejects.toThrow(/over 20 MB/);
+    expect(read).not.toHaveBeenCalled();
     expect(queryResult).not.toHaveBeenCalled();
     expect(storageResult).not.toHaveBeenCalled();
   });

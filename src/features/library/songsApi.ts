@@ -4,7 +4,7 @@
  */
 import { fetchAllPages } from '@/lib/fetchAllPages';
 import { randomUuid } from '@/lib/randomUuid';
-import { GP_FILES_BUCKET, songFilePath } from '@/lib/schema';
+import { GP_FILE_MAX_BYTES, GP_FILES_BUCKET, songFilePath } from '@/lib/schema';
 import { sha256Hex } from '@/lib/sha256';
 import { supabase } from '@/lib/supabase';
 import { throwIfError, unwrap } from '@/lib/supabaseResult';
@@ -138,6 +138,8 @@ export async function uploadSong(
 
 /** The file's bytes and score metadata, or a SongFileError for a file the app refuses. */
 async function readSongFile(file: File): Promise<{ bytes: Uint8Array; metadata: SongMetadata }> {
+  // Before reading: a phone would otherwise load a picked video into memory just to refuse it.
+  if (file.size > GP_FILE_MAX_BYTES) throw new SongFileError(SONG_FILE_MESSAGES['too-large']);
   const bytes = new Uint8Array(await file.arrayBuffer());
   const check = checkSongFile(file.name, bytes);
   if (!check.ok) throw new SongFileError(SONG_FILE_MESSAGES[check.problem]);

@@ -222,3 +222,35 @@ I also used the real Songsterr export in `tests/fixtures/real/` (not committed).
 
 - Before: `npm run check` green (33 files, 426 tests). `npm run e2e`: 102 passed.
 - After: `npm run check` green (34 files, 426 tests; the extra file is `songList.test.ts`). `npm run e2e`: 102 passed. Local Supabase was running.
+
+## Review
+
+**Scope:** every line of `git diff origin/main...unit-04` (app code, tests, fake client, fixtures, e2e, AGENTS.md). Checked each supabase-js and Storage result, list paging, the upload / rollback / cancel / delete ordering, races, e2e teardown, listeners and controllers, path construction, URL-text rendering and the bundle split.
+
+**Findings**
+
+1. **Fixed: an oversized file was read into memory before being refused.** `src/features/library/songsApi.ts:140` (`readSongFile`). It called `file.arrayBuffer()` and only then let `checkSongFile` refuse anything over 20 MB. If someone picked a multi-GB video on a phone, the whole file was loaded just to show "over 20 MB". It now checks `file.size` first and throws the same `SongFileError` copy. There's a new test in `songsApi.test.ts` ("refuses an oversized file without reading it into memory") that asserts `arrayBuffer` is never called and nothing reaches the server. Also added as a one-line rule in AGENTS.md ("Lists, files and ids").
+2. **Confirmed correct, no change:**
+   - Every `{ data, error }` is checked. That covers `fetchSongs` (unwrap per page), `findSongByHash`, Storage `upload` and `remove`, insert, update, both delete steps, and the e2e helpers (`songRows`, `userFiles`, `childRows`, `addPractice`).
+   - `fetchSongs` pages through `fetchAllPages` with a total order (`created_at desc, id`), at 500 per page, under `max_rows`. The e2e `userFiles` single page is deliberate and commented.
+   - On upload, the file goes up before the insert. A failed insert removes the file, and if that removal fails too, the error says both. On `23505`, only this upload's own path is removed (a fresh uuid), never the winner's. A cancel during the upload removes the file and nothing is inserted. A cancel is never honoured once the insert has started.
+   - `deleteSong` removes the file, then the row, and stops at the first failure. Both steps are scoped by `user_id`, and the path is built with `songFilePath`.
+   - The window drag/drop listeners are removed on unmount. The AbortController is per upload, and no object URLs or alphaTab instances are created (`parseScore` builds a plain `Settings` and score, with no API or worker).
+   - No URL text is rendered. The no-match copy is fixed.
+   - Bundle: the main chunk (165.6 kB gzip) references alphaTab only in Vite's lazy-deps map. `parseScore` and `alphaTab.core` are separate chunks.
+   - e2e: the user fixture is per test, and every upload has settled before its test ends. The cancel test releases its held route and polls the bucket until it's empty.
+
+**Open issues (not fixed; outside a small in-scope change)**
+
+1. **Insert response lost after commit.** If the insert commits but the response never arrives (flaky Wi-Fi), `uploadSong` treats it as failed and removes the file. That leaves a listed song with no file. It's recoverable: Delete still works, because removing a missing file succeeds. A fix would look the row up by id before rolling back whenever the error carries no Postgres code. Suggested for Unit 11 (flaky network), together with QA issue 1.
+2. **Upload response lost after the file was stored.** In that case the file stays behind as an orphan with no row. Harmless apart from storage use. Same fix area: a best-effort `remove` after a Storage error that isn't an HTTP rejection.
+3. **Offset paging under concurrent writes.** `fetchSongs` pages by offset. Another device adding or deleting a song between two page reads can repeat or skip one row. This only matters past 500 songs, and the next refetch corrects it. Keyset paging (or de-duplicating by id) would remove it.
+4. **Storage `remove` reports success for objects it didn't delete.** It does this both for a missing file and for one RLS hides, so `deleteSong` can't tell a real removal from a no-op. With the current owner-only policies and `songFilePath`, a no-op only happens when the file is already gone, which is the retry case it relies on. No change.
+5. Still open from QA: issue 1 (offline uploads pause as "Reading…") and issue 2 (raw network error text), already assigned to Units 11 and 12.
+
+**Results**
+
+- `npm run check`: green, 34 files, 427 tests (was 426; +1 oversized-file test).
+- `npm run test:db`: 4 files, 123 passed.
+- `npm run e2e`: 102 passed. Local Supabase was running.
+- Branch `unit-04`; nothing committed.
