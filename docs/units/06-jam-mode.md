@@ -137,3 +137,87 @@ None.
 
 - **In Chromium's touch emulation, the first tap after a swipe's fling doesn't fire `click`, so it doesn't seek.** The second tap does. A tap that stops momentum scrolling usually doesn't click on real phones either, so I don't think it's a bug. The e2e test taps before it swipes. Worth checking on the iPhone: after a swipe ends, does a tap need repeating?
 - **Mid-bar tempo changes and real touch devices are still untested.** No fixture has a mid-bar change (see Build known gaps).
+
+## QA
+
+**Setup.** Local Supabase was running. The app was the e2e build (`--mode development`) on `vite preview` at :4173. A throwaway Playwright suite (removed afterwards) drove it with a fresh user per test at phone 390x844, landscape phone 844x390, tablet 820x1180 and desktop 1440x900. All but desktop had touch on. Fixtures: `tempo-change`, `groove-120`, `waltz-34`, and the real Songsterr export in `tests/fixtures/real/` (119 bars) as the long song. Screenshots are in `docs/units/06-shots/`, named `<size>-NN-<what>.png`. I deleted the shots of the real export so no copyrighted notation lands in git. "Cursor on screen" means the blue beat line sits inside the score box, inside the window, and above the phone's tab bar, sampled every 150 ms.
+
+**Acceptance criteria**
+
+| Criterion                                                    | Result | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cursor stays in view at every size and through tempo changes | Pass   | Tempo Change at 200%, played to the end: 105 to 107 samples per size, and the cursor was off screen in none of them at any of the four sizes, including across bar 9 (`*-02`). The real export at 200% for 25 s (to bar 35, several line changes in page layout): no off-screen samples at any size.                                                                                                                                                                                                           |
+| Seeking lands on the tapped bar                              | Pass   | On the real export I scrolled to 10% through 88% of the song and tapped the middle of the box. Each tap landed on the same bar while paused and while playing (7 points per page-layout size, all identical; for example desktop 11, 23, 38, 50, 65, 80, 95). On the phone the cursor box contained the tap point every time (bars 13 to 93). The last bar is reachable: bar 119 on the phone, and bars 117 to 119 on the shorter last line in page layout. Taps while offline and mid-play seek too (`*-12`). |
+| Header shows % and BPM = ratio x tempo at the current bar    | Pass   | Every sample during Tempo Change at 200% read 240 for bars 1 to 8 and 180 for bars 9 to 16, with no mismatch. Rounding at 120 BPM: 25% = 30, 35% = 42, 105% = 126, 200% = 240. A far tap to bars 11 to 16 at 200% reads 180, an offline tap to bar 16 at 100% reads 90, and Waltz reads 140. The slider's Home and End keys give 25% / 30 and 200% / 240. While loading, the readout shows 100% and "–". **But on a phone the header is off screen for all of playback (issue 1).**                            |
+| Speed resets to 100% on open                                 | Pass   | 150%, then Library and back in-app: 100%, Bar 1. 60%, then history back and forward: 100%. Reload: 100% (also in the e2e).                                                                                                                                                                                                                                                                                                                                                                                     |
+
+**QA focus**
+
+- **Long songs: pass.** 119 bars, 6 tracks. The cursor follows through line changes, far taps land correctly while playing, and playback keeps going after each.
+- **Scroll fighting the cursor: pass, with a note.**
+  - The page never fights the user. Scrolling the window to the top mid-play stays at the top for 5 s at every size. `useJamMode` scrolls only once per Play.
+  - Inside the box, alphaTab owns the scroll while playing. If you scroll ahead to read, it stays until the next bar (horizontal) or next line (page layout), then snaps back to the cursor (about 1.8 s at 155 BPM). That's follow mode doing its job. There's no way to turn follow off to read ahead. That's a post-MVP idea, not a defect.
+- **Landscape phone (844x390): pass, but cramped.**
+  - 844 px wide means page layout with the sidebar. The 60dvh box is 234 px, about two lines of music.
+  - Before Play, only a sliver of the box shows above the fold (`landscape-01`). Play scrolls the page 242 px so the box fills the screen, and the cursor then never left the screen.
+  - Header and Pause are off screen while playing (issue 1).
+- **Phone portrait.** See issue 1. Horizontal layout scrolls sideways as expected and never lost the cursor.
+- **Edge cases: pass.**
+  - Taps on the score box while it loads: no seek, no errors, ready at Bar 1.
+  - 20 rapid clicks on the next bar while playing: it lands on that bar and keeps playing.
+  - A double click on a bar selects an invisible newline (selection type Range, nothing visible, `*-16`). Harmless.
+  - Tapping the last bar while playing and letting it finish returns to Bar 1 and Play, with no errors (`*-10`, Waltz in 3/4). A tap after the finish seeks normally.
+  - Taps on the whitespace right of the short last line in page layout, or on the top margin, do nothing.
+  - `/songs/not-a-uuid` and an unknown uuid show "Song not found" (`*-09`).
+- **Slow network (1.6 Mbps, 400 ms latency, cache off): pass.** Ready after about 7.6 s. The readout shows 100% / "–" until the score is in (`*-11`).
+- **Offline mid-play: pass.** Playback continues, a tap seeks to bar 16, and BPM switches to 90 (`*-12`).
+
+**Open items from Build, judged**
+
+1. **Pause (and the header) off screen after Play on a phone: major.** See issue 1.
+2. **The first tap after a swipe's momentum doesn't seek: not a bug.**
+   - I reproduced it at phone, landscape and tablet with CDP touch. A tap 60 ms after a fling only stops the fling. A tap after the fling settles seeks every time.
+   - That matches native behaviour on iOS and Android: a tap that stops momentum isn't a click. It stays on the Human check list.
+
+**Issues**
+
+1. **Major: on a phone, Play scrolls the speed and BPM header and Pause off screen for all of playback.**
+   - Repro (390x844):
+     1. Open any song, with the page scrolled to the top.
+     2. Press Play.
+     3. `useJamMode` calls `scrollIntoView({ block: 'nearest' })` on the 506 px score box, and the window scrolls 208 px. Pause's top moves to -55 px, the readout to -116 px, the title to -192 px (`phone-08`, `phone-02`).
+     4. They stay off screen in every sample until the song ends. To pause, you have to scroll the page back up first. That works, and nothing fights it.
+   - It's the same in landscape (844x390): the window scrolls 242 px and Pause sits at -73 px (`landscape-08`). Tablet and desktop are unaffected, because the box is already fully visible.
+   - Why major: the BPM readout following a tempo change is part of this unit's acceptance, and on the phone it's never visible while it changes. Needing to scroll before you can pause is a poor fit for someone holding sticks.
+   - In portrait the scroll buys nothing. Horizontal layout is one system, 233 px tall. Before Play the box already shows 298 px of itself above the tab bar, with the cursor on screen. The other 273 px of the box is empty white (`phone-02`).
+   - Fix options for Build:
+     - In horizontal layout, size the box to its content (one system) instead of `h-[60dvh]`. Header, controls and score then all fit on a 390x844 screen with no scroll.
+     - Or scroll the cursor's bar into view with `nearest`, not the whole box.
+     - Landscape (page layout, 390 px tall) can't fit everything. A compact sticky row with Pause and BPM, or a denser controls bar, is the likely answer there. Unit 05 QA issue 5 flagged the same height problem.
+2. **Minor: on a phone the score opens scrolled 47 px sideways, clipping the drum clef and time signature** (`phone-01`).
+   - alphaTab's continuous scroll puts bar 1's left edge at the box edge. It's harmless for reading the notes.
+   - I left it, since the fix is a scroll offset change, not styling.
+3. **Note for the Human check: double-tap to zoom.**
+   - Two quick taps on a bar in iOS Safari may zoom the page.
+   - `touch-action: manipulation` on `.jam-score` would stop that. It's a behaviour change, so I haven't added it.
+
+I made no cosmetic fixes, and no app code changed.
+
+**Human check (Shane)**
+
+- iPhone and iPad:
+  - Does a tap on a bar seek reliably?
+  - Does a sideways or vertical swipe never seek?
+  - After a swipe settles, does the next tap work first time? (A tap during the fling only stops it, as expected.)
+- iPhone: do two quick taps on a bar zoom the page?
+- Are the cursor colours (pale yellow bar, blue beat line) readable from the throne?
+- iPad page layout, long song: is the line-change scroll smooth? Is the snap back after reading ahead acceptable?
+- iPhone portrait and landscape: confirm issue 1 on the device (Pause and BPM off screen while playing).
+
+**Results**
+
+- `npm run check`: green, 46 files, 592 tests.
+- `npx playwright test jam.spec.ts`: 23 passed, 1 skipped.
+- Files changed by QA: this note and `docs/units/06-shots/` (36 screenshots). Nothing is committed.
+
+**Verdict: FAIL.** All four acceptance criteria pass on function. But issue 1 (major) hides the jam header and Pause for all of playback on a phone, so it should go to Build before Readability. Issues 2 and 3 are minor and can be carried forward.
