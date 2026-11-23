@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
+import { fixtures } from '../fixtures/sources.ts';
 import { expect, signIn, test, type E2eUser } from './auth';
 
 // Unit 04: upload, dedupe, refuse bad files, edit, delete, search and sort.
@@ -143,4 +144,150 @@ test('edits title and artist, searches, sorts and deletes', async ({ user, page 
   await expect(titles).toHaveText(['Back Beat']);
   expect((await songRows(user)).map((song) => song.title)).toEqual(['Back Beat']);
   expect(await userFiles(user)).toHaveLength(1);
+});
+
+// Test stage -----------------------------------------------------------------
+
+/** Rows of a child table for the user, read past RLS. */
+async function childRows(table: 'loops' | 'practice_sessions', user: E2eUser) {
+  const { data, error } = await admin.from(table).select('id').eq('user_id', user.id);
+  if (error) throw error;
+  return data;
+}
+
+/** A loop on the song, practiced at `lastPracticedAt`, with one logged session. */
+async function addPractice(user: E2eUser, songId: string, lastPracticedAt: string) {
+  const loopId = crypto.randomUUID();
+  const loop = await admin.from('loops').insert({
+    id: loopId,
+    user_id: user.id,
+    song_id: songId,
+    name: 'Fill',
+    start_bar: 1,
+    end_bar: 2,
+    last_practiced_at: lastPracticedAt,
+  });
+  if (loop.error) throw loop.error;
+  const session = await admin.from('practice_sessions').insert({
+    id: crypto.randomUUID(),
+    user_id: user.id,
+    loop_id: loopId,
+    started_at: lastPracticedAt,
+    duration_seconds: 60,
+    speed_ratio: 0.8,
+  });
+  if (session.error) throw session.error;
+}
+
+test('every fixture uploads with the metadata its source declares', async ({ user, page }) => {
+  await signIn(page, user, '/library');
+  for (const { name, expected } of fixtures) {
+    await upload(page, fixture(name));
+    await expect(
+      page.getByRole('status').filter({ hasText: `Added “${expected.title}”.` }),
+    ).toBeVisible();
+    const item = page.getByRole('listitem').filter({
+      has: page.getByRole('link', { name: expected.title, exact: true }),
+    });
+    await expect(item).toContainText(`${expected.barCount} bars · ${expected.tempoAtBar1} BPM`);
+    await expect(item.getByText('No drum track found')).toHaveCount(
+      expected.drumTrackIndex === null ? 1 : 0,
+    );
+  }
+
+  const rows = await songRows(user);
+  expect(rows).toHaveLength(fixtures.length);
+  for (const { expected } of fixtures) {
+    expect(rows.find((row) => row.title === expected.title)).toMatchObject({
+      artist: 'Fixture',
+      original_tempo: expected.tempoAtBar1,
+      bar_count: expected.barCount,
+      drum_track_index: expected.drumTrackIndex,
+    });
+  }
+  expect((await userFiles(user)).sort()).toEqual(rows.map((row) => `${row.id}.gp`).sort());
+});
+
+test('a failed insert removes the uploaded file and lists nothing', async ({ user, page }) => {
+  await signIn(page, user, '/library');
+  const fileUploads: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/storage/v1/object/gp-files/')) {
+      fileUploads.push(request.url());
+    }
+  });
+  await page.route('**/rest/v1/songs**', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'insert broke', code: 'XX000' }),
+        })
+      : route.continue(),
+  );
+
+  await upload(page, fixture('groove-120'));
+  await expect(page.getByRole('alert')).toContainText("Couldn't upload groove-120.gp");
+  await expect(page.getByText('No songs yet.')).toBeVisible();
+  expect(await songRows(user)).toEqual([]);
+  // The file went up before the insert failed, so an empty folder means it was removed.
+  expect(fileUploads).toHaveLength(1);
+  expect(await userFiles(user)).toEqual([]);
+});
+
+test('cancelling during the upload removes the file', async ({ user, page }) => {
+  await signIn(page, user, '/library');
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/storage/v1/object/gp-files/**', async (route) => {
+    if (route.request().method() === 'POST') await held;
+    await route.continue();
+  });
+
+  await upload(page, fixture('waltz-34'));
+  await expect(page.getByRole('status').filter({ hasText: 'Uploading waltz-34.gp' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  release();
+
+  await expect(page.getByText('Upload cancelled. Nothing was saved.')).toBeVisible();
+  expect(await songRows(user)).toEqual([]);
+  await expect.poll(() => userFiles(user)).toEqual([]);
+});
+
+test('sorts by recent practice, and deleting a song removes its file, loops and sessions', async ({
+  user,
+  page,
+}) => {
+  await signIn(page, user, '/library');
+  await upload(page, fixture('groove-120'));
+  await expect(page.getByRole('status').filter({ hasText: 'Added “Groove 120”' })).toBeVisible();
+  await upload(page, fixture('waltz-34'));
+  await expect(page.getByRole('status').filter({ hasText: 'Added “Waltz 3-4”' })).toBeVisible();
+
+  const songs = await songRows(user);
+  const groove = songs.find((song) => song.title === 'Groove 120')!;
+  const waltz = songs.find((song) => song.title === 'Waltz 3-4')!;
+  // Groove was added first but practiced last, so it leads "Recently practiced".
+  await addPractice(user, waltz.id, '2026-11-20T10:00:00Z');
+  await addPractice(user, groove.id, '2026-11-21T10:00:00Z');
+  await page.reload();
+
+  const titles = page.getByRole('list').getByRole('link');
+  await expect(titles).toHaveText(['Groove 120', 'Waltz 3-4']);
+  await page.getByLabel('Sort by').selectOption('added');
+  await expect(titles).toHaveText(['Waltz 3-4', 'Groove 120']);
+  expect(await childRows('loops', user)).toHaveLength(2);
+  expect(await childRows('practice_sessions', user)).toHaveLength(2);
+
+  await page.getByRole('button', { name: 'Delete Groove 120' }).click();
+  await page.getByRole('button', { name: 'Delete song' }).click();
+  await expect(titles).toHaveText(['Waltz 3-4']);
+
+  expect((await songRows(user)).map((song) => song.id)).toEqual([waltz.id]);
+  expect(await userFiles(user)).toEqual([`${waltz.id}.gp`]);
+  // The other song's loop and session stay; the deleted song's are gone.
+  const { data: loops, error } = await admin.from('loops').select('song_id').eq('user_id', user.id);
+  if (error) throw error;
+  expect(loops).toEqual([{ song_id: waltz.id }]);
+  expect(await childRows('practice_sessions', user)).toHaveLength(1);
 });

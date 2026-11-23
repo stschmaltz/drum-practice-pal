@@ -1,0 +1,239 @@
+import { fireEvent, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Route } from 'react-router';
+import {
+  opArgs,
+  queryResult,
+  resetFakeSupabase,
+  storageResult,
+  type FakeResult,
+} from '@/test/fakeSupabase';
+import { renderRoutes } from '@/test/render';
+import type { ParseResult } from './parseScore';
+import type { SongMetadata } from './songMetadata';
+import { UploadPanel } from './UploadPanel';
+
+vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
+
+// Real parsing is covered by parseScore.test.ts and the e2e specs.
+const parseScore = vi.fn<(bytes: Uint8Array, fileName: string) => ParseResult>();
+vi.mock('./parseScore', () => ({
+  parseScore: (...args: [Uint8Array, string]) => parseScore(...args),
+}));
+
+const metadata: SongMetadata = {
+  title: 'Groove',
+  artist: 'Band',
+  originalTempo: 120,
+  barCount: 16,
+  drumTrackIndex: 0,
+};
+const row = (overrides: Record<string, unknown> = {}) => ({
+  id: 'song-1',
+  title: 'Groove',
+  artist: 'Band',
+  original_tempo: 120,
+  bar_count: 16,
+  drum_track_index: 0,
+  created_at: '2026-11-22T00:00:00Z',
+  ...overrides,
+});
+const ok = (data: unknown): FakeResult => ({ data, error: null });
+const fail = (message: string, code?: string): FakeResult => ({
+  data: null,
+  error: { message, code },
+});
+const gpFile = (name = 'groove.gp') =>
+  new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2])], name);
+
+/** Answers the hash lookup, the insert and any list refetch. */
+function serve({
+  existing = null,
+  insert = ok(row()),
+}: {
+  existing?: unknown;
+  insert?: FakeResult;
+}) {
+  queryResult.mockImplementation(async (call) => {
+    if (opArgs(call, 'insert')) return insert;
+    if (opArgs(call, 'range')) return ok([]);
+    return ok(existing);
+  });
+}
+
+const inserts = () => queryResult.mock.calls.filter(([call]) => opArgs(call, 'insert'));
+const storageMethods = () => storageResult.mock.calls.map(([call]) => call.method);
+const picker = () => screen.getByLabelText('Upload a Guitar Pro file');
+
+function renderPanel() {
+  renderRoutes(<Route path="/library" element={<UploadPanel />} />, { path: '/library' });
+  return userEvent.setup();
+}
+
+function deferred() {
+  let resolve!: (value: FakeResult) => void;
+  const promise = new Promise<FakeResult>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+beforeEach(() => {
+  resetFakeSupabase();
+  parseScore.mockReset().mockReturnValue({ ok: true, metadata });
+});
+
+describe('UploadPanel', () => {
+  it('uploads a picked file and links to the new song', async () => {
+    serve({});
+    const user = renderPanel();
+    await user.upload(picker(), gpFile());
+
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open “Groove”' })).toHaveAttribute(
+      'href',
+      '/songs/song-1',
+    );
+    expect(screen.queryByText(/No drum track found/)).not.toBeInTheDocument();
+    expect(storageMethods()).toEqual(['upload']);
+    expect(inserts()).toHaveLength(1);
+  });
+
+  it('notes a file with no drum track', async () => {
+    parseScore.mockReturnValue({ ok: true, metadata: { ...metadata, drumTrackIndex: null } });
+    serve({ insert: ok(row({ drum_track_index: null })) });
+    const user = renderPanel();
+    await user.upload(picker(), gpFile());
+
+    expect(await screen.findByText(/No drum track found in this file/)).toBeInTheDocument();
+    const [[insertCall]] = inserts() as [[Parameters<typeof opArgs>[0]]];
+    expect(opArgs(insertCall, 'insert')?.[0]).toMatchObject({ drum_track_index: null });
+  });
+
+  it('warns about a duplicate, offers the existing song and uploads nothing', async () => {
+    serve({ existing: row({ id: 'existing', title: 'First Upload' }) });
+    const user = renderPanel();
+    await user.upload(picker(), gpFile('copy.gp'));
+
+    expect(
+      await screen.findByText(
+        /already uploaded this file as “First Upload”. Nothing new was added./,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open “First Upload”' })).toHaveAttribute(
+      'href',
+      '/songs/existing',
+    );
+    expect(storageResult).not.toHaveBeenCalled();
+    expect(inserts()).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      'a MIDI file',
+      new File([new TextEncoder().encode('MThd\0\0\0\u0006')], 'song.mid'),
+      /Couldn't add song.mid. MIDI files aren't supported. In Songsterr, export the song as Guitar Pro/,
+    ],
+    [
+      'a non-Guitar Pro file',
+      new File(['just some text'], 'notes.gp'),
+      /Couldn't add notes.gp. That isn't a Guitar Pro file./,
+    ],
+    ['an empty file', new File([], 'empty.gp'), /That file is empty./],
+  ])('refuses %s with a clear message, creating nothing', async (_label, file, message) => {
+    serve({});
+    const user = renderPanel();
+    await user.upload(picker(), file);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    expect(queryResult).not.toHaveBeenCalled();
+    expect(storageResult).not.toHaveBeenCalled();
+  });
+
+  it('refuses a damaged Guitar Pro file, creating nothing', async () => {
+    parseScore.mockReturnValue({ ok: false, reason: 'parse-error' });
+    serve({});
+    const user = renderPanel();
+    await user.upload(picker(), gpFile('broken.gp'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /Couldn't add broken.gp. That file looks like Guitar Pro but couldn't be read./,
+    );
+    expect(queryResult).not.toHaveBeenCalled();
+    expect(storageResult).not.toHaveBeenCalled();
+  });
+
+  it('shows a failed save and removes the uploaded file', async () => {
+    serve({ insert: fail('insert failed') });
+    const user = renderPanel();
+    await user.upload(picker(), gpFile());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't upload groove.gp: insert failed",
+    );
+    expect(storageMethods()).toEqual(['upload', 'remove']);
+  });
+
+  it('shows the step while working, and Cancel during the upload removes the file', async () => {
+    serve({});
+    const upload = deferred();
+    storageResult.mockReturnValueOnce(upload.promise);
+    const user = renderPanel();
+    await user.upload(picker(), gpFile());
+
+    expect(await screen.findByText('Uploading groove.gp…')).toBeInTheDocument();
+    expect(picker()).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    upload.resolve(ok({}));
+
+    expect(await screen.findByText('Upload cancelled. Nothing was saved.')).toBeInTheDocument();
+    expect(storageMethods()).toEqual(['upload', 'remove']);
+    expect(inserts()).toHaveLength(0);
+    expect(picker()).toBeEnabled();
+  });
+
+  it('has no Cancel once the row is being saved', async () => {
+    const insert = deferred();
+    serve({});
+    queryResult.mockImplementation(async (call) =>
+      opArgs(call, 'insert') ? insert.promise : ok(opArgs(call, 'range') ? [] : null),
+    );
+    const user = renderPanel();
+    await user.upload(picker(), gpFile());
+
+    expect(await screen.findByText('Saving groove.gp…')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    insert.resolve(ok(row()));
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+  });
+
+  it('uploads a dropped file', async () => {
+    serve({});
+    renderPanel();
+    fireEvent.drop(screen.getByTestId('drop-zone'), {
+      dataTransfer: { files: [gpFile('dropped.gp')] },
+    });
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(storageMethods()).toEqual(['upload']);
+  });
+
+  it('refuses several dropped files at once, uploading none', async () => {
+    serve({});
+    renderPanel();
+    fireEvent.drop(screen.getByTestId('drop-zone'), {
+      dataTransfer: { files: [gpFile('a.gp'), gpFile('b.gp')] },
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Drop one file at a time.');
+    await waitFor(() => expect(queryResult).not.toHaveBeenCalled());
+    expect(storageResult).not.toHaveBeenCalled();
+  });
+
+  it('lets the same file be picked again after a refusal', async () => {
+    serve({});
+    const user = renderPanel();
+    const text = new File(['nope'], 'notes.gp');
+    await user.upload(picker(), text);
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.upload(picker(), gpFile());
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
