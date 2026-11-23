@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import {
@@ -24,13 +24,31 @@ type Mode = 'view' | 'edit' | 'confirm-delete';
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 const formatDay = (timestamp: string) => dateFormat.format(new Date(timestamp));
 
-export function SongListItem({ song }: { song: LibrarySong }) {
+export function SongListItem({
+  song,
+  onEditingChange,
+}: {
+  song: LibrarySong;
+  /**
+   * Told when the edit form opens and closes (or the item unmounts), so the
+   * list can keep showing a song whose optimistic rename no longer matches
+   * the search. Pass a stable function.
+   */
+  onEditingChange?: (songId: string, editing: boolean) => void;
+}) {
   const [mode, setMode] = useState<Mode>('view');
   const view = () => setMode('view');
+  const editing = mode === 'edit';
+
+  useEffect(() => {
+    if (!editing || !onEditingChange) return;
+    onEditingChange(song.id, true);
+    return () => onEditingChange(song.id, false);
+  }, [editing, song.id, onEditingChange]);
 
   return (
     <li className="flex flex-col gap-3 rounded-lg border border-neutral-800 p-4">
-      {mode === 'edit' ? <EditSongForm song={song} onDone={view} /> : <SongSummary song={song} />}
+      {editing ? <EditSongForm song={song} onDone={view} /> : <SongSummary song={song} />}
       {mode === 'view' && (
         <div className="flex flex-wrap gap-2">
           <button type="button" className={buttonClass} onClick={() => setMode('edit')}>
@@ -83,8 +101,12 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
   const [errors, setErrors] = useState<SongEditErrors>({});
   const saved: SongEdit = { title: song.title, artist: song.artist };
   const values: SongEdit = { ...saved, ...draft };
+  // Locked while saving: an edit would reset() the mutation, so the form would
+  // stop showing its progress or error and allow a second save alongside it.
+  const saving = update.isPending;
 
   const edit = (changes: Partial<SongEdit>) => {
+    if (saving) return;
     setDraft({ ...draft, ...changes });
     setErrors({});
     update.reset();
@@ -92,6 +114,7 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
+    if (saving) return;
     const normalised = normaliseSongEdit(values);
     const found = validateSongEdit(normalised);
     setErrors(found);
@@ -110,19 +133,21 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
         label="Title"
         value={values.title}
         error={errors.title}
+        readOnly={saving}
         onChange={(title) => edit({ title })}
       />
       <TextField
         label="Artist"
         value={values.artist}
         error={errors.artist}
+        readOnly={saving}
         onChange={(artist) => edit({ artist })}
       />
       <div className="flex flex-wrap gap-2">
-        <button type="submit" className={primaryButtonClass} disabled={update.isPending}>
-          {update.isPending ? 'Saving…' : 'Save'}
+        <button type="submit" className={primaryButtonClass} disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
         </button>
-        <button type="button" className={buttonClass} disabled={update.isPending} onClick={onDone}>
+        <button type="button" className={buttonClass} disabled={saving} onClick={onDone}>
           Cancel
         </button>
       </div>
@@ -135,11 +160,14 @@ function TextField({
   label,
   value,
   error,
+  readOnly,
   onChange,
 }: {
   label: string;
   value: string;
   error: string | undefined;
+  /** Read-only rather than disabled, so focus stays put while saving. */
+  readOnly: boolean;
   onChange: (value: string) => void;
 }) {
   const id = useId();
@@ -150,6 +178,7 @@ function TextField({
         id={id}
         className={inputClass}
         value={value}
+        readOnly={readOnly}
         aria-invalid={error ? true : undefined}
         onChange={(event) => onChange(event.target.value)}
       />

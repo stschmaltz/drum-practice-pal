@@ -1,10 +1,11 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
 import { renderRoutes } from '@/test/render';
 import { LibraryPage } from './LibraryPage';
 import type { LibrarySong } from './songForm';
+import { songKeys } from './useSongs';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -171,6 +172,45 @@ describe('LibraryPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(shownTitles()).toEqual(['Halo', 'Waltz 3-4', 'Intro Fill']));
+  });
+
+  it('keeps a song renamed out of the search open in its editor until the save succeeds', async () => {
+    serveLibrary(library);
+    const serve = queryResult.getMockImplementation()!;
+    let failSave!: () => void;
+    const firstSave = new Promise<FakeResult>(
+      (resolve) => (failSave = () => resolve({ data: null, error: { message: 'offline' } })),
+    );
+    let saves = 0;
+    queryResult.mockImplementation((call) =>
+      opArgs(call, 'update') && saves++ === 0 ? firstSave : serve(call),
+    );
+    const { user, queryClient } = renderLibrary('/library?q=fill');
+    await screen.findByRole('list');
+    await user.click(screen.getByRole('button', { name: 'Edit Chorus Fill' }));
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Intro Groove');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    // The optimistic rename no longer matches "fill", but the editor stays.
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<LibrarySong[]>(songKeys.forUser('user-1'))?.map((s) => s.title),
+      ).toContain('Intro Groove'),
+    );
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // let observers render it
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeInTheDocument();
+    expect(screen.queryByText('No songs match your search.')).not.toBeInTheDocument();
+
+    failSave();
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save the song: offline");
+    expect(screen.getByLabelText('Title')).toHaveValue('Intro Groove');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    // Saved: the form closes and the song drops out of the "fill" results.
+    expect(await screen.findByText('No songs match your search.')).toBeInTheDocument();
+    await user.clear(screen.getByLabelText('Search title or artist'));
+    expect(shownTitles()).toContain('Intro Groove');
   });
 
   it('drops a deleted song from the list', async () => {

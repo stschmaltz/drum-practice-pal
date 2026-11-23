@@ -178,6 +178,74 @@ describe('useUpdateSong', () => {
   });
 });
 
+describe('useUpdateSong alongside other writes', () => {
+  it("rolls back only the failed song, keeping another song's pending edit", async () => {
+    const view = await renderLoaded([song('a'), song('b')]);
+    const writeA = deferred();
+    const writeB = deferred();
+    queryResult.mockReturnValueOnce(writeA.promise).mockReturnValueOnce(writeB.promise);
+    queryResult.mockResolvedValue(
+      ok([listRow(song('a')), listRow({ ...song('b'), title: 'B renamed' })]),
+    );
+
+    act(() => view.result.current.update.mutate({ songId: 'a', changes: { title: 'A renamed' } }));
+    await waitFor(() => expect(queryResult).toHaveBeenCalledTimes(2));
+    act(() => view.result.current.update.mutate({ songId: 'b', changes: { title: 'B renamed' } }));
+    await waitFor(() => expect(queryResult).toHaveBeenCalledTimes(3));
+    expect(view.cached()?.map((s) => s.title)).toEqual(['A renamed', 'B renamed']);
+
+    writeA.resolve(fail('offline'));
+    await waitFor(() => expect(view.cached()?.[0]?.title).toBe('Song a'));
+    // b's optimistic title survives, and no refetch replaces it while b is pending.
+    expect(view.cached()?.[1]?.title).toBe('B renamed');
+    expect(queryResult).toHaveBeenCalledTimes(3);
+
+    writeB.resolve(ok({ ...song('b'), title: 'B renamed' }));
+    await waitFor(() => expect(queryResult).toHaveBeenCalledTimes(4));
+    expect(view.cached()?.map((s) => s.title)).toEqual(['Song a', 'B renamed']);
+  });
+
+  it('does not bring back a song deleted while the edit was pending', async () => {
+    const view = await renderLoaded([song('a'), song('b')]);
+    const write = deferred();
+    queryResult.mockReturnValueOnce(write.promise).mockResolvedValueOnce(ok(null)); // edit, delete
+    queryResult.mockResolvedValue(ok([listRow(song('a'))]));
+
+    act(() => view.result.current.update.mutate({ songId: 'a', changes: { title: 'A renamed' } }));
+    await waitFor(() => expect(queryResult).toHaveBeenCalledTimes(2));
+    act(() => view.result.current.remove.mutate('b'));
+    await waitFor(() => expect(view.cached()?.map((s) => s.id)).toEqual(['a']));
+
+    write.resolve(fail('offline'));
+    await waitFor(() => expect(view.result.current.update.isError).toBe(true));
+    expect(view.cached()).toEqual([song('a')]);
+  });
+
+  it('keeps an upload that landed while the edit was pending', async () => {
+    const view = await renderLoaded([song('a')]);
+    const write = deferred();
+    const inserted: Song = { ...song('new'), title: 'New' };
+    queryResult
+      .mockReturnValueOnce(write.promise) // edit
+      .mockResolvedValueOnce(ok(null)) // no duplicate
+      .mockResolvedValueOnce(ok(inserted)); // insert
+    queryResult.mockResolvedValue(ok([listRow(song('new')), listRow(song('a'))]));
+
+    act(() => view.result.current.update.mutate({ songId: 'a', changes: { artist: 'Other' } }));
+    await waitFor(() => expect(queryResult).toHaveBeenCalledTimes(2));
+    act(() => view.result.current.upload.mutate({ file: gpFile() }));
+    await waitFor(() => expect(view.result.current.upload.isSuccess).toBe(true));
+    expect(view.cached()?.map((s) => s.id)).toEqual(['new', 'a']);
+
+    write.resolve(fail('offline'));
+    await waitFor(() => expect(view.result.current.update.isError).toBe(true));
+    expect(view.cached()?.map((s) => [s.id, s.artist])).toEqual([
+      ['new', 'Band'],
+      ['a', 'Band'],
+    ]);
+  });
+});
+
 describe('useDeleteSong', () => {
   it('keeps the song listed until the server confirms, then drops it', async () => {
     const view = await renderLoaded([song('a'), song('b')]);

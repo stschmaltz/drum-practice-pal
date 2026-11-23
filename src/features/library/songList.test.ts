@@ -38,6 +38,14 @@ describe('searchSongs', () => {
     expect(ids('sister ranger')).toEqual(['3']);
     expect(ids('sister halo')).toEqual([]);
   });
+
+  it('always keeps the songs named in keep, in their original order', () => {
+    const kept = (query: string, keep: string[]) =>
+      searchSongs(songs, query, new Set(keep)).map((s) => s.id);
+    expect(kept('halo', ['3'])).toEqual(['2', '3']);
+    expect(kept('nothing matches', ['1'])).toEqual(['1']);
+    expect(kept('', ['1'])).toEqual(['1', '2', '3']);
+  });
 });
 
 describe('sortSongs', () => {

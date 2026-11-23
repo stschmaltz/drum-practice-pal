@@ -78,3 +78,21 @@ export function changedSongFields(saved: SongEdit, draft: SongEdit): Partial<Son
   if (draft.artist !== saved.artist) changes.artist = draft.artist;
   return changes;
 }
+
+/**
+ * Undoes a failed optimistic edit on the current cached song: each changed
+ * field goes back to its value before the edit, but only while it still holds
+ * the optimistic value, so a newer edit or refetch of that field survives.
+ */
+export function revertSongEdit<T extends SongEdit>(
+  current: T,
+  before: SongEdit,
+  changes: Partial<SongEdit>,
+): T {
+  const reverted = { ...current };
+  for (const field of ['title', 'artist'] as const) {
+    const sent = changes[field];
+    if (sent !== undefined && current[field] === sent) reverted[field] = before[field];
+  }
+  return reverted;
+}

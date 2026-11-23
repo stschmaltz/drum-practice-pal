@@ -19,14 +19,19 @@ function searchable(text: string): string {
     .toLocaleLowerCase();
 }
 
-/** Songs whose title or artist contains every word of the query. */
-export function searchSongs<T extends Pick<Song, 'title' | 'artist'>>(
+/**
+ * Songs whose title or artist contains every word of the query, plus any
+ * whose id is in `keep` whether or not they match.
+ */
+export function searchSongs<T extends Pick<Song, 'id' | 'title' | 'artist'>>(
   songs: readonly T[],
   query: string,
+  keep: ReadonlySet<string> = new Set(),
 ): T[] {
   const words = searchable(query).split(/\s+/).filter(Boolean);
   if (words.length === 0) return [...songs];
   return songs.filter((song) => {
+    if (keep.has(song.id)) return true;
     const haystack = searchable(`${song.title} ${song.artist}`);
     return words.every((word) => haystack.includes(word));
   });

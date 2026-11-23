@@ -5,6 +5,7 @@ import {
   SONG_SELECT,
   changedSongFields,
   normaliseSongEdit,
+  revertSongEdit,
   toLibrarySong,
   validateSongEdit,
   type Song,
@@ -84,5 +85,28 @@ describe('editing', () => {
     expect(changedSongFields(saved, saved)).toEqual({});
     expect(changedSongFields(saved, { title: 'C', artist: 'B' })).toEqual({ title: 'C' });
     expect(changedSongFields(saved, { title: 'A', artist: '' })).toEqual({ artist: '' });
+  });
+});
+
+describe('revertSongEdit', () => {
+  const before = { title: 'Old', artist: 'Band' };
+
+  it('restores each changed field that still holds the optimistic value', () => {
+    const current = { id: 'a', title: 'New', artist: 'Other' };
+    expect(revertSongEdit(current, before, { title: 'New', artist: 'Other' })).toEqual({
+      id: 'a',
+      title: 'Old',
+      artist: 'Band',
+    });
+  });
+
+  it('leaves fields the edit did not send, and ones changed since, alone', () => {
+    const current = { id: 'a', title: 'Newer', artist: 'Someone' };
+    expect(revertSongEdit(current, before, { title: 'New' })).toEqual(current);
+  });
+
+  it('restores an empty artist', () => {
+    const current = { id: 'a', title: 'Old', artist: '' };
+    expect(revertSongEdit(current, before, { artist: '' })).toEqual({ ...current, artist: 'Band' });
   });
 });

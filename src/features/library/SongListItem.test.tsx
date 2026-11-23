@@ -150,6 +150,35 @@ describe('SongListItem editing', () => {
   });
 });
 
+describe('SongListItem while a save is pending', () => {
+  it('locks the form so it keeps showing that save, then its error', async () => {
+    let answer!: (result: FakeResult) => void;
+    queryResult.mockReturnValueOnce(new Promise<FakeResult>((resolve) => (answer = resolve)));
+    const user = renderItem();
+    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await user.type(screen.getByLabelText('Artist'), 's');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    const artist = screen.getByLabelText('Artist');
+    expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(artist).toHaveAttribute('readonly');
+    expect(screen.getByLabelText('Title')).toHaveAttribute('readonly');
+
+    // Typing and Enter change nothing and send nothing more.
+    await user.type(artist, 'x{Enter}');
+    expect(artist).toHaveValue('Bands');
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeInTheDocument();
+    expect(updates()).toEqual([{ artist: 'Bands' }]);
+
+    answer(fail('offline'));
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save the song: offline");
+    expect(artist).not.toHaveAttribute('readonly');
+    expect(artist).toHaveValue('Bands');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+});
+
 describe('SongListItem deleting', () => {
   it('asks first, and "Keep it" deletes nothing', async () => {
     const user = renderItem();

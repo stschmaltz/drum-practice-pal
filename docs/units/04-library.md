@@ -254,3 +254,18 @@ I also used the real Songsterr export in `tests/fixtures/real/` (not committed).
 - `npm run test:db`: 4 files, 123 passed.
 - `npm run e2e`: 102 passed. Local Supabase was running.
 - Branch `unit-04`; nothing committed.
+
+## Copilot review fixes
+
+1. **Edit rollback restored a whole-list snapshot** (`useSongs.ts`, `useUpdateSong`). A failed save put back the list as it was at `onMutate`, which could undo another song's pending edit, bring back a song deleted meanwhile, or drop an upload that landed meanwhile. `onMutate` now keeps only the edited song's previous version, and `onError` reverts just that song's sent fields in the current cache, and only while they still hold the optimistic values (`revertSongEdit` in `songForm.ts`). All three song mutations share `songKeys.writes(userId)` as their `mutationKey`, and `onSettled` refetches only when no other song write is pending (`invalidateWhenIdle`; the settling mutation still counts as pending in `onSettled`, hence `> 1`), so one write's refetch can't overwrite another's optimistic value.
+2. **The edit form stayed editable during a save** (`SongListItem.tsx`). Typing called `update.reset()`, so the form stopped observing the request, hid "Saving…" and its error, and allowed a second save. While saving, the inputs are read-only (focus stays put), Save and Cancel are disabled, and `edit` and `onSubmit` ignore input, so the form shows the save through to success or error.
+3. **A rename out of the active search unmounted the editor** (`LibraryPage.tsx`). The optimistic title filtered the song out mid-save; on failure it came back in view mode without the draft or error. `SongListItem` reports when its edit form opens and closes (`onEditingChange`, from an effect, so unmounting clears it), `LibraryPage` keeps those ids (`useEditingIds`), and `searchSongs` takes a `keep` set that always passes. The song leaves the results once the form closes after a successful save (or Cancel).
+
+**Tests added**
+
+- `useSongs.test.tsx` › "useUpdateSong alongside other writes": overlapping edits on two songs where one fails (the other keeps its optimistic value and no refetch goes out until it settles); an edit failing after a delete landed; an edit failing after an upload landed.
+- `SongListItem.test.tsx` › "while a save is pending": inputs read-only, typing and Enter send nothing more, then the error shows with the draft and the form unlocks.
+- `LibraryPage.test.tsx`: search "fill", rename to a non-matching title, the editor stays during and after a failed save with the draft and error; a successful retry closes it and the song drops out of the results. Confirmed it fails with the `keep` check removed.
+- `songForm.test.ts` (`revertSongEdit`) and `songList.test.ts` (`searchSongs` with `keep`).
+
+**Results:** `npm run check` green (34 files, 436 tests). `npm run e2e`: 102 passed, local Supabase running. Nothing committed.
