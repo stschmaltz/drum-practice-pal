@@ -42,6 +42,13 @@ const sidePanelToggle = (page: Page) => page.getByRole('button', { name: /^(Show
 
 const isSheet = (page: Page) => expectedLayout(page) === 'horizontal';
 
+/**
+ * Whatever opens and closes the panel at this width; its `aria-expanded` says
+ * whether the panel is open.
+ */
+export const loopPanelToggle = (page: Page) =>
+  isSheet(page) ? sheetHeader(page) : sidePanelToggle(page);
+
 /** Opens the loop panel if it is closed: the sheet on a phone, the side column otherwise. */
 export async function openLoopPanel(page: Page): Promise<void> {
   const toggle = isSheet(page) ? sheetHeader(page) : sidePanelToggle(page);

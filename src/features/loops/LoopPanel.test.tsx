@@ -356,6 +356,213 @@ describe('LoopPanel Play loop and the phone sheet', () => {
   });
 });
 
+// Test stage, QA fix round 1: what the closed sheet must not cost, and the scroll to a paused loop.
+describe('LoopPanel after Play loop has closed the phone sheet', () => {
+  const asPhone = () => vi.stubGlobal('matchMedia', () => ({ matches: false }));
+  const asWide = () =>
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === PAGE_LAYOUT_QUERY }));
+  const enginePlays = (view: ReturnType<typeof renderPanel>) =>
+    act(() => view.engine.fire('stateChanged', { playing: true }));
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reopened, it shows the playing loop and its speed control, and playback is untouched', async () => {
+    asPhone();
+    const view = renderPanel();
+    await view.user.click(await view.panel.findByRole('button', { name: 'Play loop Late' }));
+    enginePlays(view);
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+    const restarts = view.engine.restartCalls();
+
+    await view.user.click(view.header());
+
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    const card = within(view.panel.getByRole('region', { name: 'Practicing Late' }));
+    expect(card.getByText('Bars 9 to 12, repeating')).toBeVisible();
+    const speed = within(view.panel.getByRole('group', { name: 'Loop speed' }));
+    expect(speed.getByLabelText('Speed %')).toBeVisible();
+    expect(speed.getByLabelText('Speed %')).toHaveValue('50');
+    expect(speed.getByLabelText('BPM')).toHaveValue('45');
+    expect(view.panel.getByRole('button', { name: 'Restart loop Late' })).toBeVisible();
+    expect(view.engine.restartCalls()).toBe(restarts);
+    expect(view.player.getSnapshot()).toMatchObject({
+      status: 'playing',
+      range: { startBar: 9, endBar: 12 },
+      speedRatio: 0.5,
+    });
+  });
+
+  it('reopened, the speed control still changes the speed live', async () => {
+    asPhone();
+    const view = renderPanel();
+    await view.user.click(await view.panel.findByRole('button', { name: 'Play loop Late' }));
+    enginePlays(view);
+    await view.user.click(view.header());
+    const restarts = view.engine.restartCalls();
+
+    await view.user.click(view.panel.getByRole('button', { name: 'Faster by 5%' }));
+
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'playing', speedRatio: 0.55 });
+    expect(view.engine.restartCalls()).toBe(restarts);
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('on a phone, Play loop after a Pause closes the sheet again: playback starts from that press', async () => {
+    asPhone();
+    const view = renderPanel();
+    await view.user.click(await view.panel.findByRole('button', { name: 'Play loop Late' }));
+    enginePlays(view);
+    await view.user.click(view.header());
+    act(() => {
+      view.player.pause();
+      view.engine.fire('stateChanged', { playing: false });
+    });
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    await view.user.click(view.panel.getByRole('button', { name: 'Restart loop Late' }));
+
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+    expect(view.engine.play).toHaveBeenCalledTimes(2);
+  });
+
+  it('on a phone, switching and restarting while playing never stop playback or close the sheet', async () => {
+    asPhone();
+    const view = renderPanel();
+    await view.user.click(await view.panel.findByRole('button', { name: 'Play loop Late' }));
+    enginePlays(view);
+    await view.user.click(view.header());
+    const restarts = view.engine.restartCalls();
+    view.engine.scrollToBar.mockClear();
+
+    await view.user.click(view.play('Intro'));
+    await view.user.click(view.panel.getByRole('button', { name: 'Restart loop Intro' }));
+    await view.user.click(view.play('Late'));
+
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.engine.restartCalls()).toBe(restarts);
+    // alphaTab follows its own cursor while it plays.
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'playing', barNumber: 9 });
+    expect(view.panel.getByRole('group', { name: 'Loop speed' })).toBeVisible();
+  });
+
+  it('from 768 px nothing closes it: starting, switching, restarting, or a count-in', async () => {
+    asWide();
+    const view = renderPanel();
+    await view.user.click(await view.panel.findByRole('button', { name: 'Play loop Late' }));
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    enginePlays(view);
+    await view.user.click(view.play('Intro'));
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    await view.user.click(view.panel.getByRole('button', { name: 'Restart loop Intro' }));
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    act(() => {
+      view.player.pause();
+      view.engine.fire('stateChanged', { playing: false });
+      view.player.setCountInBars(2);
+    });
+    await view.user.click(view.play('Late'));
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    await view.user.click(view.play('Intro'));
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'countingIn', barNumber: 1 });
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.panel.getByRole('group', { name: 'Loop speed' })).toBeVisible();
+    act(() => view.player.pause());
+  });
+});
+
+// 08 QA issue 2, the part fixed: a loop chosen while paused is scrolled to.
+describe('LoopPanel bringing a paused loop’s first bar on screen', () => {
+  async function saveTypedLoop(view: ReturnType<typeof renderPanel>, first: string, last: string) {
+    await view.user.click(await view.panel.findByRole('button', { name: 'New loop' }));
+    await view.user.type(view.panel.getByLabelText('First bar'), first);
+    await view.user.type(view.panel.getByLabelText('Last bar'), last);
+    await view.user.type(view.panel.getByLabelText('Name'), 'Typed');
+    await view.user.click(view.panel.getByRole('button', { name: 'Save loop' }));
+    await view.panel.findByRole('region', { name: 'Practicing Typed' });
+  }
+
+  it('a loop saved from typed bars while paused scrolls to its first bar, and only once saved', async () => {
+    const view = renderPanel();
+    await view.user.click(await view.panel.findByRole('button', { name: 'New loop' }));
+    await view.user.type(view.panel.getByLabelText('First bar'), '13');
+    await view.user.type(view.panel.getByLabelText('Last bar'), '14');
+    await view.user.type(view.panel.getByLabelText('Name'), 'Typed');
+    // Typed bars are highlighted but not scrolled to (left for Unit 12).
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+
+    await view.user.click(view.panel.getByRole('button', { name: 'Save loop' }));
+    await view.panel.findByRole('region', { name: 'Practicing Typed' });
+
+    expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    expect(view.player.getSnapshot()).toMatchObject({
+      status: 'ready',
+      barNumber: 13,
+      range: { startBar: 13, endBar: 14 },
+    });
+    expect(view.engine.restartCalls()).toBe(1); // the one loadScore of setup
+  });
+
+  it('a loop the server refuses scrolls nowhere', async () => {
+    const view = renderPanel();
+    view.table.failNext('insert', 'nope');
+    await view.user.click(await view.panel.findByRole('button', { name: 'New loop' }));
+    await view.user.type(view.panel.getByLabelText('First bar'), '13');
+    await view.user.type(view.panel.getByLabelText('Last bar'), '14');
+    await view.user.type(view.panel.getByLabelText('Name'), 'Typed');
+    await view.user.click(view.panel.getByRole('button', { name: 'Save loop' }));
+    expect(await view.panel.findByRole('alert')).toBeInTheDocument();
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('a loop saved while the song plays is left to alphaTab’s own scrolling', async () => {
+    const view = renderPanel();
+    act(() => {
+      view.player.play();
+      view.engine.fire('stateChanged', { playing: true });
+    });
+    await saveTypedLoop(view, '13', '14');
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'playing', barNumber: 13 });
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('the paused loop’s bars, edited in the form, scroll to its new first bar on save', async () => {
+    const view = renderPanel();
+    await saveTypedLoop(view, '13', '14');
+    view.engine.scrollToBar.mockClear();
+
+    await view.user.click(view.panel.getByRole('button', { name: 'Edit Typed' }));
+    const first = view.panel.getByLabelText('First bar');
+    await view.user.clear(first);
+    await view.user.type(first, '3');
+    await view.user.click(view.panel.getByRole('button', { name: 'Save loop' }));
+
+    await waitFor(() => expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(2));
+    expect(view.player.getSnapshot()).toMatchObject({
+      status: 'ready',
+      barNumber: 3,
+      range: { startBar: 3, endBar: 14 },
+    });
+    expect(view.engine.play).not.toHaveBeenCalled();
+  });
+
+  it('renaming the paused loop moves nothing', async () => {
+    const view = renderPanel();
+    await saveTypedLoop(view, '13', '14');
+    view.engine.scrollToBar.mockClear();
+    view.engine.seek.mockClear();
+
+    await view.user.click(view.panel.getByRole('button', { name: 'Edit Typed' }));
+    await view.user.type(view.panel.getByLabelText('Name'), ' two');
+    await view.user.click(view.panel.getByRole('button', { name: 'Save loop' }));
+    await view.panel.findByRole('region', { name: 'Practicing Typed two' });
+
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    expect(view.engine.seek).not.toHaveBeenCalled();
+  });
+});
+
 describe('LoopPanel new and edited loops', () => {
   it('New loop swaps the list for the form; Cancel brings the list back unchanged', async () => {
     const view = renderPanel();

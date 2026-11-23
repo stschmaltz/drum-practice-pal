@@ -576,3 +576,78 @@ describe('scrolling a bar into view', () => {
     expect(drags).toEqual([]);
   });
 });
+
+// Test stage, QA fix round 1: bars cut off by an edge, and what must leave the scroll alone.
+describe('scrolling a bar into view: bars cut off by an edge', () => {
+  /** A 200 x 100 score box at the window's origin, scrolled to (left, top). */
+  function boxScrolledTo(left: number, top: number, border = 0) {
+    const view = mounted();
+    const box = view.element.parentElement!;
+    Object.defineProperty(box, 'clientWidth', { value: 200 });
+    Object.defineProperty(box, 'clientHeight', { value: 100 });
+    Object.defineProperty(box, 'clientLeft', { value: border });
+    Object.defineProperty(box, 'clientTop', { value: border });
+    box.getBoundingClientRect = () => new DOMRect(0, 0, 200 + 2 * border, 100 + 2 * border);
+    view.surface.getBoundingClientRect = () =>
+      new DOMRect(border - box.scrollLeft, border - box.scrollTop, 320, 200);
+    box.scrollLeft = left;
+    box.scrollTop = top;
+    const scroll = () => ({ left: box.scrollLeft, top: box.scrollTop });
+    return { ...view, box, scroll };
+  }
+
+  it.each([
+    // Bar index 1 spans x 110 to 210 on the first line (y 20 to 100).
+    ['cut off by the right edge', 1, { left: 0, top: 0 }, { left: 110, top: 0 }],
+    ['cut off by the left edge', 1, { left: 150, top: 0 }, { left: 110, top: 0 }],
+    // Bar index 3 spans y 100 to 180 on the second line.
+    ['cut off by the bottom edge', 3, { left: 0, top: 40 }, { left: 0, top: 100 }],
+    ['cut off by the top edge', 3, { left: 0, top: 130 }, { left: 0, top: 100 }],
+  ])('a bar %s goes to the start of the box on that axis only', (_what, barIndex, from, to) => {
+    const { engine, scroll } = boxScrolledTo(from.left, from.top);
+    engine.scrollToBar(barIndex);
+    expect(scroll()).toEqual(to);
+  });
+
+  it('allows for the box’s border', () => {
+    const { engine, scroll } = boxScrolledTo(0, 0, 4);
+    engine.scrollToBar(5);
+    expect(scroll()).toEqual({ left: 210, top: 100 });
+    // All on show now: asked again, it stays.
+    engine.scrollToBar(5);
+    expect(scroll()).toEqual({ left: 210, top: 100 });
+  });
+
+  it('scrolls at once, not smoothly, where the browser has Element.scrollTo', () => {
+    const { engine, box } = boxScrolledTo(0, 0);
+    const scrollTo = vi.fn();
+    box.scrollTo = scrollTo;
+    engine.scrollToBar(5);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenLastCalledWith({ left: 210, top: 100, behavior: 'instant' });
+    // A bar all on show asks for no scroll at all.
+    engine.scrollToBar(0);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+  });
+
+  it('a tap on a bar that is partly on show reports the bar and leaves the scroll alone', () => {
+    // Bar index 1 is cut off by the right edge of the box.
+    const { tap, taps, scroll } = boxScrolledTo(0, 0);
+    tap({ x: 150, y: 60 });
+    expect(taps).toEqual([{ barIndex: 1 }]);
+    expect(scroll()).toEqual({ left: 0, top: 0 });
+  });
+
+  it('drawing a highlight scrolls nothing', () => {
+    const { engine, scroll } = boxScrolledTo(0, 0);
+    engine.setHighlight({ startBarIndex: 4, endBarIndex: 5 });
+    expect(scroll()).toEqual({ left: 0, top: 0 });
+  });
+
+  it('scrolls nothing, and does not throw, when alphaTab has no surface yet', () => {
+    const { engine, surface, scroll } = boxScrolledTo(40, 10);
+    surface.remove();
+    expect(() => engine.scrollToBar(5)).not.toThrow();
+    expect(scroll()).toEqual({ left: 40, top: 10 });
+  });
+});

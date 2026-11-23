@@ -1184,3 +1184,64 @@ describe('SongPage loops', () => {
     );
   });
 });
+
+// 08 QA fix round 1 (Test stage): what scrolls the score box on the page, and what must not.
+describe('SongPage scrolling the score to a bar', () => {
+  const panel = () => within(screen.getByTestId('loop-panel'));
+
+  it('a tap on the score seeks and never scrolls it, paused or playing', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    act(() => engine.fire('barTapped', { barIndex: 11 }));
+    expect(status()).toHaveTextContent('Bar 12 of 16');
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: true }));
+    act(() => engine.fire('barTapped', { barIndex: 2 }));
+    expect(status()).toHaveTextContent('Bar 3 of 16');
+
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('Play with a count-in scrolls to the bar it counts into, before playback starts', async () => {
+    serve({ settings: ok({ ...settingsRow, count_in_bars: 1 }) });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    act(() => engine.fire('barTapped', { barIndex: 6 }));
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+
+    await user.click(playButton());
+
+    expect(status()).toHaveTextContent('Bar 7 of 16 · Counting in…');
+    expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(6);
+    expect(engine.play).not.toHaveBeenCalled();
+    await user.click(playButton());
+  });
+
+  it('Play with the count-in off scrolls nothing: alphaTab follows its cursor', async () => {
+    serve();
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    await user.click(playButton());
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('Play loop while paused scrolls to the loop’s first bar; Exit loop scrolls nowhere', async () => {
+    serve({ loops: [loopRow('late', { name: 'Late', start_bar: 13, end_bar: 14 })] });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+
+    await user.click(await panel().findByRole('button', { name: 'Play loop Late' }));
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+
+    engine.scrollToBar.mockClear();
+    await user.click(
+      within(screen.getByTestId('active-loop')).getByRole('button', { name: 'Exit loop' }),
+    );
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+});
