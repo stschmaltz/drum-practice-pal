@@ -1,10 +1,12 @@
-import { useCallback, useId, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
 import { inputClass, labelClass, sectionHeadingClass } from '@/components/styles';
+import { findItemControl, isItemListed, neighbourAfterLeaving } from '@/lib/itemFocus';
 import { waitsForNetwork } from '@/lib/network';
+import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import type { LibrarySong } from './songForm';
 import { isLibrarySort, searchSongs, sortSongs, type LibrarySort } from './songList';
 import { SongListItem } from './SongListItem';
@@ -99,6 +101,37 @@ function SongList({ songs }: { songs: LibrarySong[] }) {
   const sortId = useId();
   const [editingIds, onEditingChange] = useEditingIds();
   const shown = sortSongs(searchSongs(songs, query, editingIds), sort);
+  const focusWhenReady = useFocusWhenReady();
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Closing the edit form brings back the song's Edit, unless a saved rename no
+  // longer matches the search: the song leaves the list once the form has closed,
+  // so focus goes to the next song's Edit, or to the search that hid it.
+  const followEditClosed = (songId: string) => {
+    const nextId = neighbourAfterLeaving(
+      shown.map((song) => song.id),
+      songId,
+    );
+    focusWhenReady(() => {
+      const own = findItemControl(songId, 'edit');
+      if (own) return own;
+      if (isItemListed(songId)) return null;
+      return (nextId === null ? null : findItemControl(nextId, 'edit')) ?? searchRef.current;
+    });
+  };
+
+  // A deleted song takes its buttons with it: focus goes to the next song's Delete
+  // (the one before, for the last), once the song has left the list.
+  const followDelete = (songId: string) => {
+    const nextId = neighbourAfterLeaving(
+      shown.map((song) => song.id),
+      songId,
+    );
+    focusWhenReady(() => {
+      if (isItemListed(songId)) return null;
+      return nextId === null ? null : findItemControl(nextId, 'delete');
+    });
+  };
 
   return (
     <section aria-labelledby="songs-heading" className="flex flex-col gap-4">
@@ -111,6 +144,7 @@ function SongList({ songs }: { songs: LibrarySong[] }) {
             Search title or artist
           </label>
           <input
+            ref={searchRef}
             id={searchId}
             type="search"
             className={inputClass}
@@ -144,7 +178,13 @@ function SongList({ songs }: { songs: LibrarySong[] }) {
       ) : (
         <ul className="flex flex-col gap-3">
           {shown.map((song) => (
-            <SongListItem key={song.id} song={song} onEditingChange={onEditingChange} />
+            <SongListItem
+              key={song.id}
+              song={song}
+              onEditingChange={onEditingChange}
+              onEditClosed={followEditClosed}
+              onDeletePressed={followDelete}
+            />
           ))}
         </ul>
       )}

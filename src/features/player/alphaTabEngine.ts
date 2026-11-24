@@ -152,7 +152,7 @@ export function createAlphaTabEngine({
       highlight.show(range);
     },
     scrollToBar(barIndex) {
-      scrollBoxToBar(element, scrollElement, staffSystems(), barIndex);
+      return scrollBoxToBar(element, scrollElement, staffSystems(), barIndex);
     },
     destroy() {
       stopWatchingPointer();
@@ -227,8 +227,18 @@ function watchScorePointer(
     });
   };
 
+  // The browser took the press away (a system gesture, a native drag): a drag under way ends,
+  // picking nothing, so what it had shown is cleared; a press that never dragged says nothing.
   const onPointerCancel = () => {
+    const cancelled = press;
     press = null;
+    if (!cancelled || cancelled.barIndex === null || cancelled.draggedTo === null) return;
+    taps.emit('barsDragged', {
+      fromBarIndex: cancelled.barIndex,
+      toBarIndex: cancelled.draggedTo,
+      done: true,
+      cancelled: true,
+    });
   };
 
   // click, not pointerdown: browsers don't fire it after a pan, so scrolling the score never seeks.
@@ -302,16 +312,22 @@ function createHighlightLayer(element: HTMLElement, staffSystems: StaffSystems) 
   };
 }
 
-/** Scrolls the box so the bar can be read, unless all of it is on show or it has no bounds yet. */
+/**
+ * Scrolls the box so the bar can be read, unless all of it is on show. False
+ * when the score has no bounds yet (not rendered), so the caller can ask again;
+ * true once it could decide, scrolled or not.
+ */
 function scrollBoxToBar(
   element: HTMLElement,
   scrollElement: HTMLElement,
   systems: readonly SystemBoundsLike[],
   barIndex: number,
-): void {
+): boolean {
   const surface = element.querySelector('.at-surface');
+  if (!surface || systems.length === 0) return false;
+  // Laid out, but not a bar of this score: nothing to wait for.
   const bar = barBounds(systems, barIndex);
-  if (!surface || !bar) return;
+  if (!bar) return true;
   const view = {
     left: scrollElement.scrollLeft,
     top: scrollElement.scrollTop,
@@ -330,7 +346,7 @@ function scrollBoxToBar(
     },
     view,
   );
-  if (!target) return;
+  if (!target) return true;
   // At once, not animated: a count-in may be a second long, and the bar is to be read during it.
   if (typeof scrollElement.scrollTo === 'function') {
     scrollElement.scrollTo({ ...target, behavior: 'instant' });
@@ -339,6 +355,7 @@ function scrollBoxToBar(
     scrollElement.scrollLeft = target.left;
     scrollElement.scrollTop = target.top;
   }
+  return true;
 }
 
 function subscribe<K extends keyof EngineEvents>(
@@ -366,6 +383,10 @@ function subscribe<K extends keyof EngineEvents>(
     case 'readyForPlayback':
       // alphaTab's playerReady is the synth's readyForPlayback: soundfont and MIDI loaded.
       api.playerReady.on(() => emit(undefined));
+      return;
+    case 'rendered':
+      // After this alphaTab has its bounds (boundsLookup), which scrollToBar needs.
+      api.postRenderFinished.on(() => emit(undefined));
       return;
     case 'stateChanged':
       api.playerStateChanged.on((e) =>

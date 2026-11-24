@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
-const PORT = 4173;
+// E2E_PORT: a second checkout (a worktree) can run e2e while another serves 4173.
+const PORT = Number(process.env.E2E_PORT ?? 4173);
 
 export default defineConfig({
   testDir: './tests/e2e',

@@ -1,5 +1,13 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
+import { AuthApiError } from '@supabase/supabase-js';
+import { focusManager, onlineManager } from '@tanstack/react-query';
+import {
+  fakeSupabase,
+  opArgs,
+  queryResult,
+  resetFakeSupabase,
+  type FakeResult,
+} from '@/test/fakeSupabase';
 import { LOOP_SONG_ID, loopRow } from '@/test/loopTable';
 import { settle, signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import { songKeys } from '@/features/library/useSongs';
@@ -63,6 +71,11 @@ const newLoop = {
 
 beforeEach(() => {
   resetFakeSupabase();
+});
+
+afterEach(() => {
+  // Back to following the document, after a test that set focus by hand.
+  focusManager.setFocused(undefined);
 });
 
 describe('loopKeys', () => {
@@ -169,6 +182,41 @@ describe('useUpdateLoop', () => {
     expect(view.cached()?.[0]).toMatchObject({ name: 'Old', end_bar: 12 });
   });
 
+  it('a token the server refuses is refreshed, and the edit sent again with the new one (Copilot review)', async () => {
+    const view = await renderLoaded([loopRow('a'), loopRow('b')]);
+    const saved = loopRow('a', { speed_ratio: 0.9 });
+    queryResult.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'JWSError JWSInvalidSignature', code: 'PGRST301' },
+    });
+    queryResult.mockResolvedValueOnce(ok(saved));
+    queryResult.mockResolvedValue(ok([saved, loopRow('b')]));
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+
+    await waitFor(() => expect(view.result.current.update.isSuccess).toBe(true));
+    expect(fakeSupabase.auth.refreshSession).toHaveBeenCalledTimes(1);
+    expect(view.cached()?.[0]?.speed_ratio).toBe(0.9);
+  });
+
+  it('a token that can’t be refreshed fails the edit and rolls it back, rather than resending it for ever', async () => {
+    const view = await renderLoaded([loopRow('a'), loopRow('b')]);
+    fakeSupabase.auth.refreshSession.mockResolvedValue({
+      data: { session: null, user: null },
+      error: new AuthApiError('Invalid Refresh Token', 400, 'refresh_token_not_found'),
+    });
+    queryResult.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'JWSError JWSInvalidSignature', code: 'PGRST301' },
+    });
+    queryResult.mockResolvedValue(ok([loopRow('a'), loopRow('b')]));
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+
+    await waitFor(() => expect(view.result.current.update.isError).toBe(true));
+    expect(view.cached()?.[0]?.speed_ratio).toBe(loopRow('a').speed_ratio);
+  });
+
   it('does not refetch while another loop write is still pending', async () => {
     const view = await renderLoaded([loopRow('a'), loopRow('b')]);
     const first = deferred();
@@ -192,6 +240,50 @@ describe('useUpdateLoop', () => {
     second.resolve(ok(loopRow('b', { name: 'B2' })));
     await waitFor(() => expect(selectsSoFar()).toBeGreaterThan(before));
   });
+
+  // Bug hunt D1: a write waiting between retries is pending, not paused, and the list's
+  // refetch on focus or reconnect brought the old row back over its optimistic value.
+  it.each([
+    [
+      'the window regains focus',
+      () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      },
+    ],
+    [
+      'the connection comes back',
+      () => {
+        onlineManager.setOnline(false);
+        onlineManager.setOnline(true);
+      },
+    ],
+  ])(
+    'does not refetch over a pending edit when %s, and reads the list once it settles',
+    async (_name, trigger) => {
+      const view = await renderLoaded([loopRow('a', { start_bar: 5, end_bar: 8 })]);
+      const update = deferred();
+      queryResult.mockReturnValueOnce(update.promise);
+      queryResult.mockResolvedValue(ok([loopRow('a', { start_bar: 5, end_bar: 8 })]));
+      const selectsSoFar = () =>
+        queryResult.mock.calls.filter(([call]) => !opArgs(call, 'update')).length;
+      const before = selectsSoFar();
+
+      act(() =>
+        view.result.current.update.mutate({ loopId: 'a', changes: { start_bar: 9, end_bar: 12 } }),
+      );
+      await waitFor(() => expect(view.cached()?.[0]?.start_bar).toBe(9));
+      act(trigger);
+      await settle();
+
+      expect(selectsSoFar()).toBe(before);
+      expect(view.cached()?.[0]).toMatchObject({ start_bar: 9, end_bar: 12 });
+
+      queryResult.mockResolvedValue(ok([loopRow('a', { start_bar: 9, end_bar: 12 })]));
+      update.resolve(ok(loopRow('a', { start_bar: 9, end_bar: 12 })));
+      await waitFor(() => expect(selectsSoFar()).toBeGreaterThan(before));
+    },
+  );
 });
 
 describe('useDeleteLoop', () => {

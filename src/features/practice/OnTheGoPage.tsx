@@ -11,7 +11,8 @@ import {
   segmentOffClass,
   segmentOnClass,
 } from '@/components/styles';
-import { findStatusButton, neighbourAfterLeaving } from '@/features/loops/loopFocus';
+import { findStatusButton } from '@/features/loops/loopFocus';
+import { neighbourAfterLeaving } from '@/lib/itemFocus';
 import { barsLabel } from '@/features/loops/loopForm';
 import {
   PRACTICE_TABS,

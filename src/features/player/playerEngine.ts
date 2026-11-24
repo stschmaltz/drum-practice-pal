@@ -23,6 +23,12 @@ export type EngineEvents = {
   ticksReady: { bars: BarTicks[] };
   /** Soundfont and MIDI are both loaded. alphaTab fires this more than once. */
   readyForPlayback: undefined;
+  /**
+   * The notation finished rendering, so bars have bounds to scroll to. Fires
+   * after every render (load, resize, layout), and can come before or after
+   * readyForPlayback.
+   */
+  rendered: undefined;
   /** The synth started or stopped producing sound. */
   stateChanged: { playing: boolean };
   /** Playback position; frequent while playing, and once after each seek. */
@@ -37,7 +43,11 @@ export type EngineEvents = {
    * released, to another. Either bar may come first. Touch never reports this:
    * a finger dragging over the score scrolls it. No barTapped follows a drag.
    */
-  barsDragged: { fromBarIndex: number; toBarIndex: number; done: boolean };
+  /**
+   * `done` on release; with `cancelled` too when the browser cancelled the
+   * press instead (pointercancel), which picks nothing.
+   */
+  barsDragged: { fromBarIndex: number; toBarIndex: number; done: boolean; cancelled?: true };
 };
 
 export interface PlayerEngine {
@@ -71,10 +81,11 @@ export interface PlayerEngine {
   /**
    * Scrolls the score box so a bar (0-based) can be read, if it isn't all on
    * show already. For when nothing is playing: alphaTab only follows the
-   * cursor during playback. Scrolling only; playback is untouched. Does
-   * nothing for a bar that isn't laid out.
+   * cursor during playback. Scrolling only; playback is untouched. False when
+   * it couldn't tell because the score hasn't rendered yet (no bounds): ask
+   * again on `rendered`. True once it could, scrolled or not.
    */
-  scrollToBar(barIndex: number): void;
+  scrollToBar(barIndex: number): boolean;
   destroy(): void;
 }
 

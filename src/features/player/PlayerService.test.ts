@@ -530,20 +530,45 @@ describe('PlayerService bar taps', () => {
     expect(service.getSnapshot().barNumber).toBe(1);
   });
 
-  it('ignores taps before the song is ready, after an error and after dispose', () => {
+  it('ignores taps and drags before the score is in, after a score error and after dispose', () => {
     const { engine, service } = setup();
     const tapped = vi.fn();
     service.on('barTapped', tapped);
+    service.on('barsDragged', tapped);
     service.load(bytes);
     engine.fire('barTapped', { barIndex: 0 });
+    engine.fire('barsDragged', { fromBarIndex: 0, toBarIndex: 2, done: true });
 
     engine.finishLoading();
     engine.fire('error', { error: new Error('render failed') });
     engine.fire('barTapped', { barIndex: 0 });
+    engine.fire('barsDragged', { fromBarIndex: 0, toBarIndex: 2, done: true });
 
     service.dispose();
     engine.fire('barTapped', { barIndex: 0 });
     expect(tapped).not.toHaveBeenCalled();
+  });
+
+  // Bug hunt P3: "New loop" opens once the score is in, so its bars can be picked from then on.
+  it('reports taps and drags on a score whose sounds are still loading, or failed to load', async () => {
+    const { engine, service } = setup();
+    const tapped = vi.fn();
+    const dragged = vi.fn();
+    service.on('barTapped', tapped);
+    service.on('barsDragged', dragged);
+    engine.soundFont = Promise.reject(new Error('Failed to fetch'));
+    service.load(bytes);
+    engine.fire('scoreLoaded', { barCount: 16, trackCount: 3, barTempos: [], barMeters: [] });
+    expect(service.getSnapshot().status).toBe('loading');
+
+    engine.fire('barTapped', { barIndex: 2 });
+    engine.fire('barsDragged', { fromBarIndex: 5, toBarIndex: 3, done: false });
+    expect(tapped).toHaveBeenLastCalledWith({ barNumber: 3 });
+    expect(dragged).toHaveBeenLastCalledWith({ startBar: 4, endBar: 6, done: false });
+
+    await vi.waitFor(() => expect(service.getSnapshot().error).toBe('soundFont'));
+    engine.fire('barTapped', { barIndex: 7 });
+    expect(tapped).toHaveBeenLastCalledWith({ barNumber: 8 });
   });
 });
 

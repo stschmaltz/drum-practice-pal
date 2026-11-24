@@ -32,13 +32,3 @@ export function findFormOpener(opener: LoopFormOpener): HTMLElement | null {
     document.querySelector<HTMLElement>(`[data-loop-form-opener="${value}"]`);
   return (opener.kind === 'edit' ? find(`edit:${opener.loopId}`) : null) ?? find('new');
 }
-
-/**
- * The item focus moves to when `leavingId` leaves `ids` (a list on show): the
- * one after it, or the one before when it was last; null when it was alone.
- */
-export function neighbourAfterLeaving(ids: readonly string[], leavingId: string): string | null {
-  const index = ids.indexOf(leavingId);
-  if (index === -1) return null;
-  return ids[index + 1] ?? ids[index - 1] ?? null;
-}

@@ -48,6 +48,8 @@ export class FakePlayerEngine implements PlayerEngine {
   mount: EngineMount | null = null;
   loadScoreResult = true;
   soundFont: Promise<void> = Promise.resolve();
+  /** False until the notation has rendered, for a test where the sounds are in first: scrollToBar can't scroll yet. */
+  laidOut = true;
 
   loadScore = vi.fn<PlayerEngine['loadScore']>(() => this.loadScoreResult);
   loadSoundFont = vi.fn<PlayerEngine['loadSoundFont']>(() => this.soundFont);
@@ -63,7 +65,7 @@ export class FakePlayerEngine implements PlayerEngine {
   setPlaybackRange = vi.fn();
   setLooping = vi.fn();
   setHighlight = vi.fn();
-  scrollToBar = vi.fn();
+  scrollToBar = vi.fn<PlayerEngine['scrollToBar']>(() => this.laidOut);
   destroy = vi.fn();
 
   on<K extends keyof EngineEvents>(event: K, handler: (payload: EngineEvents[K]) => void): void {

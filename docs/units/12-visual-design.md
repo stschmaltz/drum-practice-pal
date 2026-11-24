@@ -271,3 +271,25 @@ Readability saw it fail once and lost the error text. Here it passed 8 of 8 runs
 - `npm run check`: 100 files, 4004 tests green.
 - `npm run e2e`: 381 passed, 18 skipped, 0 failed, on a fresh `vite build --mode development`. The `vite preview` on 4173 (PID 56088, from an earlier session) was left running; the bundle it served (`index-CiRP3sfD.js`, `index-DsIk1PFU.css`) was checked against `dist/index.html` before the run.
 - Not committed.
+
+## Merge with main
+
+`origin/main` gained the bug-hunt PR (docs/units/bug-hunt-2026-11.md) after this branch was cut; merged with `git merge origin/main`, not rebased. Main's behaviour is kept in full and drawn with this unit's tokens and classes.
+
+### Conflicts and how each was resolved
+
+- `src/features/library/LibraryPage.tsx` (imports): both sides' imports kept: `EmptyState` / `LoadingLine`, `labelClass` / `sectionHeadingClass` from here, `itemFocus` helpers and the search field's `ref` from main.
+- `src/features/library/SongListItem.tsx`: the item is `cardClass` with main's `itemAttributes`; the edit form's `onDone` is main's (`onEditClosed` hand-over); Edit and Delete are `quietButtonClass` with their icons and main's `itemControlAttributes`; the "Delete …?" group is `dangerPanelClass` and keeps main's `ref`, `tabIndex={-1}` and `focus:outline-none` (it focuses itself on mount; the outline is off on the group, not on its buttons).
+- `src/features/loops/LoopPanel.tsx`: Edit is `quietButtonClass` with main's `disabled={!canEdit}` (`canPickBars`); Delete is `quietButtonClass` with its icon and main's `itemControlAttributes`; the confirm group as in the library.
+- `src/features/practice/OnTheGoPage.tsx` (imports): this unit's style imports, with `neighbourAfterLeaving` from `@/lib/itemFocus` as main moved it.
+
+Auto-merged with no edit needed: `AGENTS.md`, `docs/plan.md` (Unit 13's Carried forward list holds both sides' new lines; neither side had dealt with the other's), `docs/review-checklist.md`, `SignOutButton.tsx`, `alphaTabEngine.ts` and main's logic files. Main added no new markup with colours, so nothing else needed tokens; the token test passes over the merged tree.
+
+### Decisions
+
+None about behaviour: every conflict was a class string or an import beside one of main's attributes.
+
+### Results
+
+- `npm run check`: 102 files, 4055 tests green.
+- `npm run e2e`: 381 passed, 18 skipped, 0 failed, on a fresh `npm run build -- --mode development`. The `vite preview` on 4173 (PID 56088, not ours) was left running; the bundle it served (`assets/index-zb0pTqMD.js`) was checked equal to the fresh `dist/index.html`.

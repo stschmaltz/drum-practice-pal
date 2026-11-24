@@ -4,7 +4,7 @@
  * (Unit 10). A control and its key must never disagree about whether a press
  * would do anything.
  */
-import { isLoaded, type PlayerService, type PlayerSnapshot } from './PlayerService';
+import { isLoaded, showsScoreBars, type PlayerService, type PlayerSnapshot } from './PlayerService';
 
 /**
  * Whether playback can start: the song is loaded (or already running). Not
@@ -24,4 +24,13 @@ export function canChangeOptions(player: PlayerService | null): player is Player
 /** Mute drums and Drums only, which need a drum track to act on. */
 export function canUseDrumToggles(player: PlayerService | null, snapshot: PlayerSnapshot): boolean {
   return player !== null && snapshot.hasDrumTrack;
+}
+
+/**
+ * Opening the loop form and picking its bars on the score: "New loop", each
+ * loop's "Edit", a drag across bars, and the form itself. They need the
+ * score's bars, not its sounds, so they work while the soundfont loads.
+ */
+export function canPickBars(snapshot: PlayerSnapshot): boolean {
+  return showsScoreBars(snapshot);
 }

@@ -112,6 +112,124 @@ describe('showBar while not playing', () => {
     service.showBar(9);
     expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
   });
+
+  describe('asked while the song is still loading (a loop opened by ?loop=, bug hunt P2)', () => {
+    it('scrolls to the bar once the song is ready, once', () => {
+      const { engine, service } = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+      service.setRange({ startBar: 13, endBar: 14 });
+      service.showBar(13);
+      expect(engine.scrollToBar).not.toHaveBeenCalled();
+
+      engine.finishLoading();
+
+      expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+      expect(engine.scrollToBar).toHaveBeenLastCalledWith(12);
+      engine.fire('readyForPlayback', undefined);
+      expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+    });
+
+    it('the last bar asked for wins', () => {
+      const { engine, service } = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+      service.showBar(3);
+      service.showBar(9);
+      engine.finishLoading();
+      expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+      expect(engine.scrollToBar).toHaveBeenLastCalledWith(8);
+    });
+
+    it('a range set afterwards (the loop left) drops it', () => {
+      const { engine, service } = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+      service.showBar(13);
+      service.setRange(null);
+      engine.finishLoading();
+      expect(engine.scrollToBar).not.toHaveBeenCalled();
+    });
+
+    it('a bar the song lacks scrolls nowhere when it is ready', () => {
+      const { engine, service } = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+      service.showBar(40);
+      engine.finishLoading();
+      expect(engine.scrollToBar).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('asked once the sounds are in but before the notation has rendered (Copilot review)', () => {
+  /** The soundfont and MIDI are in (cached), the notation still rendering. */
+  function readyBeforeRender() {
+    const ctx = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+    ctx.engine.laidOut = false;
+    return ctx;
+  }
+
+  it('a bar kept while loading is scrolled to once the score renders, once', () => {
+    const { engine, service } = readyBeforeRender();
+    service.setRange({ startBar: 13, endBar: 14 });
+    service.showBar(13);
+    engine.finishLoading();
+    expect(service.getSnapshot().status).toBe('ready');
+    engine.scrollToBar.mockClear();
+
+    engine.laidOut = true;
+    engine.fire('rendered', undefined);
+
+    expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    engine.fire('rendered', undefined);
+    expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+  });
+
+  it('a bar asked for when ready is scrolled to once the score renders', () => {
+    const { engine, service } = readyBeforeRender();
+    engine.finishLoading();
+    service.showBar(9);
+    engine.scrollToBar.mockClear();
+
+    engine.laidOut = true;
+    engine.fire('rendered', undefined);
+
+    expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(8);
+  });
+
+  it('a range set before the render (the loop left) drops it', () => {
+    const { engine, service } = readyBeforeRender();
+    engine.finishLoading();
+    service.showBar(9);
+    service.setRange(null);
+    engine.scrollToBar.mockClear();
+    engine.laidOut = true;
+    engine.fire('rendered', undefined);
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('playing by the time the score renders: left to alphaTab', () => {
+    const { engine, service } = readyBeforeRender();
+    engine.finishLoading();
+    service.showBar(9);
+    service.play();
+    enginePlays(engine);
+    engine.scrollToBar.mockClear();
+    engine.laidOut = true;
+    engine.fire('rendered', undefined);
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('a count-in that starts before the render scrolls to its bar once it has rendered', () => {
+    const ctx = setupCountIn({ loaded: false });
+    ctx.engine.laidOut = false;
+    ctx.engine.finishLoading();
+    ctx.service.seekToBar(13);
+    ctx.service.play();
+    expect(ctx.service.getSnapshot().status).toBe('countingIn');
+    ctx.engine.scrollToBar.mockClear();
+
+    ctx.engine.laidOut = true;
+    ctx.engine.fire('rendered', undefined);
+
+    expect(ctx.engine.scrollToBar).toHaveBeenCalledTimes(1);
+    expect(ctx.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+  });
 });
 
 describe('showBar as a no-op', () => {

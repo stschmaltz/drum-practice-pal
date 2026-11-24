@@ -11,6 +11,7 @@ import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
 import { sessionKeys } from '@/features/practice/sessionKeys';
 import { useSignedInUser } from '@/lib/auth';
 import { queuedWriteRetry } from '@/lib/network';
+import { sendRefreshingToken } from '@/lib/tokenRefresh';
 import { randomUuid } from '@/lib/randomUuid';
 import type { LoopStatus } from '@/lib/schema';
 import { loopKeys } from './loopKeys';
@@ -40,6 +41,19 @@ function anotherWriteIsPending(queryClient: QueryClient, userId: string): boolea
 function invalidateWhenIdle(queryClient: QueryClient, userId: string) {
   if (anotherWriteIsPending(queryClient, userId)) return;
   return queryClient.invalidateQueries({ queryKey: loopKeys.forUser(userId) });
+}
+
+/**
+ * The refetches TanStack Query starts by itself (window focus, reconnect, a
+ * new screen mounting the list), held off while any loop write is pending: a
+ * write waiting between retries is pending but not paused, and a list read
+ * then would put the old server row back over its optimistic value (a bars
+ * edit of the playing loop would move playback back). invalidateWhenIdle
+ * reads the list once the last write has settled.
+ */
+function refetchUnlessWritesPending(queryClient: QueryClient, userId: string) {
+  const whenIdle = () => queryClient.isMutating({ mutationKey: loopKeys.writes(userId) }) === 0;
+  return { refetchOnWindowFocus: whenIdle, refetchOnReconnect: whenIdle, refetchOnMount: whenIdle };
 }
 
 /**
@@ -77,9 +91,11 @@ function setCachedLoop(
 /** One song's loops, oldest first; sort for display with sortLoops. */
 export function useLoops(songId: string) {
   const user = useSignedInUser();
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: loopKeys.forSong(user.id, songId),
     queryFn: () => fetchLoops(user.id, songId),
+    ...refetchUnlessWritesPending(queryClient, user.id),
   });
 }
 
@@ -89,9 +105,11 @@ export function useLoops(songId: string) {
  */
 export function usePracticeLoops() {
   const user = useSignedInUser();
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: loopKeys.practice(user.id),
     queryFn: () => fetchPracticeLoops(user.id),
+    ...refetchUnlessWritesPending(queryClient, user.id),
   });
 }
 
@@ -187,7 +205,8 @@ export function loopEditOptions(queryClient: QueryClient, userId: string, songId
   return {
     mutationKey: loopKeys.writes(userId),
     scope: { id: loopKeys.writes(userId).join('/') },
-    mutationFn: ({ loopId, changes }: LoopUpdate) => updateLoop(userId, loopId, changes),
+    mutationFn: ({ loopId, changes }: LoopUpdate) =>
+      sendRefreshingToken(() => updateLoop(userId, loopId, changes)),
     ...queuedWriteRetry,
     onMutate: async ({
       loopId,

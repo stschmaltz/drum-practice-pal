@@ -23,6 +23,7 @@ import {
 import {
   FakePlayerEngine,
   startOfBar,
+  straightBars,
   TEMPO_CHANGE_BAR_TEMPOS,
   TICKS_PER_BAR,
 } from '@/test/fakePlayerEngine';
@@ -597,6 +598,22 @@ describe('SongPage jam mode', () => {
     expect(status()).toHaveTextContent('Bar 3 of 16');
     expect(engine.restartCalls()).toBe(restartsBefore);
     expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('a tap while the sounds are still loading seeks nowhere: the song can’t play yet', async () => {
+    serve();
+    renderSong(SONG_A);
+    await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+    const engine = engines[0]!;
+    act(() => {
+      engine.fire('scoreLoaded', { barCount: 16, trackCount: 3, barTempos: [], barMeters: [] });
+      engine.fire('ticksReady', { bars: straightBars(16) });
+    });
+
+    act(() => engine.fire('barTapped', { barIndex: 11 }));
+
+    expect(engine.seek).not.toHaveBeenCalled();
+    expect(status()).not.toHaveTextContent('Bar 12');
   });
 
   it('opens every song at 100%, whatever speed the last one played at', async () => {

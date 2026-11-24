@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { canPlay } from '@/features/player/controlGates';
+import { canPickBars, canPlay } from '@/features/player/controlGates';
 import {
   isSameBarRange,
   type BarRange,
@@ -152,9 +152,16 @@ export function useLoopPractice(
 
   // --- The loop form's bars ---
 
-  const openEditor = useCallback((loop: Loop | null) => {
-    setEditor({ loopId: loop?.id ?? null, bars: {}, awaitingEnd: false, saving: false });
-  }, []);
+  /** Opens the loop form; false, and nothing opens, before the score's bars are known. */
+  const openEditor = useCallback(
+    (loop: Loop | null): boolean => {
+      // Asked of the player at the press, as "New loop" and each "Edit" are gated on it.
+      if (!player || !canPickBars(player.getSnapshot())) return false;
+      setEditor({ loopId: loop?.id ?? null, bars: {}, awaitingEnd: false, saving: false });
+      return true;
+    },
+    [player],
+  );
 
   const closeEditor = useCallback(() => setEditor(null), []);
 
@@ -194,8 +201,14 @@ export function useLoopPractice(
   // A mouse drag across bars is a range, with or without the form open.
   useEffect(() => {
     if (!player) return;
-    return player.on('barsDragged', ({ startBar, endBar, done }) => {
+    return player.on('barsDragged', ({ startBar, endBar, done, cancelled }) => {
       const range = { startBar, endBar };
+      // The browser took the press away: nothing was picked, and the preview goes.
+      // An open form keeps the bars the drag had reached, as it does for each move.
+      if (cancelled) {
+        setDragPreview(null);
+        return;
+      }
       if (editorOpen) {
         setEditor((open) => withPickedBars(open, range, false));
         return;
