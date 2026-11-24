@@ -17,7 +17,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-dvh md:flex">
-      <aside className="hidden md:sticky md:top-0 md:flex md:h-dvh md:w-56 md:shrink-0 md:flex-col md:gap-8 md:border-r md:border-line md:bg-surface md:p-4">
+      <aside className="hidden md:sticky md:top-0 md:flex md:h-dvh md:w-sidebar md:shrink-0 md:flex-col md:gap-8 md:border-r md:border-line md:bg-surface md:p-4">
         <p className="px-2 pt-2">
           <Wordmark />
         </p>

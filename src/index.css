@@ -70,8 +70,18 @@
   --text-count-in: min(40vw, 45dvh);
   --text-count-in--line-height: 1;
 
+  /*
+   * Breakpoints, written out (they are Tailwind's defaults) because code reads
+   * them too: `md` is the player's page layout and the sidebar (layout.ts),
+   * `lg` the loop panel's column (loopPanelLayout.ts). Tests keep them equal.
+   */
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 64rem;
+
   /* Spacing: Tailwind's 0.25rem steps, plus the touch target every control meets. */
   --spacing-touch: 2.75rem;
+  /* The sidebar's width from md; the tablet's loop sheet starts to the right of it. */
+  --spacing-sidebar: 14rem;
 
   /* Radius and shadow. */
   --radius-control: 0.625rem;

@@ -10,6 +10,7 @@ import {
   openLoopPanel,
   playLoopButton,
   saveNewLoop,
+  expectedLoopPanel,
 } from './loopsPage';
 import {
   barNumber,
@@ -207,8 +208,8 @@ test('Space after clicking Play loop pauses, rather than pressing the focused Re
   await playLoopButton(page, 'Verse').click();
   await expect(playButton(page)).toHaveText('Pause');
   await recordStatuses(page);
-  // Clicked, the button keeps focus in Chromium. On a phone the press closes the sheet it is in.
-  if (expectedLayout(page) === 'page') {
+  // Clicked, the button keeps focus in Chromium. Below 1024 px the press closes the sheet it is in.
+  if (expectedLoopPanel(page) === 'column') {
     await expect(page.getByRole('button', { name: 'Restart loop Verse' })).toBeFocused();
   }
 

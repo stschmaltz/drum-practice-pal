@@ -321,3 +321,54 @@ Hygiene went to section 7 (renumbered; nothing referred to it by number).
 - The fix was undone and redone in one rebuild alongside the label's ring, so both new checks were seen failing on the same build and passing on the next.
 - `npm run check`: 102 files, 4055 tests green.
 - `npm run e2e`: 384 passed (the new long-name test on three profiles), 18 skipped, 0 failed, on a fresh `npm run build -- --mode development`. The `vite preview` on 4173 (PID 56088, not ours) was left running; the bundle it served (`assets/index-C1u9JK4V.js`) was checked equal to the fresh `dist/index.html`.
+
+## Tablet loop sheet (after screenshot review)
+
+Shane's review of `final-tablet-04-song-loop.png` and `final-tablet-05-song-playing.png`: on a tablet in portrait (820 x 1180) the 224 px sidebar and the 256 px loop column left the score about 260 px, one bar to a line. His choice: keep the full sidebar, and below tablet landscape make the loop panel the bottom sheet, as on the phone.
+
+### Summary
+
+- Below 1024 px (phone, tablet in portrait) the loop panel is the bottom sheet; from 1024 px (tablet in landscape at 1180, laptop) it is the side column, unchanged. On a tablet in portrait the score now spans the whole content column (532 px at 820 wide, was about 260).
+- The rule lives in one pure module, `src/features/loops/loopPanelLayout.ts` (`LOOP_COLUMN_MIN_WIDTH` 1024, `loopPanelKindForWidth`, `LOOP_COLUMN_QUERY`). `loopPanelIsSheet()` and `loopPanelStartsOpen()` (`useLoopPanelOpen.ts`) ask that query; the CSS uses `lg:`, and `index.css` now writes out `--breakpoint-md: 48rem` and `--breakpoint-lg: 64rem` so `loopPanelLayout.test.ts` can check both against the code (`lg` = the column, `md` = `PAGE_LAYOUT_MIN_WIDTH`).
+- The tablet's sheet is not a stretched phone sheet: from `md` there is no tab bar, so it sits on the safe area (`md:bottom-[env(safe-area-inset-bottom)]`) and spans the content column to the right of the sidebar (`md:left-[calc(var(--spacing-sidebar)+2rem)] md:right-8`, i.e. exactly the score's width, with side borders); its body is at most `min(40dvh, 30rem)` (the phone's is 45dvh). The sidebar's width is now the token `--spacing-sidebar` (14rem, `md:w-sidebar` in `AppShell`), so the sheet's offset follows it.
+- Everything the phone sheet does applies at the new widths, because it is the same element and the same `loopPanelIsSheet()`: the header is the one toggle (`aria-expanded`, `aria-controls`), "Play loop" closes it when the press starts playback, it starts closed. The "Show loops" / "Hide loops" button is now `max-lg:hidden`, so the tablet in portrait has exactly one toggle. The score box's `scroll-mb` is `calc(4rem + safe area)` from `md` (clearing the sheet's header; there's no tab bar) and `scroll-mb-4` from `lg`; the page's bottom padding (`pb-12`) now runs to `lg`.
+- The loop speed's nudge buttons are one row of four at every width (`md:grid-cols-2` existed only for the 256 px tablet column, which is gone).
+- alphaTab's page/horizontal breakpoint (768 px, `layout.ts`, e2e's `layoutForWidth` / `expectedLayout`) did not move and means what it meant. e2e now asks `expectedLoopPanel(page)` (`loopsPage.ts`, mirroring the 1024 rule) wherever it meant "is the panel a sheet"; `loopPanelToggle`, `openLoopPanel` and `closeLoopPanel` are still one helper for all sizes.
+
+### Files
+
+- `src/features/loops/loopPanelLayout.ts` (new) and `loopPanelLayout.test.ts` (new): the rule, and the check that the stylesheet's `md` / `lg` match the code.
+- `src/features/loops/useLoopPanelOpen.ts`: `loopPanelIsSheet` and `loopPanelStartsOpen` from the one query (`LOOP_PANEL_OPEN_MIN_WIDTH` is gone: the column starts open, the sheet closed). `useLoopPanelOpen.test.ts`: widths 390 to 1440 for both, and the hook's starting state.
+- `src/features/loops/LoopPanel.tsx`: the classes (`md:` sheet placement, `lg:` column). `LoopPanel.test.tsx`: `atWidth(px)` answers any `(min-width: Npx)` query; new "on a tablet in portrait the panel is the sheet too: Play loop closes it"; the "nothing closes it" case now at 1180.
+- `src/features/loops/LoopSpeedControl.tsx`: nudges one row.
+- `src/features/song/SongPage.tsx`: `lg:` two columns, `max-lg:hidden` toggle, `scroll-mb` per size, comments. `src/features/song/useJamMode.ts`: comment.
+- `src/features/shell/AppShell.tsx`, `src/index.css`: `--spacing-sidebar`, the written-out breakpoints.
+- `tests/e2e/loopsPage.ts`: `expectedLoopPanel(page)`; the toggle helpers use it. `loops.spec.ts`: the panel test now has three cases (phone sheet on the tab bar; tablet sheet on the window's foot, right of the sidebar, as wide as the score, the score near the content column's full width; the column), and checks exactly one toggle is on show and the starting state. `loop-scroll.spec.ts`: sheet checks by `expectedLoopPanel`; the breakpoint test is now 767 / 1023 / 1024 (desktop project). `shortcuts.spec.ts`: "Restart loop keeps focus" only where the column is. `playerPage.ts`: comment.
+- `docs/units/12-shots/final-tablet-04-song-loop.png`, `final-tablet-05-song-playing.png` (retaken), `final-tablet-landscape-05-song-playing.png` (new, 1180 x 820), from a temporary spec since deleted.
+
+### Decisions
+
+- **Why 1024 (Tailwind's `lg`).** The page already split at `lg` (the column's 320 px width, the controls bar's one-row layout, the "open by default" width), and it is the first width at which a column beside the score still leaves room for two bars a line (1180 landscape gives the score 556 px, two bars a line). Anything between 768 and 1023 is a tablet in portrait or a narrow window, where the column only ever left a strip. `md` stays the sidebar and alphaTab's page layout.
+- **The sheet spans the content column, not the window right of the sidebar.** It lines up with the score above it (same left and right edges), so it reads as the score's drawer, and it never goes under the sidebar.
+- **Crossing 1024 keeps the open state.** A rotation from landscape (column open) to portrait gives an open sheet; from portrait (sheet closed) to landscape a closed column. Same as crossing 768 did before; the user's last choice wins over the width's default.
+- **Still one bar to a line at 820 in portrait.** The score is now 532 px wide (from about 260), every bar drawn full width, but alphaTab needs about 540 px for two of these bars. Narrowing the main column's `md:p-8` to `p-6` would likely give two a line; that changes every page's gutter, so it is left for Shane to decide.
+
+### Async windows and inputs
+
+None added. `loopPanelIsSheet()` is read at the press (as before), so a rotation since the page opened is answered by the current width.
+
+### Known gaps
+
+- Only Chromium (Playwright) at 390, 820 x 1180, 1180 x 820, 1440, and 767 / 1023 / 1024 wide.
+- With the sheet open on a tablet in portrait, the score above it is the space between the controls and the sheet (about 140 px in shot 04, with the window scrolled to the top); scrolling the page brings more of it up, as on the phone.
+
+### Manual verify
+
+1. `npm run dev`, a song with a loop, a window 820 x 1180: no "Show loops" button; a sheet header at the foot of the content column, right of the sidebar, as wide as the score; the score is the full content width.
+2. Open the sheet, press "Play loop": the sheet closes, the loop plays, the header says "Loop: …". Open it again while playing: the speed control is there; switching loops leaves it open.
+3. Resize to 1180 x 820: the column beside the score with "Hide loops"; "Play loop" leaves it open.
+
+### Results
+
+- `npm run check`: 103 files, 4077 tests green.
+- `npm run e2e`: 385 passed, 20 skipped, 0 failed (405 listed), on a fresh `npm run build -- --mode development` run from bash. The `vite preview` on 4173 (PID 56088, not ours) was left running; the page it served loaded `assets/index-CMcgEGtQ.js` and `assets/index-DEwLMAEV.css`, the files in the fresh `dist`, and its CSS had the new `--spacing-sidebar` rules.

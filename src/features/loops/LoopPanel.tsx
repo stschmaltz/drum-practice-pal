@@ -64,15 +64,17 @@ interface LoopPanelProps {
   loops: ReturnType<typeof useLoops>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** For the `aria-controls` of a toggle the page places elsewhere (beside the status line, from 768 px). */
+  /** For the `aria-controls` of a toggle the page places elsewhere (beside the status line, from 1024 px). */
   bodyId: string;
 }
 
 /**
- * The song's loops: a bottom sheet on a phone (fixed above the tab bar, its
- * header always on show and opening the rest), a side panel from 768 px (in
- * the page beside the score, shown or hidden by the page's own toggle). One
- * component and one `open` state for both; only the classes differ.
+ * The song's loops: a bottom sheet below 1024 px, so on a phone and a tablet
+ * in portrait (fixed at the foot of the window, its header always on show and
+ * opening the rest), a column beside the score from 1024 px (shown or hidden
+ * by the page's own toggle). The width rule is `loopPanelLayout.ts`, which is
+ * the CSS's `lg`. One component and one `open` state for both; only the
+ * classes differ.
  */
 export function LoopPanel({
   songId,
@@ -97,15 +99,17 @@ export function LoopPanel({
     <aside
       aria-label="Loops"
       data-testid="loop-panel"
-      // Phone: fixed just above the tab bar (3.5rem plus its border). From md: a
-      // column beside the score that stays put while the page scrolls.
-      className={`fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 rounded-t-card border-t border-line bg-surface shadow-sheet md:sticky md:inset-x-auto md:top-20 md:bottom-auto md:z-auto md:max-h-[calc(100dvh-6rem)] md:w-64 md:shrink-0 md:self-start md:overflow-y-auto md:rounded-card md:border md:shadow-card lg:w-80 ${
-        open ? '' : 'md:hidden'
+      // Phone: fixed just above the tab bar (3.5rem plus its border). Tablet in
+      // portrait (md): no tab bar, so on the safe area, and as wide as the content
+      // column to the right of the sidebar (its 2rem padding each side), not under
+      // it. From lg: a column beside the score that stays put while the page scrolls.
+      className={`fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 rounded-t-card border-t border-line bg-surface shadow-sheet md:right-8 md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+2rem)] md:border-x lg:sticky lg:inset-x-auto lg:top-20 lg:bottom-auto lg:z-auto lg:max-h-[calc(100dvh-6rem)] lg:w-80 lg:shrink-0 lg:self-start lg:overflow-y-auto lg:rounded-card lg:border lg:shadow-card ${
+        open ? '' : 'lg:hidden'
       }`}
     >
       <button
         type="button"
-        className={`flex min-h-touch w-full items-center justify-between gap-3 rounded-t-card px-4 text-left font-semibold md:hidden ${focusRing} focus-visible:-outline-offset-2`}
+        className={`flex min-h-touch w-full items-center justify-between gap-3 rounded-t-card px-4 text-left font-semibold lg:hidden ${focusRing} focus-visible:-outline-offset-2`}
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => onOpenChange(!open)}
@@ -127,8 +131,9 @@ export function LoopPanel({
       <div
         id={bodyId}
         hidden={!open}
-        // The sheet stops well short of the top so the score stays in reach above it.
-        className="max-h-[45dvh] overflow-y-auto p-4 pt-1 md:max-h-none md:overflow-visible md:pt-4"
+        // The sheet stops well short of the top so the score stays in reach above it;
+        // on a tall tablet less of the window, so a few lines of the score stay readable.
+        className="max-h-[45dvh] overflow-y-auto p-4 pt-1 md:max-h-[min(40dvh,30rem)] lg:max-h-none lg:overflow-visible lg:pt-4"
       >
         <LoopPanelBody
           songId={songId}

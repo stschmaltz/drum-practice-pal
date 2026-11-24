@@ -2,12 +2,12 @@
 /**
  * Locators and steps for the song page's loop panel (Unit 08), shared by
  * loops.spec.ts, loop-scroll.spec.ts and count-in.spec.ts. The panel is a
- * bottom sheet below 768 px and a column beside the score from there up;
- * these steps work on both.
+ * bottom sheet below 1024 px (a phone, a tablet in portrait) and a column
+ * beside the score from there up; these steps work on both.
  */
 import type { Locator, Page } from '@playwright/test';
 import { expect } from './auth';
-import { expectedLayout, viewport, type Box } from './playerPage';
+import { viewport, type Box } from './playerPage';
 
 export const loopPanel = (page: Page) => page.getByTestId('loop-panel');
 export const loopForm = (page: Page) => loopPanel(page).getByRole('form');
@@ -35,22 +35,31 @@ export const loopItem = (page: Page, name: string) =>
 export const playLoopButton = (page: Page, name: string) =>
   loopItem(page, name).getByRole('button', { name: new RegExp(`^(Play|Restart) loop ${name}$`) });
 
-/** The phone sheet's header, which opens and closes it. Hidden from 768 px. */
+/**
+ * Mirrors loopPanelLayout.ts: the loop panel is a column from this width, a
+ * sheet below. Apart from the player's 768 px layout breakpoint
+ * (`expectedLayout`): a tablet in portrait has page layout and the sheet.
+ */
+const LOOP_COLUMN_MIN_WIDTH = 1024;
+
+/** Where the app should draw the loop panel at the page's current viewport. */
+export const expectedLoopPanel = (page: Page): 'sheet' | 'column' =>
+  (page.viewportSize()?.width ?? 0) >= LOOP_COLUMN_MIN_WIDTH ? 'column' : 'sheet';
+
+/** The sheet's header, which opens and closes it. Hidden from 1024 px. */
 const sheetHeader = (page: Page) => loopPanel(page).locator('button[aria-controls]');
 
-/** The side panel's toggle beside the status line. Hidden below 768 px. */
-const sidePanelToggle = (page: Page) => page.getByRole('button', { name: /^(Show|Hide) loops$/ });
-
-const isSheet = (page: Page) => expectedLayout(page) === 'horizontal';
+/** The column's toggle beside the status line. Hidden below 1024 px. */
+const columnToggle = (page: Page) => page.getByRole('button', { name: /^(Show|Hide) loops$/ });
 
 /**
- * Whatever opens and closes the panel at this width; its `aria-expanded` says
- * whether the panel is open.
+ * Whatever opens and closes the panel at this width, the one toggle on show
+ * there; its `aria-expanded` says whether the panel is open.
  */
 export const loopPanelToggle = (page: Page) =>
-  isSheet(page) ? sheetHeader(page) : sidePanelToggle(page);
+  expectedLoopPanel(page) === 'sheet' ? sheetHeader(page) : columnToggle(page);
 
-/** Opens the loop panel if it is closed: the sheet on a phone, the side column otherwise. */
+/** Opens the loop panel if it is closed: the sheet below 1024 px, the column from there. */
 export async function openLoopPanel(page: Page): Promise<void> {
   const toggle = loopPanelToggle(page);
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();

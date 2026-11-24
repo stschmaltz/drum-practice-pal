@@ -135,7 +135,7 @@ export async function cursorBarPoint(page: Page): Promise<Point> {
 /**
  * Scrolls the score box, and only the box, so the cursor's bar sits near its
  * top left: the cursor's bar and the one after it are then on screen at every
- * size, clear of the phone's loop sheet. (Element.scrollIntoView would move
+ * size, clear of the loop sheet. (Element.scrollIntoView would move
  * the window as well.)
  */
 export async function scrollScoreToCursor(page: Page): Promise<void> {

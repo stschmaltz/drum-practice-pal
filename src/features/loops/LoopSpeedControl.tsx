@@ -68,8 +68,8 @@ export function LoopSpeedControl({
           onCommit={(text) => setSpeed(tempo === null ? null : parseSpeedBpm(text, tempo))}
         />
       </div>
-      {/* One even row where the panel is wide enough (the phone sheet, the side panel from lg); two rows in the narrow tablet panel, never three buttons and a stray fourth. */}
-      <div className="grid grid-cols-4 gap-2 md:grid-cols-2 lg:grid-cols-4">
+      {/* One even row, in the sheet and in the column: never three buttons and a stray fourth. */}
+      <div className="grid grid-cols-4 gap-2">
         {NUDGES.map((delta) => (
           <button
             key={delta}

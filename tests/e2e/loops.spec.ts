@@ -23,6 +23,8 @@ import {
   saveNewLoop,
   saveSpeedButton,
   targetField,
+  expectedLoopPanel,
+  loopPanelToggle,
 } from './loopsPage';
 import {
   barCursorBox,
@@ -257,7 +259,7 @@ test('a saved loop opens on another device at the same range and speed, with BPM
 
     // The same range, the same speed, and the BPM the first device typed.
     await expect(playButton(other)).toHaveText('Pause');
-    // On a phone the press closed the sheet, to show the score; the speed fields are inside it.
+    // Below 1024 px the press closed the sheet, to show the score; the speed fields are inside it.
     await openLoopPanel(other);
     await expect(activeLoopLine(other)).toContainText('Bars 9 to 12');
     await expect(speed(other)).toHaveText('86%');
@@ -432,8 +434,8 @@ test('a tap on a bar outside the playing loop moves nothing, paused or playing',
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Bar two', firstBar: 2, lastBar: 2 });
   await expect(status(page)).toHaveText('Bar 2 of 16');
-  // Only the phone's sheet is in the way of the score; the side panel stays as it is.
-  if (expectedLayout(page) === 'horizontal') await closeLoopPanel(page);
+  // Only the sheet is in the way of the score; the side column stays as it is.
+  if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
   await expect.poll(async () => (await barCursorBox(page)).width).toBeGreaterThan(2);
   await scrollScoreToCursor(page);
   const bar3 = await nextBarPoint(page);
@@ -494,32 +496,56 @@ test('in a song with a repeat, a loop inside the repeat plays just its bars', as
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Play');
   await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
-  // Only the phone's sheet is in the way of the score; closing the side panel
+  // Only the sheet is in the way of the score; closing the side column
   // would lay the score out again while the tap point is being measured.
-  if (expectedLayout(page) === 'horizontal') await closeLoopPanel(page);
+  if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
   const from = await barNumber(page);
   await scrollScoreToCursor(page);
   const landed = await tapAndWaitForBar(page, await nextBarPoint(page), from);
   expect(landed).toBe(from + 1);
 });
 
-test('the loop panel is a bottom sheet on a phone and a side panel from a tablet up', async ({
+test('the loop panel is a bottom sheet on a phone and a tablet in portrait, and a side column from 1024 px', async ({
   user,
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
+  const sheetHeader = loopPanel(page).locator('button[aria-controls]');
+  const columnToggle = page.getByRole('button', { name: /^(Show|Hide) loops$/ });
+  const sheet = expectedLoopPanel(page) === 'sheet';
+  // One toggle on show at each width, the one the shared steps use.
+  await expect(sheet ? columnToggle : sheetHeader).toBeHidden();
+  await expect(sheet ? sheetHeader : columnToggle).toBeVisible();
+  // The sheet starts closed, so the score opens with nothing over it; the column starts open.
+  await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', sheet ? 'false' : 'true');
+
   await openLoopPanel(page);
   await expect(newLoopButton(page)).toBeVisible();
   const panel = await boxOf(loopPanel(page), 'loop panel');
   const size = page.viewportSize();
   if (!size) throw new Error('No viewport size');
 
-  if (expectedLayout(page) === 'horizontal') {
-    // Full width, sitting on the tab bar, and short enough to leave the score in reach.
-    const tabBar = await boxOf(page.locator('nav[aria-label="Main"]:visible'), 'tab bar');
-    expect(panel.x).toBe(0);
-    expect(panel.width).toBe(size.width);
-    expect(Math.abs(panel.y + panel.height - tabBar.y)).toBeLessThanOrEqual(2);
+  if (sheet) {
+    const tabBar = page.locator('nav[aria-label="Main"]:visible');
+    if (expectedLayout(page) === 'horizontal') {
+      // A phone: full width, sitting on the tab bar.
+      const tabBarBox = await boxOf(tabBar, 'tab bar');
+      expect(panel.x).toBe(0);
+      expect(panel.width).toBe(size.width);
+      expect(Math.abs(panel.y + panel.height - tabBarBox.y)).toBeLessThanOrEqual(2);
+    } else {
+      // A tablet in portrait: no tab bar, so on the foot of the window, and as wide as the
+      // score above it, to the right of the sidebar rather than under it.
+      const sidebar = await boxOf(page.locator('aside:has(nav[aria-label="Main"])'), 'sidebar');
+      const score = await scoreBox(page);
+      expect(panel.x).toBeGreaterThanOrEqual(sidebar.x + sidebar.width);
+      expect(Math.abs(panel.x - score.x)).toBeLessThanOrEqual(2);
+      expect(Math.abs(panel.width - score.width)).toBeLessThanOrEqual(2);
+      expect(Math.abs(panel.y + panel.height - size.height)).toBeLessThanOrEqual(2);
+      // The score has the content column's whole width, with no column beside it.
+      expect(score.width).toBeGreaterThan((size.width - sidebar.width) * 0.85);
+    }
+    // Short enough to leave the score in reach.
     expect(panel.height).toBeLessThan(size.height * 0.6);
 
     // Closed, only its header is left, and the page behind is clear of it.
@@ -757,7 +783,7 @@ test('switching, editing and deleting the playing loop never stop playback', asy
 
   await playLoopButton(page, 'First').click();
   await expect(playButton(page)).toHaveText('Pause');
-  // On a phone the press that starts playback closes the sheet; one that switches loops doesn't.
+  // Below 1024 px the press that starts playback closes the sheet; one that switches loops doesn't.
   await openLoopPanel(page);
   await expect.poll(async () => (await barAndBpm(page)).bar).toBeLessThanOrEqual(2);
   await recordStatuses(page);

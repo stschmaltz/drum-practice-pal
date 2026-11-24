@@ -15,7 +15,7 @@ interface JamModeRefs {
 /**
  * When the score box is brought into the window. `playing`: as close as it
  * needs to move to be fully visible. `picking-bars`: its top right under the
- * sticky bar, because on a phone the loop sheet covers the lower part of the
+ * sticky bar, because below 1024 px the loop sheet covers the lower part of the
  * window and the staff is at the top of the box.
  */
 export type ScoreOnScreen = 'playing' | 'picking-bars' | null;

@@ -9,7 +9,6 @@ import { startOfBar, straightBars, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePl
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable, type LoopTable } from '@/test/loopTable';
 import { settle, testQueryClient, wrapperFor } from '@/test/render';
-import { PAGE_LAYOUT_QUERY } from '@/features/player/layout';
 import type { PlayerService } from '@/features/player/PlayerService';
 import type { PracticeSession } from '@/features/practice/sessions';
 import type { Loop } from './loopForm';
@@ -94,7 +93,7 @@ function renderPanel({
         player.pause();
         engine.fire('stateChanged', { playing: false });
       }),
-    /** The phone sheet's header; from 768 px CSS hides it and the page has its own toggle. */
+    /** The sheet's header; from 1024 px CSS hides it and the page has its own toggle. */
     header: () => panel.getByRole('button', { name: /(Open|Close)$/ }),
     item: (name: string) =>
       within(
@@ -128,11 +127,16 @@ async function rename(view: View, name: string) {
   await view.user.type(field, name);
 }
 
-/** Below or from the 768 px breakpoint, as the browser would answer the layout query. */
-const atWidth = (kind: 'phone' | 'wide') =>
-  vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: kind === 'wide' && query === PAGE_LAYOUT_QUERY,
-  }));
+/** A window this many px wide, as the browser would answer any `(min-width: Npx)` query. */
+const atWidth = (width: number) =>
+  vi.stubGlobal('matchMedia', (query: string) => {
+    const min = /^\(min-width: (\d+)px\)$/.exec(query)?.[1];
+    if (min === undefined) throw new Error(`Unexpected media query ${query}`);
+    return { matches: width >= Number(min) };
+  });
+const PHONE = 390;
+const TABLET_PORTRAIT = 820;
+const TABLET_LANDSCAPE = 1180;
 
 beforeEach(() => {
   resetFakeSupabase();
@@ -230,7 +234,7 @@ describe('LoopPanel list', () => {
   });
 
   it('cannot play a loop while the sounds are still loading, though the score is there', async () => {
-    atWidth('phone');
+    atWidth(PHONE);
     const view = renderPanel({ loaded: false });
     await waitFor(() => expect(view.names()).toEqual(['Intro', 'Late']));
     // alphaTab has the score; the MIDI and the soundfont are still to come.
@@ -367,9 +371,9 @@ describe('LoopPanel playing a loop', () => {
 });
 
 // 08 QA issue 1: the sheet lies over the score and the count-in number.
-describe('LoopPanel Play loop and the phone sheet', () => {
+describe('LoopPanel Play loop and the sheet', () => {
   it('on a phone, Play loop closes the sheet and starts the loop, named in the header', async () => {
-    atWidth('phone');
+    atWidth(PHONE);
     const view = renderPanel();
     await view.press('Play loop Late');
 
@@ -385,7 +389,7 @@ describe('LoopPanel Play loop and the phone sheet', () => {
   });
 
   it('on a phone, Play loop with a count-in closes the sheet for the counter', async () => {
-    atWidth('phone');
+    atWidth(PHONE);
     const view = renderPanel();
     act(() => view.player.setCountInBars(1));
     await view.press('Play loop Late');
@@ -397,7 +401,7 @@ describe('LoopPanel Play loop and the phone sheet', () => {
   });
 
   it('on a phone, choosing another loop during a count-in closes the sheet again', async () => {
-    atWidth('phone');
+    atWidth(PHONE);
     const view = renderPanel();
     act(() => view.player.setCountInBars(2));
     await view.press('Play loop Late');
@@ -411,7 +415,7 @@ describe('LoopPanel Play loop and the phone sheet', () => {
   });
 
   it('reopened, it shows the playing loop and its speed control, and playback is untouched', async () => {
-    atWidth('phone');
+    atWidth(PHONE);
     const view = renderPanel();
     await view.press('Play loop Late');
     view.enginePlays();
@@ -437,7 +441,7 @@ describe('LoopPanel Play loop and the phone sheet', () => {
   });
 
   it('reopened, the speed control still changes the speed live', async () => {
-    atWidth('phone');
+    atWidth(PHONE);
     const view = renderPanel();
     await view.press('Play loop Late');
     view.enginePlays();
@@ -452,7 +456,7 @@ describe('LoopPanel Play loop and the phone sheet', () => {
   });
 
   it('on a phone, Play loop after a Pause closes the sheet again: playback starts from that press', async () => {
-    atWidth('phone');
+    atWidth(PHONE);
     const view = renderPanel();
     await view.press('Play loop Late');
     view.enginePlays();
@@ -467,7 +471,7 @@ describe('LoopPanel Play loop and the phone sheet', () => {
   });
 
   it('on a phone, switching and restarting while playing never stop playback or close the sheet', async () => {
-    atWidth('phone');
+    atWidth(PHONE);
     const view = renderPanel();
     await view.press('Play loop Late');
     view.enginePlays();
@@ -487,8 +491,18 @@ describe('LoopPanel Play loop and the phone sheet', () => {
     expect(view.panel.getByRole('group', { name: 'Loop speed' })).toBeVisible();
   });
 
-  it('from 768 px nothing closes it: starting, switching, restarting, or a count-in', async () => {
-    atWidth('wide');
+  it('on a tablet in portrait the panel is the sheet too: Play loop closes it', async () => {
+    atWidth(TABLET_PORTRAIT);
+    const view = renderPanel();
+    await view.press('Play loop Late');
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById(BODY_ID)).not.toBeVisible();
+    expect(view.header()).toHaveTextContent('Loop: Late');
+    expect(view.engine.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('from 1024 px, the column, nothing closes it: starting, switching, restarting, or a count-in', async () => {
+    atWidth(TABLET_LANDSCAPE);
     const view = renderPanel();
     await view.press('Play loop Late');
     expect(view.header()).toHaveAttribute('aria-expanded', 'true');

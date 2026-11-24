@@ -199,12 +199,12 @@ function SongPlayer({
     : snapshot.barTempo;
 
   return (
-    // The bottom padding keeps the end of the page clear of the phone's loop sheet header.
-    <div className="flex flex-col gap-3 pb-12 md:pb-0">
+    // The bottom padding keeps the end of the page clear of the loop sheet's header.
+    <div className="flex flex-col gap-3 pb-12 lg:pb-0">
       <JamBar ref={stickyBarRef} player={player} snapshot={snapshot} tempo={readoutTempo} />
-      {/* Above the two columns: beside the panel on a tablet the controls would be squeezed. */}
+      {/* Above the two columns: beside the panel the controls would be squeezed. */}
       <PlayerControls player={player} snapshot={snapshot} showPlayButton={false} />
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:gap-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-4">
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <PlayerStatusLine snapshot={snapshot} />
@@ -263,8 +263,9 @@ function ShortcutsButton({ onOpen }: { onOpen: () => void }) {
 }
 
 /**
- * Shows or hides the loop panel from 768 px, where it is a column beside the
- * score. Hidden on a phone: the sheet has its own header there.
+ * Shows or hides the loop panel from 1024 px, where it is a column beside the
+ * score. Hidden below (a phone, a tablet in portrait): the sheet's own header
+ * is the one toggle there.
  */
 function LoopPanelToggle({
   open,
@@ -278,7 +279,7 @@ function LoopPanelToggle({
   return (
     <button
       type="button"
-      className={`max-md:hidden ${open ? pressedButtonClass : buttonClass} whitespace-nowrap`}
+      className={`max-lg:hidden ${open ? pressedButtonClass : buttonClass} whitespace-nowrap`}
       aria-expanded={open}
       aria-controls={panelBodyId}
       onClick={() => onOpenChange(!open)}
@@ -312,10 +313,10 @@ function ScoreBox({
         // Hidden, not unmounted: alphaTab keeps its elements until the player is disposed.
         hidden={hidden}
         // jam-score: the cursor, highlight and tap styles in index.css. The bottom scroll
-        // margin keeps the box clear of the phone's fixed tab bar and the loop sheet's
-        // header above it when playback scrolls it into view (useJamMode sets the top
-        // one from the sticky bar's height).
-        className="jam-score relative h-[60dvh] scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:scroll-mb-4"
+        // margin keeps the box clear of the loop sheet's header (and on a phone the
+        // fixed tab bar under it) when playback scrolls it into view; the column from
+        // lg covers nothing (useJamMode sets the top one from the sticky bar's height).
+        className="jam-score relative h-[60dvh] scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))] lg:scroll-mb-4"
       >
         <div ref={scoreRef} />
       </div>
@@ -325,7 +326,7 @@ function ScoreBox({
 
 /**
  * Which loop is repeating, with the way back to the whole song. Above the
- * score rather than only in the panel, which on a phone is a closed sheet.
+ * score rather than only in the panel, which below 1024 px is a closed sheet.
  */
 function ActiveLoopLine({ loop, onExit }: { loop: Loop; onExit: () => void }) {
   return (
@@ -349,7 +350,7 @@ function ActiveLoopLine({ loop, onExit }: { loop: Loop; onExit: () => void }) {
 /**
  * What became of the last practice session: logged, kept on the device until
  * the connection is back, or refused with a way to send it again. Above the
- * score, because on a phone the loop panel is a closed sheet while practising.
+ * score, because below 1024 px the loop panel is a closed sheet while practising.
  */
 function SessionNotice({
   tracker,
