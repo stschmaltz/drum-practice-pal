@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { ErrorAlert } from '@/components/ErrorAlert';
+import { Icon } from '@/components/icons';
 import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass } from '@/components/styles';
 import { hasUnsentWrites, useHasUnsentWrites } from '@/features/offline/unsentWrites';
@@ -29,6 +30,7 @@ export function SignOutButton({ className = buttonClass }: { className?: string 
           if (isOnline() && !hasUnsentWrites(queryClient, user.id)) signOut.mutate();
         }}
       >
+        <Icon name="signOut" />
         {signOut.isPending ? 'Signing out…' : 'Sign out'}
       </button>
       {!online ? (

@@ -15,6 +15,7 @@ import { createEmitter, type Emitter } from './emitter';
 import type { LayoutChoice } from './layout';
 import type { EngineEvents, EngineMount, PlayerEngine } from './playerEngine';
 import { movedBeyondTap, type PointerPoint } from './tapGesture';
+import { NOTATION_SCALE, SCORE_RESOURCES } from './scoreTheme';
 import { barStartTempos } from './tempo';
 
 /** Engine events the engine raises itself rather than forwarding from alphaTab. */
@@ -44,7 +45,12 @@ export function createAlphaTabEngine({
     // Without this, production builds look for fonts next to the lazy chunk
     // (/assets/font/) and nothing renders. The Vite plugin copies them to public/font.
     core: { fontDirectory: '/font/' },
-    display: { layoutMode: toLayoutMode(layout) },
+    // Colours and size from the design tokens (scoreTheme.ts).
+    display: {
+      layoutMode: toLayoutMode(layout),
+      scale: NOTATION_SCALE,
+      resources: SCORE_RESOURCES,
+    },
     player: {
       playerMode: alphaTab.PlayerMode.EnabledSynthesizer,
       // Loaded by loadSoundFont() below, so a failed fetch reaches the UI.

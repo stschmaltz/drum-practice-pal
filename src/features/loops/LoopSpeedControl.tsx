@@ -1,6 +1,6 @@
 import { useId, useState, type KeyboardEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
-import { buttonClass, inputClass, primaryButtonClass } from '@/components/styles';
+import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import {
   nudgeSpeedRatio,
@@ -93,12 +93,12 @@ export function LoopSpeedControl({
         >
           Save speed
         </button>
-        <p className="text-sm text-neutral-400" data-testid="loop-saved-speed">
+        <p className="text-sm text-ink-muted" data-testid="loop-saved-speed">
           Saved: {speedLabel(loop.speed_ratio, tempo)}
         </p>
       </div>
       {update.isPending && !online && (
-        <p role="status" className="text-sm text-neutral-400" data-testid="loop-speed-queued">
+        <p role="status" className="text-sm text-ink-muted" data-testid="loop-speed-queued">
           Saved on this device. It's sent when you're back online.
         </p>
       )}
@@ -140,12 +140,12 @@ function CommitField({
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm text-neutral-300">
+      <label htmlFor={id} className={labelClass}>
         {label}
       </label>
       <input
         id={id}
-        className={`${inputClass} w-24 tabular-nums disabled:opacity-50`}
+        className={`${inputClass} w-24 text-lg font-semibold tabular-nums disabled:opacity-50`}
         inputMode="decimal"
         autoComplete="off"
         value={typed ?? value}

@@ -14,20 +14,22 @@ export function CountInCounter({ snapshot }: { snapshot: PlayerSnapshot }) {
       data-testid="count-in"
       // The status line announces "Counting in"; reading every beat aloud would lag behind the clicks.
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-lg bg-neutral-950/80"
+      className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-card bg-canvas/90"
     >
       <span
+        // A new element each beat, so its small pop plays again (not under reduced motion).
+        key={countIn ? `${countIn.bar}:${countIn.beat}` : 'waiting'}
         data-testid="count-in-beat"
-        // Beat one gets the accent colour, like the accented click.
-        className={`text-[min(40vw,45dvh)] font-bold leading-none tabular-nums ${
-          countIn?.beat === 1 ? 'text-sky-300' : 'text-white'
+        // Beat one gets the brand colour, like the accented click.
+        className={`text-count-in font-extrabold tabular-nums motion-safe:animate-beat ${
+          countIn?.beat === 1 ? 'text-brand' : 'text-ink'
         }`}
       >
         {/* A non-breaking space keeps the box's height before the first click. */}
         {countIn ? countIn.beat : ' '}
       </span>
       {countIn && countIn.bars > 1 && (
-        <span className="text-2xl font-semibold text-neutral-200" data-testid="count-in-bar">
+        <span className="text-2xl font-semibold text-ink-soft" data-testid="count-in-bar">
           Bar {countIn.bar} of {countIn.bars}
         </span>
       )}

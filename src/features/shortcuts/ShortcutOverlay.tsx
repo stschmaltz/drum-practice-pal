@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { buttonClass } from '@/components/styles';
+import { Icon } from '@/components/icons';
+import { ghostButtonClass } from '@/components/styles';
 import { characterKeysLabel, shortcutHelp } from './shortcuts';
 import { useCharacterKeysOn } from './useCharacterKeysOn';
 
@@ -57,7 +58,7 @@ function OpenOverlay({ onClose }: { onClose: () => void }) {
   return createPortal(
     <div
       ref={backdropRef}
-      className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-30 flex items-center justify-center bg-scrim/80 p-4 motion-safe:animate-fade-in"
       onMouseDown={(event) => {
         pressStartedOutside.current = event.target === event.currentTarget;
       }}
@@ -69,26 +70,35 @@ function OpenOverlay({ onClose }: { onClose: () => void }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex max-h-full w-full max-w-md flex-col gap-4 overflow-y-auto rounded-lg border border-neutral-700 bg-neutral-900 p-5"
+        className="flex max-h-full w-full max-w-md flex-col gap-4 overflow-y-auto rounded-card border border-line-strong bg-surface p-5 shadow-dialog"
         onKeyDown={(event) => {
           if (event.key !== 'Escape') return;
           event.preventDefault();
           onClose();
         }}
       >
-        <h2 id={titleId} className="text-lg font-semibold">
-          Keyboard shortcuts
-        </h2>
-        <dl className="flex flex-col gap-2 text-sm">
+        {/* Close first, at the top: focus goes to it on open, and on a landscape phone
+            the dialog scrolls to what has focus, so a Close at the end hid the title. */}
+        <div className="flex items-center justify-between gap-3">
+          <h2 id={titleId} className="flex items-center gap-2 text-lg font-bold tracking-tight">
+            <Icon name="keyboard" className="text-brand" />
+            Keyboard shortcuts
+          </h2>
+          <button ref={closeRef} type="button" className={ghostButtonClass} onClick={onClose}>
+            <Icon name="close" />
+            Close
+          </button>
+        </div>
+        <dl className="flex flex-col divide-y divide-line text-sm">
           {shortcutHelp({ characterKeys }).map((row) => (
-            <div key={row.label} className="flex items-baseline justify-between gap-4">
-              <dt className="text-neutral-200">{row.label}</dt>
+            <div key={row.label} className="flex items-baseline justify-between gap-4 py-2">
+              <dt className="text-ink">{row.label}</dt>
               {/* At most half the row, so a narrow phone wraps the keys instead of squeezing the label. */}
               <dd className="flex max-w-[50%] flex-wrap justify-end gap-1">
                 {row.keys.map((key) => (
                   <kbd
                     key={key}
-                    className="whitespace-nowrap rounded border border-neutral-600 bg-neutral-800 px-1.5 py-0.5 font-mono text-xs"
+                    className="rounded border border-line-strong border-b-2 bg-raised px-1.5 py-0.5 font-mono text-xs whitespace-nowrap text-ink"
                   >
                     {key}
                   </kbd>
@@ -98,23 +108,15 @@ function OpenOverlay({ onClose }: { onClose: () => void }) {
           ))}
         </dl>
         {!characterKeys && (
-          <p className="text-sm text-neutral-200">
+          <p className="text-sm text-ink">
             Single-letter shortcuts ({characterKeysLabel()}) are off on this device. Turn them on in
             Settings.
           </p>
         )}
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-ink-muted">
           Keys do nothing while you type in a field. A page-turner pedal that sends Page Up and Page
           Down, or the arrow keys, switches loops.
         </p>
-        <button
-          ref={closeRef}
-          type="button"
-          className={`${buttonClass} self-end`}
-          onClick={onClose}
-        >
-          Close
-        </button>
       </div>
     </div>,
     document.body,

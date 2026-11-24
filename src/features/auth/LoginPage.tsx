@@ -5,7 +5,14 @@ import { isOnline, useOnline } from '@/lib/network';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { FullPageMessage } from '@/components/FullPageMessage';
 import { OfflineNote } from '@/components/OfflineNote';
-import { buttonClass, inputClass, primaryButtonClass } from '@/components/styles';
+import { Wordmark } from '@/components/Brand';
+import {
+  cardClass,
+  ghostButtonClass,
+  inputClass,
+  labelClass,
+  primaryButtonClass,
+} from '@/components/styles';
 import { safeNextPath, type LoginRedirectState } from './loginRedirect';
 import { useSendSignInEmail, useVerifySignInCode } from './useAuthActions';
 import {
@@ -45,42 +52,48 @@ export function LoginPage() {
   );
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 p-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-3xl font-semibold">Drum Practice Pal</h1>
-        <p className="text-neutral-400">Sign in with a link sent to your email.</p>
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 p-4 sm:p-6">
+      <header className="flex flex-col items-center gap-3 text-center">
+        <h1>
+          <Wordmark size="lg" />
+        </h1>
+        <p className="text-ink-muted">Sign in with a link sent to your email.</p>
       </header>
+      <div className={`${cardClass} flex flex-col gap-5 p-5 sm:p-6`}>
+        {linkError && !sentTo && (
+          <p
+            role="alert"
+            className="rounded-control border border-danger-solid/50 bg-danger-soft p-3 text-sm text-danger"
+          >
+            {linkError} Send yourself a new one.
+          </p>
+        )}
 
-      {linkError && !sentTo && (
-        <p role="alert" className="rounded-md bg-red-950 p-3 text-sm text-red-200">
-          {linkError} Send yourself a new one.
-        </p>
-      )}
+        {!online && <OfflineNote>You're offline. Signing in needs a connection.</OfflineNote>}
 
-      {!online && <OfflineNote>You're offline. Signing in needs a connection.</OfflineNote>}
-
-      {sentTo === null ? (
-        <EmailStep
-          email={email}
-          onEmailChange={setEmail}
-          sending={sendEmail.isPending}
-          offline={!online}
-          onSend={send}
-          sendError={sendError}
-        />
-      ) : (
-        <CodeStep
-          email={sentTo}
-          sending={sendEmail.isPending}
-          offline={!online}
-          onSendAgain={() => send(sentTo)}
-          onUseDifferentEmail={() => {
-            setSentTo(null);
-            sendEmail.reset();
-          }}
-          sendError={sendError}
-        />
-      )}
+        {sentTo === null ? (
+          <EmailStep
+            email={email}
+            onEmailChange={setEmail}
+            sending={sendEmail.isPending}
+            offline={!online}
+            onSend={send}
+            sendError={sendError}
+          />
+        ) : (
+          <CodeStep
+            email={sentTo}
+            sending={sendEmail.isPending}
+            offline={!online}
+            onSendAgain={() => send(sentTo)}
+            onUseDifferentEmail={() => {
+              setSentTo(null);
+              sendEmail.reset();
+            }}
+            sendError={sendError}
+          />
+        )}
+      </div>
     </main>
   );
 }
@@ -109,7 +122,7 @@ function EmailStep({
 
   return (
     <form className="flex flex-col gap-3" onSubmit={onSubmit}>
-      <label className="flex flex-col gap-1 text-sm">
+      <label className={`flex flex-col gap-1 ${labelClass}`}>
         Email
         <input
           className={inputClass}
@@ -157,15 +170,15 @@ function CodeStep({
 
   return (
     <div className="flex flex-col gap-4">
-      <p role="status">
+      <p role="status" className="text-ink-soft">
         Check <strong className="break-all">{email}</strong> for a sign-in link. Open it on this
         device, or type the {SIGN_IN_CODE_LENGTH}-digit code from the email below.
       </p>
       <form className="flex flex-col gap-3" onSubmit={onSubmit}>
-        <label className="flex flex-col gap-1 text-sm">
+        <label className={`flex flex-col gap-1 ${labelClass}`}>
           Code
           <input
-            className={`${inputClass} tracking-widest`}
+            className={`${inputClass} text-center font-mono text-xl tracking-[0.4em]`}
             name="code"
             autoComplete="one-time-code"
             inputMode="numeric"
@@ -189,7 +202,7 @@ function CodeStep({
       <div className="flex flex-wrap gap-2 text-sm">
         <button
           type="button"
-          className={buttonClass}
+          className={ghostButtonClass}
           disabled={sending || offline}
           onClick={() => {
             // A new email means a new code, so the last code's error no longer applies.
@@ -200,7 +213,7 @@ function CodeStep({
           {sending ? 'Sending…' : 'Send again'}
         </button>
         {/* Unmounting this step clears the code and its error. */}
-        <button type="button" className={buttonClass} onClick={onUseDifferentEmail}>
+        <button type="button" className={ghostButtonClass} onClick={onUseDifferentEmail}>
           Use a different email
         </button>
       </div>

@@ -1,10 +1,6 @@
 import { useId, type ReactNode } from 'react';
-import {
-  buttonClass,
-  pressedButtonClass,
-  primaryButtonClass,
-  selectClass,
-} from '@/components/styles';
+import { Icon, type IconName } from '@/components/icons';
+import { cardClass, primaryButtonClass, selectClass, toolButtonClass } from '@/components/styles';
 import {
   COUNT_IN_BAR_OPTIONS,
   COUNT_IN_MODES,
@@ -40,15 +36,17 @@ interface PlayerControlsProps extends PlayerViewProps {
 
 /** Play/Pause. Part of `PlayerControls` unless the screen places it itself. */
 export function PlayPauseButton({ player, snapshot }: PlayerViewProps) {
+  const running = isRunning(snapshot.status);
   return (
     <button
       type="button"
-      className={`${primaryButtonClass} min-w-24`}
+      className={`${primaryButtonClass} min-w-24 md:min-w-28 md:text-lg`}
       disabled={!canPlay(player, snapshot)}
       // No await before this: iOS only starts audio inside the tap itself.
       onClick={() => player?.togglePlay()}
     >
-      {isRunning(snapshot.status) ? 'Pause' : 'Play'}
+      <Icon name={running ? 'pause' : 'play'} className="size-6" />
+      {running ? 'Pause' : 'Play'}
     </button>
   );
 }
@@ -57,6 +55,10 @@ export function PlayPauseButton({ player, snapshot }: PlayerViewProps) {
  * The shared controls bar: play/pause (unless `showPlayButton` is false),
  * back to start, speed, metronome, count-in, drum mute and drums only. Every
  * change is live; none restarts playback.
+ *
+ * Three rows on a phone: the buttons as one row of tiles, the speed beside
+ * the metronome volume, then the count-in; a tablet the same. From 1024 px
+ * the buttons are a line of icon-and-label buttons beside the sliders.
  */
 export function PlayerControls({ player, snapshot, showPlayButton = true }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist.
@@ -67,34 +69,54 @@ export function PlayerControls({ player, snapshot, showPlayButton = true }: Play
   return (
     <section
       aria-label="Player controls"
-      className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3"
+      className={`${cardClass} flex flex-col gap-3 p-3 md:p-4 lg:flex-row lg:flex-wrap lg:items-center lg:gap-x-6`}
     >
-      <div className="flex gap-2">
+      <div className="grid auto-cols-fr grid-flow-col gap-2 lg:flex lg:flex-wrap">
         {showPlayButton && <PlayPauseButton player={player} snapshot={snapshot} />}
         <button
           type="button"
-          className={buttonClass}
+          className={toolButtonClass(false)}
           disabled={!canPlay(player, snapshot)}
           onClick={() => player?.stop()}
         >
+          <Icon name="backToStart" />
           Back to start
         </button>
-      </div>
-
-      <SpeedSlider
-        speedRatio={snapshot.speedRatio}
-        disabled={optionsDisabled}
-        onChange={(ratio) => player?.setSpeed(ratio)}
-      />
-
-      <div className="flex flex-wrap items-center gap-2">
         <ToggleButton
+          icon="metronome"
           pressed={snapshot.metronomeOn}
           disabled={optionsDisabled}
           onChange={(on) => player?.setMetronomeOn(on)}
         >
           Metronome
         </ToggleButton>
+        <ToggleButton
+          icon="drumMuted"
+          pressed={snapshot.drumsMuted}
+          disabled={drumTogglesDisabled}
+          onChange={(muted) => player?.setDrumsMuted(muted)}
+          title={noDrumsReason}
+        >
+          Mute drums
+        </ToggleButton>
+        <ToggleButton
+          icon="headphones"
+          pressed={snapshot.drumsOnly}
+          disabled={drumTogglesDisabled}
+          onChange={(drumsOnly) => player?.setDrumsOnly(drumsOnly)}
+          title={noDrumsReason}
+        >
+          Drums only
+        </ToggleButton>
+      </div>
+
+      {/* Speed takes the larger share; on the narrowest phones the volume wraps under it. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 lg:min-w-80 lg:flex-1">
+        <SpeedSlider
+          speedRatio={snapshot.speedRatio}
+          disabled={optionsDisabled}
+          onChange={(ratio) => player?.setSpeed(ratio)}
+        />
         <VolumeSlider
           volume={snapshot.metronomeVolume}
           disabled={optionsDisabled}
@@ -109,26 +131,6 @@ export function PlayerControls({ player, snapshot, showPlayButton = true }: Play
         onBarsChange={(bars) => player?.setCountInBars(bars)}
         onModeChange={(mode) => player?.setCountInMode(mode)}
       />
-
-      {/* One group, so the pair shares a row on a phone and the bar gets no taller. */}
-      <div className="flex gap-2">
-        <ToggleButton
-          pressed={snapshot.drumsMuted}
-          disabled={drumTogglesDisabled}
-          onChange={(muted) => player?.setDrumsMuted(muted)}
-          title={noDrumsReason}
-        >
-          Mute drums
-        </ToggleButton>
-        <ToggleButton
-          pressed={snapshot.drumsOnly}
-          disabled={drumTogglesDisabled}
-          onChange={(drumsOnly) => player?.setDrumsOnly(drumsOnly)}
-          title={noDrumsReason}
-        >
-          Drums only
-        </ToggleButton>
-      </div>
     </section>
   );
 }
@@ -145,6 +147,8 @@ function SpeedSlider({
   return (
     <PercentSlider
       label="Speed"
+      className="flex-[3_1_13rem]"
+      sliderClassName="min-w-20"
       value={ratioToPercent(speedRatio)}
       min={ratioToPercent(SPEED_RATIO_MIN)}
       max={ratioToPercent(SPEED_RATIO_MAX)}
@@ -167,6 +171,11 @@ function VolumeSlider({
   return (
     <PercentSlider
       label="Metronome volume"
+      icon="volume"
+      // The row has no room for the words or the readout on a phone; the speaker stands for them.
+      compact
+      className="flex-[1_1_5rem]"
+      sliderClassName="min-w-12"
       value={ratioToPercent(volume)}
       min={ratioToPercent(METRONOME_VOLUME_MIN)}
       max={ratioToPercent(METRONOME_VOLUME_MAX)}
@@ -195,9 +204,10 @@ function CountInControls({
   onModeChange: (mode: CountInMode) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex items-center gap-2">
       <LabelledSelect
         label="Count-in"
+        icon="countIn"
         value={String(bars)}
         disabled={disabled}
         onChange={(value) => {
@@ -214,6 +224,8 @@ function CountInControls({
       <LabelledSelect
         label="When to count in"
         hideLabel
+        // It gives way before the row wraps: its option's text is cut short on a narrow phone.
+        className="min-w-0 flex-1"
         value={mode}
         // The mode only matters when there's a count-in to play.
         disabled={disabled || bars === 0}
@@ -233,14 +245,18 @@ function CountInControls({
 
 function LabelledSelect({
   label,
+  icon,
   hideLabel = false,
+  className = '',
   value,
   disabled,
   onChange,
   children,
 }: {
   label: string;
+  icon?: IconName;
   hideLabel?: boolean;
+  className?: string;
   value: string;
   disabled: boolean;
   onChange: (value: string) => void;
@@ -248,8 +264,14 @@ function LabelledSelect({
 }) {
   const id = useId();
   return (
-    <div className="flex min-h-11 items-center gap-2 text-sm">
-      <label htmlFor={id} className={hideLabel ? 'sr-only' : 'whitespace-nowrap text-neutral-300'}>
+    <div className={`flex min-h-touch items-center gap-2 text-sm ${className}`}>
+      <label
+        htmlFor={id}
+        className={
+          hideLabel ? 'sr-only' : 'flex items-center gap-2 whitespace-nowrap text-ink-soft'
+        }
+      >
+        {icon && <Icon name={icon} className="size-5 text-ink-muted" />}
         {label}
       </label>
       <select
@@ -257,7 +279,7 @@ function LabelledSelect({
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className={selectClass}
+        className={`${selectClass} min-w-0 ${hideLabel ? 'w-full' : ''}`}
       >
         {children}
       </select>
@@ -267,6 +289,10 @@ function LabelledSelect({
 
 function PercentSlider({
   label,
+  icon,
+  compact = false,
+  className,
+  sliderClassName,
   value,
   min,
   max,
@@ -275,6 +301,14 @@ function PercentSlider({
   onChange,
 }: {
   label: string;
+  /** Beside the label's words; in place of them when `compact`. */
+  icon?: IconName;
+  /** The label's words and the readout are left to screen readers below 768 px (`aria-valuetext` says the value). */
+  compact?: boolean;
+  /** The slider's share of its row. */
+  className: string;
+  /** The narrowest the slider itself gets before the row wraps. */
+  sliderClassName: string;
   value: number;
   min: number;
   max: number;
@@ -284,9 +318,10 @@ function PercentSlider({
 }) {
   const id = useId();
   return (
-    <div className="flex min-h-11 items-center gap-2 text-sm">
-      <label htmlFor={id} className="whitespace-nowrap text-neutral-300">
-        {label}
+    <div className={`flex min-h-touch items-center gap-2 text-sm ${className}`}>
+      <label htmlFor={id} className="flex items-center gap-2 whitespace-nowrap text-ink-soft">
+        {icon && <Icon name={icon} className="size-5 text-ink-muted" />}
+        <span className={compact ? 'max-md:sr-only' : undefined}>{label}</span>
       </label>
       <input
         id={id}
@@ -298,9 +333,12 @@ function PercentSlider({
         aria-valuetext={`${value}%`}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="min-h-11 w-28 accent-sky-500 sm:w-36"
+        className={`min-h-touch min-w-0 flex-1 ${sliderClassName}`}
       />
-      <output htmlFor={id} className="w-11 text-right tabular-nums">
+      <output
+        htmlFor={id}
+        className={`w-11 shrink-0 text-right font-semibold tabular-nums ${compact ? 'max-md:sr-only' : ''}`}
+      >
         {value}%
       </output>
     </div>
@@ -308,12 +346,14 @@ function PercentSlider({
 }
 
 function ToggleButton({
+  icon,
   pressed,
   disabled,
   onChange,
   title,
   children,
 }: {
+  icon: IconName;
   pressed: boolean;
   disabled: boolean;
   onChange: (pressed: boolean) => void;
@@ -327,8 +367,9 @@ function ToggleButton({
       disabled={disabled}
       title={title}
       onClick={() => onChange(!pressed)}
-      className={pressed ? pressedButtonClass : buttonClass}
+      className={toolButtonClass(pressed)}
     >
+      <Icon name={icon} />
       {children}
     </button>
   );

@@ -3,7 +3,8 @@ import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
-import { buttonClass, primaryButtonClass } from '@/components/styles';
+import { EmptyState, LoadingLine } from '@/components/StatusMessages';
+import { buttonClass, cardClass, primaryButtonClass } from '@/components/styles';
 import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
 import { SignOutButton } from '@/features/auth/SignOutButton';
 import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
@@ -28,12 +29,12 @@ export function SettingsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader title="Settings" />
       {waitsForNetwork(settings) ? (
-        <p className="text-neutral-400">
+        <EmptyState icon="offline">
           You're offline, and your settings haven't been opened on this device yet. They show once
           you're back online.
-        </p>
+        </EmptyState>
       ) : settings.isPending ? (
-        <p className="text-neutral-400">Loading settings…</p>
+        <LoadingLine>Loading settings…</LoadingLine>
       ) : // Only a failed first load blocks the form. A failed background refetch
       // keeps the cached row, and unmounting the form would drop unsaved edits.
       settings.isLoadingError ? (
@@ -44,8 +45,8 @@ export function SettingsPage() {
         <SettingsForm saved={settings.data} />
       )}
       <KeyboardSection />
-      <section className="flex flex-col items-start gap-2 border-t border-neutral-800 pt-6">
-        <h2 className="text-lg font-semibold">Account</h2>
+      <section className={`${cardClass} flex max-w-xl flex-col items-start gap-3 p-5`}>
+        <h2 className="text-lg font-bold tracking-tight">Account</h2>
         <SignOutButton />
       </section>
     </div>
@@ -103,7 +104,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
 
   return (
     <form
-      className="flex max-w-xl flex-col gap-6"
+      className={`${cardClass} flex max-w-xl flex-col gap-8 p-5`}
       onSubmit={onSubmit}
       aria-busy={saving}
       noValidate
@@ -121,7 +122,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
             Discard changes
           </button>
         )}
-        <p role="status" className="text-sm text-neutral-400">
+        <p role="status" className="text-sm text-ink-muted">
           {update.isSuccess && !dirty ? 'Saved' : ''}
         </p>
       </div>
@@ -141,11 +142,11 @@ function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
 
   return (
     <fieldset className="flex flex-col gap-3">
-      <legend className="mb-2 text-lg font-semibold">Metronome</legend>
-      <label className="flex min-h-11 items-center gap-3">
+      <legend className="mb-2 text-lg font-bold tracking-tight">Metronome</legend>
+      <label className="flex min-h-touch items-center gap-3">
         <input
           type="checkbox"
-          className="size-5 accent-sky-500"
+          className="size-5 accent-brand"
           checked={values.metronome_on}
           onChange={(event) => edit({ metronome_on: event.target.checked })}
         />
@@ -155,14 +156,14 @@ function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
         {/* The output sits outside the label, so the slider's name is just "Metronome volume". */}
         <div className="flex justify-between">
           <label htmlFor={volumeId}>Metronome volume</label>
-          <output htmlFor={volumeId} className="tabular-nums text-neutral-300">
+          <output htmlFor={volumeId} className="tabular-nums text-ink-soft">
             {volumePercent}%
           </output>
         </div>
         <input
           id={volumeId}
           type="range"
-          className="min-h-11 accent-sky-500"
+          className="min-h-touch accent-brand"
           min={0}
           max={100}
           step={5}
@@ -174,7 +175,7 @@ function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
           }
         />
         {errors.metronome_volume && (
-          <span className="text-sm text-red-300">{errors.metronome_volume}</span>
+          <span className="text-sm text-danger">{errors.metronome_volume}</span>
         )}
       </div>
     </fieldset>
@@ -187,17 +188,18 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
 
   return (
     <fieldset className="flex flex-col gap-3">
-      <legend className="mb-2 text-lg font-semibold">Count-in</legend>
+      <legend className="mb-2 text-lg font-bold tracking-tight">Count-in</legend>
       <div role="radiogroup" aria-label="Count-in length" className="flex flex-wrap gap-2">
         {COUNT_IN_BAR_OPTIONS.map((bars) => (
           <label
             key={bars}
-            className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-neutral-700 px-4 has-[:checked]:border-sky-500 has-[:checked]:bg-sky-950"
+            // The radio is visible, so its own focus ring shows; the pill shows which is chosen.
+            className="flex min-h-touch cursor-pointer items-center gap-2 rounded-control border border-field-line px-4 transition-colors duration-150 hover:bg-raised has-[:checked]:border-brand has-[:checked]:bg-brand-soft"
           >
             <input
               type="radio"
               name="count_in_bars"
-              className="accent-sky-500"
+              className="accent-brand"
               checked={values.count_in_bars === bars}
               onChange={() => edit({ count_in_bars: bars })}
             />
@@ -205,17 +207,17 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
           </label>
         ))}
       </div>
-      {errors.count_in_bars && <p className="text-sm text-red-300">{errors.count_in_bars}</p>}
+      {errors.count_in_bars && <p className="text-sm text-danger">{errors.count_in_bars}</p>}
       <div role="radiogroup" aria-label="When the count-in plays" className="flex flex-col gap-1">
         {(Object.keys(COUNT_IN_MODE_LABELS) as CountInMode[]).map((mode) => (
           <label
             key={mode}
-            className={`flex min-h-11 items-center gap-3 ${countInOff ? 'text-neutral-500' : ''}`}
+            className={`flex min-h-touch items-center gap-3 ${countInOff ? 'text-ink-muted opacity-60' : ''}`}
           >
             <input
               type="radio"
               name="count_in_mode"
-              className="size-5 accent-sky-500"
+              className="size-5 accent-brand"
               checked={values.count_in_mode === mode}
               disabled={countInOff}
               onChange={() => edit({ count_in_mode: mode })}
@@ -224,7 +226,7 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
           </label>
         ))}
       </div>
-      {errors.count_in_mode && <p className="text-sm text-red-300">{errors.count_in_mode}</p>}
+      {errors.count_in_mode && <p className="text-sm text-danger">{errors.count_in_mode}</p>}
     </fieldset>
   );
 }
@@ -232,11 +234,11 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
 function DrumsFieldset({ values, edit }: FieldsetProps) {
   return (
     <fieldset className="flex flex-col gap-3">
-      <legend className="mb-2 text-lg font-semibold">Drums</legend>
-      <label className="flex min-h-11 items-center gap-3">
+      <legend className="mb-2 text-lg font-bold tracking-tight">Drums</legend>
+      <label className="flex min-h-touch items-center gap-3">
         <input
           type="checkbox"
-          className="size-5 accent-sky-500"
+          className="size-5 accent-brand"
           checked={values.drums_muted_default}
           onChange={(event) => edit({ drums_muted_default: event.target.checked })}
         />
@@ -259,26 +261,26 @@ function KeyboardSection() {
   const descriptionId = useId();
 
   return (
-    <section className="flex max-w-xl flex-col gap-3 border-t border-neutral-800 pt-6">
-      <h2 className="text-lg font-semibold">Keyboard on this device</h2>
+    <section className={`${cardClass} flex max-w-xl flex-col gap-3 p-5`}>
+      <h2 className="text-lg font-bold tracking-tight">Keyboard on this device</h2>
       <div className="flex flex-col gap-1">
-        <label className="flex min-h-11 items-center gap-3">
+        <label className="flex min-h-touch items-center gap-3">
           <input
             type="checkbox"
-            className="size-5 accent-sky-500"
+            className="size-5 accent-brand"
             checked={on}
             aria-describedby={descriptionId}
             onChange={(event) => setNotKept(!saveCharacterKeysOn(event.target.checked))}
           />
           Single-letter shortcuts
         </label>
-        <p id={descriptionId} className="text-sm text-neutral-400">
+        <p id={descriptionId} className="text-sm text-ink-muted">
           {characterKeysLabel()} on the song page. For this device only, and saved as soon as you
           change it. Turn them off if speech input or a stray key press sets them off. Space, the
           arrow keys and Page Up / Page Down (pedals) keep working either way.
         </p>
       </div>
-      <p role="status" className="text-sm text-amber-300">
+      <p role="status" className="text-sm text-warning">
         {notKept ? 'This browser won’t keep this after the app is closed.' : ''}
       </p>
     </section>

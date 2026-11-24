@@ -1,5 +1,6 @@
 import { ErrorAlert } from '@/components/ErrorAlert';
-import { buttonClass } from '@/components/styles';
+import { Icon } from '@/components/icons';
+import { quietButtonClass } from '@/components/styles';
 import type { LoopStatus } from '@/lib/schema';
 import { statusButtonAttributes } from './loopFocus';
 import type { Loop } from './loopForm';
@@ -29,7 +30,7 @@ export function LoopStatusButton({
     <>
       <button
         type="button"
-        className={buttonClass}
+        className={quietButtonClass}
         // Locked while any control is changing this loop's status, not only this one. Locked,
         // not disabled: focus follows the loop to this button while the write is still on its
         // way, and a disabled button can't take it. `setStatus` ignores the press meanwhile.
@@ -42,6 +43,7 @@ export function LoopStatusButton({
           if (status.setStatus(next)) onSet?.(next);
         }}
       >
+        <Icon name={finished ? 'reopen' : 'check'} className="size-4" />
         {finished ? 'Reopen' : 'Mark finished'}
         <span className="sr-only"> {loop.name}</span>
       </button>

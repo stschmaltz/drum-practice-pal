@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { buttonClass } from './styles';
+import { Icon } from './icons';
+import { buttonClass, inlineIconClass } from './styles';
 
 /**
  * A first load that failed, with a way to read again. For `isLoadingError`
@@ -16,8 +17,16 @@ export function LoadErrorAlert({
   compact?: boolean;
 }) {
   return (
-    <div role="alert" className={`flex flex-col items-start ${compact ? 'gap-2' : 'gap-3'}`}>
-      <p className={compact ? 'text-sm text-red-300' : 'text-red-300'}>{children}</p>
+    <div
+      role="alert"
+      className={`flex flex-col items-start rounded-card border border-danger-solid/50 bg-danger-soft ${
+        compact ? 'gap-2 p-3' : 'gap-3 p-4'
+      }`}
+    >
+      <p className={`text-danger ${compact ? 'text-sm' : ''}`}>
+        <Icon name="alert" className={`${inlineIconClass} ${compact ? 'size-4' : 'size-5'}`} />
+        {children}
+      </p>
       <button type="button" className={buttonClass} onClick={onRetry}>
         Try again
       </button>

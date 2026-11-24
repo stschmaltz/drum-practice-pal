@@ -2,7 +2,17 @@ import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link, useParams } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
-import { buttonClass, pressedButtonClass } from '@/components/styles';
+import { Icon } from '@/components/icons';
+import { LoadErrorAlert } from '@/components/LoadErrorAlert';
+import { EmptyState, LoadingLine } from '@/components/StatusMessages';
+import {
+  activeCardClass,
+  buttonClass,
+  ghostButtonClass,
+  inlineIconClass,
+  linkClass,
+  pressedButtonClass,
+} from '@/components/styles';
 import type { Song } from '@/features/library/songForm';
 import { useSong, useSongFile } from '@/features/library/useSongs';
 import { barsLabel, type Loop } from '@/features/loops/loopForm';
@@ -60,7 +70,7 @@ export function SongPage() {
       </OfflineMessage>
     );
   }
-  if (song.isPending) return <p className="text-neutral-400">Loading song…</p>;
+  if (song.isPending) return <LoadingLine>Loading song…</LoadingLine>;
   if (song.isLoadingError) {
     return <LoadFailed message="Couldn't load this song." onRetry={() => void song.refetch()} />;
   }
@@ -106,7 +116,7 @@ function SongBody({ song }: { song: Song }) {
   }
   // Settings that can't be fetched offline give way to the defaults, like a failed fetch.
   if (file.isPending || (settings.isPending && !waitsForNetwork(settings) && !playerOpened)) {
-    return <p className="text-neutral-400">Downloading the song…</p>;
+    return <LoadingLine>Downloading the song…</LoadingLine>;
   }
   // Remembered during render, so the next render already knows (React's "state from
   // the previous render" pattern); per song, since another song's file is waited for again.
@@ -115,7 +125,8 @@ function SongBody({ song }: { song: Song }) {
   return (
     <>
       {settings.isLoadingError && (
-        <p className="text-sm text-amber-300">
+        <p className="flex items-start gap-2 text-sm text-warning">
+          <Icon name="alert" className="mt-0.5 size-4" />
           Couldn't load your settings, so the player is using the defaults.
         </p>
       )}
@@ -239,10 +250,11 @@ function ShortcutsButton({ onOpen }: { onOpen: () => void }) {
   return (
     <button
       type="button"
-      className={`hidden md:inline-flex md:items-center ${buttonClass}`}
+      className={`max-md:hidden ${ghostButtonClass} whitespace-nowrap`}
       aria-haspopup="dialog"
       onClick={onOpen}
     >
+      <Icon name="keyboard" />
       Shortcuts
     </button>
   );
@@ -264,11 +276,12 @@ function LoopPanelToggle({
   return (
     <button
       type="button"
-      className={`hidden md:inline-flex md:items-center ${open ? pressedButtonClass : buttonClass}`}
+      className={`max-md:hidden ${open ? pressedButtonClass : buttonClass} whitespace-nowrap`}
       aria-expanded={open}
       aria-controls={panelBodyId}
       onClick={() => onOpenChange(!open)}
     >
+      <Icon name="loop" />
       {open ? 'Hide loops' : 'Show loops'}
     </button>
   );
@@ -300,7 +313,7 @@ function ScoreBox({
         // margin keeps the box clear of the phone's fixed tab bar and the loop sheet's
         // header above it when playback scrolls it into view (useJamMode sets the top
         // one from the sticky bar's height).
-        className="jam-score relative h-[60dvh] scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-lg bg-white text-black md:scroll-mb-4"
+        className="jam-score relative h-[60dvh] scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:scroll-mb-4"
       >
         <div ref={scoreRef} />
       </div>
@@ -316,13 +329,15 @@ function ActiveLoopLine({ loop, onExit }: { loop: Loop; onExit: () => void }) {
   return (
     <div
       data-testid="active-loop"
-      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border border-sky-800 bg-sky-950/40 px-3 py-1"
+      className={`${activeCardClass} flex items-center justify-between gap-3 py-1 pr-1 pl-3`}
     >
-      <p className="min-w-0 break-words text-sm">
+      <Icon name="loop" className="size-5 text-brand" />
+      {/* Two lines at most: a long unbroken name is cut short, not stacked a letter per line. */}
+      <p className="line-clamp-2 min-w-0 flex-1 text-sm break-words" title={loop.name}>
         Looping <span className="font-semibold">{loop.name}</span> ·{' '}
         {barsLabel(loop.start_bar, loop.end_bar)}
       </p>
-      <button type="button" className={buttonClass} onClick={onExit}>
+      <button type="button" className={`${ghostButtonClass} shrink-0`} onClick={onExit}>
         Exit loop
       </button>
     </div>
@@ -345,8 +360,12 @@ function SessionNotice({
   const online = useOnline();
   if (unsaved.length > 0) {
     return (
-      <div role="alert" className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <p className="text-sm text-red-300">
+      <div
+        role="alert"
+        className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-card border border-danger-solid/50 bg-danger-soft py-1 pr-1 pl-3"
+      >
+        <p className="flex flex-1 items-start gap-2 text-sm text-danger">
+          <Icon name="alert" className="mt-0.5 size-4" />
           {unsaved.length === 1
             ? "Couldn't save your last practice session."
             : `Couldn't save your last ${unsaved.length} practice sessions.`}
@@ -359,7 +378,12 @@ function SessionNotice({
   }
   if (waiting.length > 0 && !online) {
     return (
-      <p role="status" className="text-sm text-neutral-400" data-testid="session-waiting">
+      <p
+        role="status"
+        className="flex items-start gap-2 text-sm text-ink-muted"
+        data-testid="session-waiting"
+      >
+        <Icon name="offline" className="mt-0.5 size-4 text-warning" />
         Practice saved on this device. It's logged when you're back online.
       </p>
     );
@@ -367,7 +391,8 @@ function SessionNotice({
   if (!lastLogged) return null;
   const loopName = loops?.find((loop) => loop.id === lastLogged.loopId)?.name;
   return (
-    <p role="status" className="text-sm text-neutral-400" data-testid="session-logged">
+    <p role="status" className="text-sm text-ink-muted" data-testid="session-logged">
+      <Icon name="check" className={`${inlineIconClass} size-4 text-success`} />
       Practice logged: {durationLabel(lastLogged.durationSeconds)}
       {loopName !== undefined && <> of {loopName}</>} at {ratioToPercent(lastLogged.speedRatio)}%.
     </p>
@@ -395,7 +420,7 @@ function JamBar({
     <div
       ref={ref}
       data-testid="jam-bar"
-      className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-neutral-950 px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:-mx-8 md:px-8"
+      className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-canvas px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:-mx-8 md:px-8"
     >
       <JamReadout speedRatio={snapshot.speedRatio} tempo={tempo} />
       <PlayPauseButton player={player} snapshot={snapshot} />
@@ -410,7 +435,7 @@ function JamBar({
  */
 function JamReadout({ speedRatio, tempo }: { speedRatio: number; tempo: number | null }) {
   return (
-    <dl aria-label="Tempo" className="flex items-baseline gap-6 tabular-nums">
+    <dl aria-label="Tempo" className="flex items-baseline gap-4 tabular-nums md:gap-6">
       <ReadoutValue label="Speed" testId="jam-speed">
         {ratioToPercent(speedRatio)}%
       </ReadoutValue>
@@ -432,8 +457,8 @@ function ReadoutValue({
 }) {
   return (
     <div className="flex items-baseline gap-2">
-      <dt className="text-sm text-neutral-400">{label}</dt>
-      <dd className="text-3xl font-semibold" data-testid={testId}>
+      <dt className="text-xs font-semibold tracking-wider text-ink-muted uppercase">{label}</dt>
+      <dd className="text-readout md:text-4xl md:font-bold" data-testid={testId}>
         {children}
       </dd>
     </div>
@@ -446,7 +471,7 @@ function PlayerStatusLine({ snapshot }: { snapshot: PlayerSnapshot }) {
     return <ErrorAlert>{PLAYER_ERROR_MESSAGES[snapshot.error]}</ErrorAlert>;
   }
   return (
-    <p className="text-sm text-neutral-400" aria-live="polite" data-testid="player-status">
+    <p className="text-sm text-ink-muted" aria-live="polite" data-testid="player-status">
       {snapshot.status === 'loading'
         ? 'Loading the score and sounds…'
         : `Bar ${snapshot.barNumber ?? 1} of ${snapshot.barCount ?? '?'}`}
@@ -456,25 +481,22 @@ function PlayerStatusLine({ snapshot }: { snapshot: PlayerSnapshot }) {
 }
 
 function LoadFailed({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div role="alert" className="flex flex-col items-start gap-3">
-      <p className="text-red-300">{message}</p>
-      <button type="button" className={buttonClass} onClick={onRetry}>
-        Try again
-      </button>
-    </div>
-  );
+  return <LoadErrorAlert onRetry={onRetry}>{message}</LoadErrorAlert>;
 }
 
 function OfflineMessage({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-amber-300">You're offline.</p>
-      <p className="text-neutral-300">{children}</p>
-      <Link to="/library" className="text-sky-400 underline">
-        Go to Library
-      </Link>
-    </div>
+    <EmptyState
+      icon="offline"
+      action={
+        <Link to="/library" className={linkClass}>
+          Go to Library
+        </Link>
+      }
+    >
+      <span className="block font-semibold text-warning">You're offline.</span>
+      {children}
+    </EmptyState>
   );
 }
 
@@ -484,7 +506,7 @@ function SongNotFound() {
       <PageHeader title="Song not found">
         This song isn't in your library. It may have been deleted.
       </PageHeader>
-      <Link to="/library" className="text-sky-400 underline">
+      <Link to="/library" className={`${linkClass} self-start`}>
         Go to Library
       </Link>
     </div>

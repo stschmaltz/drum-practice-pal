@@ -1,4 +1,7 @@
 import { NavLink, Outlet } from 'react-router';
+import { Wordmark } from '@/components/Brand';
+import { Icon } from '@/components/icons';
+import { focusRing, ghostButtonClass } from '@/components/styles';
 import { SignOutButton } from '@/features/auth/SignOutButton';
 import { OfflineBanner } from '@/features/offline/OfflineBanner';
 import { useOutboxReplay } from '@/features/offline/useOutboxReplay';
@@ -14,24 +17,26 @@ export function AppShell() {
 
   return (
     <div className="min-h-dvh md:flex">
-      <aside className="hidden md:sticky md:top-0 md:flex md:h-dvh md:w-56 md:shrink-0 md:flex-col md:gap-6 md:border-r md:border-neutral-800 md:p-4">
-        <p className="px-3 text-lg font-semibold">Drum Practice Pal</p>
+      <aside className="hidden md:sticky md:top-0 md:flex md:h-dvh md:w-56 md:shrink-0 md:flex-col md:gap-8 md:border-r md:border-line md:bg-surface md:p-4">
+        <p className="px-2 pt-2">
+          <Wordmark />
+        </p>
         <nav aria-label="Main" className="flex flex-col gap-1">
           <NavLinks
             linkClass={(isActive) =>
-              `flex min-h-11 items-center rounded-md px-3 ${
+              `flex min-h-touch items-center gap-3 rounded-control px-3 transition-colors duration-150 ${focusRing} ${
                 isActive
-                  ? 'bg-neutral-800 font-semibold text-white'
-                  : 'text-neutral-300 hover:bg-neutral-900'
+                  ? 'bg-raised font-semibold text-ink shadow-[inset_3px_0_0_var(--color-brand)]'
+                  : 'text-ink-soft hover:bg-raised hover:text-ink'
               }`
             }
           />
         </nav>
-        <div className="mt-auto flex flex-col gap-2 px-3 text-sm">
-          <p className="truncate text-neutral-400" title={user.email}>
+        <div className="mt-auto flex flex-col gap-2 border-t border-line px-1 pt-4 text-sm">
+          <p className="truncate px-2 text-ink-muted" title={user.email}>
             {user.email}
           </p>
-          <SignOutButton />
+          <SignOutButton className={`${ghostButtonClass} w-full justify-start`} />
         </div>
       </aside>
 
@@ -42,14 +47,15 @@ export function AppShell() {
         <Outlet />
       </main>
 
+      {/* h-14 plus the 1px border: the loop sheet and the score's scroll margin sit above exactly this. */}
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-10 flex border-t border-neutral-800 bg-neutral-950 pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-10 flex border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         <NavLinks
           linkClass={(isActive) =>
-            `flex min-h-14 flex-1 items-center justify-center text-sm ${
-              isActive ? 'font-semibold text-sky-400' : 'text-neutral-400'
+            `flex h-14 flex-1 flex-col items-center justify-center gap-0.5 text-xs ${focusRing} focus-visible:-outline-offset-2 ${
+              isActive ? 'font-semibold text-brand' : 'text-ink-muted'
             }`
           }
         />
@@ -67,6 +73,7 @@ function NavLinks({ linkClass }: { linkClass: (isActive: boolean) => string }) {
       end={item.end}
       className={({ isActive }) => linkClass(isActive)}
     >
+      <Icon name={item.icon} />
       {item.label}
     </NavLink>
   ));

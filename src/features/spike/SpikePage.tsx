@@ -113,7 +113,7 @@ export function SpikePage() {
     <main className="mx-auto flex max-w-6xl flex-col gap-4 p-4">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="text-2xl font-semibold">alphaTab spike</h1>
-        <p className="text-sm text-neutral-400" data-testid="now-playing">
+        <p className="text-sm text-ink-muted" data-testid="now-playing">
           {snapshot?.scoreTitle ?? 'Loading…'} · bar {snapshot?.currentBarNumber ?? '-'} of{' '}
           {barCount} · {Math.round(options.speedRatio * 100)}% · {bpm ?? '-'} BPM
         </p>
@@ -325,7 +325,7 @@ export function SpikePage() {
       <div
         ref={scrollRef}
         data-testid="score-viewport"
-        className={`relative max-h-[70dvh] rounded border border-neutral-700 bg-white ${
+        className={`relative max-h-[70dvh] rounded border border-line-strong bg-score-paper ${
           layout === 'horizontal' ? 'overflow-x-auto overflow-y-hidden' : 'overflow-auto'
         }`}
       >
@@ -333,7 +333,7 @@ export function SpikePage() {
       </div>
 
       <section aria-label="Diagnostics" className="grid gap-3 text-sm lg:grid-cols-2">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded border border-neutral-700 p-3">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded border border-line-strong p-3">
           <Stat name="Tracks" value={snapshot?.trackNames.join(', ') || '-'} />
           <Stat
             name="Metronome beat"
@@ -394,7 +394,7 @@ export function SpikePage() {
         </dl>
         <ol
           aria-label="Event log"
-          className="max-h-72 overflow-auto rounded border border-neutral-700 p-3 font-mono text-xs"
+          className="max-h-72 overflow-auto rounded border border-line-strong p-3 font-mono text-xs"
         >
           {[...log].reverse().map((entry, i) => (
             <li key={`${entry.at}-${i}`}>
@@ -407,13 +407,12 @@ export function SpikePage() {
   );
 }
 
-const inputClass = 'w-full rounded border border-neutral-600 bg-neutral-900 px-2 py-2 text-sm';
-const buttonClass =
-  'min-h-11 rounded bg-neutral-100 px-4 font-medium text-neutral-900 disabled:opacity-40';
+const inputClass = 'w-full rounded border border-line-strong bg-surface px-2 py-2 text-sm';
+const buttonClass = 'min-h-touch rounded bg-ink px-4 font-medium text-canvas disabled:opacity-40';
 
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <fieldset className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
+    <fieldset className="flex flex-col gap-2 rounded border border-line-strong p-3">
       <legend className="px-1 text-sm font-semibold">{title}</legend>
       {children}
     </fieldset>
@@ -430,7 +429,7 @@ function Check({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex min-h-11 items-center gap-2 text-sm">
+    <label className="flex min-h-touch items-center gap-2 text-sm">
       <input
         type="checkbox"
         className="size-5"
@@ -476,7 +475,7 @@ function NumberInput({
 function Stat({ name, value }: { name: string; value: string }) {
   return (
     <>
-      <dt className="text-neutral-400">{name}</dt>
+      <dt className="text-ink-muted">{name}</dt>
       <dd className="break-all">{value}</dd>
     </>
   );

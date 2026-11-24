@@ -1,6 +1,8 @@
 /**
  * Draws the app icons in public/ from one SVG, with Playwright's Chromium.
- * Run with: npm run icons. The PNGs are committed; Unit 12 redraws the mark.
+ * Run with: npm run icons. The PNGs are committed. The mark is the one the
+ * page draws (`src/components/brandMark.ts`), in the colour tokens read from
+ * `src/index.css`, so a change of theme is a change of tokens and a rerun.
  *
  * - favicon.svg: the mark on a rounded square, for browser tabs.
  * - icon-192.png, icon-512.png: the manifest's icons ("any").
@@ -8,28 +10,29 @@
  *   80%), on a full-bleed background, for Android's shaped launcher icons.
  * - apple-touch-icon.png (180 px): full bleed; iOS rounds the corners itself.
  */
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { brandMarkMarkup } from '../src/components/brandMark';
+import { colorToken, parseColorTokens } from '../src/lib/themeTokens';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 
-const BACKGROUND = '#0a0a0a';
+const tokens = parseColorTokens(
+  readFileSync(fileURLToPath(new URL('../src/index.css', import.meta.url)), 'utf8'),
+);
 
-/** A drum with two crossed sticks, drawn on a 512 grid. */
-const MARK = `
-  <line x1="150" y1="96" x2="262" y2="232" stroke="#f5f5f5" stroke-width="20" stroke-linecap="round"/>
-  <line x1="362" y1="96" x2="250" y2="232" stroke="#f5f5f5" stroke-width="20" stroke-linecap="round"/>
-  <path d="M106 250 v104 a150 54 0 0 0 300 0 v-104 a150 54 0 0 1 -300 0z" fill="#0369a1"/>
-  <ellipse cx="256" cy="250" rx="150" ry="54" fill="#38bdf8"/>
-`;
+// The manifest's background_color and theme_color are this too (checked in tests/unit/designTokens.test.ts).
+const BACKGROUND = colorToken(tokens, 'canvas');
+
+const MARK = brandMarkMarkup((name) => colorToken(tokens, name));
 
 function svg({ rounded, scale }: { rounded: boolean; scale: number }): string {
   const offset = (512 * (1 - scale)) / 2;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="${rounded ? 96 : 0}" fill="${BACKGROUND}"/>
-  <g transform="translate(${offset} ${offset + 24 * scale}) scale(${scale})">${MARK}</g>
+  <g transform="translate(${offset} ${offset + 8 * scale}) scale(${scale})">${MARK}</g>
 </svg>`;
 }
 
