@@ -289,8 +289,15 @@ test('Mark finished and Reopen keep focus on the loop while the write is on its 
   const reopen = loopPanel(page).getByRole('button', { name: 'Reopen Verse' });
   await expect(reopen).toBeFocused();
   await expect(reopen).toHaveAttribute('aria-disabled', 'true');
+  // Locked as assistive tech and the eye see it (dimmed by `buttonBase`), not only by attribute.
+  await expect(reopen).toBeDisabled();
+  await expect(reopen).toHaveCSS('opacity', '0.5');
+  // Enter on it sends nothing: a second PATCH would be held too, and the next release counts them.
+  await page.keyboard.press('Enter');
   await releaseWrite();
   await expect(reopen).not.toHaveAttribute('aria-disabled');
+  await expect(reopen).toBeEnabled();
+  await expect(reopen).toHaveCSS('opacity', '1');
   await expect(reopen).toBeFocused();
   await expect
     .poll(async () => (await loopsOf(user)).map((loop) => loop.status))

@@ -977,6 +977,40 @@ describe('LoopPanel finishing a loop', () => {
     expect(savedLate(view)?.status).toBe('finished');
   });
 
+  it('while the list’s Reopen is on its way, the prompt’s Mark finished is locked, and a press sends nothing', async () => {
+    const finishedAtTarget = loopRow('late', {
+      ...atTarget,
+      status: 'finished',
+      finished_at: '2026-11-20T10:00:00Z',
+    });
+    const view = renderPanel({ loops: [intro, finishedAtTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+    const release = view.table.holdNext('update');
+    await view.press('Reopen Late');
+
+    // Reopened at its target, so the prompt asks at once, with the reopen still pending.
+    const finish = await prompt(view).findByRole('button', { name: 'Mark finished' });
+    expect(finish).toHaveAttribute('aria-disabled', 'true');
+    await view.user.click(finish);
+    finish.focus();
+    await view.user.keyboard('{Enter}');
+    await view.user.keyboard(' ');
+    await settle();
+    expect(view.table.sent('update')).toEqual([{ status: 'active' }]);
+    // The refused press had no other effect: the prompt is still asking.
+    expect(view.panel.getByTestId('finish-prompt')).toBeInTheDocument();
+
+    release();
+    await waitFor(() => expect(finish).not.toHaveAttribute('aria-disabled'));
+    await view.user.click(finish);
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ status: 'active' }, { status: 'finished' }]),
+    );
+    await waitFor(() => expect(finishedNames(view)).toEqual(['Late']));
+  });
+
   it('"Save speed" answered while "Mark finished" is on its way does not put the loop back among the active', async () => {
     const view = renderPanel({ loops: [intro, atTarget] });
     await view.press('Play loop Late');
@@ -1295,6 +1329,50 @@ describe('LoopPanel keeping focus (Unit 10)', () => {
     releaseReopen();
     await waitFor(() => expect(finish).not.toHaveAttribute('aria-disabled'));
     expect(finish).toHaveFocus();
+  });
+
+  it('Space on the locked Reopen sends nothing either', async () => {
+    const view = renderPanel();
+    const release = view.table.holdNext('update');
+    await view.press('Mark finished Intro');
+    const reopen = await view.panel.findByRole('button', { name: 'Reopen Intro' });
+    await waitFor(() => expect(reopen).toHaveFocus());
+
+    await view.user.keyboard(' ');
+    await settle();
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+    release();
+    await waitFor(() => expect(reopen).not.toHaveAttribute('aria-disabled'));
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+  });
+
+  it('a refused write unlocks the loop’s button where it lands, and a press there sends again', async () => {
+    const view = renderPanel();
+    const refuse = view.table.holdNext('update');
+    view.table.failNext('update', 'nope');
+    (await view.panel.findByRole('button', { name: 'Mark finished Intro' })).focus();
+    await view.user.keyboard('{Enter}');
+    const reopen = await view.panel.findByRole('button', { name: 'Reopen Intro' });
+    await waitFor(() => expect(reopen).toHaveFocus());
+    expect(reopen).toHaveAttribute('aria-disabled', 'true');
+
+    refuse();
+
+    await waitFor(() =>
+      expect(view.panel.queryByRole('region', { name: 'Finished loops' })).not.toBeInTheDocument(),
+    );
+    expect(await view.item('Intro').findByRole('alert')).toHaveTextContent(
+      "Couldn't change the loop: nope",
+    );
+    const finish = view.panel.getByRole('button', { name: 'Mark finished Intro' });
+    expect(finish).not.toHaveAttribute('aria-disabled');
+    await view.user.click(finish);
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ status: 'finished' }, { status: 'finished' }]),
+    );
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Reopen Intro' })).toHaveFocus(),
+    );
   });
 
   it('with the prompt’s write on its way, focus is on the loop’s Reopen at once', async () => {

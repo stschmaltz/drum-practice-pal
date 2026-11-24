@@ -213,3 +213,39 @@ Fixes QA issue 1: "Mark finished" and "Reopen" in the song page's loop panel, an
 
 1. Song with two loops; in devtools throttle to "Slow 3G" (or hold the loops PATCH). Focus a loop's "Mark finished", press Enter: focus is on its "Reopen" under Finished at once, dimmed; Enter there does nothing; once the write lands it is no longer dimmed and still focused. Reopen likewise.
 2. Play a loop at its target, press the prompt's "Mark finished": focus is on the loop's "Reopen".
+
+## Test: QA fix round 1
+
+### Summary
+
+Re-ran on the area changed by QA fix round 1: the status buttons (`LoopStatusButton`, the "Mark finished?" prompt's button) locked with `aria-disabled` instead of `disabled` while a status write to their loop is pending. A locked button can now be focused and pressed, so the lock rests on `setStatus`'s refusal alone. The tests below press locked buttons every way (click, Enter, Space) on the song page and the home page, cross the three controls of one loop, refuse a write while focus is on a locked button, and check that the lock still reads as disabled to assistive tech and still looks dimmed. Build's own tests (Enter on the focused locked Reopen, focus during the prompt's write, the e2e spec) were already there; these add only what they left out.
+
+### Tests added
+
+- `src/features/loops/LoopPanel.test.tsx`
+  - "LoopPanel finishing a loop": **while the list's Reopen is on its way, the prompt's Mark finished is locked, and a press sends nothing.** A finished loop at its target is played and reopened with the write held. The prompt asks at once, its button is `aria-disabled`, and a click, Enter and Space on it send nothing and leave the prompt in place. Once the write lands, a press finishes the loop. This is the third pair of the three controls (list then prompt). Build's tests covered prompt then list, and list then list.
+  - "LoopPanel keeping focus (Unit 10)": **Space on the locked Reopen sends nothing either.** No page shortcuts in this harness, so Space presses the button natively. It sends nothing, before or after the write lands.
+  - Same describe: **a refused write unlocks the loop's button where it lands, and a press there sends again.** Enter on a focused Mark finished, held then refused. With focus on the locked Reopen, the refusal shows its alert under the loop, the loop's Mark finished is no longer locked, a press sends the second write, and focus follows to Reopen.
+- `src/features/practice/OnTheGoPage.test.tsx`, "moves the loop at once and locks its button…": the locked Reopen is now also focused and pressed with Enter and Space, not only clicked. The home page has no shortcuts, so both are native presses.
+- `src/features/song/SongPage.test.tsx`, "SongPage keyboard shortcuts": **Space on a loop's Reopen, focused while its write is on its way, pauses and sends nothing.** With a loop playing, Enter on Mark finished Late (held) puts focus on the locked Reopen. Space there is the page's play/pause (one `engine.pause`) and no press. Enter there sends nothing. Focus stays after the write lands.
+- `tests/e2e/shortcuts.spec.ts`, "Mark finished and Reopen keep focus…", extended: while pending, the focused Reopen is `toBeDisabled()` (Playwright reads `aria-disabled`, as assistive tech does) and has opacity 0.5 (the `aria-disabled:` variants in `buttonBase` are generated and applied). Enter on it then sends nothing: a second PATCH would also be held, and the next `releaseWrite` would count two. After the write lands it is enabled, opacity 1, still focused.
+
+### Each new test fails without the code it covers
+
+- `setStatus`'s pending check disabled (`isMutating(filters) > 99`): 6 component tests fail, all 4 new or extended ones among them (LoopPanel ×4, home page, song page), and the e2e spec fails on desktop.
+- `aria-disabled:` classes removed from `buttonBase`: the e2e spec fails on `toHaveCSS('opacity', '0.5')`.
+- Build's tests already fail with `disabled` put back (focus on `<body>`).
+
+### Checked, no test added
+
+- Elsewhere, nothing relied on the status buttons being `disabled`. No e2e spec asserts `toBeDisabled` on Mark finished or Reopen, and the component tests that did were switched to `aria-disabled` by Build. Testing Library's `toBeDisabled` ignores `aria-disabled`, so a component test must read the attribute. Playwright's counts it.
+- Space on a focused locked button on the song page is the page's play/pause (`shortcuts.ts` resolves Space on a button as `togglePlay` and prevents the default), so it never presses the button. The new song page test proves it for a locked button.
+- The prompt's `onFinished` (the focus hand-over) is skipped on a refused press. Running it anyway changes nothing a test can see: it schedules focus on a Reopen that only appears after a later press that schedules the same thing. Not tested, and noted here so it isn't read as covered.
+
+### Bugs found
+
+None.
+
+### Totals
+
+`npm run check`: 89 files, 3501 tests passed. `npm run e2e`: 334 passed, 14 skipped (the existing skips), 0 failed, built afresh (`dist` deleted, nothing on 4173).

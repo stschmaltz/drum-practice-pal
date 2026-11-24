@@ -1826,6 +1826,29 @@ describe('SongPage keyboard shortcuts', () => {
     expect(panel().getByRole('group', { name: 'Mark finished?' })).toBeInTheDocument();
   });
 
+  it('Space on a loop’s Reopen, focused while its write is on its way, pauses and sends nothing', async () => {
+    const { user, engine } = await openSong();
+    await user.click(panel().getByRole('button', { name: 'Play loop Verse' }));
+    act(() => engine.fire('stateChanged', { playing: true }));
+    const release = loops.holdNext('update');
+    panel().getByRole('button', { name: 'Mark finished Late' }).focus();
+    await user.keyboard('{Enter}');
+    const reopen = await panel().findByRole('button', { name: 'Reopen Late' });
+    await waitFor(() => expect(reopen).toHaveFocus());
+    expect(reopen).toHaveAttribute('aria-disabled', 'true');
+
+    await user.keyboard(' ');
+    await user.keyboard('{Enter}');
+    await settle();
+
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+    expect(loops.sent('update')).toEqual([{ status: 'finished' }]);
+    release();
+    await waitFor(() => expect(reopen).not.toHaveAttribute('aria-disabled'));
+    expect(reopen).toHaveFocus();
+    expect(loops.sent('update')).toEqual([{ status: 'finished' }]);
+  });
+
   it('typing a loop’s name types, and no shortcut fires', async () => {
     const { user, engine } = await openSong();
     await user.click(panel().getByRole('button', { name: 'New loop' }));

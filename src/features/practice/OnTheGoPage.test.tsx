@@ -245,6 +245,10 @@ describe('finishing and reopening from the home page', () => {
     const reopen = screen.getByRole('button', { name: 'Reopen Chorus fill' });
     expect(reopen).toHaveAttribute('aria-disabled', 'true');
     await user.click(reopen);
+    reopen.focus();
+    await user.keyboard('{Enter}');
+    await user.keyboard(' ');
+    await settle();
     expect(table.writes()).toEqual([{ status: 'finished' }]);
 
     release();
