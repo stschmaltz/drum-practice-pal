@@ -231,7 +231,7 @@ test('leaving the page mid-practice still logs the session, once', async ({ page
   await sessionCount(user, { timeout: 10_000 }).toBe(2);
 });
 
-test('a session whose answer is lost is sent again on request and logged once', async ({
+test('a session whose answer is lost is sent again by itself and logged once', async ({
   page,
   user,
 }) => {
@@ -251,17 +251,13 @@ test('a session whose answer is lost is sent again on request and logged once', 
   await playButton(page).click();
   await playFor(page, 3_000);
 
-  const notSaved = page.getByRole('alert').filter({ hasText: /Couldn.t save your last practice/ });
-  await expect(notSaved).toBeVisible();
-  await expect(sessionLogged(page)).toHaveCount(0);
-  // The row is there all the same: this is the retry that must not double it.
+  // A dropped connection is not a refusal (Unit 11): the log is retried, with no
+  // "Couldn't save" on the way, and the retry finds the row already there.
+  await expect(sessionLogged(page)).toContainText('of Flaky at 100%', { timeout: 10_000 });
   expect(lost).toBe(1);
-  await sessionCount(user).toBe(1);
-
-  await notSaved.getByRole('button', { name: 'Try again' }).click();
-
-  await expect(sessionLogged(page)).toContainText('of Flaky at 100%');
-  await expect(notSaved).toHaveCount(0);
+  await expect(
+    page.getByRole('alert').filter({ hasText: /Couldn.t save your last practice/ }),
+  ).toHaveCount(0);
   const sent = await sentSessions(page);
   expect(sent.length).toBeGreaterThanOrEqual(2);
   expect(new Set(sent.map((session) => session.id)).size).toBe(1);

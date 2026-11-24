@@ -6,6 +6,8 @@
 export const sessionKeys = {
   all: ['practice-sessions'] as const,
   forUser: (userId: string) => [...sessionKeys.all, userId] as const,
+  /** Every session log being sent: the mutations, not a query. */
+  logs: (userId: string) => [...sessionKeys.forUser(userId), 'log'] as const,
   /** One loop's history. */
   forLoop: (userId: string, loopId: string) =>
     [...sessionKeys.forUser(userId), 'loop', loopId] as const,

@@ -1002,7 +1002,7 @@ describe('LoopPanel finishing a loop', () => {
     await waitFor(() => expect(finishedNames(view)).toEqual(['Late']));
   });
 
-  it('"Save speed" answered while "Mark finished" is on its way does not put the loop back among the active', async () => {
+  it('"Save speed" pressed while "Mark finished" is on its way waits for it, and neither undoes the other', async () => {
     const view = renderPanel({ loops: [intro, atTarget] });
     await view.press('Play loop Late');
     view.enginePlays();
@@ -1010,24 +1010,19 @@ describe('LoopPanel finishing a loop', () => {
     await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
     await waitFor(() => expect(finishedNames(view)).toEqual(['Late']));
 
-    // The server answers this one first, with a row from before the finish: status active.
+    // Loop edits go one at a time (their scope), so the speed isn't sent until the finish
+    // has its answer: no answer can come back from before the other write.
     await view.press('Slower by 5%');
     await view.press('Save speed');
-    await waitFor(() =>
-      expect(view.table.sent('update')).toEqual([{ status: 'finished' }, { speed_ratio: 0.95 }]),
-    );
-    await waitFor(() =>
-      expect(view.panel.getByRole('button', { name: 'Save speed' })).toBeDisabled(),
-    );
-    expect(savedLate(view)).toMatchObject({
-      status: 'active',
-      speed_ratio: 0.95,
-    });
-
+    await settle();
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
     expect(finishedNames(view)).toEqual(['Late']);
     expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
 
     release();
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ status: 'finished' }, { speed_ratio: 0.95 }]),
+    );
 
     await waitFor(() =>
       expect(savedLate(view)).toMatchObject({

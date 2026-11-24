@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { loopKeys } from '@/features/loops/loopKeys';
 import type { PracticeLoop } from '@/features/loops/practiceList';
+import { loadSongFile, removeStoredSongFile } from '@/features/offline/songFileStore';
 import { sessionKeys } from '@/features/practice/sessionKeys';
 import { useSignedInUser } from '@/lib/auth';
 import {
@@ -63,17 +64,26 @@ export function useSong(songId: string, { enabled = true } = {}) {
 }
 
 /**
- * The song's Guitar Pro bytes. A stored file never changes (its path is the
- * song id), so it never goes stale and only leaves the cache when unused.
+ * The song's Guitar Pro bytes: the copy kept on this device if there is one,
+ * else a download that is kept for next time, so a song opened once plays
+ * offline. A stored file never changes (its path is the song id), so it never
+ * goes stale. In memory only while in use and a few minutes after: the copy on
+ * the device is what lasts.
  */
 export function useSongFile(songId: string) {
   const user = useSignedInUser();
   return useQuery({
     queryKey: songFileKeys.forSong(user.id, songId),
-    queryFn: () => downloadSongFile(user.id, songId),
+    queryFn: () => loadSongFile(user.id, songId, () => downloadSongFile(user.id, songId)),
     staleTime: Infinity,
+    gcTime: SONG_FILE_IN_MEMORY_MS,
+    // Runs offline too, since the copy on the device needs no network; with none
+    // stored, the download fails and the retry waits for the connection (paused).
+    networkMode: 'offlineFirst',
   });
 }
+
+const SONG_FILE_IN_MEMORY_MS = 5 * 60 * 1000;
 
 export interface UploadInput extends UploadOptions {
   file: File;
@@ -87,6 +97,8 @@ export function useUploadSong() {
 
   return useMutation({
     mutationKey: songKeys.writes(user.id),
+    // Online only (the control is off offline), so a dropped connection fails it rather than pausing it.
+    networkMode: 'always',
     mutationFn: ({ file, ...options }: UploadInput) => uploadSong(user.id, file, options),
     onSuccess: (result) => {
       if (result.kind !== 'uploaded') return;
@@ -111,6 +123,7 @@ export function useUpdateSong() {
 
   return useMutation({
     mutationKey: songKeys.writes(user.id),
+    networkMode: 'always',
     mutationFn: ({ songId, changes }: SongUpdate) => updateSong(user.id, songId, changes),
     onMutate: async ({ songId, changes }) => {
       // A refetch landing after this would overwrite the optimistic value.
@@ -164,6 +177,7 @@ export function useDeleteSong() {
 
   return useMutation({
     mutationKey: songKeys.writes(user.id),
+    networkMode: 'always',
     mutationFn: (songId: string) => deleteSong(user.id, songId),
     onSuccess: (_result, songId) => {
       queryClient.setQueryData<LibrarySong[]>(queryKey, (songs) =>
@@ -173,6 +187,7 @@ export function useDeleteSong() {
       // row and bytes while the refetch that finds it gone is still on its way.
       queryClient.setQueryData<Song | null>(songKeys.detail(user.id, songId), null);
       queryClient.removeQueries({ queryKey: songFileKeys.forSong(user.id, songId) });
+      void removeStoredSongFile(user.id, songId);
       // Its loops went with it (cascade); a cached list would outlive them.
       queryClient.removeQueries({ queryKey: loopKeys.forSong(user.id, songId) });
       queryClient.setQueryData<PracticeLoop[]>(loopKeys.practice(user.id), (loops) =>

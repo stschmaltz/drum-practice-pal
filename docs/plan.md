@@ -362,26 +362,7 @@ Handoff notes written before the Visual design unit was added call the release u
 
 **Carried forward**
 
-- Offline, mutations pause silently: sign-out sits on "Signing out…", a settings save on "Saving…", an upload on "Reading…" with a Cancel that does nothing. Choose a `networkMode` per mutation, or disable the control with a reason. (03 QA issues 1 and 2, 04 QA issue 1)
-- Sign-out must also clear the persisted query cache and the IndexedDB song files. `AuthProvider` only clears the in-memory cache today.
-- A token refresh that fails for lack of network must not sign the user out or clear those caches. Check what supabase-js emits offline before relying on `SIGNED_OUT`. A 401 on a query still isn't treated as signed out. (03 QA issue 3)
-- A soundfont that fails to load has no retry and doesn't recover when the connection returns. Cache it with the fonts and alphaTab's lazy chunks and worker files, and retry on `online`. (05 QA issue 2)
-- A cache miss for a file must never be answered with `index.html` (the Workers SPA fallback does this). `alphaTabEngine.loadSoundFont` already checks the content type; do the same for anything the service worker caches.
-- Lost responses on flaky Wi-Fi: an insert that commits but whose response is lost has its file removed, leaving a listed song with no file; an upload whose response is lost leaves an orphan file. Look the row up by id before rolling back. (04 Review open issues 1 and 2)
-- `updated_at` isn't yet fit for last-write-wins: logging a session bumps the loop's `updated_at`. Decide whether it means edited or touched. (Unit 08 stopped clients sending their own `created_at` and `updated_at` for loops; a songs insert still accepts both.) (02 QA issues 4 and 5)
-- Add the component test for a failed background refetch of a song file (`isLoadingError`), once something refetches it. (05 Review)
-- `useUpdateSong`'s `onSuccess` merges the whole server row, as `useUpdateLoop` did. With two writes to one song pending, the first answer undoes the second's optimistic fields until it lands. Unreachable today (one locked form per song); a queue that flushes several edits makes it reachable. Do as `useUpdateLoop` does (`applySavedLoopEdit`). (08 Copilot review, comment 4)
-- Installed iOS PWA: sign-in links open in Safari, so the 6-digit code is the way in. Check it. (03 QA)
-- If Unit 01's Human check picks a bigger soundfont, budget its size in the first load and the cache. (01 Findings)
-- A loop is created with a client id, so a queued create can be replayed; a replay after a lost response gets a duplicate-key error (23505) that nothing handles yet. Treat it as saved, or look the row up by id. The form makes a new id at each press of "Save loop" (`LoopEditorForm`), so a user's own second press after a lost response inserts a second loop; keep one id for the form's lifetime once the duplicate key is handled. (08 Build, 08 Review)
-- Loop edits are optimistic and roll back on any error, a dropped connection included. Queued offline, "Save speed" must not roll back. (08 Build)
-- Offline today, loop writes pause like the others: "Save loop" sits on "Saving…" with Cancel disabled and "Save speed" goes disabled with no message, then both go through on reconnect. (08 QA issue 8)
-- Session logs aren't durable yet. A log that fails while the song page is open is kept in the page's state with "Try again"; one that fails as the screen unmounts (`logSessionUnobserved`) or after the page has gone (`keepalive`) is lost, and so is everything on a reload. The queue takes `SessionRecord`s as they are: each has its client id and every send is "on conflict do nothing", so a replay can't log twice, and a 23503 (`loopGone`) means drop it. Offline, the mutation pauses and the notice shows nothing until the connection is back. A sign-out that reaches the song page mid-practice (from another tab, or a failed token refresh) unmounts it with the session already gone, so that practice session's log is refused and lost; the queue should hold it for the next sign-in of the same user or drop it. (09 Build, 09 Review)
-- The keepalive log uses the access token held in React state. A page hidden for longer than the token lives sends an expired one; the 401 comes back as `failed` and the fallback mutation runs only if the page is still alive. (09 Build)
-- A device whose clock is more than a day ahead has every session refused (23514, the new `started_at` rule) and "Try again" can never succeed; one whose clock is behind logs sessions in the past, which is accepted. Decide whether the client should take its time from the server, or drop a refused session with a message instead of offering a retry. (09 Build)
-- Finish and reopen are optimistic loop edits (`useSetLoopStatus`), so they roll back on a dropped connection like "Save speed"; queued offline they must not. Two devices finishing and reopening one loop is last write wins on the server. (09 Build)
-- The home page's list (`loopKeys.practice`) and each loop's history (`sessionKeys.forLoop`) are new caches to persist, and to clear on sign-out. (09 Build)
-- `?loop=<id>` waits for a read of the song's loops made since the page opened, and goes by the cached list only when that read fails or is paused (`useRequestedLoop`; fixed in 09 Review). With a persisted cache, check the offline cold start: the read must show as `fetchStatus: 'paused'`, not `'fetching'`, or the loop never opens. On a connection that hangs without failing, the loop opens only when the read gives up (two retries); decide whether to cap the wait. (09 QA issue 1, 09 Review)
+None left: each item was dealt with in 11 Build or handed to Unit 13 (see docs/units/11-pwa-offline.md, Decisions).
 
 ### 12 Visual design
 
@@ -400,6 +381,8 @@ Handoff notes written before the Visual design unit was added call the release u
 **Test focus:** e2e stays green; contrast checks on the token pairs. **QA focus:** before and after screenshots of every screen and state at all three sizes. **Human check:** look and feel on the phone at the kit, in a dim room and a bright one.
 
 **Carried forward**
+
+- The app icons and the mark in `public/` are placeholders drawn by `npm run icons` (`scripts/generate-icons.ts`); redraw them there and keep `theme_color` / `background_color` in `vite.config.ts`'s manifest in step with the theme. The offline banner, the "Reload to update" line and the `OfflineNote`s are plain amber and sky text. (11 Build)
 
 - The on-phone controls bar is four rows. (05 Build)
 - From 06 QA: the volume readout overflows the controls box at 320 px and below; the sticky bar has no bottom edge; on a phone the score opens scrolled 47 px sideways, clipping the clef; double-tap on the score may zoom.
@@ -428,8 +411,17 @@ Handoff notes written before the Visual design unit was added call the release u
 
 **Carried forward**
 
+- From 11: a 401 on a query still isn't treated as signed out (03 QA issue 3). Offline the token question is settled: supabase-js 2.119 never signs out for a refresh that only lacked a network, and an offline start opens on the stored session (`startingAuth`, `readStoredSession`).
+- From 11: lost responses on flaky Wi-Fi for uploads (online only): an insert that commits but whose response is lost has its file removed, leaving a listed song with no file; an upload whose response is lost leaves an orphan file. Look the row up by id before rolling back. (04 Review open issues 1 and 2)
+- From 11: a loop create is online only and not queued, but a lost response still lets the user's second press of "Save loop" insert a second loop (`LoopEditorForm` makes a new id per press), and a resend of the same id gets an unhandled 23505. Keep one id for the form's lifetime and treat 23505 on that id as saved. (08 Build, 08 Review)
+- From 11: `useUpdateSong`'s `onSuccess` merges the whole server row; still unreachable (song edits are online only, one locked form per song). Do as `useUpdateLoop` does if song edits are ever queued. (08 Copilot review, comment 4)
+- From 11: the component test for a failed background refetch of a song file (`isLoadingError`), once something refetches it; nothing does (`staleTime: Infinity`, and the file now comes from the device). (05 Review)
+- From 11: a device whose clock is more than a day ahead has every session refused (23514), now also on replay from the outbox, which then drops it. Decide whether the client takes its time from the server. (09 Build)
+- From 11: a sign-out the server forces (a refused refresh) empties the device, outbox included, so practice not yet sent is lost; one by the user is off while offline. Decide whether to warn before a sign-out with unsent entries, and whether to allow it offline. (09 Review, 11 Build)
+- From 11: `?loop=<id>` on a connection that hangs without failing opens the loop only when the read gives up (two retries); decide whether to cap the wait. Offline it opens at once from the persisted list (the read is `paused`). (09 QA issue 1)
+- From 11: song files kept on the device have no size cap or eviction, and a stored file alphaTab can't read stays stored. A replayed loop edit (an entry whose answer was lost) can overwrite a newer change made on another device. (11 Build)
 - Retire the spike: the `/spike` route, `src/features/spike/`, `scripts/spike-measure.ts`, `tests/e2e/spike.spec.ts` and `public/sf-candidates/`. Its fixtures ship in `dist` today. (05 Build)
-- Final soundfont, after the Unit 01 listen. (01 Findings)
+- Final soundfont, after the Unit 01 listen. A bigger one is precached by the service worker (`soundfont/sonivox.sf2` in `vite.config.ts`'s `globPatterns`; `maximumFileSizeToCacheInBytes` is 4 MB), so budget its size in the first install. (01 Findings, 11 Build)
 - Fixed copy for network failures instead of "Failed to fetch". (04 QA issue 2)
 - Link inline form errors to their inputs with `aria-describedby`. (04 QA issue 6)
 - Speed, metronome and mute stay enabled after a player error. (05 QA issue 3)
@@ -465,6 +457,7 @@ The handoff notes record none of these as done; delete a row once it is. Everyth
 | 09   | Phone at the kit: practise a loop for a minute, pause, and check "Practice logged" and the loop's History (duration, speed, passes). Then mid-practice: lock the phone, switch apps, close the tab; each should leave one session, with no hours of pocket time in it. iOS Safari and an installed PWA especially (`pagehide` and `keepalive` were only run on Chromium; the keepalive request is cross-origin with an `Authorization` header, so it needs a CORS preflight that must also outlive the page). Two devices: save a loop on the laptop, then press its "Practice" on a phone that had the song open a minute before; it should open on the loop |
 | 09   | Home page on the phone: the order after practising two loops, "Practice" into a loop (is song-then-Play quick enough), Mark finished and Reopen between the two tabs. With "before every repeat" on: one session for the sitting, its play time without the count-ins                                                                                                                                                                                                                                                                                                                                                                                         |
 | 10   | A real page-turner pedal on a laptop and on an iPad (Page Up / Page Down or the arrows): it switches loops while playing with no gap, and Space or the pedal never restarts a loop by accident. Safari: Space on a focused button plays or pauses and doesn't also press it; a Bluetooth keyboard's Space starts sound on iOS                                                                                                                                                                                                                                                                                                                                 |
+| 11   | iPhone: Add to Home Screen, open from the icon, sign in with the 6-digit code (links open in Safari), open a song, then airplane mode: it plays, a loop's practice and a saved speed reach the server once after reconnecting, also after closing the app offline. Android Chrome: the install prompt and the maskable icon. A deploy while the installed app is open shows "Reload to update"                                                                                                                                                                                                                                                                |
 
 ## Risks and mitigations
 

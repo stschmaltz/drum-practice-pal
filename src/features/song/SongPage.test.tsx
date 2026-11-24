@@ -1,8 +1,9 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient } from '@tanstack/react-query';
+import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { Link, Outlet, Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
+import { songKeys } from '@/features/library/useSongs';
 import type { Loop } from '@/features/loops/loopForm';
 import { loopKeys } from '@/features/loops/loopKeys';
 import type { EngineMount } from '@/features/player/playerEngine';
@@ -187,6 +188,47 @@ describe('SongPage not found and load failures', () => {
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     await loadPlayer();
     expect(status()).toHaveTextContent('Bar 1 of 16');
+  });
+});
+
+describe('SongPage offline', () => {
+  it('plays a song opened before from the copy on the device, with no download', async () => {
+    serve();
+    renderSong(SONG_A);
+    await loadPlayer();
+    expect(downloads()).toHaveLength(1);
+
+    // A later visit, in a new page: nothing in memory, the file on the device.
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+    act(() => onlineManager.setOnline(false));
+    cleanup();
+    renderSong(SONG_A, queryClient);
+    await waitFor(() => expect(engines[1]?.loadScore).toHaveBeenCalled());
+    expect(Array.from(engines[1]!.loadScore.mock.calls[0]![0])).toEqual(fileBytes(SONG_A));
+    expect(downloads()).toHaveLength(1);
+  });
+
+  it('says why, rather than loading for ever, for a song never opened on this device', async () => {
+    serve();
+    act(() => onlineManager.setOnline(false));
+    renderSong(SONG_A);
+    expect(await screen.findByText(/hasn't been opened on this device yet/)).toBeInTheDocument();
+    expect(queryResult).not.toHaveBeenCalled();
+  });
+
+  it('says why when the row is cached but the file never came down', async () => {
+    serve();
+    storageResult.mockResolvedValue(fail('TypeError: Failed to fetch'));
+    // The app's own retries: the first try fails, the retry waits for the connection.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
+    queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+    act(() => onlineManager.setOnline(false));
+    renderSong(SONG_A, queryClient);
+    expect(
+      await screen.findByText(/file isn't on this device yet/, {}, { timeout: 3000 }),
+    ).toBeInTheDocument();
+    expect(downloads()).toHaveLength(1);
   });
 });
 

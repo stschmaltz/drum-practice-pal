@@ -10,6 +10,8 @@ import { throwIfError } from '@/lib/supabaseResult';
  */
 export function useSendSignInEmail() {
   return useMutation({
+    // Online only: the login page is off offline, and a dropped connection fails rather than pausing.
+    networkMode: 'always',
     mutationFn: async ({ email, redirectTo }: { email: string; redirectTo: string }) => {
       throwIfError(
         await supabase.auth.signInWithOtp({
@@ -23,6 +25,7 @@ export function useSendSignInEmail() {
 
 export function useVerifySignInCode() {
   return useMutation({
+    networkMode: 'always',
     mutationFn: async ({ email, code }: { email: string; code: string }) => {
       // 'email' covers both first-time sign-up and returning-user codes.
       throwIfError(await supabase.auth.verifyOtp({ email, token: code, type: 'email' }));
@@ -32,6 +35,7 @@ export function useVerifySignInCode() {
 
 export function useSignOut() {
   return useMutation({
+    networkMode: 'always',
     // Local scope: signing out on the laptop shouldn't sign the phone out too.
     // AuthProvider clears the query cache on the SIGNED_OUT event.
     mutationFn: async () => throwIfError(await supabase.auth.signOut({ scope: 'local' })),

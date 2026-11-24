@@ -9,6 +9,7 @@ import {
   ratioToPercent,
 } from '@/features/player/speed';
 import { bpmAtSpeed } from '@/features/player/tempo';
+import { useOnline } from '@/lib/network';
 import type { Loop } from './loopForm';
 import { speedLabel } from './loopLabels';
 import { useUpdateLoop } from './useLoops';
@@ -34,6 +35,10 @@ export function LoopSpeedControl({
   snapshot: PlayerSnapshot;
 }) {
   const update = useUpdateLoop(songId);
+  const online = useOnline();
+  // Offline a save waits for the connection; another may be saved behind it (loop edits
+  // go in order). One that is being sent locks the button, so two never race.
+  const sending = update.isPending && !update.isPaused;
   // Null until the score has loaded; the BPM field waits for it.
   const tempo = player?.tempoAtBar(loop.start_bar) ?? null;
   const ratio = snapshot.speedRatio;
@@ -83,7 +88,7 @@ export function LoopSpeedControl({
         <button
           type="button"
           className={primaryButtonClass}
-          disabled={!unsaved || update.isPending}
+          disabled={!unsaved || sending}
           onClick={() => update.mutate({ loopId: loop.id, changes: { speed_ratio: ratio } })}
         >
           Save speed
@@ -92,6 +97,11 @@ export function LoopSpeedControl({
           Saved: {speedLabel(loop.speed_ratio, tempo)}
         </p>
       </div>
+      {update.isPending && !online && (
+        <p role="status" className="text-sm text-neutral-400" data-testid="loop-speed-queued">
+          Saved on this device. It's sent when you're back online.
+        </p>
+      )}
       {update.isError && <ErrorAlert>Couldn't save the speed: {update.error.message}</ErrorAlert>}
     </div>
   );

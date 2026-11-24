@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
 import { LOOP_SONG_ID, loopRow } from '@/test/loopTable';
-import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
+import { settle, signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import { songKeys } from '@/features/library/useSongs';
 import { sessionKeys } from '@/features/practice/sessionKeys';
 import type { Loop } from './loopForm';
@@ -675,17 +675,30 @@ describe('useSetLoopStatus', () => {
     await waitFor(() => expect(statusWrites()).toHaveLength(2));
   });
 
-  it('is not held up by another kind of write to the same loop', async () => {
+  it('is not locked by another kind of write to the same loop, and goes after it', async () => {
     const { result } = renderStatus();
-    queryResult.mockReturnValueOnce(deferred().promise);
+    const speedWrite = deferred();
+    queryResult.mockReturnValueOnce(speedWrite.promise);
     queryResult.mockResolvedValue(ok(loopRow('a', { status: 'finished' })));
 
     act(() => result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
     await waitFor(() => expect(result.current.update.isPending).toBe(true));
 
     expect(result.current.first.isPending).toBe(false);
-    act(() => result.current.first.setStatus('finished'));
-    await waitFor(() => expect(statusWrites()).toContainEqual({ status: 'finished' }));
+    let sent = false;
+    act(() => {
+      sent = result.current.first.setStatus('finished');
+    });
+    expect(sent).toBe(true);
+    await waitFor(() => expect(result.current.first.isPending).toBe(true));
+    // Loop edits go one at a time (their scope), so the finish waits for the speed's answer.
+    await settle();
+    expect(statusWrites()).toEqual([{ speed_ratio: 0.9 }]);
+
+    await act(async () => speedWrite.resolve(ok(loopRow('a', { speed_ratio: 0.9 }))));
+    await waitFor(() =>
+      expect(statusWrites()).toEqual([{ speed_ratio: 0.9 }, { status: 'finished' }]),
+    );
   });
 
   it('reports a failure on every control of that loop, until its next status write', async () => {

@@ -1,4 +1,16 @@
 import '@testing-library/jest-dom/vitest';
+// IndexedDB for the offline store (Dexie); jsdom has none.
+import 'fake-indexeddb/auto';
+import { onlineManager } from '@tanstack/react-query';
+import { resetUpdateWaiting } from '@/features/offline/appUpdate';
+import { clearOfflineData } from '@/features/offline/offlineData';
+
+// Each test starts online, with nothing stored on the "device" by the one before.
+afterEach(async () => {
+  onlineManager.setOnline(true);
+  resetUpdateWaiting();
+  await clearOfflineData();
+});
 
 // jsdom's Blob has no arrayBuffer(), which the upload flow reads files with.
 if (typeof Blob !== 'undefined' && !('arrayBuffer' in Blob.prototype)) {

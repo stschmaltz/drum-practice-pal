@@ -1,5 +1,7 @@
 import { NavLink, Outlet } from 'react-router';
 import { SignOutButton } from '@/features/auth/SignOutButton';
+import { OfflineBanner } from '@/features/offline/OfflineBanner';
+import { useOutboxReplay } from '@/features/offline/useOutboxReplay';
 import { useSignedInUser } from '@/lib/auth';
 import { NAV_ITEMS } from './navItems';
 
@@ -7,6 +9,8 @@ import { NAV_ITEMS } from './navItems';
 // player uses for page vs horizontal layout.
 export function AppShell() {
   const user = useSignedInUser();
+  // Writes an earlier page queued and never heard back about go once the user is known.
+  useOutboxReplay();
 
   return (
     <div className="min-h-dvh md:flex">
@@ -34,6 +38,7 @@ export function AppShell() {
       {/* Bottom padding keeps content clear of the fixed tab bar and the iOS home indicator.
           min-w-0 lets main shrink below a wide child (alphaTab's rendered score) when the window narrows. */}
       <main className="mx-auto w-full min-w-0 max-w-5xl p-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:p-8">
+        <OfflineBanner />
         <Outlet />
       </main>
 

@@ -1,6 +1,8 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
+import { OfflineNote } from '@/components/OfflineNote';
+import { isOnline, useOnline } from '@/lib/network';
 import {
   buttonClass,
   dangerButtonClass,
@@ -104,6 +106,7 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
   // Locked while saving: an edit would reset() the mutation, so the form would
   // stop showing its progress or error and allow a second save alongside it.
   const saving = update.isPending;
+  const online = useOnline();
 
   const edit = (changes: Partial<SongEdit>) => {
     if (saving) return;
@@ -114,7 +117,7 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (saving) return;
+    if (saving || !isOnline()) return;
     const normalised = normaliseSongEdit(values);
     const found = validateSongEdit(normalised);
     setErrors(found);
@@ -144,13 +147,16 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
         onChange={(artist) => edit({ artist })}
       />
       <div className="flex flex-wrap gap-2">
-        <button type="submit" className={primaryButtonClass} disabled={saving}>
+        <button type="submit" className={primaryButtonClass} disabled={saving || !online}>
           {saving ? 'Saving…' : 'Save'}
         </button>
         <button type="button" className={buttonClass} disabled={saving} onClick={onDone}>
           Cancel
         </button>
       </div>
+      {!online && (
+        <OfflineNote>You're offline. Changes can be saved once you're back online.</OfflineNote>
+      )}
       {update.isError && <ErrorAlert>Couldn't save the song: {update.error.message}</ErrorAlert>}
     </form>
   );
@@ -189,6 +195,7 @@ function TextField({
 
 function ConfirmDelete({ song, onCancel }: { song: LibrarySong; onCancel: () => void }) {
   const remove = useDeleteSong();
+  const online = useOnline();
 
   return (
     <div role="group" aria-label={`Delete ${song.title}`} className="flex flex-col gap-2">
@@ -199,8 +206,10 @@ function ConfirmDelete({ song, onCancel }: { song: LibrarySong; onCancel: () => 
         <button
           type="button"
           className={dangerButtonClass}
-          disabled={remove.isPending}
-          onClick={() => remove.mutate(song.id)}
+          disabled={remove.isPending || !online}
+          onClick={() => {
+            if (isOnline()) remove.mutate(song.id);
+          }}
         >
           {remove.isPending ? 'Deleting…' : 'Delete song'}
         </button>
@@ -213,6 +222,9 @@ function ConfirmDelete({ song, onCancel }: { song: LibrarySong; onCancel: () => 
           Keep it
         </button>
       </div>
+      {!online && (
+        <OfflineNote>You're offline. Songs can be deleted once you're back online.</OfflineNote>
+      )}
       {remove.isError && <ErrorAlert>Couldn't delete the song: {remove.error.message}</ErrorAlert>}
     </div>
   );

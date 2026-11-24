@@ -11,6 +11,10 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${PORT}`,
     trace: 'on-first-retry',
+    // The build registers a service worker (Unit 11). Off for every spec but the
+    // offline ones, which turn it on: a worker serving the app from its cache
+    // would hide what a spec does to requests (page.route, a refused soundfont).
+    serviceWorkers: 'block',
   },
   // The three device sizes every unit is checked at.
   projects: [

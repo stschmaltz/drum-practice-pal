@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
+import { OfflineNote } from '@/components/OfflineNote';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass, primaryButtonClass } from '@/components/styles';
@@ -17,6 +18,7 @@ import {
   type Settings,
   type SettingsErrors,
 } from './settingsForm';
+import { isOnline, useOnline } from '@/lib/network';
 import { useSettings, useUpdateSettings } from './useSettings';
 
 export function SettingsPage() {
@@ -64,6 +66,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
   // Locked while saving: an edit would reset() the mutation, so the form would
   // stop showing its progress or error and allow a second save alongside it.
   const saving = update.isPending;
+  const online = useOnline();
 
   const edit = (edited: Partial<Settings>) => {
     if (saving) return;
@@ -79,7 +82,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (!draft || saving) return;
+    if (!draft || saving || !isOnline()) return;
     const found = validateSettings(values);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
@@ -105,7 +108,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
       <DrumsFieldset {...fieldsetProps} />
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" className={primaryButtonClass} disabled={!dirty || saving}>
+        <button type="submit" className={primaryButtonClass} disabled={!dirty || saving || !online}>
           {saving ? 'Saving…' : 'Save settings'}
         </button>
         {dirty && (
@@ -117,6 +120,9 @@ function SettingsForm({ saved }: { saved: Settings }) {
           {update.isSuccess && !dirty ? 'Saved' : ''}
         </p>
       </div>
+      {!online && (
+        <OfflineNote>You're offline. Settings can be saved once you're back online.</OfflineNote>
+      )}
       {update.isError && (
         <ErrorAlert>Couldn't save your settings: {update.error.message}</ErrorAlert>
       )}

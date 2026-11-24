@@ -17,6 +17,7 @@ import { ratioToPercent } from '@/features/player/speed';
 import { loopPracticePath } from '@/lib/routes';
 import type { LoopStatus } from '@/lib/schema';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
+import { waitsForNetwork } from '@/lib/network';
 import { lastPracticedLabel, practiceDayInSentence } from './sessions';
 
 const TAB_PARAM = 'tab';
@@ -71,7 +72,12 @@ export function OnTheGoPage() {
     <div className="flex flex-col gap-6">
       <PageHeader title="On the go">Your loops, most recently practiced first.</PageHeader>
       <PracticeTabButtons tab={tab} loops={loops.data} onShow={showTab} />
-      {loops.isPending ? (
+      {waitsForNetwork(loops) ? (
+        <p className="text-neutral-400">
+          You're offline, and your loops haven't been opened on this device yet. They show once
+          you're back online.
+        </p>
+      ) : loops.isPending ? (
         <p className="text-neutral-400">Loading your loops…</p>
       ) : loops.isLoadingError ? (
         // isLoadingError, not isError: a failed background refetch keeps the list.

@@ -105,12 +105,16 @@ export const fakeSupabase = {
 };
 
 /** What keepalive requests are built from; a test stubs `fetch` to see them. */
+/** Where the fake client's session would be kept in localStorage (storedSession.ts reads it). */
+export const FAKE_AUTH_STORAGE_KEY = 'sb-test-auth-token';
+
 export const FAKE_REST_CONFIG = { url: 'http://supabase.test', publishableKey: 'publishable-key' };
 
 export const fakeSupabaseModule = {
   supabase: fakeSupabase,
   supabaseConfigError: null,
   supabaseRestConfig: FAKE_REST_CONFIG,
+  authStorageKey: FAKE_AUTH_STORAGE_KEY,
 };
 
 /** Sends an auth event to every AuthProvider subscribed to the fake client. */

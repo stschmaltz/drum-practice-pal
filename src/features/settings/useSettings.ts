@@ -27,6 +27,8 @@ export function useUpdateSettings() {
   const queryKey = settingsKeys.forUser(user.id);
 
   return useMutation({
+    // Online only (Save is off offline), so a dropped connection fails it rather than pausing it.
+    networkMode: 'always',
     mutationFn: (changes: Partial<Settings>) => updateSettings(user.id, changes),
     onMutate: async (changes) => {
       // A refetch landing after this would overwrite the optimistic value.

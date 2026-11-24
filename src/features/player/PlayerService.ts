@@ -252,15 +252,30 @@ export class PlayerService {
       barTempo: null,
     });
     this.wakeLock.setActive(false);
-    if (!this.soundFontRequested) {
-      this.soundFontRequested = true;
-      this.engine.loadSoundFont(this.soundFontUrl).catch(() => {
-        // So the next load tries again instead of waiting forever for sounds.
-        this.soundFontRequested = false;
-        this.fail('soundFont');
-      });
-    }
+    this.requestSoundFont();
     if (!this.engine.loadScore(bytes, [this.drumTrackIndex ?? 0])) this.fail('score');
+  }
+
+  /**
+   * After the soundfont failed to load (offline before the service worker had
+   * it, say), tries again: the page calls this when the connection comes
+   * back. Does nothing in any other state. alphaTab reports ready for playback
+   * once the sounds are in, as it would have the first time.
+   */
+  retrySoundFont(): void {
+    if (this.disposed || this.snapshot.error !== 'soundFont') return;
+    this.update({ status: 'loading', error: null });
+    this.requestSoundFont();
+  }
+
+  private requestSoundFont(): void {
+    if (this.soundFontRequested) return;
+    this.soundFontRequested = true;
+    this.engine.loadSoundFont(this.soundFontUrl).catch(() => {
+      // So a later load or retry tries again instead of waiting forever for sounds.
+      this.soundFontRequested = false;
+      this.fail('soundFont');
+    });
   }
 
   // --- Transport ---

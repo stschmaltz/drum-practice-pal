@@ -31,7 +31,7 @@ export const sessionCount = (user: E2eUser, options?: { timeout?: number }) =>
 export async function loopsOf(user: E2eUser) {
   const { data, error } = await admin
     .from('loops')
-    .select('id, name, status, finished_at, last_practiced_at')
+    .select('id, name, status, speed_ratio, finished_at, last_practiced_at')
     .eq('user_id', user.id);
   if (error) throw error;
   return data;

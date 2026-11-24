@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
+import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass, inputClass, primaryButtonClass } from '@/components/styles';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { percentToRatio } from '@/features/player/speed';
+import { isOnline, useOnline } from '@/lib/network';
 import { randomUuid } from '@/lib/randomUuid';
 import {
   changedLoopDetails,
@@ -64,6 +66,9 @@ export function LoopEditorForm({
   // Locked while saving: an edit would reset() the mutation, so the form would
   // stop showing its progress or error and allow a second save alongside it.
   const saving = mutation.isPending;
+  // A new loop or an edit of one waits for the connection: offline the form would sit on
+  // "Saving…" until it came back. A loop's speed and status are what queue offline.
+  const online = useOnline();
   // The bars are the page's state, and the score changes them without passing through this form.
   useEffect(() => onSavingChange(saving), [saving, onSavingChange]);
 
@@ -101,7 +106,7 @@ export function LoopEditorForm({
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (saving) return;
+    if (saving || !isOnline()) return;
     const parsed = parseLoopForm(values, barCount);
     setErrors(parsed.ok ? {} : parsed.errors);
     if (!parsed.ok) return;
@@ -180,13 +185,16 @@ export function LoopEditorForm({
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <button type="submit" className={primaryButtonClass} disabled={saving}>
+        <button type="submit" className={primaryButtonClass} disabled={saving || !online}>
           {saving ? 'Saving…' : 'Save loop'}
         </button>
         <button type="button" className={buttonClass} disabled={saving} onClick={onCancel}>
           Cancel
         </button>
       </div>
+      {!online && (
+        <OfflineNote>You're offline. Loops can be saved once you're back online.</OfflineNote>
+      )}
       {mutation.isError && (
         <ErrorAlert>Couldn't save the loop: {mutation.error.message}</ErrorAlert>
       )}
