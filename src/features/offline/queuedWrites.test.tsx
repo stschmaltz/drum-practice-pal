@@ -227,3 +227,59 @@ describe('useOutboxReplay', () => {
     await waitFor(() => expect(sessionInserts()).toEqual(['s-left']));
   });
 });
+
+describe('loop edits, round trips and lost answers', () => {
+  const loop = loopRow('a', { speed_ratio: 1, target_ratio: 0.855556 });
+
+  it('a speed typed as a BPM is kept on the device and sent at its exact ratio, after a reload too', async () => {
+    answerWith(loop);
+    const first = testQueryClient();
+    first.setQueryData(loopKeys.forSong(USER, LOOP_SONG_ID), [loop]);
+    const { result, unmount } = renderHook(() => useUpdateLoop(LOOP_SONG_ID), {
+      wrapper: wrapperFor(first),
+    });
+    act(() => onlineManager.setOnline(false));
+    act(() => result.current.mutate({ loopId: 'a', changes: { speed_ratio: 0.708333 } }));
+    await waitFor(async () =>
+      expect(await outboxEntries(USER)).toEqual([
+        expect.objectContaining({ kind: 'loopEdit', changes: { speed_ratio: 0.708333 } }),
+      ]),
+    );
+    // The page goes before the connection comes back; the next one replays what it left.
+    // (This test's module is the same "page", which never replays its own entries, so the
+    // entry is handed over as the next page would read it: the same data, from the database.)
+    const [stored] = await offlineDb.outbox.toArray();
+    unmount();
+    first.clear();
+    await offlineDb.outbox.clear();
+    await offlineDb.outbox.put({ ...stored!, id: 'from-the-last-page' });
+    act(() => onlineManager.setOnline(true));
+    renderHook(() => useOutboxReplay(), { wrapper: wrapperFor(testQueryClient()) });
+
+    await waitFor(() => expect(loopUpdates()).toEqual([{ speed_ratio: 0.708333 }]));
+    await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+  });
+
+  it('an edit the server applied but whose answer was lost is sent again with the same values, and settles', async () => {
+    answerWith(loop);
+    const answer = queryResult.getMockImplementation()!;
+    // The server takes it; the answer never arrives.
+    queryResult.mockImplementationOnce(async (call) => {
+      await answer(call);
+      return dropped;
+    });
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(loopKeys.forSong(USER, LOOP_SONG_ID), [loop]);
+    const { result } = renderHook(() => useUpdateLoop(LOOP_SONG_ID), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() => result.current.mutate({ loopId: 'a', changes: { speed_ratio: 0.8 } }));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true), { timeout: 3000 });
+    expect(loopUpdates()).toEqual([{ speed_ratio: 0.8 }, { speed_ratio: 0.8 }]);
+    expect(
+      queryClient.getQueryData<Loop[]>(loopKeys.forSong(USER, LOOP_SONG_ID))?.[0],
+    ).toMatchObject({ speed_ratio: 0.8, target_ratio: 0.855556 });
+    await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+  });
+});

@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { onlineManager } from '@tanstack/react-query';
 import { enginePlays } from '@/test/countInPlayer';
 import { expectLocked, expectUnlocked } from '@/test/locked';
 import { queryResult, resetFakeSupabase } from '@/test/fakeSupabase';
@@ -1374,3 +1375,139 @@ describe('LoopPanel keeping focus', () => {
     expect(reopen).toHaveFocus();
   });
 });
+
+describe('LoopPanel offline', () => {
+  const offline = () => act(() => onlineManager.setOnline(false));
+  const online = () => act(() => onlineManager.setOnline(true));
+  const queuedNote = (view: View) => view.panel.queryByTestId('loop-speed-queued');
+
+  it('a speed saved offline shows at once, says it waits, can be saved again behind it, and both go in order', async () => {
+    const view = renderPanel();
+    await view.press('Play loop Intro');
+    offline();
+
+    await view.press('Slower by 5%');
+    await view.press('Save speed');
+    expect(await view.panel.findByTestId('loop-speed-queued')).toHaveTextContent(
+      "Saved on this device. It's sent when you're back online.",
+    );
+    expect(view.panel.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 75%');
+
+    // Waiting for the connection is not "being sent": a second save can queue behind it.
+    await view.press('Slower by 5%');
+    const save = view.panel.getByRole('button', { name: 'Save speed' });
+    expect(save).toBeEnabled();
+    await view.user.click(save);
+    await waitFor(() =>
+      expect(view.panel.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 70%'),
+    );
+    await settle();
+    expect(view.table.sent('update')).toEqual([]);
+
+    online();
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.75 }, { speed_ratio: 0.7 }]),
+    );
+    await waitFor(() => expect(queuedNote(view)).not.toBeInTheDocument());
+    expect(view.table.rows().find((row) => row.id === 'intro')?.speed_ratio).toBe(0.7);
+    expect(view.panel.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 70%');
+  });
+
+  it('"Save speed" is locked while a save is being sent, once the connection is back', async () => {
+    const view = renderPanel();
+    await view.press('Play loop Intro');
+    offline();
+    await view.press('Slower by 5%');
+    await view.press('Save speed');
+    await view.panel.findByTestId('loop-speed-queued');
+
+    const release = view.table.holdNext('update');
+    online();
+    await waitFor(() => expect(view.table.sent('update')).toHaveLength(1));
+    await view.press('Slower by 5%');
+    const save = view.panel.getByRole('button', { name: 'Save speed' });
+    expect(save).toBeDisabled();
+    release();
+    await waitFor(() => expect(save).toBeEnabled());
+  });
+
+  it('a loop finished offline moves at once, its Reopen is locked until the write has gone, and other loops can still change', async () => {
+    const view = renderPanel();
+    offline();
+    await view.press('Mark finished Intro');
+    await waitFor(() => expect(finishedOf(view)).toEqual(['Intro']));
+
+    const reopen = view.panel.getByRole('button', { name: 'Reopen Intro' });
+    expectLocked(reopen);
+    await view.user.click(reopen);
+    await view.press('Mark finished Late');
+    await waitFor(() => expect(finishedOf(view).sort()).toEqual(['Intro', 'Late']));
+    await settle();
+    expect(view.table.sent('update')).toEqual([]);
+
+    online();
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ status: 'finished' }, { status: 'finished' }]),
+    );
+    await waitFor(() => expectUnlocked(view.panel.getByRole('button', { name: 'Reopen Intro' })));
+    expect(view.table.rows().map((row) => row.status)).toEqual(['finished', 'finished']);
+  });
+
+  it('"Save loop" is off with a reason, and a submit of the form saves nothing', async () => {
+    const view = renderPanel();
+    await typeNewLoop(view, { first: '2', last: '3', name: 'Fill' });
+    offline();
+    const save = view.panel.getByRole('button', { name: 'Save loop' });
+    expect(save).toBeDisabled();
+    expect(view.panel.getByTestId('offline-note')).toHaveTextContent(
+      "You're offline. Loops can be saved once you're back online.",
+    );
+    fireEvent.submit(view.panel.getByRole('form'));
+    await settle();
+    expect(view.table.sent('insert')).toEqual([]);
+    expect(view.panel.getByLabelText('Name')).toHaveValue('Fill');
+
+    online();
+    await view.user.click(save);
+    await waitFor(() => expect(view.names()).toContain('Fill'));
+    expect(view.table.sent('insert')).toHaveLength(1);
+  });
+
+  it('"Delete loop" is off with a reason while offline', async () => {
+    const view = renderPanel();
+    await view.press('Delete Late');
+    offline();
+    const confirm = within(view.panel.getByRole('group', { name: 'Delete Late' }));
+    const remove = confirm.getByRole('button', { name: 'Delete loop' });
+    expect(remove).toBeDisabled();
+    expect(confirm.getByTestId('offline-note')).toHaveTextContent(
+      "You're offline. Loops can be deleted once you're back online.",
+    );
+    act(() => remove.click());
+    await settle();
+    expect(view.table.sent('delete')).toEqual([]);
+
+    online();
+    await view.user.click(remove);
+    await waitFor(() => expect(view.names()).toEqual(['Intro']));
+  });
+
+  it("says why, rather than loading for ever, when the song's loops were never read on this device", async () => {
+    offline();
+    const view = renderPanel();
+    expect(
+      await view.panel.findByText(/loops haven't been opened on this device yet/),
+    ).toBeInTheDocument();
+    expect(view.panel.queryByText('Loading loops…')).not.toBeInTheDocument();
+    expect(view.table.sent('update')).toEqual([]);
+    expect(queryResult).not.toHaveBeenCalled();
+
+    online();
+    await waitFor(() => expect(view.names()).toEqual(['Intro', 'Late']));
+  });
+});
+
+const finishedOf = (view: View) =>
+  within(view.panel.getByRole('region', { name: 'Finished loops' }))
+    .queryAllByRole('listitem')
+    .map((li) => li.querySelector('p')?.textContent ?? '');

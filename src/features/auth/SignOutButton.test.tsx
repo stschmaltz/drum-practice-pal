@@ -1,8 +1,9 @@
-import { screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
+import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import { fakeSupabase, resetFakeSupabase } from '@/test/fakeSupabase';
-import { renderRoutes } from '@/test/render';
+import { renderRoutes, settle } from '@/test/render';
 import { SignOutButton } from './SignOutButton';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -23,5 +24,25 @@ describe('SignOutButton', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       "Couldn't sign out: Failed to fetch",
     );
+  });
+});
+
+describe('SignOutButton offline', () => {
+  it('is off with a reason while offline (it would empty the device), and signs out once back online', async () => {
+    renderRoutes(<Route path="/" element={<SignOutButton />} />);
+    act(() => onlineManager.setOnline(false));
+    const button = screen.getByRole('button', { name: 'Sign out' });
+    expect(button).toBeDisabled();
+    expect(screen.getByTestId('offline-note')).toHaveTextContent(
+      "You can sign out once you're back online.",
+    );
+    fireEvent.click(button);
+    await settle();
+    expect(fakeSupabase.auth.signOut).not.toHaveBeenCalled();
+
+    act(() => onlineManager.setOnline(true));
+    expect(screen.queryByTestId('offline-note')).not.toBeInTheDocument();
+    await userEvent.click(button);
+    expect(fakeSupabase.auth.signOut).toHaveBeenCalledTimes(1);
   });
 });

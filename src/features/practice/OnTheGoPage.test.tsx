@@ -1,4 +1,5 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
+import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import type { Loop } from '@/features/loops/loopForm';
@@ -425,5 +426,36 @@ describe('focus after a loop leaves the tab', () => {
 
     await waitFor(() => expect(listed()).toEqual([]));
     expect(tab(/^On the go/)).toHaveFocus();
+  });
+});
+
+describe('On the go offline (Unit 11)', () => {
+  it('says why, rather than loading for ever, when the loops were never read on this device', async () => {
+    serve([fill]);
+    act(() => onlineManager.setOnline(false));
+    renderHome();
+    expect(await screen.findByText(/loops haven't been opened on this device yet/)).toBeVisible();
+    expect(screen.queryByText('Loading your loops…')).not.toBeInTheDocument();
+    expect(queryResult).not.toHaveBeenCalled();
+
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() => expect(listed()).toEqual(['Chorus fill']));
+  });
+
+  it('Mark finished offline moves the loop to Finished at once, and is sent when the connection is back', async () => {
+    const table = serve([fill, intro]);
+    const user = renderHome();
+    await waitFor(() => expect(listed()).toEqual(['Intro', 'Chorus fill']));
+    act(() => onlineManager.setOnline(false));
+
+    await user.click(screen.getByRole('button', { name: 'Mark finished Chorus fill' }));
+    await waitFor(() => expect(tab(/^Finished/)).toHaveTextContent('Finished (1)'));
+    await settle();
+    expect(table.writes()).toEqual([]);
+
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() => expect(table.writes()).toEqual([{ status: 'finished' }]));
+    expect(table.rows().find((row) => row.id === FILL)?.status).toBe('finished');
+    expect(tab(/^Finished/)).toHaveTextContent('Finished (1)');
   });
 });

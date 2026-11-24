@@ -1,8 +1,10 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { onlineManager } from '@tanstack/react-query';
+import { restoredCacheIsStale } from '@/features/offline/queryPersister';
 import { Route } from 'react-router';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
-import { renderRoutes } from '@/test/render';
+import { renderRoutes, settle, testQueryClient } from '@/test/render';
 import { LibraryPage } from './LibraryPage';
 import type { LibrarySong } from './songForm';
 import { songKeys } from './useSongs';
@@ -220,5 +222,34 @@ describe('LibraryPage', () => {
     await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
     await waitFor(() => expect(shownTitles()).toEqual(['Waltz 3-4', 'Chorus Fill']));
+  });
+});
+
+describe('LibraryPage offline (Unit 11)', () => {
+  it('says why, rather than loading for ever, when the library was never read on this device', async () => {
+    serveLibrary(library);
+    act(() => onlineManager.setOnline(false));
+    renderLibrary();
+    expect(await screen.findByText(/library hasn't been opened on this device yet/)).toBeVisible();
+    expect(screen.queryByText('Loading your songs…')).not.toBeInTheDocument();
+    expect(queryResult).not.toHaveBeenCalled();
+
+    act(() => onlineManager.setOnline(true));
+    expect(await screen.findByRole('heading', { name: 'Your songs (3)' })).toBeInTheDocument();
+  });
+
+  it('keeps showing a library read before, offline', async () => {
+    serveLibrary(library);
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(songKeys.forUser('user-1'), library);
+    restoredCacheIsStale(queryClient);
+    act(() => onlineManager.setOnline(false));
+    renderRoutes(<Route path="/library" element={<LibraryPage />} />, {
+      path: '/library',
+      queryClient,
+    });
+    expect(await screen.findByRole('heading', { name: 'Your songs (3)' })).toBeInTheDocument();
+    await settle();
+    expect(queryResult).not.toHaveBeenCalled();
   });
 });

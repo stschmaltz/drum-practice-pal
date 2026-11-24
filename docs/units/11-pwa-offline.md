@@ -97,3 +97,46 @@ Changed:
 - iPhone: Add to Home Screen, open from the icon, sign in with the 6-digit code (links open in Safari), open a song, then airplane mode: the song plays, a loop's session logs after reconnect, once.
 - Android Chrome: install prompt, maskable icon shape.
 - A deploy while the installed app is open: the "Reload to update" banner appears and reloading picks up the new build.
+
+## Test
+
+### Summary
+
+29 new Vitest / Testing Library tests in the subjects' existing files, and 3 new Playwright specs in `tests/e2e/offline.spec.ts` (9 runs over phone, tablet and desktop). Every new unit test was checked against a break of the code it covers (23 breaks, each caught; the two soundfont guards are caught together, since either one alone stops the second fetch). The service worker spec was checked against a build whose worker answers every failed request with `index.html` (`precacheFallback`): it fails there.
+
+### What each criterion and checklist row is proved by
+
+| Criterion or row                                                                                          | Tests                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Offline, a song opened before plays its loops; the session syncs once                                     | Build's first `offline.spec.ts` spec; `usePracticeTracker.test.tsx` "offline (Unit 11)": a stop offline waits, is in the outbox, is logged once online                                                                                                                                    |
+| Queue and flush                                                                                           | `LoopPanel.test.tsx` "LoopPanel offline": two speeds saved offline go in order once online, the newer kept; `OnTheGoPage.test.tsx`: Mark finished offline moves at once and is sent online                                                                                                |
+| Idempotent replay                                                                                         | `queuedWrites.test.tsx` "round trips and lost answers": a BPM-typed speed (0.708333) is kept exactly in the outbox and replayed exactly by the next page                                                                                                                                  |
+| Lost responses                                                                                            | `queuedWrites.test.tsx`: an edit the server applied but whose answer was lost is sent again with the same values and settles, nothing rolled back; `usePracticeTracker.test.tsx`: a session whose request dropped is sent again by itself with the same id and never shown as "Try again" |
+| Offline cold start                                                                                        | `SongPage.test.tsx` "opens on a cold start offline": restored (stale) cache, file on the device, `?loop=` opens the loop with the read `paused` and no request (the 09 carried-forward check). e2e: a cold start offline on the home page, then "Practice" opens the song on its loop     |
+| Sign-out empties the device                                                                               | `offlineStore.test.ts` "clearOfflineData": song files, outbox and persisted cache all gone, and the persister restores nothing; e2e "signing out empties the device" reads the three IndexedDB stores before (non-empty) and after (empty), then an offline load goes to `/login`         |
+| The service worker never answers a file with `index.html`                                                 | e2e: offline, a missing chunk, font and soundfont are network errors; the precached soundfont is a 200 that isn't HTML; a navigation opens any route                                                                                                                                      |
+| Controls gated offline (disabled with a reason; a press around the button sends nothing; online it works) | `SignOutButton.test.tsx`, `LoginPage.test.tsx` (send, verify, send again), `SettingsPage.test.tsx`, `SongListItem.test.tsx` (edit, delete), `LoopPanel.test.tsx` (Save loop, Delete loop); e2e walks them all offline at three sizes                                                      |
+| Serial loop edits (two writes to one item in flight)                                                      | `LoopPanel.test.tsx`: a second "Save speed" can queue behind one waiting offline, and is locked while one is being sent online; a finish offline locks that loop's Reopen until its write has gone, while another loop can still change                                                   |
+| Late events after a halt or unmount                                                                       | `usePracticeTracker.test.tsx`: a session waiting offline when the screen goes is logged once when the connection is back, and the history cache hears of it; `usePlayer.test.tsx`: `online` after unmount fetches nothing                                                                 |
+| Session log windows                                                                                       | `usePracticeTracker.test.tsx`: a page hidden offline tries no keepalive; the session is in the outbox before the keepalive leaves and out of it once the keepalive is in                                                                                                                  |
+| Soundfont retry                                                                                           | `usePlayer.test.tsx`: sounds that failed load again on `online`; a second `online` while the retry is out fetches nothing more                                                                                                                                                            |
+| Screens with nothing cached say why                                                                       | `LibraryPage`, `OnTheGoPage`, `SettingsPage`, `LoopPanel` tests; `LibraryPage` also shows a restored library offline with no request                                                                                                                                                      |
+
+### Fixed
+
+- `SettingsPage` showed "Loading settings…" for ever offline when the settings had never been read on the device: it now says why, as the other screens do (`waitsForNetwork`, five lines).
+
+### Bugs found
+
+1. **The persisted cache can miss the last second of changes (medium).** The persister writes a second after a change (the async persister's throttle) and nothing flushes it on `pagehide` or a hidden page. Repro: online, save a new loop on the song page, leave or reload within a second, then go offline and reload: the song's loop panel says "No loops yet" and `?loop=<id>` opens nothing (the home page's list has the loop, from its own later read). Found by the new e2e spec before it waited for the cache. The same goes for any cache change just before the app is closed. Options: persist on `visibilitychange`/`pagehide` (`persistQueryClientSave`, though the persister's throttle still defers it), or a smaller `throttleTime`.
+2. **A replayed loop edit can land after one the user made at start (low).** `useOutboxReplay` builds the replayed edits only once its IndexedDB read has answered. An edit made before that (a "Save speed" in the first moments after the app opens) joins the loop scope first, so the older replayed value reaches the server last and is the one kept, and its optimistic value is shown over the user's. The note's table says replayed edits go first; that holds only once the read is in. Unlikely by hand (the song page needs its file and player first), but reachable with a slow IndexedDB open. Fix by building the replay's mutations before the read (a gate the scope waits on), or by dropping a replayed edit whose fields the user has since edited.
+
+### Not covered
+
+- Two tabs replaying one outbox (both may send; idempotent, not tested).
+- Install prompts, icons and the update banner on real devices (Human check).
+- Playwright's offline mode is Chromium only.
+
+### Verify
+
+`npm run check`; `npm run db:start` then `npm run e2e` (or `npx playwright test tests/e2e/offline.spec.ts`).

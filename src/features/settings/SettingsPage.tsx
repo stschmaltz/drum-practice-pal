@@ -18,7 +18,7 @@ import {
   type Settings,
   type SettingsErrors,
 } from './settingsForm';
-import { isOnline, useOnline } from '@/lib/network';
+import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
 import { useSettings, useUpdateSettings } from './useSettings';
 
 export function SettingsPage() {
@@ -27,7 +27,12 @@ export function SettingsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Settings" />
-      {settings.isPending ? (
+      {waitsForNetwork(settings) ? (
+        <p className="text-neutral-400">
+          You're offline, and your settings haven't been opened on this device yet. They show once
+          you're back online.
+        </p>
+      ) : settings.isPending ? (
         <p className="text-neutral-400">Loading settings…</p>
       ) : // Only a failed first load blocks the form. A failed background refetch
       // keeps the cached row, and unmounting the form would drop unsaved edits.

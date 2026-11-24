@@ -6,6 +6,8 @@ import type { Song } from '@/features/library/songForm';
 import { songKeys } from '@/features/library/useSongs';
 import type { Loop } from '@/features/loops/loopForm';
 import { loopKeys } from '@/features/loops/loopKeys';
+import { offlineDb } from '@/features/offline/offlineDb';
+import { restoredCacheIsStale } from '@/features/offline/queryPersister';
 import type { EngineMount } from '@/features/player/playerEngine';
 import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
 import type { Settings } from '@/features/settings/settingsForm';
@@ -1440,6 +1442,33 @@ describe('SongPage opened on a loop (?loop=)', () => {
       );
       expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
       expect(status()).toHaveTextContent('Bar 9 of 16');
+    });
+
+    it('opens on a cold start offline, from the restored cache: the read is paused, not pending for ever', async () => {
+      serve({ loops: [chorus, other] });
+      // As the app finds the device after a reload with no connection: the song's row and
+      // loops restored from IndexedDB and marked stale (restoredCacheIsStale), its file stored.
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+      queryClient.setQueryData(loopsKey, [chorus, other]);
+      restoredCacheIsStale(queryClient);
+      await offlineDb.songFiles.put({
+        userId: USER,
+        songId: SONG_A,
+        bytes: new Uint8Array(fileBytes(SONG_A)),
+      });
+      act(() => onlineManager.setOnline(false));
+
+      renderSong(`${SONG_A}?loop=${LOOP_ID}`, queryClient);
+      await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent(
+        'Looping Chorus fill · Bars 9 to 12',
+      );
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+      expect(queryClient.getQueryState(loopsKey)?.fetchStatus).toBe('paused');
+      expect(queryResult).not.toHaveBeenCalled();
+      expect(downloads()).toEqual([]);
     });
 
     it('reads a list too fresh to be read on arrival once more when it lacks the loop', async () => {

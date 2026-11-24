@@ -1,4 +1,5 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import { songFilePath } from '@/lib/schema';
@@ -9,7 +10,7 @@ import {
   storageResult,
   type FakeResult,
 } from '@/test/fakeSupabase';
-import { renderRoutes } from '@/test/render';
+import { renderRoutes, settle } from '@/test/render';
 import type { LibrarySong } from './songForm';
 import { SongListItem } from './SongListItem';
 
@@ -218,5 +219,53 @@ describe('SongListItem deleting', () => {
     );
     expect(deletes()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Delete song' })).toBeEnabled();
+  });
+});
+
+describe('SongListItem offline', () => {
+  it('keeps an edit on screen but saves nothing until back online', async () => {
+    queryResult.mockImplementation(async (call) =>
+      ok({ ...song, ...(opArgs(call, 'update')?.[0] as object) }),
+    );
+    const user = renderItem();
+    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Back Beat');
+    act(() => onlineManager.setOnline(false));
+
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save).toBeDisabled();
+    expect(screen.getByTestId('offline-note')).toHaveTextContent(
+      "You're offline. Changes can be saved once you're back online.",
+    );
+    fireEvent.submit(save.closest('form')!);
+    await settle();
+    expect(updates()).toEqual([]);
+    expect(screen.getByLabelText('Title')).toHaveValue('Back Beat');
+
+    act(() => onlineManager.setOnline(true));
+    await user.click(save);
+    await waitFor(() => expect(updates()).toEqual([{ title: 'Back Beat' }]));
+  });
+
+  it('turns "Delete song" off with a reason while offline', async () => {
+    queryResult.mockResolvedValue(ok(null));
+    const user = renderItem();
+    await user.click(screen.getByRole('button', { name: 'Delete Groove' }));
+    act(() => onlineManager.setOnline(false));
+    const remove = screen.getByRole('button', { name: 'Delete song' });
+    expect(remove).toBeDisabled();
+    expect(screen.getByTestId('offline-note')).toHaveTextContent(
+      "You're offline. Songs can be deleted once you're back online.",
+    );
+    fireEvent.click(remove);
+    await settle();
+    expect(storageResult).not.toHaveBeenCalled();
+    expect(deletes()).toEqual([]);
+
+    act(() => onlineManager.setOnline(true));
+    await user.click(remove);
+    await waitFor(() => expect(deletes()).toHaveLength(1));
+    expect(storageResult).toHaveBeenCalled();
   });
 });

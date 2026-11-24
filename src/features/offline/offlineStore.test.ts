@@ -10,7 +10,12 @@ import {
   removeOutboxEntry,
   takeLeftoverOutboxEntries,
 } from './outbox';
-import { restoredCacheIsStale, shouldPersistQuery } from './queryPersister';
+import {
+  PERSISTED_CACHE_BUSTER,
+  queryPersister,
+  restoredCacheIsStale,
+  shouldPersistQuery,
+} from './queryPersister';
 import { loadSongFile, readStoredSongFile, removeStoredSongFile } from './songFileStore';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -165,5 +170,36 @@ describe('restoredCacheIsStale', () => {
     restoredCacheIsStale(queryClient);
     expect(queryClient.getQueryState(songKeys.forUser('u1'))?.isInvalidated).toBe(true);
     expect(queryFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('clearOfflineData (sign-out)', () => {
+  it("leaves nothing of anyone's on the device: song files, queued writes and the persisted cache", async () => {
+    await loadSongFile('u1', 's1', async () => bytes(1));
+    await putOutboxEntry(session('a'));
+    await queryPersister.persistClient({
+      timestamp: Date.now(),
+      buster: PERSISTED_CACHE_BUSTER,
+      clientState: { queries: [], mutations: [] },
+    });
+    await vi.waitFor(async () => expect(await offlineDb.queryCache.count()).toBe(1));
+
+    await clearOfflineData();
+
+    expect(await readStoredSongFile('u1', 's1')).toBeNull();
+    expect(await outboxEntries('u1')).toEqual([]);
+    expect(await offlineDb.queryCache.count()).toBe(0);
+    expect(await queryPersister.restoreClient()).toBeUndefined();
+  });
+
+  it('resolves even when the database is unusable', async () => {
+    const transaction = vi
+      .spyOn(offlineDb, 'transaction')
+      .mockRejectedValue(new Error('blocked') as never);
+    try {
+      await expect(clearOfflineData()).resolves.toBeUndefined();
+    } finally {
+      transaction.mockRestore();
+    }
   });
 });
