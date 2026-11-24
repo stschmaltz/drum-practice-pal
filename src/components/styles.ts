@@ -66,8 +66,8 @@ export const cardClass = 'rounded-card border border-line bg-surface shadow-card
 /** A card that is the one in play (the repeating loop, a loop's prompt). */
 export const activeCardClass = 'rounded-card border border-brand-line bg-brand-soft/40 shadow-card';
 
-/** An in-text link to another page. */
-export const linkClass = `rounded-sm font-medium text-brand underline underline-offset-4 hover:text-brand-hover ${focusRing}`;
+/** A link to another page, on a line of its own (every use so far): a 44 px target like a button. */
+export const linkClass = `inline-flex min-h-touch items-center rounded-sm font-medium text-brand underline underline-offset-4 hover:text-brand-hover ${focusRing}`;
 
 /**
  * An icon at the start of a line of text, inline with it. Not a flex row: a

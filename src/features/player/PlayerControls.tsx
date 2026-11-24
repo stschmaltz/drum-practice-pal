@@ -147,7 +147,7 @@ function SpeedSlider({
   return (
     <PercentSlider
       label="Speed"
-      className="flex-[3_1_13rem]"
+      className="flex-[3_1_12rem]"
       sliderClassName="min-w-20"
       value={ratioToPercent(speedRatio)}
       min={ratioToPercent(SPEED_RATIO_MIN)}
@@ -333,7 +333,8 @@ function PercentSlider({
         aria-valuetext={`${value}%`}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className={`min-h-touch min-w-0 flex-1 ${sliderClassName}`}
+        // w-0: left to its own width (129 px in Chromium), a slider pushes the volume onto a fourth row on a phone.
+        className={`min-h-touch w-0 min-w-0 flex-1 ${sliderClassName}`}
       />
       <output
         htmlFor={id}

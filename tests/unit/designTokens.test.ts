@@ -84,6 +84,49 @@ describe('token contrast', () => {
   );
 });
 
+/** `top` at `alpha` over the opaque `under`, as hex: what a `bg-token/NN` class draws. */
+function blend(top: string, alpha: number, under: string): string {
+  const channels = (color: string) =>
+    [1, 3, 5].map((i) => Number.parseInt(color.slice(i, i + 2), 16));
+  const a = channels(top);
+  const b = channels(under);
+  return `#${a
+    .map((c, i) =>
+      Math.round(c * alpha + (b[i] ?? 0) * (1 - alpha))
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`;
+}
+
+/**
+ * Text on a see-through surface, against what shows through it. The playing
+ * loop's card (`activeCardClass`, `brand-soft/40`) sits on the page or a
+ * panel; the count-in number (`canvas/90`) sits over the score's paper.
+ */
+const BLENDED_TEXT_PAIRS: [text: string[], top: string, alpha: number, under: string][] = [
+  [['ink', 'ink-soft', 'ink-muted', 'brand', 'danger'], 'brand-soft', 0.4, 'surface'],
+  [['ink', 'ink-soft', 'ink-muted', 'brand', 'danger'], 'brand-soft', 0.4, 'canvas'],
+  [['ink', 'ink-soft', 'brand'], 'canvas', 0.9, 'score-paper'],
+];
+
+describe('token contrast on see-through surfaces', () => {
+  it.each(
+    BLENDED_TEXT_PAIRS.flatMap(([texts, top, alpha, under]) =>
+      texts.map((text) => [text, `${top}/${alpha * 100}`, under, top, alpha] as const),
+    ),
+  )('%s text on %s over %s meets 4.5:1', (text, _label, under, top, alpha) => {
+    expect(contrastRatio(hex(text), blend(hex(top), alpha, hex(under)))).toBeGreaterThanOrEqual(
+      AA_TEXT,
+    );
+  });
+
+  it('blends as the browser does', () => {
+    expect(blend('#000000', 0.5, '#ffffff')).toBe('#808080');
+    expect(blend('#ff8a3d', 1, '#000000')).toBe('#ff8a3d');
+  });
+});
+
 /** Every .ts and .tsx file under src/, as paths from the repo root. */
 function sourceFiles(dir = join(root, 'src')): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

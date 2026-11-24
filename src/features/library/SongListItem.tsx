@@ -82,7 +82,7 @@ function SongSummary({ song }: { song: LibrarySong }) {
     <div className="flex flex-col gap-1">
       <Link
         to={songPath(song.id)}
-        className={`self-start rounded-sm text-lg font-semibold break-words text-ink hover:text-brand ${focusRing}`}
+        className={`inline-flex min-h-touch items-center self-start rounded-sm text-lg font-semibold break-words text-ink hover:text-brand ${focusRing}`}
       >
         {song.title}
       </Link>
