@@ -36,9 +36,16 @@ const formatDay = (timestamp: string) => dateFormat.format(new Date(timestamp));
 export function SongListItem({
   song,
   onEditingChange,
+  onEditClosed,
   onDeletePressed,
 }: {
   song: LibrarySong;
+  /**
+   * The edit form closed (saved or cancelled). A saved rename can take the song
+   * out of the list's search, and its Edit button with it, so the list hands
+   * focus on instead of the item. Without it the item focuses its own Edit.
+   */
+  onEditClosed?: (songId: string) => void;
   /**
    * "Delete song" was pressed: the item will leave the list once the server
    * confirms, and the list hands focus on (its own button goes with it).
@@ -72,7 +79,14 @@ export function SongListItem({
       {...itemAttributes(song.id)}
     >
       {editing ? (
-        <EditSongForm song={song} onDone={() => backTo('edit')} />
+        <EditSongForm
+          song={song}
+          onDone={() => {
+            if (!onEditClosed) return backTo('edit');
+            setMode('view');
+            onEditClosed(song.id);
+          }}
+        />
       ) : (
         <SongSummary song={song} />
       )}

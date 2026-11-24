@@ -385,8 +385,9 @@ export class PlayerService {
    * loop's first bar chosen from the panel: alphaTab follows its cursor only
    * while it plays, so this does nothing then. seekToBar doesn't do it, since
    * a tapped bar would move under the finger. Scrolling only. Asked before the
-   * song is ready (a loop opened by link while the sounds load), it is kept and
-   * done when the song is ready; a setRange meanwhile drops it.
+   * song is ready (a loop opened by link while the sounds load), or before the
+   * notation has rendered (the sounds cached, the score still drawing), it is
+   * kept and done when both are; a setRange meanwhile drops it.
    */
   showBar(barNumber: number): void {
     if (this.disposed) return;
@@ -396,7 +397,18 @@ export class PlayerService {
     }
     if (this.snapshot.status === 'playing') return;
     if (startTickOfBar(this.bars, barNumber) === null) return;
-    this.engine.scrollToBar(barNumber - 1);
+    this.scrollToBarWhenRendered(barNumber);
+  }
+
+  /** The engine can't scroll to a bar before the score has bounds; then it waits for `rendered`. */
+  private scrollToBarWhenRendered(barNumber: number): void {
+    this.pendingShowBar = this.engine.scrollToBar(barNumber - 1) ? null : barNumber;
+  }
+
+  private showPendingBar(): void {
+    const shown = this.pendingShowBar;
+    this.pendingShowBar = null;
+    if (shown !== null) this.showBar(shown);
   }
 
   /** The tempo a 1-based bar starts at, in the file's BPM; null before the score loads or for no such bar. */
@@ -576,9 +588,11 @@ export class PlayerService {
       // is known to be lost: alphaTab 1.9 holds its channel mutes until told otherwise.
       this.applyAll();
       this.update({ status: 'ready' });
-      const shown = this.pendingShowBar;
-      this.pendingShowBar = null;
-      if (shown !== null) this.showBar(shown);
+      this.showPendingBar();
+    });
+    engine.on('rendered', () => {
+      if (this.disposed || !this.isLoaded()) return;
+      this.showPendingBar();
     });
     engine.on('stateChanged', ({ playing }) => {
       if (this.disposed) return;
@@ -697,7 +711,7 @@ export class PlayerService {
     this.cancelCountIn = cancel;
     // The count-in is for reading the bar ahead, and the engine, not playing yet, won't scroll
     // to it: the user may have scrolled away, or a repeat's pass ended lines below its start.
-    this.engine.scrollToBar(barNumber - 1);
+    this.scrollToBarWhenRendered(barNumber);
     this.update({ status: 'countingIn', countIn: null });
     this.wakeLock.setActive(true);
     return true;

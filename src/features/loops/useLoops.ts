@@ -11,6 +11,7 @@ import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
 import { sessionKeys } from '@/features/practice/sessionKeys';
 import { useSignedInUser } from '@/lib/auth';
 import { queuedWriteRetry } from '@/lib/network';
+import { sendRefreshingToken } from '@/lib/tokenRefresh';
 import { randomUuid } from '@/lib/randomUuid';
 import type { LoopStatus } from '@/lib/schema';
 import { loopKeys } from './loopKeys';
@@ -204,7 +205,8 @@ export function loopEditOptions(queryClient: QueryClient, userId: string, songId
   return {
     mutationKey: loopKeys.writes(userId),
     scope: { id: loopKeys.writes(userId).join('/') },
-    mutationFn: ({ loopId, changes }: LoopUpdate) => updateLoop(userId, loopId, changes),
+    mutationFn: ({ loopId, changes }: LoopUpdate) =>
+      sendRefreshingToken(() => updateLoop(userId, loopId, changes)),
     ...queuedWriteRetry,
     onMutate: async ({
       loopId,

@@ -731,4 +731,27 @@ describe('scrolling a bar into view', () => {
     expect(() => engine.scrollToBar(5)).not.toThrow();
     expect(scroll()).toEqual({ left: 40, top: 10 });
   });
+
+  it('says whether it could decide: false only before the score has rendered (Copilot review)', () => {
+    const { engine, api, surface } = scrolledTo(0, 0);
+    expect(engine.scrollToBar(5)).toBe(true);
+    // All on show: nothing to do, but decided.
+    expect(engine.scrollToBar(5)).toBe(true);
+    // Laid out, and no such bar: nothing to wait for either.
+    expect(engine.scrollToBar(20)).toBe(true);
+    api.boundsLookup = null;
+    expect(engine.scrollToBar(3)).toBe(false);
+    api.boundsLookup = { staffSystems: TWO_LINES };
+    surface.remove();
+    expect(engine.scrollToBar(3)).toBe(false);
+  });
+
+  it('reports each finished render as rendered, so a scroll asked too early can be asked again', () => {
+    const { engine, api } = scrolledTo(0, 0);
+    const rendered = vi.fn();
+    engine.on('rendered', rendered);
+    api.postRenderFinished.fire();
+    api.postRenderFinished.fire();
+    expect(rendered).toHaveBeenCalledTimes(2);
+  });
 });

@@ -1,6 +1,13 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { AuthApiError } from '@supabase/supabase-js';
 import { focusManager, onlineManager } from '@tanstack/react-query';
-import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
+import {
+  fakeSupabase,
+  opArgs,
+  queryResult,
+  resetFakeSupabase,
+  type FakeResult,
+} from '@/test/fakeSupabase';
 import { LOOP_SONG_ID, loopRow } from '@/test/loopTable';
 import { settle, signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import { songKeys } from '@/features/library/useSongs';
@@ -173,6 +180,41 @@ describe('useUpdateLoop', () => {
     update.resolve(fail('permission denied'));
     await waitFor(() => expect(view.result.current.update.isError).toBe(true));
     expect(view.cached()?.[0]).toMatchObject({ name: 'Old', end_bar: 12 });
+  });
+
+  it('a token the server refuses is refreshed, and the edit sent again with the new one (Copilot review)', async () => {
+    const view = await renderLoaded([loopRow('a'), loopRow('b')]);
+    const saved = loopRow('a', { speed_ratio: 0.9 });
+    queryResult.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'JWSError JWSInvalidSignature', code: 'PGRST301' },
+    });
+    queryResult.mockResolvedValueOnce(ok(saved));
+    queryResult.mockResolvedValue(ok([saved, loopRow('b')]));
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+
+    await waitFor(() => expect(view.result.current.update.isSuccess).toBe(true));
+    expect(fakeSupabase.auth.refreshSession).toHaveBeenCalledTimes(1);
+    expect(view.cached()?.[0]?.speed_ratio).toBe(0.9);
+  });
+
+  it('a token that can’t be refreshed fails the edit and rolls it back, rather than resending it for ever', async () => {
+    const view = await renderLoaded([loopRow('a'), loopRow('b')]);
+    fakeSupabase.auth.refreshSession.mockResolvedValue({
+      data: { session: null, user: null },
+      error: new AuthApiError('Invalid Refresh Token', 400, 'refresh_token_not_found'),
+    });
+    queryResult.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'JWSError JWSInvalidSignature', code: 'PGRST301' },
+    });
+    queryResult.mockResolvedValue(ok([loopRow('a'), loopRow('b')]));
+
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+
+    await waitFor(() => expect(view.result.current.update.isError).toBe(true));
+    expect(view.cached()?.[0]?.speed_ratio).toBe(loopRow('a').speed_ratio);
   });
 
   it('does not refetch while another loop write is still pending', async () => {
