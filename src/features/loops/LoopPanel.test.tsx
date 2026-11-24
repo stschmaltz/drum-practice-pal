@@ -893,10 +893,12 @@ describe('LoopPanel finishing a loop', () => {
     await view.press('Mark finished Intro');
 
     const reopen = await view.panel.findByRole('button', { name: 'Reopen Intro' });
-    expect(reopen).toBeDisabled();
+    expect(reopen).toHaveAttribute('aria-disabled', 'true');
     release();
     await waitFor(() =>
-      expect(view.panel.getByRole('button', { name: 'Reopen Intro' })).toBeEnabled(),
+      expect(view.panel.getByRole('button', { name: 'Reopen Intro' })).not.toHaveAttribute(
+        'aria-disabled',
+      ),
     );
 
     // Held, so the loop is seen to move back among the active ones before the refusal:
@@ -956,16 +958,20 @@ describe('LoopPanel finishing a loop', () => {
     await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
 
     const reopen = await view.panel.findByRole('button', { name: 'Reopen Late' });
-    expect(reopen).toBeDisabled();
+    expect(reopen).toHaveAttribute('aria-disabled', 'true');
     // Another loop's button is not held up by it.
-    expect(view.panel.getByRole('button', { name: 'Mark finished Intro' })).toBeEnabled();
+    expect(view.panel.getByRole('button', { name: 'Mark finished Intro' })).not.toHaveAttribute(
+      'aria-disabled',
+    );
     await view.user.click(reopen);
     expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
 
     release();
 
     await waitFor(() =>
-      expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toBeEnabled(),
+      expect(view.panel.getByRole('button', { name: 'Reopen Late' })).not.toHaveAttribute(
+        'aria-disabled',
+      ),
     );
     expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
     expect(savedLate(view)?.status).toBe('finished');
@@ -1005,7 +1011,9 @@ describe('LoopPanel finishing a loop', () => {
       }),
     );
     await waitFor(() =>
-      expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toBeEnabled(),
+      expect(view.panel.getByRole('button', { name: 'Reopen Late' })).not.toHaveAttribute(
+        'aria-disabled',
+      ),
     );
     expect(finishedNames(view)).toEqual(['Late']);
     expect(view.item('Late').getByText(/95% \(86 BPM\)/)).toBeInTheDocument();
@@ -1259,5 +1267,50 @@ describe('LoopPanel keeping focus (Unit 10)', () => {
     await waitFor(() =>
       expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toHaveFocus(),
     );
+  });
+
+  // Held: the loop's new button is rendered while its write is still pending, as on a real network.
+  it('with the write on its way, focus is on the loop’s Reopen at once, and Enter there sends nothing', async () => {
+    const view = renderPanel();
+    const release = view.table.holdNext('update');
+    await view.press('Mark finished Intro');
+
+    const reopen = await view.panel.findByRole('button', { name: 'Reopen Intro' });
+    await waitFor(() => expect(reopen).toHaveFocus());
+    expect(reopen).toHaveAttribute('aria-disabled', 'true');
+    await view.user.keyboard('{Enter}');
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+
+    release();
+    await waitFor(() => expect(reopen).not.toHaveAttribute('aria-disabled'));
+    expect(reopen).toHaveFocus();
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+
+    // And back: Reopen, held, focuses Mark finished.
+    const releaseReopen = view.table.holdNext('update');
+    await view.user.keyboard('{Enter}');
+    const finish = await view.panel.findByRole('button', { name: 'Mark finished Intro' });
+    await waitFor(() => expect(finish).toHaveFocus());
+    expect(finish).toHaveAttribute('aria-disabled', 'true');
+    releaseReopen();
+    await waitFor(() => expect(finish).not.toHaveAttribute('aria-disabled'));
+    expect(finish).toHaveFocus();
+  });
+
+  it('with the prompt’s write on its way, focus is on the loop’s Reopen at once', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+    const release = view.table.holdNext('update');
+
+    const prompt = within(view.panel.getByRole('group', { name: 'Mark finished?' }));
+    await view.user.click(prompt.getByRole('button', { name: 'Mark finished' }));
+
+    const reopen = await view.panel.findByRole('button', { name: 'Reopen Late' });
+    await waitFor(() => expect(reopen).toHaveFocus());
+    expect(reopen).toHaveAttribute('aria-disabled', 'true');
+    release();
+    await waitFor(() => expect(reopen).not.toHaveAttribute('aria-disabled'));
+    expect(reopen).toHaveFocus();
   });
 });

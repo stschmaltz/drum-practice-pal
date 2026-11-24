@@ -316,7 +316,8 @@ function FinishPrompt({
         <button
           type="button"
           className={primaryButtonClass}
-          disabled={status.isPending}
+          // Locked like the list's status button (`LoopStatusButton`), which says why.
+          aria-disabled={status.isPending || undefined}
           onClick={() => {
             if (status.setStatus('finished')) onFinished();
           }}

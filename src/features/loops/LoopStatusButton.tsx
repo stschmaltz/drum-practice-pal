@@ -30,8 +30,10 @@ export function LoopStatusButton({
       <button
         type="button"
         className={buttonClass}
-        // Locked while any control is changing this loop's status, not only this one.
-        disabled={status.isPending}
+        // Locked while any control is changing this loop's status, not only this one. Locked,
+        // not disabled: focus follows the loop to this button while the write is still on its
+        // way, and a disabled button can't take it. `setStatus` ignores the press meanwhile.
+        aria-disabled={status.isPending || undefined}
         {...statusButtonAttributes(loop)}
         onClick={() => {
           const next = finished ? 'active' : 'finished';

@@ -243,13 +243,15 @@ describe('finishing and reopening from the home page', () => {
     await waitFor(() => expect(tab(/^Finished/)).toHaveTextContent('Finished (1)'));
     await user.click(tab(/^Finished/));
     const reopen = screen.getByRole('button', { name: 'Reopen Chorus fill' });
-    expect(reopen).toBeDisabled();
+    expect(reopen).toHaveAttribute('aria-disabled', 'true');
     await user.click(reopen);
     expect(table.writes()).toEqual([{ status: 'finished' }]);
 
     release();
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Reopen Chorus fill' })).toBeEnabled(),
+      expect(screen.getByRole('button', { name: 'Reopen Chorus fill' })).not.toHaveAttribute(
+        'aria-disabled',
+      ),
     );
   });
 

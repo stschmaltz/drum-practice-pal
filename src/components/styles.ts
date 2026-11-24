@@ -3,7 +3,7 @@
 const focusRing =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400';
 
-const buttonBase = `min-h-11 rounded-md px-4 py-2 font-medium ${focusRing} disabled:cursor-not-allowed disabled:opacity-50`;
+const buttonBase = `min-h-11 rounded-md px-4 py-2 font-medium ${focusRing} disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50`;
 
 export const buttonClass = `${buttonBase} bg-neutral-800 text-neutral-100 hover:bg-neutral-700`;
 

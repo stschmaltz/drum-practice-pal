@@ -179,3 +179,37 @@ None.
 - The earlier rows of Open human checks are unchanged.
 
 **Totals.** `npm run check`: 89 files, 3495 tests passed. `npm run e2e`: 331 passed, 14 skipped (the existing skips), 0 failed, built afresh (`dist` deleted, nothing on 4173).
+
+## Build: QA fix round 1
+
+### Summary
+
+Fixes QA issue 1: "Mark finished" and "Reopen" in the song page's loop panel, and the "Mark finished?" prompt's button, left focus on `<body>`. Focus is handed to the same loop's status button in its other section, and that button was `disabled` while the write was on its way; `useFocusWhenReady` found it on the move's render, called `focus()` on a disabled button (which does nothing) and ended its wait. The status buttons are now locked with `aria-disabled` instead, so they stay focusable while pending; the press is refused by `setStatus`, which already sends nothing while another status write to the loop is pending (asked of the mutation cache at the press). Focus now lands on the loop's new button on the render that moves it, with the write still in flight, and stays there when the write lands.
+
+### Files
+
+- `src/features/loops/LoopStatusButton.tsx`: `aria-disabled={status.isPending || undefined}` in place of `disabled`.
+- `src/features/loops/LoopPanel.tsx`: the same on the prompt's "Mark finished" (`FinishPrompt`), for one locking rule on every status control.
+- `src/components/styles.ts`: `buttonBase` styles `aria-disabled` like `disabled` (dimmed, not-allowed cursor).
+- `src/features/loops/LoopPanel.test.tsx`: two tests in "LoopPanel keeping focus (Unit 10)" that hold the write (`holdNext('update')`): the list's Mark finished, then Reopen, focus the loop's new button while it is still `aria-disabled`, Enter on it then sends nothing, and focus stays once the write lands; the prompt's Mark finished likewise. Both failed before the fix (focus on `<body>`). The existing "locks the button" assertions read `aria-disabled` instead of `toBeDisabled` / `toBeEnabled` (which would now pass on any button); "a press sends nothing" now clicks a live button, so it tests `setStatus`'s refusal rather than the browser skipping a disabled one.
+- `src/features/practice/OnTheGoPage.test.tsx`: the same assertion change for the home page's locked Reopen.
+- `tests/e2e/shortcuts.spec.ts`: "Mark finished and Reopen keep focus on the loop while the write is on its way" (3 projects). `page.route` holds each loops PATCH until the test lets it go; Enter on a focused Mark finished puts focus on Reopen while it is `aria-disabled`, it stays there when the write lands, and Enter there reopens it the same way. Failed on desktop with the fix reverted (`toBeFocused`).
+- `AGENTS.md`: one sentence in "Keyboard shortcuts and focus": a control focus can be handed to while pending is `aria-disabled`, never `disabled`.
+
+### Decisions
+
+- **`aria-disabled` rather than having `useFocusWhenReady` wait for the button to enable.** Waiting would leave focus on `<body>` for the whole round trip (a Tab or key meanwhile starts from the top of the page), and would depend on something re-rendering the panel when the write settles; the status buttons read their state from the mutation cache, so the panel itself isn't guaranteed to. Keeping the button focusable gives focus its place at once and needs no change to the hook. The gate stays single: `setStatus` refuses, and `isPending` (the same cache, the same filter) only draws the lock.
+- The home page uses the same `LoopStatusButton`, so its locked Reopen is `aria-disabled` too. Its focus target was already another loop's button; nothing else there changes.
+
+### Async windows and inputs
+
+- **A status write in flight, focus on the loop's new button (now possible).** Enter or a click on it: `setStatus` sees the pending write in the mutation cache and sends nothing, schedules no focus. Space: play/pause, as everywhere (the page's shortcut). A press on another loop's status button: that loop isn't locked and acts as before. The write lands: `aria-disabled` goes, focus stays. The write is refused: the optimistic move is undone, the loop's button moves back to its first section (a new element), focus falls to `<body>` and the error shows under the loop. Checked with a held, refused write; that is the known gap Build recorded, unchanged.
+
+### Known gaps
+
+- Unchanged from Build: a refused write leaves focus on `<body>`.
+
+### Manual verify
+
+1. Song with two loops; in devtools throttle to "Slow 3G" (or hold the loops PATCH). Focus a loop's "Mark finished", press Enter: focus is on its "Reopen" under Finished at once, dimmed; Enter there does nothing; once the write lands it is no longer dimmed and still focused. Reopen likewise.
+2. Play a loop at its target, press the prompt's "Mark finished": focus is on the loop's "Reopen".

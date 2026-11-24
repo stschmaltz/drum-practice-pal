@@ -3,7 +3,9 @@ import type { Page } from '@playwright/test';
 import { expect, test } from './auth';
 import {
   activeLoopLine,
+  loopItem,
   loopNameField,
+  loopPanel,
   newLoopButton,
   openLoopPanel,
   playLoopButton,
@@ -21,6 +23,7 @@ import {
   recordStatuses,
   status,
 } from './playerPage';
+import { loopsOf } from './practicePage';
 
 // Unit 10: keyboard shortcuts and page-turner pedals on the song page. A
 // pedal is a keyboard to the browser: it sends Page Up and Page Down (or the
@@ -257,4 +260,49 @@ test('while the loop form is open, the loop keys do nothing and the others still
 
   await expect(activeLoopLine(page)).toHaveCount(0);
   await expect(status(page)).toHaveText(barBefore ?? '');
+});
+
+test('Mark finished and Reopen keep focus on the loop while the write is on its way', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await saveNewLoop(page, { name: 'Chorus', firstBar: 9, lastBar: 12 });
+  await page.getByRole('button', { name: 'Exit loop' }).click();
+  await openLoopPanel(page);
+
+  // Each status write is held until let go: the loop's new button renders while it is pending.
+  const held: (() => void)[] = [];
+  await page.route('**/rest/v1/loops*', async (route) => {
+    if (route.request().method() !== 'PATCH') return route.continue();
+    await new Promise<void>((resolve) => held.push(resolve));
+    await route.continue();
+  });
+  const releaseWrite = async () => {
+    await expect.poll(() => held.length).toBe(1);
+    held.shift()?.();
+  };
+
+  await loopItem(page, 'Verse').getByRole('button', { name: 'Mark finished Verse' }).focus();
+  await page.keyboard.press('Enter');
+  const reopen = loopPanel(page).getByRole('button', { name: 'Reopen Verse' });
+  await expect(reopen).toBeFocused();
+  await expect(reopen).toHaveAttribute('aria-disabled', 'true');
+  await releaseWrite();
+  await expect(reopen).not.toHaveAttribute('aria-disabled');
+  await expect(reopen).toBeFocused();
+  await expect
+    .poll(async () => (await loopsOf(user)).map((loop) => loop.status))
+    .toContain('finished');
+
+  await page.keyboard.press('Enter');
+  const finish = loopPanel(page).getByRole('button', { name: 'Mark finished Verse' });
+  await expect(finish).toBeFocused();
+  await releaseWrite();
+  await expect(finish).not.toHaveAttribute('aria-disabled');
+  await expect(finish).toBeFocused();
+  await expect
+    .poll(async () => (await loopsOf(user)).map((loop) => loop.status))
+    .toEqual(['active', 'active']);
 });
