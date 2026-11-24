@@ -28,6 +28,8 @@ For every async window (a pending mutation, a load, a count-in, a hand-over betw
 
 - **A path that returns to its start.** Drag-or-tap decided by comparing the end point with the start misses a drag that came back. _08: the drag emitted both `barsDragged` and `barTapped`._ Keep state for the whole press (did it ever leave the slop?) and carry it to the trailing `click`.
 - **Points outside the visible area.** Hit-testing a window-level move against the full surface picks things the user can't see (clipped by a scroll box, under a sticky bar). _08: a drag past the score box picked hidden bars._ Reject points outside the visible client rectangle.
+- **Where a click lands.** A `click` goes to the nearest element that both the press and the release were on. _10: selecting text in the shortcut list and letting go past its edge clicked the backdrop, which closed it._ A "click outside" handler checks where the press began, not only the click's target.
+- **The other half never comes.** A flag set on one event and cleared by its pair (keydown and keyup, pointerdown and pointerup) stays set when the pair goes to another window or is cancelled. _10: a Space held while switching windows left "cancel the next Space keyup" set, so a later Space on the list's Close didn't press it._ Reset the flag at the start of each new first half, and say what a lost second half leaves behind.
 - **Every event a gesture produces.** Write down the full sequence the browser fires (`pointerdown`, `pointermove`s, `pointerup`, `click`, touch vs mouse, pan cancels) and say what each does.
 
 ## 4. Round trips: does a value survive display, edit and save unchanged?

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ShortcutOverlay } from './ShortcutOverlay';
 import { shortcutHelp } from './shortcuts';
@@ -75,6 +75,26 @@ describe('ShortcutOverlay', () => {
     await user.click(within(dialog).getByRole('heading', { name: 'Keyboard shortcuts' }));
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('a press that starts inside it and is let go outside leaves it open', async () => {
+    const { dialog } = await openOverlay();
+    const backdrop = dialog.parentElement;
+    if (!backdrop) throw new Error('no backdrop');
+
+    // Selecting a row's text and letting go past the edge: the browser sends the
+    // click to the element both ends share, which is the backdrop.
+    const heading = within(dialog).getByRole('heading', { name: 'Keyboard shortcuts' });
+    fireEvent.mouseDown(heading);
+    fireEvent.mouseUp(backdrop);
+    fireEvent.click(backdrop);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    // A press on the backdrop itself still closes it.
+    fireEvent.mouseDown(backdrop);
+    fireEvent.mouseUp(backdrop);
+    fireEvent.click(backdrop);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('unmounted while open, gives focus back to what opened it when that is still on the page', async () => {

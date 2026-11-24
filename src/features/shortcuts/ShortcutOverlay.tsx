@@ -16,6 +16,9 @@ export function ShortcutOverlay({ open, onClose }: { open: boolean; onClose: () 
 function OpenOverlay({ onClose }: { onClose: () => void }) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
+  // A press that starts in the dialog and is let go outside (selecting its text)
+  // clicks the element both ends share, the backdrop: only a press begun there closes.
+  const pressStartedOutside = useRef(false);
 
   useEffect(() => {
     const returnTo = document.activeElement;
@@ -40,8 +43,11 @@ function OpenOverlay({ onClose }: { onClose: () => void }) {
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4"
+      onMouseDown={(event) => {
+        pressStartedOutside.current = event.target === event.currentTarget;
+      }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget && pressStartedOutside.current) onClose();
       }}
     >
       <div

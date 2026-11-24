@@ -300,3 +300,46 @@ No behaviour change. The unit's code was already in the right places (pure rules
 ### Totals
 
 `npm run check`: 89 files, 3501 tests passed, before and after. `npm run e2e`: 334 passed, 14 skipped (the existing skips), 0 failed, before and after, each built afresh (`dist` deleted, nothing on 4173).
+
+## Review
+
+Reviewed `git diff unit-09...HEAD` (the branch is stacked on `unit-09`): app code, tests, e2e helpers, AGENTS.md and the plan.
+
+### Inventory
+
+- `useSongShortcuts` (window `keydown` / `keyup` listeners, the `latest` ref, the Space-keyup latch, `runShortcut`, `stepLoopOrBar`, `stepBar`).
+- `shortcuts.ts` (pure: `resolveShortcut`, `focusKindOf`, `neighbourLoop`, `steppedBar`, `nextCountInBars`, the help rows).
+- `ShortcutOverlay` (focus on open and back on close, the Tab trap, Escape, the backdrop click).
+- `controlGates.ts` and its callers: `PlayerControls`, `LoopPanel`'s Play loop, `useLoopPractice.playLoop`, the keys.
+- `useFocusWhenReady` and its three owners: `LoopPanelBody` (`openForm` / `closeForm`, `followStatusButton`), `OnTheGoPage` (`followStatusChange`), and the finders in `loopFocus.ts`.
+- `LoopStatusButton` and `FinishPrompt` (locked with `aria-disabled`, `onSet` / `onFinished`), `useSetLoopStatus.setStatus` (now returns whether it sent).
+- `LoopEditorForm` (focuses itself on mount).
+- `index.css` (`isolation: isolate` on `.jam-score`), `buttonBase` (`aria-disabled:` styles).
+- Tests: `useSongShortcuts.test.tsx`, `shortcuts.test.ts`, `ShortcutOverlay.test.tsx`, `useFocusWhenReady.test.tsx`, `loopFocus.test.ts`, the Unit 10 cases in `LoopPanel`, `OnTheGoPage`, `SongPage` and `useLoopPractice` tests, `src/test/locked.ts`, `loopPlayer({ drumTrackIndex })`, `tests/e2e/shortcuts.spec.ts`, `metronomeButton`. No migrations, scripts, Supabase calls or list reads in the diff.
+
+### Findings
+
+1. **Fixed (low), Gestures (3): a press begun inside the shortcut list and let go outside closed it.** `ShortcutOverlay.tsx`, the backdrop's `onClick`. A `click` goes to the nearest element that both the `mousedown` and the `mouseup` were on, so selecting a row's text and releasing past the dialog's edge clicked the backdrop, whose handler only checked `event.target === event.currentTarget`. Now the backdrop records on `mousedown` whether the press began on it, and the click closes only then (touch taps fire `mousedown` first too). Test: `ShortcutOverlay.test.tsx`, "a press that starts inside it and is let go outside leaves it open" (fails without the fix: the dialog is gone).
+2. **Fixed (low), Gestures (3) / Interleavings (1): a lost Space keyup left the keyup latch set.** `useSongShortcuts.ts`, `swallowSpaceKeyup`. It was set by a Space keydown the page took and cleared only by the next Space keyup. A keyup that never comes (Space held while switching windows) left it set, so the next Space keyup the page doesn't own was cancelled: with the shortcut list open, Space on its Close (a button presses on keyup) did nothing the first time. Now every Space keydown resets the latch before deciding. Test: `useSongShortcuts.test.tsx`, "a Space whose keyup never came … leaves the next one alone" (fails without the fix: the keyup is cancelled).
+
+Both are new checklist rows under section 3 ("Where a click lands", "The other half never comes"); the dialog bullet in AGENTS.md says how a click outside is judged.
+
+### Checked, no finding
+
+- **Gates.** Every key asks the gate its control uses, of `player.getSnapshot()` at the press: Space and the loop and bar keys `canPlay`, speed, M and C `canChangeOptions`, D and S `canUseDrumToggles`. `playLoop` asks `canPlay` itself, so the panel's sheet-closing wrapper can only run on a press of an enabled button. The loop keys while paused (`openLoop`) also need `canPlay`, which is stricter than `openLoop` needs, but agrees with Play.
+- **Interleavings.** Two keys before React draws: the snapshot is read at the press and `practice` / `loops` from a ref set in a layout effect; React flushes a native discrete event's updates before the next event (tested). A loop key during a count-in, while the form's save is pending (editor open: nothing), while loops are still read (nothing), while a status write is pending (the list already shows the optimistic order, which is the order the keys use). `useRequestedLoop` gives way once a key has set a loop (`userChoseLoop` is `activeLoop !== null`). A locked status button: `setStatus` refuses from the mutation cache at the press, the same filter `isPending` draws from.
+- **Focus hand-overs.** `useFocusWhenReady` moves focus only when it is on what was pressed or on `<body>`, and drops the wait after `FOCUS_WAIT_MS`; `closeForm` is the only caller of `closeEditor`, so the remembered opener can't go stale. A form opened by a mouse drag while the panel is hidden (768 to 1023 px, where it starts closed) focuses itself before the page's effect opens the panel, so the `focus()` misses and focus stays where it was (on `<body>` after a drag on the score); nothing is lost and the keys work from there, so no change.
+- **Round trips.** A paused loop key sets the saved `speed_ratio` exactly (tested at 0.708333); the speed keys nudge from the snapshot's ratio and clamp.
+- **Bars.** `steppedBar` and `seekToBar` / `showBar` are 1-based; `barNumber` is 1 from `scoreLoaded`, and `canPlay` keeps the bar keys off until then.
+- **Validated paths.** `playLoop` keeps `isValidBarRange`; `openLoop` leaves the range to the effect, which validates.
+- **Leaks.** Both window listeners are removed in the effect's cleanup (StrictMode tested); the overlay adds none; `useFocusWhenReady` has no timers.
+- **AGENTS.md.** Named exports, pure rules in plain modules, gates in one place, the Unit 10 conventions written up. Tests clean up what they place (`placed`), and the e2e route is per page.
+- Two quick Space presses a few ms apart both read `ready` before the engine reports `playing` (QA saw it); the Play button has the same hand-over and it predates this unit; no human presses that fast.
+
+### Open issues
+
+None new. The known gaps Build recorded (focus after a refused status write, no live announcement of key changes) are already on Unit 13's Carried forward list.
+
+### Totals
+
+`npm run check`: 89 files, 3503 tests passed. `npm run e2e`: 334 passed, 14 skipped (the existing skips), 0 failed, built afresh (`dist` deleted, nothing on 4173).

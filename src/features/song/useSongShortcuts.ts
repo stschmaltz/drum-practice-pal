@@ -48,6 +48,9 @@ export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs
     let swallowSpaceKeyup = false;
 
     const onKeyDown = (event: KeyboardEvent) => {
+      // Only for the press whose keydown this is: a keyup lost to another window must not
+      // cancel a later Space the page leaves alone (the shortcut list's Close).
+      if (event.key === ' ') swallowSpaceKeyup = false;
       const target = event.target instanceof HTMLElement ? event.target : null;
       const resolved = resolveShortcut(event, {
         focus: focusKindOf(target),

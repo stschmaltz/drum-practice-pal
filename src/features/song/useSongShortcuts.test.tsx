@@ -176,6 +176,19 @@ describe('Space', () => {
     view.keyDown(' ', {}, input);
     expect(view.keyUp(' ', input)).toBe(true);
   });
+
+  it('a Space whose keyup never came (the window lost focus while it was held) leaves the next one alone', async () => {
+    const view = await renderShortcuts();
+
+    view.keyDown(' ');
+    // No keyup: it went to another window. Back, the list is opened and Space
+    // presses its Close, which a button does on keyup.
+    view.key('?');
+    expect(view.helpOpen()).toBe(true);
+    const close = focused('button');
+    expect(view.keyDown(' ', {}, close)).toBe(true);
+    expect(view.keyUp(' ', close)).toBe(true);
+  });
 });
 
 describe('speed', () => {
