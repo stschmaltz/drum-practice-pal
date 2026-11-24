@@ -112,6 +112,46 @@ describe('showBar while not playing', () => {
     service.showBar(9);
     expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
   });
+
+  describe('asked while the song is still loading (a loop opened by ?loop=, bug hunt P2)', () => {
+    it('scrolls to the bar once the song is ready, once', () => {
+      const { engine, service } = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+      service.setRange({ startBar: 13, endBar: 14 });
+      service.showBar(13);
+      expect(engine.scrollToBar).not.toHaveBeenCalled();
+
+      engine.finishLoading();
+
+      expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+      expect(engine.scrollToBar).toHaveBeenLastCalledWith(12);
+      engine.fire('readyForPlayback', undefined);
+      expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+    });
+
+    it('the last bar asked for wins', () => {
+      const { engine, service } = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+      service.showBar(3);
+      service.showBar(9);
+      engine.finishLoading();
+      expect(engine.scrollToBar).toHaveBeenCalledTimes(1);
+      expect(engine.scrollToBar).toHaveBeenLastCalledWith(8);
+    });
+
+    it('a range set afterwards (the loop left) drops it', () => {
+      const { engine, service } = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+      service.showBar(13);
+      service.setRange(null);
+      engine.finishLoading();
+      expect(engine.scrollToBar).not.toHaveBeenCalled();
+    });
+
+    it('a bar the song lacks scrolls nowhere when it is ready', () => {
+      const { engine, service } = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+      service.showBar(40);
+      engine.finishLoading();
+      expect(engine.scrollToBar).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('showBar as a no-op', () => {

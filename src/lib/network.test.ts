@@ -51,6 +51,20 @@ describe('retrying queued writes', () => {
     expect(retryNetworkFailures(0, { message: 'nope', code: '23514' })).toBe(false);
   });
 
+  // Bug hunt D4: an access token that expired while the write waited is refused with a
+  // 401, which isn't the server saying no to the write: the next try refreshes it.
+  it.each([
+    ['an expired token', { message: 'JWT expired', code: 'PGRST303' }],
+    [
+      'a token that could not be read',
+      { message: 'JWSError JWSInvalidSignature', code: 'PGRST301' },
+    ],
+  ])('retries %s, however many times it has failed', (_case, error) => {
+    expect(retryNetworkFailures(1, error)).toBe(true);
+    expect(retryNetworkFailures(50, error)).toBe(true);
+    expect(isNetworkFailure(error)).toBe(false);
+  });
+
   it('backs off from a second to half a minute', () => {
     expect([0, 1, 2, 3, 4, 5, 6, 20].map(networkRetryDelay)).toEqual([
       1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000,

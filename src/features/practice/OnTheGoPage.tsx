@@ -2,7 +2,8 @@ import { Link, useSearchParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass, pressedButtonClass, primaryButtonClass } from '@/components/styles';
-import { findStatusButton, neighbourAfterLeaving } from '@/features/loops/loopFocus';
+import { findStatusButton } from '@/features/loops/loopFocus';
+import { neighbourAfterLeaving } from '@/lib/itemFocus';
 import { barsLabel } from '@/features/loops/loopForm';
 import {
   PRACTICE_TABS,

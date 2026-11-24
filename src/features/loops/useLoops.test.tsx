@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { focusManager, onlineManager } from '@tanstack/react-query';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
 import { LOOP_SONG_ID, loopRow } from '@/test/loopTable';
 import { settle, signedInAs, testQueryClient, wrapperFor } from '@/test/render';
@@ -63,6 +64,11 @@ const newLoop = {
 
 beforeEach(() => {
   resetFakeSupabase();
+});
+
+afterEach(() => {
+  // Back to following the document, after a test that set focus by hand.
+  focusManager.setFocused(undefined);
 });
 
 describe('loopKeys', () => {
@@ -192,6 +198,50 @@ describe('useUpdateLoop', () => {
     second.resolve(ok(loopRow('b', { name: 'B2' })));
     await waitFor(() => expect(selectsSoFar()).toBeGreaterThan(before));
   });
+
+  // Bug hunt D1: a write waiting between retries is pending, not paused, and the list's
+  // refetch on focus or reconnect brought the old row back over its optimistic value.
+  it.each([
+    [
+      'the window regains focus',
+      () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      },
+    ],
+    [
+      'the connection comes back',
+      () => {
+        onlineManager.setOnline(false);
+        onlineManager.setOnline(true);
+      },
+    ],
+  ])(
+    'does not refetch over a pending edit when %s, and reads the list once it settles',
+    async (_name, trigger) => {
+      const view = await renderLoaded([loopRow('a', { start_bar: 5, end_bar: 8 })]);
+      const update = deferred();
+      queryResult.mockReturnValueOnce(update.promise);
+      queryResult.mockResolvedValue(ok([loopRow('a', { start_bar: 5, end_bar: 8 })]));
+      const selectsSoFar = () =>
+        queryResult.mock.calls.filter(([call]) => !opArgs(call, 'update')).length;
+      const before = selectsSoFar();
+
+      act(() =>
+        view.result.current.update.mutate({ loopId: 'a', changes: { start_bar: 9, end_bar: 12 } }),
+      );
+      await waitFor(() => expect(view.cached()?.[0]?.start_bar).toBe(9));
+      act(trigger);
+      await settle();
+
+      expect(selectsSoFar()).toBe(before);
+      expect(view.cached()?.[0]).toMatchObject({ start_bar: 9, end_bar: 12 });
+
+      queryResult.mockResolvedValue(ok([loopRow('a', { start_bar: 9, end_bar: 12 })]));
+      update.resolve(ok(loopRow('a', { start_bar: 9, end_bar: 12 })));
+      await waitFor(() => expect(selectsSoFar()).toBeGreaterThan(before));
+    },
+  );
 });
 
 describe('useDeleteLoop', () => {

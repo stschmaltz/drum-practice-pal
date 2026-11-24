@@ -43,6 +43,19 @@ function invalidateWhenIdle(queryClient: QueryClient, userId: string) {
 }
 
 /**
+ * The refetches TanStack Query starts by itself (window focus, reconnect, a
+ * new screen mounting the list), held off while any loop write is pending: a
+ * write waiting between retries is pending but not paused, and a list read
+ * then would put the old server row back over its optimistic value (a bars
+ * edit of the playing loop would move playback back). invalidateWhenIdle
+ * reads the list once the last write has settled.
+ */
+function refetchUnlessWritesPending(queryClient: QueryClient, userId: string) {
+  const whenIdle = () => queryClient.isMutating({ mutationKey: loopKeys.writes(userId) }) === 0;
+  return { refetchOnWindowFocus: whenIdle, refetchOnReconnect: whenIdle, refetchOnMount: whenIdle };
+}
+
+/**
  * Changes the cached loops wherever they are held: the song's own list and
  * the home page's list of every loop. A list that isn't cached stays that way.
  * Both hold rows that carry a Loop's fields, so one change fits both.
@@ -77,9 +90,11 @@ function setCachedLoop(
 /** One song's loops, oldest first; sort for display with sortLoops. */
 export function useLoops(songId: string) {
   const user = useSignedInUser();
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: loopKeys.forSong(user.id, songId),
     queryFn: () => fetchLoops(user.id, songId),
+    ...refetchUnlessWritesPending(queryClient, user.id),
   });
 }
 
@@ -89,9 +104,11 @@ export function useLoops(songId: string) {
  */
 export function usePracticeLoops() {
   const user = useSignedInUser();
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: loopKeys.practice(user.id),
     queryFn: () => fetchPracticeLoops(user.id),
+    ...refetchUnlessWritesPending(queryClient, user.id),
   });
 }
 

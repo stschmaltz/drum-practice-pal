@@ -379,14 +379,25 @@ describe('a mouse drag across bars', () => {
     expect(drags).toEqual([]);
   });
 
-  it('a cancelled press reports no end, and the next move starts nothing', () => {
+  it('a cancelled drag reports its end as cancelled, and the next move starts nothing', () => {
     const { press, move, release, drags } = mounted();
     press(middleOf(0));
     move(middleOf(1));
     window.dispatchEvent(pointerEvent('pointercancel', middleOf(1)));
     move(middleOf(2));
     release(middleOf(2));
-    expect(drags).toEqual([{ fromBarIndex: 0, toBarIndex: 1, done: false }]);
+    // Bug hunt P4: with no end at all, the bars the drag had shown stayed highlighted.
+    expect(drags).toEqual([
+      { fromBarIndex: 0, toBarIndex: 1, done: false },
+      { fromBarIndex: 0, toBarIndex: 1, done: true, cancelled: true },
+    ]);
+  });
+
+  it('a cancelled press that never dragged reports nothing', () => {
+    const { press, drags } = mounted();
+    press(middleOf(0));
+    window.dispatchEvent(pointerEvent('pointercancel', middleOf(0)));
+    expect(drags).toEqual([]);
   });
 
   it('after release, moving the mouse reports nothing more', () => {

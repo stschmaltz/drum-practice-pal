@@ -58,12 +58,28 @@ export function isNetworkFailure(error: unknown): boolean {
 }
 
 /**
+ * PostgREST's refusals of the access token itself (a 401: expired, or not
+ * readable), not of the write. A token can expire while a queued write waits
+ * offline or between retries; supabase-js refreshes it before the next try.
+ */
+const TOKEN_REFUSALS = new Set(['PGRST301', 'PGRST303']);
+
+/** Whether the server refused the request's access token rather than the request. */
+export function isTokenRefusal(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { code } = error as { code?: unknown };
+  return typeof code === 'string' && TOKEN_REFUSALS.has(code);
+}
+
+/**
  * `retry` for a queued write: try again for as long as the failure is the
  * connection's (TanStack Query pauses the retries while offline and carries
- * on when the connection is back), never after a refusal.
+ * on when the connection is back) or the access token's, never after a
+ * refusal of the write. A token that can't be refreshed ends in a sign-out,
+ * which empties the device anyway.
  */
 export function retryNetworkFailures(_failureCount: number, error: unknown): boolean {
-  return isNetworkFailure(error);
+  return isNetworkFailure(error) || isTokenRefusal(error);
 }
 
 /** Waits between those retries: 1, 2, 4, … seconds, at most 30. */

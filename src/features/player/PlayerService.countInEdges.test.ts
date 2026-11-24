@@ -898,6 +898,32 @@ describe('review: races and partial failures', () => {
     },
   );
 
+  it('a loop switched after the downbeat counts in afresh, whatever the engine reports late (bug hunt P1)', () => {
+    const { engine, service, clicks } = setupCountIn();
+    service.setRange({ startBar: 5, endBar: 8 });
+    service.setLooping(true);
+    service.play();
+    vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+
+    // "Play loop" on another loop: the range moves and Play counts in for it.
+    service.setRange({ startBar: 9, endBar: 12 });
+    service.play();
+    expect(service.getSnapshot().status).toBe('countingIn');
+    const clicksBefore = clicks.cancelSession.mock.calls.length;
+
+    // The worker's answers to the first play() and to the pause that followed it.
+    enginePlays(engine);
+    engine.fire('stateChanged', { playing: false });
+
+    expect(service.getSnapshot().status).toBe('countingIn');
+    expect(clicks.cancelSession.mock.calls.length).toBe(clicksBefore);
+    vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
+    expect(engine.play).toHaveBeenCalledTimes(2);
+    enginePlays(engine);
+    expect(service.getSnapshot().status).toBe('playing');
+  });
+
   it('setRange during the clicks leaves the engine alone: it was never started', () => {
     const { engine, service } = setupCountIn();
     service.play();

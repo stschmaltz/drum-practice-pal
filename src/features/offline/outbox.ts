@@ -11,6 +11,7 @@
  * Best effort like the rest of the database: if it can't be written, the
  * mutation still sends; only the copy that would survive a reload is missing.
  */
+import { liveQuery } from 'dexie';
 import { offlineDb, type OutboxEntry } from './offlineDb';
 
 /** Ids queued by this page, which the replay at start leaves alone: their own mutation is sending them. */
@@ -57,4 +58,29 @@ export async function outboxEntries(userId: string): Promise<OutboxEntry[]> {
   } catch {
     return [];
   }
+}
+
+/** Whether the user has any entry on this device, whichever tab queued it; false if it can't be read. */
+export async function hasOutboxEntries(userId: string): Promise<boolean> {
+  try {
+    return (await offlineDb.outbox.where('userId').equals(userId).count()) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Calls `onChange` with whether the user has outbox entries, now and after
+ * every change, made by this tab or another (Dexie tells the others). Returns
+ * the unsubscribe. An unreadable database reads as none.
+ */
+export function watchOutboxEntries(
+  userId: string,
+  onChange: (hasEntries: boolean) => void,
+): () => void {
+  const subscription = liveQuery(() => hasOutboxEntries(userId)).subscribe({
+    next: onChange,
+    error: () => onChange(false),
+  });
+  return () => subscription.unsubscribe();
 }

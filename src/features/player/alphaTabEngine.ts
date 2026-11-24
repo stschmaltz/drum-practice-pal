@@ -221,8 +221,18 @@ function watchScorePointer(
     });
   };
 
+  // The browser took the press away (a system gesture, a native drag): a drag under way ends,
+  // picking nothing, so what it had shown is cleared; a press that never dragged says nothing.
   const onPointerCancel = () => {
+    const cancelled = press;
     press = null;
+    if (!cancelled || cancelled.barIndex === null || cancelled.draggedTo === null) return;
+    taps.emit('barsDragged', {
+      fromBarIndex: cancelled.barIndex,
+      toBarIndex: cancelled.draggedTo,
+      done: true,
+      cancelled: true,
+    });
   };
 
   // click, not pointerdown: browsers don't fire it after a pan, so scrolling the score never seeks.

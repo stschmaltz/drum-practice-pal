@@ -2,7 +2,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass } from '@/components/styles';
-import { hasUnsentWrites, useHasUnsentWrites } from '@/features/offline/unsentWrites';
+import {
+  hasUnsentWrites,
+  hasUnsentWritesAnywhere,
+  useHasUnsentWrites,
+} from '@/features/offline/unsentWrites';
 import { useSignedInUser } from '@/lib/auth';
 import { isOnline, useOnline } from '@/lib/network';
 import { useSignOut } from './useAuthActions';
@@ -11,7 +15,8 @@ import { useSignOut } from './useAuthActions';
  * RequireAuth redirects to /login once the SIGNED_OUT event lands. Signing
  * out empties the device, practice queued for the server included, so it is
  * off while offline and while any write is still on its way (a request that
- * hangs, or one being tried again after the connection dropped it).
+ * hangs, or one being tried again after the connection dropped it), this
+ * tab's or another's (unsentWrites.ts).
  */
 export function SignOutButton({ className = buttonClass }: { className?: string }) {
   const signOut = useSignOut();
@@ -26,7 +31,12 @@ export function SignOutButton({ className = buttonClass }: { className?: string 
         className={className}
         disabled={signOut.isPending || !online || unsent}
         onClick={() => {
-          if (isOnline() && !hasUnsentWrites(queryClient, user.id)) signOut.mutate();
+          if (!isOnline()) return;
+          // The outbox, which other tabs share, is read asynchronously; asked again after it.
+          void hasUnsentWritesAnywhere(queryClient, user.id).then((unsentNow) => {
+            if (unsentNow || !isOnline() || hasUnsentWrites(queryClient, user.id)) return;
+            signOut.mutate();
+          });
         }}
       >
         {signOut.isPending ? 'Signing out…' : 'Sign out'}

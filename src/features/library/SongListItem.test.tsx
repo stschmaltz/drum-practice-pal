@@ -222,6 +222,43 @@ describe('SongListItem deleting', () => {
   });
 });
 
+// Bug hunt S4: each of these controls replaces itself, and focus fell to <body>.
+describe('SongListItem focus as its controls replace one another', () => {
+  const form = () => screen.getByLabelText('Title').closest('form');
+
+  it('Edit hands focus to the form, and Cancel back to Edit', async () => {
+    const user = renderItem();
+    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await waitFor(() => expect(form()).toHaveFocus());
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit Groove' })).toHaveFocus());
+  });
+
+  it('a saved edit hands focus back to Edit', async () => {
+    queryResult.mockImplementation(async (call) =>
+      ok({ ...song, ...(opArgs(call, 'update')?.[0] as object) }),
+    );
+    const user = renderItem();
+    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await user.type(screen.getByLabelText('Title'), ' two');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    // The item's song is a fixed prop here, so its name stays "Groove".
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit Groove' })).toHaveFocus());
+  });
+
+  it('Delete hands focus to the question, and "Keep it" back to Delete', async () => {
+    const user = renderItem();
+    await user.click(screen.getByRole('button', { name: 'Delete Groove' }));
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Delete Groove' })).toHaveFocus());
+
+    await user.click(screen.getByRole('button', { name: 'Keep it' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Delete Groove' })).toHaveFocus(),
+    );
+  });
+});
+
 describe('SongListItem offline', () => {
   it('keeps an edit on screen but saves nothing until back online', async () => {
     queryResult.mockImplementation(async (call) =>

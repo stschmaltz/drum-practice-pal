@@ -47,6 +47,16 @@ export function isLoaded(status: PlayerStatus): boolean {
   return status === 'ready' || isRunning(status);
 }
 
+/**
+ * Whether the score's bars are known and drawn, so they can be picked on it
+ * (a loop's bars): from the score's load on, before its sounds are in, and
+ * after the sounds failed, which still leaves the notation readable. Not
+ * after a failure that leaves nothing on show.
+ */
+export function showsScoreBars(snapshot: PlayerSnapshot): boolean {
+  return snapshot.barCount !== null && snapshot.error !== 'score' && snapshot.error !== 'engine';
+}
+
 /** Where a running count-in is, for the on-screen counter. All 1-based. */
 export interface CountInBeat {
   bar: number;
@@ -111,7 +121,8 @@ export type PlayerEvents = {
    * drag reaches each bar, and once more with `done` on release. No barTapped
    * follows a drag. Like a tap, nothing happens by itself.
    */
-  barsDragged: BarRange & { done: boolean };
+  /** `done` on release; with `cancelled` too when the browser took the press away, picking nothing. */
+  barsDragged: BarRange & { done: boolean; cancelled?: true };
 };
 
 /**
@@ -184,6 +195,8 @@ export class PlayerService {
   private lastTick: number | null = null;
   /** The bar a seek asked for, until the engine reports a position in it (see SEEK_SETTLE_MS). */
   private pendingSeek: { bar: BarTicks; until: number } | null = null;
+  /** A showBar asked for before the song was ready, done once it is (see showBar). */
+  private pendingShowBar: number | null = null;
   /** Cancels the count-in that is clicking now; null once it has handed over to playback. */
   private cancelCountIn: (() => void) | null = null;
   /**
@@ -193,6 +206,13 @@ export class PlayerService {
    * or after the engine's "stopped", so only play() and load() clear this.
    */
   private haltRequested = false;
+  /**
+   * The engine was told to play and then, before it said it was playing,
+   * told to pause (callOffCountIn). Its "playing" for that play() may still
+   * be on its way, and must not end a count-in started since. Cleared by the
+   * next startEngine().
+   */
+  private playCalledOff = false;
   private trackCount = 0;
   /** The engine was last sent Drums only's mutes, which it keeps until every track is sent again. */
   private engineHoldsDrumsOnly = false;
@@ -292,7 +312,7 @@ export class PlayerService {
       this.engine.unlockAudio();
       if (this.beginCountIn(this.rewindToBarStart())) return;
     }
-    this.engine.play();
+    this.startEngine();
   }
 
   /** Pauses playback, or calls off a count-in. */
@@ -340,7 +360,7 @@ export class PlayerService {
     this.pendingSeek = bar ? { bar, until: Date.now() + SEEK_SETTLE_MS } : null;
     // Shown at once: while paused, alphaTab's position echo arrives a moment later from its worker.
     this.moveToBar(barNumber);
-    if (recount && !this.beginCountIn(barNumber)) this.engine.play();
+    if (recount && !this.beginCountIn(barNumber)) this.startEngine();
     return true;
   }
 
@@ -364,10 +384,17 @@ export class PlayerService {
    * already. For a bar the user didn't pick on the score itself, such as a
    * loop's first bar chosen from the panel: alphaTab follows its cursor only
    * while it plays, so this does nothing then. seekToBar doesn't do it, since
-   * a tapped bar would move under the finger. Scrolling only.
+   * a tapped bar would move under the finger. Scrolling only. Asked before the
+   * song is ready (a loop opened by link while the sounds load), it is kept and
+   * done when the song is ready; a setRange meanwhile drops it.
    */
   showBar(barNumber: number): void {
-    if (this.disposed || !this.isLoaded() || this.snapshot.status === 'playing') return;
+    if (this.disposed) return;
+    if (!this.isLoaded()) {
+      this.pendingShowBar = barNumber;
+      return;
+    }
+    if (this.snapshot.status === 'playing') return;
     if (startTickOfBar(this.bars, barNumber) === null) return;
     this.engine.scrollToBar(barNumber - 1);
   }
@@ -396,6 +423,8 @@ export class PlayerService {
     }
     // Its downbeat would no longer be where playback starts; Play counts in again.
     this.callOffCountIn();
+    // A bar kept to show was for the range this replaces.
+    this.pendingShowBar = null;
     // alphaTab moves playback to the start of a new range itself.
     if (range) this.pendingSeek = null;
     this.update({ range });
@@ -443,7 +472,7 @@ export class PlayerService {
       // Status stays countingIn until the engine reports it is playing, as after a downbeat.
       this.stopCountInClicks();
       this.update({ countIn: null });
-      this.engine.play();
+      this.startEngine();
     }
   }
 
@@ -547,6 +576,9 @@ export class PlayerService {
       // is known to be lost: alphaTab 1.9 holds its channel mutes until told otherwise.
       this.applyAll();
       this.update({ status: 'ready' });
+      const shown = this.pendingShowBar;
+      this.pendingShowBar = null;
+      if (shown !== null) this.showBar(shown);
     });
     engine.on('stateChanged', ({ playing }) => {
       if (this.disposed) return;
@@ -554,6 +586,10 @@ export class PlayerService {
       if (this.snapshot.status === 'loading' && !playing) return;
       // Before a repeat's count-in alphaTab stops at the end of the pass; that isn't a pause.
       if (this.snapshot.status === 'countingIn' && !playing) return;
+      // The answer to a play() the service has since called off (a loop switched just
+      // after its downbeat), with the pause sent then still to come: the count-in now
+      // clicking is the current one, and it plays the engine itself at its downbeat.
+      if (playing && this.cancelCountIn !== null && this.playCalledOff) return;
       if (playing) this.stopCountInClicks();
       this.update({ status: playing ? 'playing' : 'ready', countIn: null });
       this.wakeLock.setActive(playing);
@@ -579,14 +615,15 @@ export class PlayerService {
       if (this.disposed) return;
       this.fail('score');
     });
+    // Taps and drags pick bars as soon as the score shows them; jam mode's seek has its own gate.
     engine.on('barTapped', ({ barIndex }) => {
-      if (this.disposed || !this.isLoaded()) return;
+      if (this.disposed || !showsScoreBars(this.snapshot)) return;
       this.events.emit('barTapped', { barNumber: barIndex + 1 });
     });
-    engine.on('barsDragged', ({ fromBarIndex, toBarIndex, done }) => {
-      if (this.disposed || !this.isLoaded()) return;
+    engine.on('barsDragged', ({ fromBarIndex, toBarIndex, done, cancelled }) => {
+      if (this.disposed || !showsScoreBars(this.snapshot)) return;
       const [startBar, endBar] = orderedBars(fromBarIndex + 1, toBarIndex + 1);
-      this.events.emit('barsDragged', { startBar, endBar, done });
+      this.events.emit('barsDragged', { startBar, endBar, done, ...(cancelled && { cancelled }) });
     });
   }
 
@@ -652,7 +689,7 @@ export class PlayerService {
         onDownbeat: () => {
           // Status stays countingIn until the engine reports it is playing.
           this.cancelCountIn = null;
-          this.engine.play();
+          this.startEngine();
         },
       },
     );
@@ -675,7 +712,7 @@ export class PlayerService {
     if (!countsInEveryRepeat(this.snapshot) || this.haltRequested) return;
     const { status, range } = this.snapshot;
     if (status !== 'playing' && status !== 'ready') return;
-    if (!this.beginCountIn(range?.startBar ?? 1)) this.engine.play();
+    if (!this.beginCountIn(range?.startBar ?? 1)) this.startEngine();
   }
 
   /** Silences the count-in's remaining clicks and drops its timers; status is the caller's business. */
@@ -700,7 +737,15 @@ export class PlayerService {
   private callOffCountIn(): void {
     const handedOver = this.snapshot.status === 'countingIn' && this.cancelCountIn === null;
     this.abandonCountIn();
-    if (handedOver) this.engine.pause();
+    if (!handedOver) return;
+    this.engine.pause();
+    this.playCalledOff = true;
+  }
+
+  /** Every engine.play() goes through here. */
+  private startEngine(): void {
+    this.playCalledOff = false;
+    this.engine.play();
   }
 
   /**

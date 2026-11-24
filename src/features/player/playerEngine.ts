@@ -37,7 +37,11 @@ export type EngineEvents = {
    * released, to another. Either bar may come first. Touch never reports this:
    * a finger dragging over the score scrolls it. No barTapped follows a drag.
    */
-  barsDragged: { fromBarIndex: number; toBarIndex: number; done: boolean };
+  /**
+   * `done` on release; with `cancelled` too when the browser cancelled the
+   * press instead (pointercancel), which picks nothing.
+   */
+  barsDragged: { fromBarIndex: number; toBarIndex: number; done: boolean; cancelled?: true };
 };
 
 export interface PlayerEngine {

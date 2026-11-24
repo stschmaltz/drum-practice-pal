@@ -223,6 +223,21 @@ describe('LibraryPage', () => {
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
     await waitFor(() => expect(shownTitles()).toEqual(['Waltz 3-4', 'Chorus Fill']));
   });
+
+  it('hands focus to the next song’s Delete once a song is deleted (bug hunt S4)', async () => {
+    serveLibrary(library);
+    const { user } = renderLibrary();
+    await screen.findByRole('list');
+    const before = shownTitles();
+    const index = before.indexOf('Halo');
+    const next = before[index + 1] ?? before[index - 1];
+    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await user.click(screen.getByRole('button', { name: 'Delete song' }));
+    await waitFor(() => expect(shownTitles()).not.toContain('Halo'));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: `Delete ${next}` })).toHaveFocus(),
+    );
+  });
 });
 
 describe('LibraryPage offline (Unit 11)', () => {

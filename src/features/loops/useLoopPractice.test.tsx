@@ -559,6 +559,19 @@ describe('dragging across bars', () => {
     expect(player.getSnapshot().highlight).toEqual({ startBar: 3, endBar: 6 });
   });
 
+  it('a drag the browser cancels opens nothing and leaves no mark (bug hunt P4)', async () => {
+    const { practice, drag, engine, player } = await renderPractice();
+    drag(3, 6, false);
+    expect(player.getSnapshot().highlight).toEqual({ startBar: 3, endBar: 6 });
+
+    act(() =>
+      engine.fire('barsDragged', { fromBarIndex: 2, toBarIndex: 5, done: true, cancelled: true }),
+    );
+
+    expect(practice().editor).toBeNull();
+    expect(player.getSnapshot().highlight).toBeNull();
+  });
+
   it('a right-to-left drag gives the bars in order', async () => {
     const { drag, fields } = await renderPractice();
     drag(9, 6, true);
