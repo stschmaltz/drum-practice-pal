@@ -393,3 +393,58 @@ None added. The open overlay is not async; inputs while it is open: Tab and Shif
 ### Manual verify
 
 Open `?` on the song page at 1440 px, click the heading, press Shift+Tab and Tab a few times: the focus ring stays on Close. Click a control behind the backdrop: nothing happens apart from the overlay closing (the press began outside). Escape: focus back on what had it.
+
+## Build: Copilot review, comment 2
+
+### Summary
+
+Comment on PR #13 (`shortcuts.ts:39`): M, D, S and C are global single-character shortcuts that can't be turned off, remapped or scoped to a focused control, so speech input can set them off with focus anywhere (WCAG 2.1.4, Character Key Shortcuts). **Real.** The input guard only gives keys to a field being typed in; with focus on the page or a button, a dictated "m" toggled the metronome.
+
+Shane's choice: an off switch, "Single-letter shortcuts", in Settings, on by default, saved per device (the keyboard, the pedal and the speech input belong to the device), no database change. Off, only the single-character keys stop acting. Space, the arrows and Page Up / Page Down keep working.
+
+**`?` counts.** 2.1.4 covers shortcuts made of "letter (including upper- and lower-case letters), punctuation, number, or symbol characters"; `?` is punctuation, and speech input types it ("question mark"). So the switch turns off M, D, S, C and `?`. Space isn't one of the character classes 2.1.4 names, and Shane chose to keep it with the arrows and page keys, which pedals send. With `?` off, the shortcut list still opens from the "Shortcuts" button (from 768 px; a phone has no keyboard shortcuts to read about) and closes with Escape or Close.
+
+The rule is one predicate, `isCharacterKey(key)` (one printable character other than Space), so a later shortcut on a character key is covered with no extra code.
+
+### Files
+
+- `src/features/shortcuts/shortcuts.ts`: `isCharacterKey`, `CHARACTER_KEYS`, `characterKeysLabel()`; `ShortcutContext.characterKeys`, which `resolveShortcut` checks right after the modifier check (with it false, a character key is left to the browser, nothing cancelled, the open overlay's `?` included); `shortcutHelp({ characterKeys })` lists only working keys and drops rows left empty.
+- `src/features/shortcuts/characterKeysPreference.ts` (new): `CHARACTER_KEYS_STORAGE_KEY`, `readCharacterKeysOn`, `saveCharacterKeysOn` (returns false when storage refused; the choice is then held in memory for the page), `subscribeCharacterKeys` (saves in this page, and the `storage` event from other tabs, `key` null for a clear). Every `localStorage` access is in try/catch, including the `window.localStorage` getter, which throws when site data is blocked; anything unreadable is "on".
+- `src/features/shortcuts/useCharacterKeysOn.ts` (new): `useSyncExternalStore` over the module.
+- `src/features/song/useSongShortcuts.ts`: passes `characterKeys: readCharacterKeysOn()` at each keydown.
+- `src/features/shortcuts/ShortcutOverlay.tsx`: reads the switch with the hook; when off, lists only the keys that work and says "Single-letter shortcuts (M, D, S, C and ?) are off on this device. Turn them on in Settings." Plain text, not a link: Close stays the dialog's only control, so the Tab trap is unchanged.
+- `src/features/settings/SettingsPage.tsx`: `KeyboardSection`, "Keyboard on this device", a checkbox "Single-letter shortcuts" with a description (linked by `aria-describedby`) that says it is for this device only and saved at once. It is a section of its own outside the account's `<form>`, so it never touches the draft, Save or `user_settings`, and it shows while the account settings load or after they fail. A status line says when the browser won't keep it.
+- `src/test/setup.ts`: clears `localStorage` after every jsdom test.
+- Tests: `shortcuts.test.ts`, `characterKeysPreference.test.ts` (new), `useSongShortcuts.test.tsx`, `ShortcutOverlay.test.tsx`, `SettingsPage.test.tsx`, `tests/e2e/shortcuts.spec.ts`.
+- Docs: `AGENTS.md` (Unit 10 section), `docs/review-checklist.md` (new row).
+
+### Tests (written first; each failed before the code)
+
+- `shortcuts.test.ts` "single-key shortcuts turned off (WCAG 2.1.4)": M (both cases), D, S, C and `?` resolve to nothing; Space, the arrows and the page keys resolve as before; with the overlay open, Escape closes and `?` doesn't; `CHARACTER_KEYS` is exactly `? c d m s`; `characterKeysLabel()`. "shortcutHelp with single-key shortcuts off": no character key listed, only the three rows with other keys left.
+- `characterKeysPreference.test.ts`: on by default; save and read back, stored as `off`; an unknown stored value is on; on when the getter or `getItem` throws; a save that throws (`setItem`, or the getter) returns false and holds the choice; subscribers hear saves here, `storage` events for the key or a clear, and not other keys or after unsubscribing.
+- `useSongShortcuts.test.tsx` "with single-key shortcuts off on this device": M, D, S, C and `?` aren't cancelled and change nothing, the overlay stays shut, then ArrowUp, PageDown and Space on the same listener do act (the keys arrive); a change made after mount applies at the next press.
+- `ShortcutOverlay.test.tsx`: off, only working keys and the note; on, no note; a change while it is open redraws it.
+- `SettingsPage.test.tsx` "single-letter shortcuts (this device only)": checked by default, described as this device only; unchecking saves to the device, leaves Save disabled and sends nothing (after `settle()`); there while the account settings failed to load; follows a `storage` event from another tab; says the browser won't keep it when `setItem` throws, and still applies it.
+- e2e (phone, tablet, desktop) "with single-letter shortcuts off in Settings, M, D, S, C and ? do nothing; Space and the arrows still work": off in Settings, back to the song, M, D, S, C and Shift+? then ArrowUp (speed reaches 105%, proving keys arrive), metronome, drums toggles, count-in unchanged and no dialog; Space plays and pauses; then turned back on in a second tab with the song page left open, and M flips the metronome with no reload.
+
+### Async windows and inputs
+
+None added. Reading and saving the switch are synchronous. Inputs that can arrive around it: a save in another tab while the song page is open (the next keydown reads storage; the overlay and Settings redraw on the `storage` event); a save while the overlay is open (redraws); storage refusing a save (held in memory for the page, Settings says so); a key pressed while a save is in progress can't happen, as saving is one synchronous call.
+
+### Checklist
+
+No row covered it. Section 5's "Accessibility claims" is about measuring what markup claims (target size), and the input guard's rows are about focus, not about the shortcut having a way off. Added **Requirements that come with the kind of feature** under section 5: some features carry a WCAG criterion of their own (2.1.4 character-key shortcuts, 2.2.1 time limits, 2.3.3 motion, 2.5.7 dragging, 1.4.13 hover content); the Build note names it and a test proves how it is met. This miss is its example.
+
+### Known gaps
+
+- The switch is per browser profile, not per account: a second browser on the same laptop starts with it on. That is what "per device" means here.
+- A `setItem` that fails while `getItem` works (a full quota) holds the choice for the page only; after a reload the stored value is back. Settings says so at the time.
+- No remapping; off is the 2.1.4 option chosen.
+
+### Manual verify
+
+At `/settings`, uncheck "Single-letter shortcuts". Open a song, click nothing, press M, D, S, C and `?`: nothing changes and no list opens; ArrowUp and Space still work. Press "Shortcuts" (768 px and up): the list shows only Space, the arrows and the page keys, and says where to turn the rest back on. In a second tab turn it back on; in the first, M toggles the metronome without a reload.
+
+### Totals
+
+`npm run check`: 90 files, 3542 tests passed. `npm run e2e`: 340 passed, 14 skipped (the existing skips), 0 failed, built afresh (`dist` deleted, nothing on 4173).

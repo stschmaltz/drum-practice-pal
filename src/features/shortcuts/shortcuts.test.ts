@@ -1,6 +1,9 @@
 import { COUNT_IN_BAR_OPTIONS, type CountInBars } from '@/lib/schema';
 import {
+  CHARACTER_KEYS,
+  characterKeysLabel,
   focusKindOf,
+  isCharacterKey,
   HELP_ROW_ACTIONS,
   KEY_BINDINGS,
   neighbourLoop,
@@ -25,7 +28,7 @@ const press = (key: string, overrides: Partial<KeyPress> = {}): KeyPress => ({
   ...overrides,
 });
 
-const onPage: ShortcutContext = { focus: 'other', helpOpen: false };
+const onPage: ShortcutContext = { focus: 'other', helpOpen: false, characterKeys: true };
 
 describe('resolveShortcut', () => {
   it.each([
@@ -103,14 +106,14 @@ describe('resolveShortcut', () => {
 
   describe('the input guard', () => {
     it('gives every key to a field being typed in', () => {
-      const typing: ShortcutContext = { focus: 'typing', helpOpen: false };
+      const typing: ShortcutContext = { focus: 'typing', helpOpen: false, characterKeys: true };
       for (const key of Object.keys(KEY_BINDINGS)) {
         expect(resolveShortcut(press(key), typing)).toBeNull();
       }
     });
 
     it('gives a slider its arrow and page keys, and keeps the rest', () => {
-      const slider: ShortcutContext = { focus: 'slider', helpOpen: false };
+      const slider: ShortcutContext = { focus: 'slider', helpOpen: false, characterKeys: true };
       for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown']) {
         expect(resolveShortcut(press(key), slider)).toBeNull();
       }
@@ -120,7 +123,7 @@ describe('resolveShortcut', () => {
   });
 
   describe('with the overlay open', () => {
-    const help: ShortcutContext = { focus: 'other', helpOpen: true };
+    const help: ShortcutContext = { focus: 'other', helpOpen: true, characterKeys: true };
 
     it('closes on Escape or ?', () => {
       expect(resolveShortcut(press('Escape'), help)).toEqual({ action: 'closeHelp', run: true });
@@ -137,14 +140,56 @@ describe('resolveShortcut', () => {
     });
 
     it('closes on Escape even while focus is in a field', () => {
-      expect(resolveShortcut(press('Escape'), { focus: 'typing', helpOpen: true })?.action).toBe(
-        'closeHelp',
-      );
+      expect(
+        resolveShortcut(press('Escape'), { focus: 'typing', helpOpen: true, characterKeys: true })
+          ?.action,
+      ).toBe('closeHelp');
     });
   });
 
   it('means nothing by Escape while the overlay is closed', () => {
     expect(resolveShortcut(press('Escape'), onPage)).toBeNull();
+  });
+});
+
+describe('single-key shortcuts turned off (WCAG 2.1.4)', () => {
+  const off: ShortcutContext = { focus: 'other', helpOpen: false, characterKeys: false };
+
+  it.each(['m', 'M', 'd', 's', 'c'])('leaves %j to the page, so the browser keeps it', (key) => {
+    expect(resolveShortcut(press(key), off)).toBeNull();
+  });
+
+  it('leaves ? to the page too: it is a punctuation character, which 2.1.4 covers', () => {
+    expect(resolveShortcut(press('?', { shiftKey: true }), off)).toBeNull();
+  });
+
+  it.each([
+    [' ', 'togglePlay'],
+    ['ArrowUp', 'speedUp'],
+    ['ArrowDown', 'speedDown'],
+    ['ArrowLeft', 'previousLoop'],
+    ['PageUp', 'previousLoop'],
+    ['ArrowRight', 'nextLoop'],
+    ['PageDown', 'nextLoop'],
+  ])('keeps %j as %s: not a letter, number, punctuation or symbol key', (key, action) => {
+    expect(resolveShortcut(press(key), off)).toEqual({ action, run: true });
+  });
+
+  it('still closes the overlay on Escape, but not on ?', () => {
+    const help: ShortcutContext = { ...off, helpOpen: true };
+    expect(resolveShortcut(press('Escape'), help)).toEqual({ action: 'closeHelp', run: true });
+    expect(resolveShortcut(press('?', { shiftKey: true }), help)).toBeNull();
+  });
+
+  it('names as character keys exactly the bound keys that are one printable character', () => {
+    expect([...CHARACTER_KEYS].sort()).toEqual(['?', 'c', 'd', 'm', 's']);
+    expect(isCharacterKey(' ')).toBe(false);
+    expect(isCharacterKey('PageDown')).toBe(false);
+    expect(isCharacterKey('M')).toBe(true);
+  });
+
+  it('writes those keys out for the copy that names them', () => {
+    expect(characterKeysLabel()).toBe('M, D, S, C and ?');
   });
 });
 
@@ -195,6 +240,19 @@ describe('shortcutHelp', () => {
     expect(
       shortcutHelp().find((row) => row.label.startsWith('Previous or next loop'))?.keys,
     ).toEqual(['←', 'Page Up', '→', 'Page Down']);
+  });
+});
+
+describe('shortcutHelp with single-key shortcuts off', () => {
+  it('lists no character key, and drops the rows left with none', () => {
+    const rows = shortcutHelp({ characterKeys: false });
+    const shown = rows.flatMap((row) => row.keys);
+    for (const key of ['M', 'D', 'S', 'C', '?']) expect(shown).not.toContain(key);
+    expect(rows.map((row) => row.label)).toEqual([
+      'Play or pause',
+      'Speed up or down 5%',
+      'Previous or next loop (a bar back or on, when the song has no loops)',
+    ]);
   });
 });
 

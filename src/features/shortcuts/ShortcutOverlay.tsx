@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { buttonClass } from '@/components/styles';
-import { shortcutHelp } from './shortcuts';
+import { characterKeysLabel, shortcutHelp } from './shortcuts';
+import { useCharacterKeysOn } from './useCharacterKeysOn';
 
 /**
  * The `?` overlay: every shortcut and its keys. Modal while open: focus moves
@@ -9,6 +10,8 @@ import { shortcutHelp } from './shortcuts';
  * and focus goes back to where it was. The page's shortcuts are off meanwhile
  * (`resolveShortcut` with `helpOpen`), apart from `?` and Escape, which the
  * page's own listener turns into closing it when focus isn't in the dialog.
+ * With this device's single-letter shortcuts off it lists only the keys that
+ * still work, says so, and points to Settings (`?` doesn't open or close it then).
  *
  * It is drawn straight into `<body>` so the rest of the page can be made
  * `inert` while it is open: clicks, Tab and screen readers can't reach what
@@ -22,6 +25,7 @@ export function ShortcutOverlay({ open, onClose }: { open: boolean; onClose: () 
 
 function OpenOverlay({ onClose }: { onClose: () => void }) {
   const titleId = useId();
+  const characterKeys = useCharacterKeysOn();
   const closeRef = useRef<HTMLButtonElement>(null);
   // A press that starts in the dialog and is let go outside (selecting its text)
   // clicks the element both ends share, the backdrop: only a press begun there closes.
@@ -76,7 +80,7 @@ function OpenOverlay({ onClose }: { onClose: () => void }) {
           Keyboard shortcuts
         </h2>
         <dl className="flex flex-col gap-2 text-sm">
-          {shortcutHelp().map((row) => (
+          {shortcutHelp({ characterKeys }).map((row) => (
             <div key={row.label} className="flex items-baseline justify-between gap-4">
               <dt className="text-neutral-200">{row.label}</dt>
               {/* At most half the row, so a narrow phone wraps the keys instead of squeezing the label. */}
@@ -93,6 +97,12 @@ function OpenOverlay({ onClose }: { onClose: () => void }) {
             </div>
           ))}
         </dl>
+        {!characterKeys && (
+          <p className="text-sm text-neutral-200">
+            Single-letter shortcuts ({characterKeysLabel()}) are off on this device. Turn them on in
+            Settings.
+          </p>
+        )}
         <p className="text-sm text-neutral-400">
           Keys do nothing while you type in a field. A page-turner pedal that sends Page Up and Page
           Down, or the arrow keys, switches loops.

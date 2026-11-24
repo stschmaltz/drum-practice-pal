@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { saveCharacterKeysOn } from './characterKeysPreference';
 import { ShortcutOverlay } from './ShortcutOverlay';
 import { shortcutHelp } from './shortcuts';
 
@@ -166,5 +167,34 @@ describe('ShortcutOverlay', () => {
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(opener).toHaveFocus();
+  });
+  describe('with single-letter shortcuts off on this device', () => {
+    it('lists only the keys that still work, and says where to turn the rest back on', async () => {
+      saveCharacterKeysOn(false);
+      const { dialog } = await openOverlay();
+
+      expect(within(dialog).queryByText('M')).not.toBeInTheDocument();
+      expect(within(dialog).queryByText('?')).not.toBeInTheDocument();
+      expect(within(dialog).getByText('Space')).toBeInTheDocument();
+      expect(within(dialog).getByText('Page Down')).toBeInTheDocument();
+      expect(dialog).toHaveTextContent(
+        'Single-letter shortcuts (M, D, S, C and ?) are off on this device. Turn them on in Settings.',
+      );
+    });
+
+    it('says nothing about it while they are on', async () => {
+      const { dialog } = await openOverlay();
+      expect(within(dialog).getByText('M')).toBeInTheDocument();
+      expect(dialog).not.toHaveTextContent('are off on this device');
+    });
+
+    it('follows a change made while it is open', async () => {
+      const { dialog } = await openOverlay();
+      act(() => {
+        saveCharacterKeysOn(false);
+      });
+      expect(within(dialog).queryByText('M')).not.toBeInTheDocument();
+      expect(dialog).toHaveTextContent('are off on this device');
+    });
   });
 });

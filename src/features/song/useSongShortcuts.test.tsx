@@ -8,6 +8,7 @@ import { startOfBar } from '@/test/fakePlayerEngine';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
+import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
 import { useSongShortcuts } from './useSongShortcuts';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -276,6 +277,45 @@ describe('metronome, drums and count-in', () => {
       return view.player.getSnapshot().countInBars;
     });
     expect(seen).toEqual([1, 2, 0]);
+  });
+
+  describe('with single-key shortcuts off on this device', () => {
+    it('M, D, S, C and ? do nothing and stay the browser’s; Space and the arrows still act', async () => {
+      saveCharacterKeysOn(false);
+      const view = await renderShortcuts();
+      const before = view.player.getSnapshot();
+
+      for (const k of ['m', 'M', 'd', 's', 'c']) expect(view.key(k)).toBe(true);
+      expect(view.key('?', { shiftKey: true })).toBe(true);
+      expect(view.helpOpen()).toBe(false);
+      expect(view.player.getSnapshot()).toMatchObject({
+        metronomeOn: before.metronomeOn,
+        drumsMuted: false,
+        drumsOnly: false,
+        countInBars: 0,
+      });
+
+      // The keys did arrive: the ones that aren't single characters act on the same listener.
+      expect(view.key('ArrowUp')).toBe(false);
+      expect(view.player.getSnapshot().speedRatio).toBeCloseTo(1.05);
+      expect(view.key('PageDown')).toBe(false);
+      await waitFor(() => expect(view.activeLoop()).toBe('intro'));
+      expect(view.key(' ')).toBe(false);
+      expect(view.engine.play).toHaveBeenCalledTimes(1);
+    });
+
+    it('takes a change at the next press, with no remount (another tab or Settings)', async () => {
+      const view = await renderShortcuts();
+      const before = view.player.getSnapshot().metronomeOn;
+
+      saveCharacterKeysOn(false);
+      expect(view.key('m')).toBe(true);
+      expect(view.player.getSnapshot().metronomeOn).toBe(before);
+
+      saveCharacterKeysOn(true);
+      expect(view.key('m')).toBe(false);
+      expect(view.player.getSnapshot().metronomeOn).toBe(!before);
+    });
   });
 });
 

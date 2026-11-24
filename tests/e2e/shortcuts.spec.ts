@@ -346,3 +346,54 @@ test('Mark finished and Reopen keep focus on the loop while the write is on its 
     .poll(async () => (await loopsOf(user)).map((loop) => loop.status))
     .toEqual(['active', 'active']);
 });
+
+/** This device's single-letter shortcuts switch in Settings, on a page of its own. */
+const letterShortcutsToggle = (page: Page) =>
+  page.getByRole('checkbox', { name: 'Single-letter shortcuts' });
+
+test('with single-letter shortcuts off in Settings, M, D, S, C and ? do nothing; Space and the arrows still work', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'multi-track', 'Multi Track');
+  const songUrl = page.url();
+
+  await page.goto('/settings');
+  await expect(letterShortcutsToggle(page)).toBeChecked();
+  await letterShortcutsToggle(page).uncheck();
+  await expect(letterShortcutsToggle(page)).not.toBeChecked();
+
+  await page.goto(songUrl);
+  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+  await focusNothing(page);
+  const metronomeWas = await metronomeButton(page).getAttribute('aria-pressed');
+  const countInWas = await countInSelect(page).inputValue();
+
+  for (const key of ['m', 'd', 's', 'c', 'Shift+?']) await page.keyboard.press(key);
+  // The keys did reach the page: one that isn't a single character, pressed after them, acts.
+  await page.keyboard.press('ArrowUp');
+  await expect(speed(page)).toHaveText('105%');
+  await expect(metronomeButton(page)).toHaveAttribute('aria-pressed', metronomeWas ?? '');
+  await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(countInSelect(page)).toHaveValue(countInWas);
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toHaveCount(0);
+
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Pause');
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Play');
+
+  // Turned back on in another tab, with the song page left open: the next press acts, no reload.
+  const settingsTab = await page.context().newPage();
+  try {
+    await settingsTab.goto('/settings');
+    await letterShortcutsToggle(settingsTab).check();
+    await expect(letterShortcutsToggle(settingsTab)).toBeChecked();
+  } finally {
+    await settingsTab.close();
+  }
+  await page.bringToFront();
+  await focusNothing(page);
+  await pressMAndSeeMetronomeFlip(page);
+});

@@ -40,6 +40,28 @@ export const KEY_BINDINGS: Readonly<Record<string, ShortcutAction>> = {
   '?': 'help',
 };
 
+/**
+ * A key that types one printable character other than Space: a letter,
+ * number, punctuation mark or symbol. WCAG 2.1.4 (Character Key Shortcuts)
+ * asks that a shortcut on such a key can be turned off, because speech input
+ * types them with the focus anywhere ("question mark" is a `?`), so the
+ * device's "Single-letter shortcuts" switch covers these: M, D, S, C and `?`.
+ * Space, the arrows and the page keys aren't characters 2.1.4 names, and a
+ * page-turner pedal needs them, so they stay on.
+ */
+export function isCharacterKey(key: string): boolean {
+  return key.length === 1 && key !== ' ';
+}
+
+/** The bound keys the "Single-letter shortcuts" switch turns off. */
+export const CHARACTER_KEYS: readonly string[] = Object.keys(KEY_BINDINGS).filter(isCharacterKey);
+
+/** "M, D, S, C and ?": the keys the switch covers, for the copy in Settings and the overlay. */
+export function characterKeysLabel(): string {
+  const shown = CHARACTER_KEYS.map((key) => key.toUpperCase());
+  return shown.length < 2 ? shown.join('') : `${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}`;
+}
+
 /** How each bound key is written in the overlay. */
 const KEY_LABELS: Readonly<Record<string, string>> = {
   ' ': 'Space',
@@ -121,6 +143,8 @@ export interface ShortcutContext {
   focus: FocusKind;
   /** The shortcut overlay is open: only `?` and Escape mean anything then. */
   helpOpen: boolean;
+  /** This device's "Single-letter shortcuts" switch: false leaves every `isCharacterKey` key alone. */
+  characterKeys: boolean;
 }
 
 /**
@@ -140,6 +164,8 @@ export function resolveShortcut(
   if (press.defaultPrevented || press.isComposing) return null;
   // The browser's and the system's own shortcuts (Ctrl+S, Cmd+←, Alt+D…) stay theirs.
   if (press.ctrlKey || press.metaKey || press.altKey) return null;
+  // Turned off, the key is the browser's as if it were bound to nothing, the overlay's `?` included.
+  if (!context.characterKeys && isCharacterKey(press.key)) return null;
 
   if (context.helpOpen) {
     if (press.key === 'Escape') return { action: 'closeHelp', run: true };
@@ -178,14 +204,20 @@ const HELP_ROWS: readonly { actions: ShortcutAction[]; label: string }[] = [
   { actions: ['help'], label: 'Show or hide these shortcuts' },
 ];
 
-/** The overlay's rows, in reading order. Every action has one (a test checks). */
-export function shortcutHelp(): ShortcutHelpRow[] {
+/**
+ * The overlay's rows, in reading order. Every action has one (a test checks).
+ * With the single-letter shortcuts off, only the keys that still work are
+ * listed, and a row left with none is dropped.
+ */
+export function shortcutHelp({ characterKeys = true } = {}): ShortcutHelpRow[] {
   return HELP_ROWS.map(({ actions, label }) => ({
     label,
     keys: Object.entries(KEY_BINDINGS)
-      .filter(([, action]) => actions.includes(action))
+      .filter(
+        ([key, action]) => actions.includes(action) && (characterKeys || !isCharacterKey(key)),
+      )
       .map(([key]) => KEY_LABELS[key] ?? key.toUpperCase()),
-  }));
+  })).filter((row) => row.keys.length > 0);
 }
 
 /** The help rows' actions, for the test that no action is left out of the overlay. */

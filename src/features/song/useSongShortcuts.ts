@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { loopsInPanelOrder, type Loop } from '@/features/loops/loopForm';
 import type { LoopPractice } from '@/features/loops/useLoopPractice';
+import { readCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
 import { canChangeOptions, canPlay, canUseDrumToggles } from '@/features/player/controlGates';
 import {
   isRunning,
@@ -55,6 +56,8 @@ export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs
       const resolved = resolveShortcut(event, {
         focus: focusKindOf(target),
         helpOpen: latest.current.helpOpen,
+        // Read at the press, so turning it off in Settings or another tab needs no reload.
+        characterKeys: readCharacterKeysOn(),
       });
       if (!resolved) return;
       // The key is ours even when this press does nothing: no page scroll or button press under it.
