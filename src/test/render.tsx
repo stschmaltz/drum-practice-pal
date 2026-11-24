@@ -4,7 +4,7 @@
  * fixed auth state, and a MemoryRouter at `path`. Pair with fakeSupabase.ts.
  */
 import type { ReactNode } from 'react';
-import { render } from '@testing-library/react';
+import { act, render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, useLocation } from 'react-router';
 import { AuthContext, authStateFromSession, LOADING_AUTH, type AuthState } from '@/lib/auth';
@@ -69,4 +69,15 @@ export function wrapperFor(queryClient: QueryClient, auth: AuthState = signedInA
       </QueryClientProvider>
     );
   };
+}
+
+/**
+ * Lets work already under way finish and be drawn (TanStack Query notifies on
+ * a timer). Only for a test about to assert that nothing changed: when
+ * something should appear, wait for it with `findBy` or `waitFor` instead.
+ */
+export async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
 }

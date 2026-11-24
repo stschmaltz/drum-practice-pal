@@ -96,6 +96,31 @@ function recordOf(session: OpenSession, playedMs: number, speedRatio: number): S
   };
 }
 
+/** The session as a record if it has enough play time to be logged, else null. */
+function recordIfLongEnough(
+  session: OpenSession,
+  now: number,
+  speedRatio: number,
+  minPlayMs: number,
+): SessionRecord | null {
+  const playedMs = playedMsAt(session, now);
+  return playedMs >= minPlayMs ? recordOf(session, playedMs, speedRatio) : null;
+}
+
+/** A session opens the moment a loop sounds; in jam mode, or before that moment, there is none. */
+function sessionOpenedBy(input: TrackerInput, newId: () => string): TrackerState {
+  if (input.loopId === null || input.phase !== 'sounding') return null;
+  return {
+    id: newId(),
+    loopId: input.loopId,
+    startedAt: input.now,
+    playedMs: 0,
+    playingSince: input.now,
+    repeats: 0,
+    speedRatio: input.speedRatio,
+  };
+}
+
 /**
  * Takes in the page's state after any change to it (the loop, the player's
  * status, the speed, the page's visibility) and says which session ended.
@@ -106,29 +131,14 @@ export function observe(
   { newId, minPlaySeconds = SESSION_MIN_PLAY_SECONDS }: TrackerOptions,
 ): TrackerStep {
   const minPlayMs = minPlaySeconds * 1000;
-  let ended: SessionRecord | null = null;
 
   if (state && state.loopId !== input.loopId) {
     // Left the loop. Its own last speed, not the input's: "Play loop" on another
     // loop sets that loop's saved speed in the same step.
-    const playedMs = playedMsAt(state, input.now);
-    if (playedMs >= minPlayMs) ended = recordOf(state, playedMs, state.speedRatio);
-    state = null;
+    const ended = recordIfLongEnough(state, input.now, state.speedRatio, minPlayMs);
+    return { state: sessionOpenedBy(input, newId), ended };
   }
-
-  if (!state) {
-    if (input.loopId === null || input.phase !== 'sounding') return { state: null, ended };
-    const opened: OpenSession = {
-      id: newId(),
-      loopId: input.loopId,
-      startedAt: input.now,
-      playedMs: 0,
-      playingSince: input.now,
-      repeats: 0,
-      speedRatio: input.speedRatio,
-    };
-    return { state: opened, ended };
-  }
+  if (!state) return { state: sessionOpenedBy(input, newId), ended: null };
 
   if (input.phase === 'sounding') {
     return {
@@ -137,21 +147,27 @@ export function observe(
         playingSince: state.playingSince ?? input.now,
         speedRatio: input.speedRatio,
       },
-      ended,
+      ended: null,
     };
   }
 
-  // Not sounding: bank the stretch that just ended, if one was running.
-  const playedMs = playedMsAt(state, input.now);
   // A stop is where a session is logged, once it is long enough. A count-in is
   // only a gap in it, and a session too short so far waits for more.
-  if (input.phase === 'stopped' && playedMs >= minPlayMs) {
-    return { state: null, ended: recordOf(state, playedMs, input.speedRatio) };
-  }
+  const ended =
+    input.phase === 'stopped'
+      ? recordIfLongEnough(state, input.now, input.speedRatio, minPlayMs)
+      : null;
+  if (ended) return { state: null, ended };
   return {
-    // A speed set while paused is the speed the next stretch plays at.
-    state: { ...state, playedMs, playingSince: null, speedRatio: input.speedRatio },
-    ended,
+    state: {
+      ...state,
+      // Bank the stretch that just ended, if one was running.
+      playedMs: playedMsAt(state, input.now),
+      playingSince: null,
+      // A speed set while paused is the speed the next stretch plays at.
+      speedRatio: input.speedRatio,
+    },
+    ended: null,
   };
 }
 

@@ -1,4 +1,5 @@
 import { Link, useSearchParams } from 'react-router';
+import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass, pressedButtonClass, primaryButtonClass } from '@/components/styles';
 import { barsLabel } from '@/features/loops/loopForm';
@@ -49,34 +50,46 @@ export function OnTheGoPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="On the go">Your loops, most recently practiced first.</PageHeader>
-      {/* Toggle buttons rather than ARIA tabs: two views of one list, with no arrow-key model to keep up. */}
-      <div role="group" aria-label="Loops to show" className="flex gap-2">
-        {PRACTICE_TABS.map((option) => (
-          <button
-            key={option}
-            type="button"
-            className={option === tab ? pressedButtonClass : buttonClass}
-            aria-pressed={option === tab}
-            onClick={() => showTab(option)}
-          >
-            {TAB_LABELS[option]}
-            {loops.data && ` (${practiceLoopsFor(loops.data, option).length})`}
-          </button>
-        ))}
-      </div>
+      <PracticeTabButtons tab={tab} loops={loops.data} onShow={showTab} />
       {loops.isPending ? (
         <p className="text-neutral-400">Loading your loops…</p>
       ) : loops.isLoadingError ? (
         // isLoadingError, not isError: a failed background refetch keeps the list.
-        <div role="alert" className="flex flex-col items-start gap-3">
-          <p className="text-red-300">Couldn't load your loops.</p>
-          <button type="button" className={buttonClass} onClick={() => void loops.refetch()}>
-            Try again
-          </button>
-        </div>
+        <LoadErrorAlert onRetry={() => void loops.refetch()}>
+          Couldn't load your loops.
+        </LoadErrorAlert>
       ) : (
         <PracticeLoopList loops={practiceLoopsFor(loops.data, tab)} tab={tab} />
       )}
+    </div>
+  );
+}
+
+/** The two tabs, each with its count once the loops are in. */
+function PracticeTabButtons({
+  tab,
+  loops,
+  onShow,
+}: {
+  tab: PracticeTab;
+  loops: readonly PracticeLoop[] | undefined;
+  onShow: (tab: PracticeTab) => void;
+}) {
+  return (
+    // Toggle buttons rather than ARIA tabs: two views of one list, with no arrow-key model to keep up.
+    <div role="group" aria-label="Loops to show" className="flex gap-2">
+      {PRACTICE_TABS.map((option) => (
+        <button
+          key={option}
+          type="button"
+          className={option === tab ? pressedButtonClass : buttonClass}
+          aria-pressed={option === tab}
+          onClick={() => onShow(option)}
+        >
+          {TAB_LABELS[option]}
+          {loops && ` (${practiceLoopsFor(loops, option).length})`}
+        </button>
+      ))}
     </div>
   );
 }

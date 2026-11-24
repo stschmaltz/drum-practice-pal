@@ -10,6 +10,7 @@ import {
   createTestUser,
   deleteTestUser,
   insertLoop,
+  insertSession,
   insertSong,
   PG,
   sessionRow,
@@ -21,7 +22,8 @@ import {
 const PRACTICE_LOOP_SELECT =
   'id, song_id, name, start_bar, end_bar, speed_ratio, target_ratio, status, finished_at, last_practiced_at, created_at, song:songs!loops_song_fkey(title, artist)';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 const fromNow = (ms: number) => new Date(Date.now() + ms).toISOString();
 
 let a: TestUser;
@@ -53,6 +55,38 @@ async function sessionsAsAdmin(loopId: string) {
   return data;
 }
 
+type SessionRow = ReturnType<typeof sessionRow>;
+
+/** Setup: the loop deleted by its owner, as the app deletes it. */
+async function deleteLoop(user: TestUser, loopId: string): Promise<void> {
+  const { error } = await user.client.from('loops').delete().eq('id', loopId);
+  if (error) throw error;
+}
+
+/** The app's "insert, on conflict do nothing" (logSession in src/features/practice/sessionsApi.ts). */
+const upsertAsApp = (user: TestUser, row: SessionRow) =>
+  user.client.from('practice_sessions').upsert(row, { onConflict: 'id', ignoreDuplicates: true });
+
+/** The request keepaliveInsert builds (src/lib/keepaliveInsert.ts), as that user. */
+async function keepaliveAs(user: TestUser, row: SessionRow): Promise<Response> {
+  const env = localSupabaseEnv();
+  const session = await user.client.auth.getSession();
+  if (session.error) throw session.error;
+  const accessToken = session.data.session?.access_token;
+  if (!accessToken) throw new Error('test user has no session');
+  return fetch(`${env.url}/rest/v1/practice_sessions?on_conflict=id`, {
+    method: 'POST',
+    keepalive: true,
+    headers: {
+      apikey: env.publishableKey,
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=ignore-duplicates,return=minimal',
+    },
+    body: JSON.stringify(row),
+  });
+}
+
 describe('duration', () => {
   it('accepts a session of exactly a day', async () => {
     const loopId = await insertLoop(a, songA);
@@ -78,7 +112,7 @@ describe('start time', () => {
     const loopId = await insertLoop(a, songA);
     const { error } = await a.client
       .from('practice_sessions')
-      .insert(sessionRow(a.id, loopId, { started_at: fromNow(23 * 60 * 60 * 1000) }));
+      .insert(sessionRow(a.id, loopId, { started_at: fromNow(23 * HOUR_MS) }));
     expect(error).toBeNull();
   });
 
@@ -163,9 +197,6 @@ describe('what a client may send', () => {
 });
 
 describe('logging the same session twice', () => {
-  const upsertAsApp = (user: TestUser, row: ReturnType<typeof sessionRow>) =>
-    user.client.from('practice_sessions').upsert(row, { onConflict: 'id', ignoreDuplicates: true });
-
   it('the app\'s "on conflict do nothing" insert works under the column grant, and a retry adds nothing', async () => {
     const loopId = await insertLoop(a, songA);
     const row = sessionRow(a.id, loopId, { started_at: fromNow(-60_000), duration_seconds: 45 });
@@ -184,26 +215,9 @@ describe('logging the same session twice', () => {
   it('the keepalive request (raw PostgREST, as keepaliveInsert sends it) logs once however often it is sent', async () => {
     const loopId = await insertLoop(a, songA);
     const row = sessionRow(a.id, loopId, { started_at: fromNow(-120_000), duration_seconds: 90 });
-    const env = localSupabaseEnv();
-    const session = await a.client.auth.getSession();
-    if (session.error) throw session.error;
-    const accessToken = session.data.session?.access_token;
-    if (!accessToken) throw new Error('test user has no session');
-    const send = () =>
-      fetch(`${env.url}/rest/v1/practice_sessions?on_conflict=id`, {
-        method: 'POST',
-        keepalive: true,
-        headers: {
-          apikey: env.publishableKey,
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          Prefer: 'resolution=ignore-duplicates,return=minimal',
-        },
-        body: JSON.stringify(row),
-      });
 
-    const first = await send();
-    const second = await send();
+    const first = await keepaliveAs(a, row);
+    const second = await keepaliveAs(a, row);
 
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
@@ -213,38 +227,16 @@ describe('logging the same session twice', () => {
 
   it('answers a session for a deleted loop with a foreign key error the app can tell apart', async () => {
     const loopId = await insertLoop(a, songA);
-    const { error: deleteError } = await a.client.from('loops').delete().eq('id', loopId);
-    if (deleteError) throw deleteError;
+    await deleteLoop(a, loopId);
 
     const { error } = await upsertAsApp(a, sessionRow(a.id, loopId));
 
     expect(error?.code).toBe(PG.FOREIGN_KEY_VIOLATION);
   });
 
-  /** The request keepaliveInsert builds (src/lib/keepaliveInsert.ts), as that user. */
-  async function keepaliveAs(user: TestUser, row: ReturnType<typeof sessionRow>) {
-    const env = localSupabaseEnv();
-    const session = await user.client.auth.getSession();
-    if (session.error) throw session.error;
-    const accessToken = session.data.session?.access_token;
-    if (!accessToken) throw new Error('test user has no session');
-    return fetch(`${env.url}/rest/v1/practice_sessions?on_conflict=id`, {
-      method: 'POST',
-      keepalive: true,
-      headers: {
-        apikey: env.publishableKey,
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        Prefer: 'resolution=ignore-duplicates,return=minimal',
-      },
-      body: JSON.stringify(row),
-    });
-  }
-
   it('the keepalive request for a deleted loop is refused with the code in its body, where the app reads it', async () => {
     const loopId = await insertLoop(a, songA);
-    const { error: deleteError } = await a.client.from('loops').delete().eq('id', loopId);
-    if (deleteError) throw deleteError;
+    await deleteLoop(a, loopId);
 
     const response = await keepaliveAs(a, sessionRow(a.id, loopId));
 
@@ -268,8 +260,7 @@ describe('logging the same session twice', () => {
   it("sending an id that is another user's session changes nothing of theirs and logs nothing", async () => {
     const loopOfB = await insertLoop(b, songB);
     const theirs = sessionRow(b.id, loopOfB, { duration_seconds: 77 });
-    const { error: theirError } = await b.client.from('practice_sessions').insert(theirs);
-    if (theirError) throw theirError;
+    await insertSession(b, theirs);
     const before = await sessionsAsAdmin(loopOfB);
     const loopOfA = await insertLoop(a, songA);
 
@@ -305,9 +296,8 @@ describe('how far a wrong clock can move a loop', () => {
 
   it('an honest session logged afterwards does not move it back, and is in the history all the same', async () => {
     const loopId = await insertLoop(a, songA);
-    const ahead = sessionRow(a.id, loopId, { started_at: fromNow(20 * 60 * 60 * 1000) });
-    const { error: aheadError } = await a.client.from('practice_sessions').insert(ahead);
-    if (aheadError) throw aheadError;
+    const ahead = sessionRow(a.id, loopId, { started_at: fromNow(20 * HOUR_MS) });
+    await insertSession(a, ahead);
     const pinned = (await loopAsAdmin(loopId)).last_practiced_at;
 
     const { error } = await a.client
@@ -341,8 +331,7 @@ describe("the history's read", () => {
       [a, sessionRow(a.id, otherLoop)],
       [b, sessionRow(b.id, loopOfB)],
     ] as const) {
-      const { error } = await user.client.from('practice_sessions').insert(row);
-      if (error) throw error;
+      await insertSession(user, row);
     }
 
     const { data, error } = await a.client
@@ -368,10 +357,7 @@ describe("the history's read", () => {
 
   it('deleting the loop takes its history with it', async () => {
     const loopId = await insertLoop(a, songA);
-    const { error: logError } = await a.client
-      .from('practice_sessions')
-      .insert(sessionRow(a.id, loopId));
-    if (logError) throw logError;
+    await insertSession(a, sessionRow(a.id, loopId));
     expect(await sessionsAsAdmin(loopId)).toHaveLength(1);
 
     const { error } = await a.client.from('loops').delete().eq('id', loopId);
@@ -404,10 +390,7 @@ describe("the home page's read", () => {
 
   it('finish and reopen move finished_at with the status and keep the history', async () => {
     const loopId = await insertLoop(a, songA);
-    const { error: logError } = await a.client
-      .from('practice_sessions')
-      .insert(sessionRow(a.id, loopId));
-    if (logError) throw logError;
+    await insertSession(a, sessionRow(a.id, loopId));
 
     const finished = await a.client
       .from('loops')

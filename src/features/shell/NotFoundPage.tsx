@@ -1,5 +1,3 @@
-// The catch-all route. The stand-in pages that used to live here have all been
-// replaced by their units (On the go by Unit 09, in src/features/practice/).
 import { Link } from 'react-router';
 import { PageHeader } from '@/components/PageHeader';
 

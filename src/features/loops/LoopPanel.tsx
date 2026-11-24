@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
+import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import {
   buttonClass,
   dangerButtonClass,
@@ -286,12 +287,9 @@ function LoopList({ songId, player, snapshot, practice, loops, onPlayLoop }: Loo
   // isLoadingError, not isError: a failed background refetch keeps the list (and a playing loop).
   if (loops.isLoadingError) {
     return (
-      <div role="alert" className="flex flex-col items-start gap-3">
-        <p className="text-red-300">Couldn't load this song's loops.</p>
-        <button type="button" className={buttonClass} onClick={() => void loops.refetch()}>
-          Try again
-        </button>
-      </div>
+      <LoadErrorAlert onRetry={() => void loops.refetch()}>
+        Couldn't load this song's loops.
+      </LoadErrorAlert>
     );
   }
   if (loops.data.length === 0) {

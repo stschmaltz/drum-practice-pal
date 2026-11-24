@@ -1,15 +1,14 @@
 /// <reference lib="dom" />
 import type { Page } from '@playwright/test';
-import { createAdminClient } from '../../scripts/supabase-admin.ts';
-import { expect, signIn, test, type E2eUser } from './auth';
+import { expect, signIn, test } from './auth';
 import {
   activeLoopLine,
   commit,
-  loopItem,
   loopPanel,
   loopPercentField,
   openLoopPanel,
   playLoopButton,
+  saveLoopSpeed,
   saveNewLoop,
   saveSpeedButton,
 } from './loopsPage';
@@ -22,72 +21,29 @@ import {
   recordStatuses,
   status,
 } from './playerPage';
+import {
+  homeItem,
+  homeList,
+  homeTab,
+  loopsOf,
+  navLink,
+  openLoopHistory,
+  playFor,
+  playOn,
+  recordSentSessions,
+  sentSessions,
+  sessionCount,
+  sessionLogged,
+  sessionsOf,
+  setPageVisibility,
+  shortSessions,
+} from './practicePage';
 
 // Unit 09: practice sessions and progress. Loop play time is logged, a loop
 // has a history, a loop at its target asks "Mark finished?", and the home page
 // lists what is on the go and what is finished.
 
-const admin = createAdminClient();
-
-const sessionLogged = (page: Page) => page.getByTestId('session-logged');
-/** The bottom tabs on a phone, the sidebar from 768 px; only one is on show. */
-const navLink = (page: Page, name: 'On the go' | 'Library') =>
-  page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name });
 const speed = (page: Page) => page.getByTestId('jam-speed');
-const homeTab = (page: Page, name: 'On the go' | 'Finished') =>
-  page.getByRole('group', { name: 'Loops to show' }).getByRole('button', { name });
-/**
- * The home page's list of the tab on show. By its name, never just "the list
- * in main": the song page's loop panel is a list in main too, and is still
- * there for a moment after a nav link is pressed.
- */
-const homeList = (page: Page) =>
-  page.getByRole('main').getByRole('list', { name: /^(On the go|Finished)$/ });
-const homeItem = (page: Page, name: string) =>
-  homeList(page).getByRole('listitem').filter({ hasText: name });
-
-/** The user's logged sessions, read with the service role. */
-async function sessionsOf(user: E2eUser) {
-  const { data, error } = await admin
-    .from('practice_sessions')
-    .select('id, loop_id, started_at, duration_seconds, speed_ratio, repeats')
-    .eq('user_id', user.id)
-    .order('started_at');
-  if (error) throw error;
-  return data;
-}
-
-async function loopsOf(user: E2eUser) {
-  const { data, error } = await admin
-    .from('loops')
-    .select('id, name, status, finished_at, last_practiced_at')
-    .eq('user_id', user.id);
-  if (error) throw error;
-  return data;
-}
-
-/**
- * Lowers the play time a session needs (30 s in the app) for this page, so a
- * spec about what happens after a session needn't play for half a minute.
- * `window.__drumPalMinSessionSeconds` is read in dev and the e2e build only.
- */
-async function shortSessions(page: Page, seconds: number): Promise<void> {
-  await page.addInitScript((min) => {
-    (window as unknown as { __drumPalMinSessionSeconds: number }).__drumPalMinSessionSeconds = min;
-  }, seconds);
-}
-
-/** Plays until the page has been in `playing` for `ms`, then pauses. Returns the ms it played. */
-async function playFor(page: Page, ms: number): Promise<number> {
-  await expect(playButton(page)).toHaveText('Pause');
-  await expect(status(page)).not.toContainText('Counting in');
-  const started = Date.now();
-  await page.waitForTimeout(ms);
-  await playButton(page).click();
-  const played = Date.now() - started;
-  await expect(playButton(page)).toHaveText('Play');
-  return played;
-}
 
 test('a minute of loop practice is logged as one session with its speed and duration', async ({
   page,
@@ -96,17 +52,14 @@ test('a minute of loop practice is logged as one session with its speed and dura
   test.setTimeout(150_000);
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Bars five to six', firstBar: 5, lastBar: 6 });
-  await openLoopPanel(page);
-  await commit(loopPercentField(page), '85');
-  await saveSpeedButton(page).click();
-  await expect(saveSpeedButton(page)).toBeDisabled();
+  await saveLoopSpeed(page, 85);
 
   await playLoopButton(page, 'Bars five to six').click();
   const playedMs = await playFor(page, 60_000);
 
   await expect(sessionLogged(page)).toContainText(/Practice logged: 1 min( \d+ s)? of Bars five/);
   await expect(sessionLogged(page)).toContainText('at 85%');
-  await expect.poll(async () => (await sessionsOf(user)).length).toBe(1);
+  await sessionCount(user).toBe(1);
   const [session] = await sessionsOf(user);
   const [loop] = await loopsOf(user);
   expect(session).toMatchObject({ loop_id: loop!.id, speed_ratio: 0.85 });
@@ -119,11 +72,7 @@ test('a minute of loop practice is logged as one session with its speed and dura
   expect(loop!.last_practiced_at).not.toBeNull();
 
   // The loop's history shows it, and the home page says it was practiced today.
-  await openLoopPanel(page);
-  await loopItem(page, 'Bars five to six')
-    .getByRole('button', { name: /^History/ })
-    .click();
-  const history = loopPanel(page).getByRole('region', { name: 'History of Bars five to six' });
+  const history = await openLoopHistory(page, 'Bars five to six');
   await expect(history.getByTestId('loop-history-summary')).toContainText('1 session');
   await expect(history.getByRole('listitem')).toHaveCount(1);
   await expect(history.getByRole('listitem')).toContainText(
@@ -158,10 +107,7 @@ test('hitting the target asks "Mark finished?", and finish and reopen move the l
   await shortSessions(page, 2);
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Fill', firstBar: 3, lastBar: 4, target: 90 });
-  await openLoopPanel(page);
-  await commit(loopPercentField(page), '80');
-  await saveSpeedButton(page).click();
-  await expect(saveSpeedButton(page)).toBeDisabled();
+  await saveLoopSpeed(page, 80);
   const prompt = loopPanel(page).getByTestId('finish-prompt');
   await expect(prompt).toHaveCount(0);
 
@@ -222,10 +168,7 @@ test('the home page lists loops by last practiced and opens a loop ready to play
   await openFixture(page, user, 'tempo-change', 'Tempo Change');
   await saveNewLoop(page, { name: 'First saved', firstBar: 1, lastBar: 2 });
   await saveNewLoop(page, { name: 'Late one', firstBar: 9, lastBar: 10, target: 100 });
-  await openLoopPanel(page);
-  await commit(loopPercentField(page), '70');
-  await saveSpeedButton(page).click();
-  await expect(saveSpeedButton(page)).toBeDisabled();
+  await saveLoopSpeed(page, 70);
   await playLoopButton(page, 'Late one').click();
   await playFor(page, 3_000);
   await expect(sessionLogged(page)).toContainText('of Late one at 70%');
@@ -256,7 +199,7 @@ test('the home page lists loops by last practiced and opens a loop ready to play
 
   await playButton(page).click();
   await playFor(page, 3_000);
-  await expect.poll(async () => (await sessionsOf(user)).length).toBe(2);
+  await sessionCount(user).toBe(2);
   expect((await sessionsOf(user)).every((session) => session.speed_ratio === 0.7)).toBe(true);
 });
 
@@ -264,14 +207,12 @@ test('leaving the page mid-practice still logs the session, once', async ({ page
   await shortSessions(page, 2);
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Leaving', firstBar: 1, lastBar: 2 });
-  await playButton(page).click();
-  await expect(playButton(page)).toHaveText('Pause');
-  await page.waitForTimeout(3_500);
+  await playOn(page, 3_500);
 
   // A full navigation away while playing: pagehide, and a request that must outlive the page.
   await page.goto('about:blank');
 
-  await expect.poll(async () => (await sessionsOf(user)).length, { timeout: 10_000 }).toBe(1);
+  await sessionCount(user, { timeout: 10_000 }).toBe(1);
   const [session] = await sessionsOf(user);
   expect(session!.duration_seconds).toBeGreaterThanOrEqual(3);
   expect(session!.duration_seconds).toBeLessThanOrEqual(8);
@@ -284,59 +225,11 @@ test('leaving the page mid-practice still logs the session, once', async ({ page
   await page.getByRole('link', { name: 'Practice Leaving' }).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(activeLoopLine(page)).toContainText('Leaving');
-  await playButton(page).click();
-  await expect(playButton(page)).toHaveText('Pause');
-  await page.waitForTimeout(3_500);
+  await playOn(page, 3_500);
   await navLink(page, 'Library').click();
 
-  await expect.poll(async () => (await sessionsOf(user)).length, { timeout: 10_000 }).toBe(2);
+  await sessionCount(user, { timeout: 10_000 }).toBe(2);
 });
-
-/** A `practice_sessions` insert the page sent: its row's id, and whether it asked the browser to keep it alive. */
-interface SentSession {
-  id: string;
-  keepalive: boolean;
-}
-
-interface SentSessionsWindow {
-  __sentSessions?: SentSession[];
-}
-
-/**
- * Records every session insert the page sends from its next load on, by
- * wrapping `fetch`: Playwright's own request events don't say whether a
- * request was sent with `keepalive`.
- */
-async function recordSentSessions(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const sent: SentSession[] = [];
-    (window as unknown as SentSessionsWindow).__sentSessions = sent;
-    const realFetch = window.fetch.bind(window);
-    window.fetch = (input, init) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-      if (url.includes('/rest/v1/practice_sessions') && method === 'POST') {
-        const body = typeof init?.body === 'string' ? init.body : '{}';
-        const row = JSON.parse(body) as { id?: string } | { id?: string }[];
-        const id = (Array.isArray(row) ? row[0]?.id : row.id) ?? 'unknown';
-        sent.push({ id, keepalive: init?.keepalive === true });
-      }
-      return realFetch(input, init);
-    };
-  });
-}
-
-const sentSessions = (page: Page) =>
-  page.evaluate(() => (window as unknown as SentSessionsWindow).__sentSessions ?? []);
-
-/** Hides or shows the page as a phone does when it is locked or another app comes up. */
-async function setPageVisibility(page: Page, state: 'hidden' | 'visible'): Promise<void> {
-  await page.evaluate((next) => {
-    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => next });
-    Object.defineProperty(document, 'hidden', { configurable: true, get: () => next === 'hidden' });
-    document.dispatchEvent(new Event('visibilitychange'));
-  }, state);
-}
 
 test('a session whose answer is lost is sent again on request and logged once', async ({
   page,
@@ -363,7 +256,7 @@ test('a session whose answer is lost is sent again on request and logged once', 
   await expect(sessionLogged(page)).toHaveCount(0);
   // The row is there all the same: this is the retry that must not double it.
   expect(lost).toBe(1);
-  await expect.poll(async () => (await sessionsOf(user)).length).toBe(1);
+  await sessionCount(user).toBe(1);
 
   await notSaved.getByRole('button', { name: 'Try again' }).click();
 
@@ -377,11 +270,7 @@ test('a session whose answer is lost is sent again on request and logged once', 
   expect(sessions[0]!.id).toBe(sent[0]!.id);
 
   // And the loop's history lists it once.
-  await openLoopPanel(page);
-  await loopItem(page, 'Flaky')
-    .getByRole('button', { name: /^History/ })
-    .click();
-  const history = loopPanel(page).getByRole('region', { name: 'History of Flaky' });
+  const history = await openLoopHistory(page, 'Flaky');
   await expect(history.getByTestId('loop-history-summary')).toContainText('1 session');
   await expect(history.getByRole('listitem')).toHaveCount(1);
 });
@@ -394,14 +283,12 @@ test('a hidden page logs with keepalive, counts none of the hidden time, and sta
   await recordSentSessions(page);
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Pocket', firstBar: 1, lastBar: 2 });
-  await playButton(page).click();
-  await expect(playButton(page)).toHaveText('Pause');
-  await page.waitForTimeout(3_500);
+  await playOn(page, 3_500);
 
   // The phone is locked: the page is hidden while the player still says "playing".
   await setPageVisibility(page, 'hidden');
 
-  await expect.poll(async () => (await sessionsOf(user)).length, { timeout: 10_000 }).toBe(1);
+  await sessionCount(user, { timeout: 10_000 }).toBe(1);
   const [first] = await sessionsOf(user);
   expect(first!.duration_seconds).toBeGreaterThanOrEqual(3);
   expect(first!.duration_seconds).toBeLessThanOrEqual(6);
@@ -417,7 +304,7 @@ test('a hidden page logs with keepalive, counts none of the hidden time, and sta
 
   const backMs = await playFor(page, 3_000);
 
-  await expect.poll(async () => (await sessionsOf(user)).length, { timeout: 10_000 }).toBe(2);
+  await sessionCount(user, { timeout: 10_000 }).toBe(2);
   const second = (await sessionsOf(user)).find((session) => session.id !== first!.id);
   // Only the time since it came back: with the pocket time it would be 8 s or more.
   expect(Math.abs(second!.duration_seconds - backMs / 1000)).toBeLessThanOrEqual(1.5);
@@ -453,7 +340,7 @@ test('with a count-in before every repeat, a sitting is one session of play time
   await expect(playButton(page)).toHaveText('Play');
 
   await expect(sessionLogged(page)).toContainText('of Counted');
-  await expect.poll(async () => (await sessionsOf(user)).length).toBe(1);
+  await sessionCount(user).toBe(1);
   // Each pass ends in a stop of the engine; none of them ended the session.
   await page.waitForTimeout(1_000);
   const sessions = await sessionsOf(user);

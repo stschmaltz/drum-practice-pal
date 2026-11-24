@@ -6,9 +6,9 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import type { LoopStatus } from '@/lib/schema';
+import { sessionKeys } from '@/features/practice/sessionKeys';
 import { useSignedInUser } from '@/lib/auth';
 import { loopKeys } from './loopKeys';
-import { sessionKeys } from '@/features/practice/sessionKeys';
 import { createLoop, deleteLoop, fetchLoops, fetchPracticeLoops, updateLoop } from './loopsApi';
 import {
   applySavedLoopEdit,

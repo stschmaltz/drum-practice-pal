@@ -24,7 +24,7 @@ import {
   TICKS_PER_BAR,
 } from '@/test/fakePlayerEngine';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
-import { renderRoutes, RouteMarker, testQueryClient } from '@/test/render';
+import { renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
 import { SongPage } from './SongPage';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -1359,6 +1359,12 @@ describe('SongPage practice sessions', () => {
     end_bar: 8,
     speed_ratio: 0.8,
   });
+  const chorus = loopOfSongA('chorus', {
+    name: 'Chorus',
+    start_bar: 9,
+    end_bar: 12,
+    speed_ratio: 0.6,
+  });
   const sessionsSent = () =>
     queryResult.mock.calls
       .map(([call]) => call)
@@ -1375,17 +1381,48 @@ describe('SongPage practice sessions', () => {
     vi.useRealTimers();
   });
 
-  async function playVerseFor(seconds: number) {
-    serve({ loops: [verse] });
+  /** Moves the clock; nothing else is on a timer. */
+  const later = (seconds: number) => vi.setSystemTime(Date.now() + seconds * 1000);
+
+  /**
+   * Renders the page and starts the Verse loop from the panel, with the
+   * engine's report of it. After serve(), so a test can first change how
+   * session logs are answered.
+   */
+  async function startVerse() {
     const user = renderSong(SONG_A);
     const engine = await loadPlayer();
     const panel = within(screen.getByTestId('loop-panel'));
     await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
     act(() => engine.fire('stateChanged', { playing: true }));
-    vi.setSystemTime(Date.now() + seconds * 1000);
-    await user.click(playButton());
-    act(() => engine.fire('stateChanged', { playing: false }));
-    return { user, engine };
+    /** Play or Pause in the sticky bar, with the engine's report of it. */
+    const press = async (playing: boolean) => {
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing }));
+    };
+    return { user, engine, panel, pause: () => press(false), resume: () => press(true) };
+  }
+
+  async function playVerseFor(seconds: number) {
+    serve({ loops: [verse] });
+    const view = await startVerse();
+    later(seconds);
+    await view.pause();
+    return view;
+  }
+
+  /** Refuses every session log, leaving the other tables as served, until `recover()`. After serve(). */
+  function failSessionLogs() {
+    const answer = queryResult.getMockImplementation()!;
+    let failing = true;
+    queryResult.mockImplementation(async (call) =>
+      call.table === 'practice_sessions' && failing ? fail('offline') : answer(call),
+    );
+    return {
+      recover: () => {
+        failing = false;
+      },
+    };
   }
 
   it('logs a minute of loop practice as one session and says so', async () => {
@@ -1406,15 +1443,13 @@ describe('SongPage practice sessions', () => {
   });
 
   it('logs nothing for a short go, and nothing for jam mode', async () => {
-    const { user, engine } = await playVerseFor(20);
+    const { user, pause, resume } = await playVerseFor(20);
     await user.click(
       within(screen.getByTestId('active-loop')).getByRole('button', { name: 'Exit loop' }),
     );
-    await user.click(playButton());
-    act(() => engine.fire('stateChanged', { playing: true }));
-    vi.setSystemTime(Date.now() + 300_000);
-    await user.click(playButton());
-    act(() => engine.fire('stateChanged', { playing: false }));
+    await resume();
+    later(300);
+    await pause();
 
     expect(sessionsSent()).toEqual([]);
     expect(screen.queryByTestId('session-logged')).not.toBeInTheDocument();
@@ -1422,24 +1457,15 @@ describe('SongPage practice sessions', () => {
 
   it('says when a session could not be saved, and sends the same one again on request', async () => {
     serve({ loops: [verse] });
-    const answer = queryResult.getMockImplementation()!;
-    let failing = true;
-    queryResult.mockImplementation(async (call) =>
-      call.table === 'practice_sessions' && failing ? fail('offline') : answer(call),
-    );
-    const user = renderSong(SONG_A);
-    const engine = await loadPlayer();
-    const panel = within(screen.getByTestId('loop-panel'));
-    await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
-    act(() => engine.fire('stateChanged', { playing: true }));
-    vi.setSystemTime(Date.now() + 45_000);
-    await user.click(playButton());
-    act(() => engine.fire('stateChanged', { playing: false }));
+    const sessionLogs = failSessionLogs();
+    const { user, pause } = await startVerse();
+    later(45);
+    await pause();
 
     const alert = await screen.findByText("Couldn't save your last practice session.");
     expect(alert.closest('[role="alert"]')).not.toHaveTextContent('offline');
 
-    failing = false;
+    sessionLogs.recover();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(await screen.findByTestId('session-logged')).toHaveTextContent(
@@ -1451,12 +1477,8 @@ describe('SongPage practice sessions', () => {
 
   it('logs the session when the page is left mid-practice', async () => {
     serve({ loops: [verse] });
-    const user = renderSong(SONG_A);
-    const engine = await loadPlayer();
-    const panel = within(screen.getByTestId('loop-panel'));
-    await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
-    act(() => engine.fire('stateChanged', { playing: true }));
-    vi.setSystemTime(Date.now() + 90_000);
+    const { user } = await startVerse();
+    later(90);
 
     await user.click(screen.getByRole('link', { name: 'Library' }));
 
@@ -1465,31 +1487,10 @@ describe('SongPage practice sessions', () => {
     expect(sessionsSent()[0]).toMatchObject({ loop_id: 'verse', duration_seconds: 90 });
   });
 
-  const chorus = loopOfSongA('chorus', {
-    name: 'Chorus',
-    start_bar: 9,
-    end_bar: 12,
-    speed_ratio: 0.6,
-  });
-
-  /** Starts the Verse loop from the panel, with the engine's report of it. */
-  async function startVerse(savedLoops: Loop[] = [verse]) {
-    serve({ loops: savedLoops });
-    const user = renderSong(SONG_A);
-    const engine = await loadPlayer();
-    const panel = within(screen.getByTestId('loop-panel'));
-    await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
-    act(() => engine.fire('stateChanged', { playing: true }));
-    const pause = async () => {
-      await user.click(playButton());
-      act(() => engine.fire('stateChanged', { playing: false }));
-    };
-    return { user, engine, panel, pause };
-  }
-
   it('"Play loop" on another loop logs the first at the speed it was played at, not the next one’s', async () => {
-    const { user, panel, pause } = await startVerse([verse, chorus]);
-    vi.setSystemTime(Date.now() + 45_000);
+    serve({ loops: [verse, chorus] });
+    const { user, panel, pause } = await startVerse();
+    later(45);
 
     await user.click(panel.getByRole('button', { name: 'Play loop Chorus' }));
 
@@ -1501,7 +1502,7 @@ describe('SongPage practice sessions', () => {
     });
     expect(screen.getByTestId('jam-speed')).toHaveTextContent('60%');
 
-    vi.setSystemTime(Date.now() + 31_000);
+    later(31);
     await pause();
 
     await waitFor(() => expect(sessionsSent()).toHaveLength(2));
@@ -1515,8 +1516,9 @@ describe('SongPage practice sessions', () => {
   });
 
   it('finishing the loop that is playing does not end its session', async () => {
+    serve({ loops: [verse] });
     const { user, panel, pause } = await startVerse();
-    vi.setSystemTime(Date.now() + 20_000);
+    later(20);
 
     await user.click(panel.getByRole('button', { name: 'Mark finished Verse' }));
     await panel.findByRole('button', { name: 'Reopen Verse' });
@@ -1524,7 +1526,7 @@ describe('SongPage practice sessions', () => {
     expect(playButton()).toHaveTextContent('Pause');
     expect(sessionsSent()).toEqual([]);
 
-    vi.setSystemTime(Date.now() + 20_000);
+    later(20);
     await pause();
 
     await waitFor(() => expect(sessionsSent()).toHaveLength(1));
@@ -1532,8 +1534,9 @@ describe('SongPage practice sessions', () => {
   });
 
   it('changing the bars of the loop that is playing does not end its session either', async () => {
+    serve({ loops: [verse] });
     const { user, panel, pause } = await startVerse();
-    vi.setSystemTime(Date.now() + 20_000);
+    later(20);
 
     await user.click(panel.getByRole('button', { name: 'Edit Verse' }));
     const lastBar = panel.getByLabelText('Last bar');
@@ -1543,7 +1546,7 @@ describe('SongPage practice sessions', () => {
     await waitFor(() => expect(screen.getByTestId('active-loop')).toHaveTextContent('Bars 5 to 6'));
     expect(sessionsSent()).toEqual([]);
 
-    vi.setSystemTime(Date.now() + 20_000);
+    later(20);
     await pause();
 
     await waitFor(() => expect(sessionsSent()).toHaveLength(1));
@@ -1564,12 +1567,8 @@ describe('SongPage practice sessions', () => {
       sessionAnswers.push(refused);
       return refused;
     });
-    const user = renderSong(SONG_A);
-    const engine = await loadPlayer();
-    const panel = within(screen.getByTestId('loop-panel'));
-    await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
-    act(() => engine.fire('stateChanged', { playing: true }));
-    vi.setSystemTime(Date.now() + 45_000);
+    const { user, panel } = await startVerse();
+    later(45);
 
     await user.click(panel.getByRole('button', { name: 'Delete Verse' }));
     await user.click(panel.getByRole('button', { name: 'Delete loop' }));
@@ -1577,10 +1576,8 @@ describe('SongPage practice sessions', () => {
     // The session was sent and refused; only then is it worth saying nothing was shown.
     await waitFor(() => expect(sessionsSent()).toHaveLength(1));
     expect(sessionsSent()[0]).toMatchObject({ loop_id: 'verse', duration_seconds: 45 });
-    await act(async () => {
-      await Promise.all(sessionAnswers);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    });
+    await act(() => Promise.all(sessionAnswers));
+    await settle();
     expect(screen.queryByText(/Couldn't save your last/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('session-logged')).not.toBeInTheDocument();
     expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
@@ -1590,31 +1587,20 @@ describe('SongPage practice sessions', () => {
 
   it('counts the sessions it could not save, and Try again sends each of them', async () => {
     serve({ loops: [verse] });
-    const answer = queryResult.getMockImplementation()!;
-    let failing = true;
-    queryResult.mockImplementation(async (call) =>
-      call.table === 'practice_sessions' && failing ? fail('offline') : answer(call),
-    );
-    const user = renderSong(SONG_A);
-    const engine = await loadPlayer();
-    const panel = within(screen.getByTestId('loop-panel'));
-    await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
-    for (const seconds of [40, 50]) {
-      act(() => engine.fire('stateChanged', { playing: true }));
-      vi.setSystemTime(Date.now() + seconds * 1000);
-      await user.click(playButton());
-      act(() => engine.fire('stateChanged', { playing: false }));
-      if (seconds === 40) {
-        await screen.findByText("Couldn't save your last practice session.");
-        await user.click(playButton());
-      }
-    }
+    const sessionLogs = failSessionLogs();
+    const { user, pause, resume } = await startVerse();
+    later(40);
+    await pause();
+    await screen.findByText("Couldn't save your last practice session.");
+    await resume();
+    later(50);
+    await pause();
 
     expect(
       await screen.findByText("Couldn't save your last 2 practice sessions."),
     ).toBeInTheDocument();
 
-    failing = false;
+    sessionLogs.recover();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(await screen.findByTestId('session-logged')).toBeInTheDocument();

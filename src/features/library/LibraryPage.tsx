@@ -1,7 +1,8 @@
 import { useCallback, useId, useState } from 'react';
 import { useSearchParams } from 'react-router';
+import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
-import { buttonClass, inputClass } from '@/components/styles';
+import { inputClass } from '@/components/styles';
 import type { LibrarySong } from './songForm';
 import { isLibrarySort, searchSongs, sortSongs, type LibrarySort } from './songList';
 import { SongListItem } from './SongListItem';
@@ -26,12 +27,9 @@ export function LibraryPage() {
       {songs.isPending ? (
         <p className="text-neutral-400">Loading your songs…</p>
       ) : songs.isLoadingError ? (
-        <div role="alert" className="flex flex-col items-start gap-3">
-          <p className="text-red-300">Couldn't load your songs: {songs.error.message}</p>
-          <button type="button" className={buttonClass} onClick={() => void songs.refetch()}>
-            Try again
-          </button>
-        </div>
+        <LoadErrorAlert onRetry={() => void songs.refetch()}>
+          Couldn't load your songs: {songs.error.message}
+        </LoadErrorAlert>
       ) : songs.data.length === 0 ? (
         <p className="text-neutral-400">
           No songs yet. Upload a Guitar Pro file to start your library.

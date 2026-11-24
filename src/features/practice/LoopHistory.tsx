@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { buttonClass } from '@/components/styles';
 import { speedLabel } from '@/features/loops/loopLabels';
 import {
@@ -38,12 +39,9 @@ export function LoopHistory({
   // isLoadingError, not isError: a failed background refetch keeps the history that is showing.
   if (sessions.isLoadingError) {
     return (
-      <div role="alert" className="flex flex-col items-start gap-2">
-        <p className="text-sm text-red-300">Couldn't load this loop's history.</p>
-        <button type="button" className={buttonClass} onClick={() => void sessions.refetch()}>
-          Try again
-        </button>
-      </div>
+      <LoadErrorAlert compact onRetry={() => void sessions.refetch()}>
+        Couldn't load this loop's history.
+      </LoadErrorAlert>
     );
   }
   if (sessions.data.length === 0) {

@@ -6,7 +6,7 @@ import { queryResult, resetFakeSupabase } from '@/test/fakeSupabase';
 import { startOfBar, straightBars, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable, type LoopTable } from '@/test/loopTable';
-import { testQueryClient, wrapperFor } from '@/test/render';
+import { settle, testQueryClient, wrapperFor } from '@/test/render';
 import { PAGE_LAYOUT_QUERY } from '@/features/player/layout';
 import type { PlayerService } from '@/features/player/PlayerService';
 import type { PracticeSession } from '@/features/practice/sessions';
@@ -782,6 +782,9 @@ describe('LoopPanel finishing a loop', () => {
   });
   const prompt = (view: ReturnType<typeof renderPanel>) =>
     within(view.panel.getByRole('group', { name: 'Mark finished?' }));
+  /** The Late loop as the table holds it now. */
+  const savedLate = (view: ReturnType<typeof renderPanel>) =>
+    view.table.rows().find((row) => row.id === 'late');
   const finishedNames = (view: ReturnType<typeof renderPanel>) =>
     within(view.panel.getByRole('region', { name: 'Finished loops' }))
       .getAllByRole('listitem')
@@ -810,7 +813,7 @@ describe('LoopPanel finishing a loop', () => {
       "You've reached your target of 100%. Mark this loop finished?",
     );
     expect(view.table.sent('update')).toEqual([{ speed_ratio: 1 }]);
-    expect(view.table.rows().find((row) => row.id === 'late')?.status).toBe('active');
+    expect(savedLate(view)?.status).toBe('active');
     // Still playing: the question interrupts nothing.
     expect(view.player.getSnapshot().status).toBe('playing');
   });
@@ -927,7 +930,7 @@ describe('LoopPanel finishing a loop', () => {
     expect(await view.panel.findByTestId('finish-prompt')).toHaveTextContent(
       "Couldn't mark the loop finished: nope",
     );
-    expect(view.table.rows().find((row) => row.id === 'late')?.status).toBe('active');
+    expect(savedLate(view)?.status).toBe('active');
   });
 
   it('asks when the speed shows as the target’s percent, though its ratio is a hair under', async () => {
@@ -965,7 +968,7 @@ describe('LoopPanel finishing a loop', () => {
       expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toBeEnabled(),
     );
     expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
-    expect(view.table.rows().find((row) => row.id === 'late')?.status).toBe('finished');
+    expect(savedLate(view)?.status).toBe('finished');
   });
 
   it('"Save speed" answered while "Mark finished" is on its way does not put the loop back among the active', async () => {
@@ -985,7 +988,7 @@ describe('LoopPanel finishing a loop', () => {
     await waitFor(() =>
       expect(view.panel.getByRole('button', { name: 'Save speed' })).toBeDisabled(),
     );
-    expect(view.table.rows().find((row) => row.id === 'late')).toMatchObject({
+    expect(savedLate(view)).toMatchObject({
       status: 'active',
       speed_ratio: 0.95,
     });
@@ -996,7 +999,7 @@ describe('LoopPanel finishing a loop', () => {
     release();
 
     await waitFor(() =>
-      expect(view.table.rows().find((row) => row.id === 'late')).toMatchObject({
+      expect(savedLate(view)).toMatchObject({
         status: 'finished',
         speed_ratio: 0.95,
       }),
@@ -1146,9 +1149,7 @@ describe('LoopPanel history', () => {
     await view.press('History Late');
     await view.press('History Late');
     await waitFor(() => expect(reads()).toBeGreaterThan(readsBefore));
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    });
+    await settle();
 
     expect(history(view, 'Late').getAllByRole('listitem')).toHaveLength(1);
     expect(view.item('Late').queryByRole('alert')).not.toBeInTheDocument();

@@ -87,29 +87,36 @@ export function usePracticeTracker(
     [logSession],
   );
 
-  const send = useCallback(
-    (record: SessionRecord, via: SendVia) => {
-      if (via === 'unobserved') {
-        void logSessionUnobserved(queryClient, userId, record);
-        return;
-      }
-      const token = accessToken.current;
-      if (via === 'mutation' || token === null) {
-        sendNow(record);
-        return;
-      }
+  /** With `keepalive`, for a page that is hidden or going away. */
+  const sendOnExit = useCallback(
+    (record: SessionRecord, token: string) => {
       void logSessionOnExit(token, userId, record).then((result) => {
         // Only reached when the page lived on: a hidden tab that came back.
+        // `loopGone` needs nothing: the loop's history went with it.
         if (result === 'failed') {
           sendNow(record);
-          return;
+        } else if (result === 'logged') {
+          sessionLogged(queryClient, userId, record);
+          setLastLogged(record);
         }
-        if (result === 'loopGone') return;
-        sessionLogged(queryClient, userId, record);
-        setLastLogged(record);
       });
     },
     [queryClient, sendNow, userId],
+  );
+
+  const send = useCallback(
+    (record: SessionRecord, via: SendVia) => {
+      const token = accessToken.current;
+      if (via === 'unobserved') {
+        void logSessionUnobserved(queryClient, userId, record);
+      } else if (via === 'keepalive' && token !== null) {
+        sendOnExit(record, token);
+      } else {
+        // Also when there is no token to build a keepalive request with.
+        sendNow(record);
+      }
+    },
+    [queryClient, sendNow, sendOnExit, userId],
   );
 
   /** Shows the tracker where things stand now, and sends the session that ended, if one did. */

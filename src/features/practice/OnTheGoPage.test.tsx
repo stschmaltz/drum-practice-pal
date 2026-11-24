@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import type { Loop } from '@/features/loops/loopForm';
@@ -6,7 +6,7 @@ import { loopKeys } from '@/features/loops/loopKeys';
 import { PRACTICE_LOOP_SELECT, type PracticeLoop } from '@/features/loops/practiceList';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
 import { loopRow } from '@/test/loopTable';
-import { renderRoutes, RouteMarker } from '@/test/render';
+import { renderRoutes, RouteMarker, settle } from '@/test/render';
 import { OnTheGoPage } from './OnTheGoPage';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -317,9 +317,7 @@ describe('On the go read again', () => {
         await queryClient.invalidateQueries({ queryKey: loopKeys.forUser('user-1') });
         expect(reads()).toBeGreaterThan(before);
         // TanStack Query tells React on a timer: give the answer time to be drawn.
-        await act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        });
+        await settle();
       },
       listState: () => queryClient.getQueryState(loopKeys.practice('user-1')),
     };

@@ -296,3 +296,49 @@ Seen and left as designed: after "Not yet", lowering the target under the curren
 - `npm run check`: green. 84 test files, 3351 tests.
 - `npm run e2e`: green. 318 tests: 304 passed, 14 skipped (the size-specific skips of earlier units), 3.1 minutes.
 - `npm run test:db`: green. 6 files, 205 tests.
+
+## Readability
+
+No behaviour changed: the app's markup, classes, copy, queries, requests and player calls are what they were, the migration is untouched, and no test was added, removed or weakened (the counts below are the same before and after). The Build stage's app code was already in small modules, so most of the work was in the tests of three stages, where the same steps had been written out many times.
+
+**App code**
+
+- `sessionTracker.ts`: `observe` reassigned its `state` parameter and carried a mutable `ended` through four branches. It is now straight-line: the "left the loop" branch returns at once, opening a session is `sessionOpenedBy(input, newId)`, and "log it if it has enough play time" is `recordIfLongEnough`, which the leaving branch and the stop branch had each spelled out. Same inputs, same steps; its 40 tests pass unchanged.
+- `usePracticeTracker.ts`: `send` held the keepalive path and its three answers inline between two early returns. That path is `sendOnExit(record, token)`, and `send` is one three-way choice by `via`.
+- `src/components/LoadErrorAlert.tsx` (new): the "Couldn't load … / Try again" block for a failed first load. The unit added its third and fourth copies (`OnTheGoPage`, `LoopHistory`) beside `LoopPanel`'s; `LibraryPage` and `SettingsPage` had the same block from Units 03 and 04. All five use the component, which renders the same elements and classes (`compact` is the history's smaller text and gap).
+- `OnTheGoPage.tsx`: the two tab buttons are `PracticeTabButtons`, beside `PracticeLoopList` and `PracticeLoopItem`.
+- `src/features/shell/PlaceholderPages.tsx` is `NotFoundPage.tsx`: this unit replaced the last placeholder, and `NotFoundPage` was all the file had left.
+- Import order in `App.tsx` and `useLoops.ts` (the `practice` imports had gone in after the relative ones).
+
+**Test helpers**
+
+- `src/test/render.tsx`: `settle()`, the "let what is under way finish and be drawn, then assert nothing changed" wait that five tests in four files had each written as an `act` around a 20 ms timeout.
+- `usePracticeTracker.test.tsx`: the view from `renderTracker` has `playOn(seconds)` (15 uses of play-then-move-the-clock), `loopBars5To8()`, `finishPasses(count)`, `tracker()` for `hook.result.current` (29 uses), and `cacheEmptyHistory()` / `cachedHistory()` / `isInvalidated(key)`. The file has `firePageEvent('pagehide' | 'pageshow')` (8 uses) and one `offline` answer (8 uses).
+- `SongPage.test.tsx`, "practice sessions": four tests and `playVerseFor` each rendered the page, pressed "Play loop Verse" and fired the engine's report by hand, though `startVerse` existed for the later tests. `startVerse()` is now the one way in (after `serve`, so a test can change how session logs are answered first), with `pause()` and `resume()`; `later(seconds)` moves the clock; `failSessionLogs()` is the "refuse session logs until told otherwise" mock two tests had built. The "two unsaved sessions" test reads as its steps, not as a loop over `[40, 50]` with an `if` inside.
+- `LoopPanel.test.tsx`: `savedLate(view)` for the table's row (5 uses).
+- `tests/db/session-sanity.test.ts`: the raw keepalive request was written out twice, once inline and once as `keepaliveAs` inside a describe; `keepaliveAs` and `upsertAsApp` are at the top and every test uses them. Setup inserts and deletes that only threw on error are `insertSession(user, row)` (new, in `tests/db/helpers.ts` beside `insertSong` and `insertLoop`) and `deleteLoop(user, loopId)`.
+- e2e: `tests/e2e/practicePage.ts` (new) has the unit's locators and steps, as `loopsPage.ts` and `playerPage.ts` do for theirs: `sessionsOf`, `loopsOf`, `sessionCount(user).toBe(n)` (8 polls of the database), `sessionLogged`, `navLink`, `homeTab` / `homeList` / `homeItem`, `openLoopHistory`, `shortSessions`, `playFor`, `playOn` (3 copies of Play, wait for Pause, wait), `recordSentSessions` / `sentSessions`, `setPageVisibility`. `saveLoopSpeed(page, percent)` is in `loopsPage.ts` (3 copies). `practice.spec.ts` is the eight tests and nothing else; each poll keeps the timeout it had.
+
+**AGENTS.md**
+
+`LoadErrorAlert` in the shared UI line; `settle()` and when it is the right wait; `practicePage.ts` and what it holds; `insertSession`; the tracker view's and the song page's step helpers. Two lines that pointed at `practice.spec.ts` for a helper now point at `practicePage.ts`.
+
+**Left as it was**
+
+- `sessionInsert` and `sessionFromRecord` in `sessions.ts` map the same six fields. Building one from the other would reorder the keys of the keepalive request's JSON body: harmless, but not nothing.
+- `LoopList` in `LoopPanel.tsx` builds both of its lists with an inner `items(listed)` closure. As a component it would take the panel's six props again; the closure is shorter.
+- The session fixtures (`record`, `session(id)`, `earlier`) are defined per test file in `sessions.test.ts`, `sessionsApi.test.ts`, `useSessions.test.tsx`, `keepaliveInsert.test.ts` and `LoopPanel.test.tsx`. Each file asserts on its own values, so a shared builder would be called with every field overridden. `ok` / `fail` stay per file too, as in every unit so far.
+- `OnTheGoPage.test.tsx`'s own small loops table (`serve`) is not `loopTable.ts`: it answers with the embedded song and sets `finished_at`, which the shared table doesn't.
+- `tests/db/constraints.test.ts` and `loops-grants.test.ts` (Units 02 and 08) have setup inserts of sessions that don't check `error`. They could use `insertSession`; left for Review, since a setup insert that turns out to be failing there is a finding, not a tidy-up.
+- `PRACTICE_LOOP_SELECT` and `SESSION_SELECT` are written out again in `tests/db/session-sanity.test.ts` (the database test config has no `@/` alias); the comments there say so.
+- The migration, and every issue in the QA section. Issue 1 (`useRequestedLoop` settling `?loop=` against a stale list) is behaviour; it is Review's.
+
+**Results**
+
+|                   | Before                             | After                              |
+| ----------------- | ---------------------------------- | ---------------------------------- |
+| `npm run check`   | green, 84 files, 3351 tests        | green, 84 files, 3351 tests        |
+| `npm run test:db` | green, 6 files, 205 tests          | green, 6 files, 205 tests          |
+| `npm run e2e`     | green, 318: 304 passed, 14 skipped | green, 318: 304 passed, 14 skipped |
+
+Nothing was heard, and nothing ran outside Chromium.
