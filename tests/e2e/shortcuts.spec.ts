@@ -405,3 +405,30 @@ test('with single-letter shortcuts off in Settings, M, D, S, C and ? do nothing;
   await focusNothing(page);
   await pressMAndSeeMetronomeFlip(page);
 });
+
+// 12 UX pass, Test: the count-in is a group of radios, which keep their arrows.
+test('on a focused count-in choice the arrows move the choice, and Space still plays and pauses', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await chooseCountIn(page, 0);
+  await expect(checkedCountIn(page)).toBeFocused();
+
+  await page.keyboard.press('ArrowRight');
+  await expect(checkedCountIn(page)).toHaveValue('1');
+  await expect(checkedCountIn(page)).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(checkedCountIn(page)).toHaveValue('0');
+  // The arrows went to the radios, not to the speed.
+  await page.keyboard.press('ArrowUp');
+  await expect(checkedCountIn(page)).toHaveValue('2');
+  await expect(speed(page)).toHaveText('100%');
+
+  await chooseCountIn(page, 0);
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Pause');
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Play');
+  await expect(checkedCountIn(page)).toHaveValue('0');
+});

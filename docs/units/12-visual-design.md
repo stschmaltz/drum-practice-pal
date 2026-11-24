@@ -457,3 +457,39 @@ Shane reviewed `docs/units/12-shots/final-*.png` and asked for "all the changes 
 
 - `npm run check`: 107 files, 4195 tests green (was 103 / 4077).
 - `npm run e2e`: 398 passed, 22 skipped, 0 failed (420 listed), on a fresh `npm run build -- --mode development` from bash. The `vite preview` on 4173 (PID 56088, not ours) was left running; the page it served loaded `assets/index-1MaXR70u.js`, the fresh `dist`'s file. Under a full parallel run `loops.spec.ts` "tap the first bar, then the last" failed once on phone (its first tap didn't seek) and then passed 6 of 6 alone and in the next two full runs; `usePlayer.test.tsx` "a second online while the retry is on its way" failed once in a loaded `npm run check` and passed alone and in every later run. Neither touches code changed here; watch them.
+
+## Test (after UX pass)
+
+Tests for the three commits since the last Test stage (tablet loop sheet, narrower gutter, UX pass). The builder's own tests already covered most criteria (fold rules, the menu's keys, the segmented count-in, toggle marks, the playing loop shown once, the library card, the compact upload, `targetProgress`, settings copy, login autofocus, the account initial); this stage filled the gaps and walked the checklist rows over the new stateful pieces: `useControlsFold`, `useFocusKeptInBar`, `useStaysOnScreen`, `OverflowMenu`, the "Loop speed" hand-over, the compact drop zone and the `choice` focus kind.
+
+### Added
+
+- `src/features/song/useControlsFold.test.ts`: a "Show controls" that lands after playback stopped (a handler from the playing render) must leave the next run folded (failed; bug 1, fixed); renders that change nothing keep the user's choice for the run; mounting on a running player starts folded.
+- `src/components/OverflowMenu.test.tsx` ("gates and late events"): Enter on a disabled item does nothing and keeps the menu; an item enabled while the menu is open can be chosen at once; opening a second menu closes the first; a pointerdown on the menu's own button is not "outside"; keys with no rule (Page Down, Space) are left to the page on the button and in the menu.
+- `src/components/SegmentedControl.test.tsx` (new): one group of native radios sharing a name, named by `labelledBy` or `label`, described by `describedBy`; a press hands back the option's own (number) value; arrows move the choice; disabled refuses a press.
+- `src/features/player/PlayerControls.test.tsx` ("folded"): Show / Hide controls keeps focus as it flips; focus on Hide controls when playback stops goes to Metronome; a control folded away doesn't pull focus the user has since put elsewhere; after a fold that moved focus the strip still works with no restart; Loop speed is the same element folded or not, focus kept.
+- `src/features/song/useSongShortcuts.test.tsx` ("the input guard"): a focused radio and a focused `role="menuitem"` keep the four arrows (no speed change, no loop switch), while Page Down switches loops and Space plays; a plain button keeps no arrows.
+- `src/features/song/SongPage.test.tsx` ("controls while playing"): on a phone, Play loop closes the sheet and "Loop speed" opens it and focuses the loop's speed group (the earlier test ran at jsdom's 1024, the column); the score keeps its place on screen through Play and Pause (the score box's rect and `window.scrollBy` modelled), positions while playing scroll nothing, and a scroll the user made while playing counts as where the score is.
+- `src/features/library/UploadPanel.test.tsx` (compact): offline, a drag over the list draws no outline and a drop uploads nothing (then online the same drop uploads); during an upload the list takes no drop and draws no outline; a drop clears the outline and several files are refused.
+- `src/features/loops/loopLabels.test.ts`: `targetProgress` at the schema's bounds (25% towards 200%) and 99.5% shown as 100% reaching a 100% target.
+- e2e `player.spec.ts` "Pause and Play leave the score where it is on screen, with no scroll anchoring to help": `overflow-anchor: none` (as Safari) and room below the page; the score's top is unchanged within 1 px across Pause, the bar having grown by over 40 px; Show controls holds for one run and the next Play folds again.
+- e2e `shortcuts.spec.ts` "on a focused count-in choice the arrows move the choice, and Space still plays and pauses".
+- e2e `auth.spec.ts` "the email field takes focus on load on a laptop, and not on a phone or tablet" (by project: desktop has a fine pointer, phone and tablet touch).
+
+Each new test was seen to fail with the code it covers broken: the disabled check, the own-button check and the key handling in `OverflowMenu`; `role` in `useSongShortcuts`' focus read; the Metronome fallback and the "focus still on body" check in `useFocusKeptInBar`; `useStaysOnScreen`'s `scrollBy` and its scroll listener; the drag outline's `blocked` check; Loop speed's `setLoopPanelOpen(true)`; the radios' shared name; the fold fix. For e2e, one build with `useStaysOnScreen` a no-op, the radio `choice` kind removed and autofocus off failed 7 tests (the score test at all three sizes, the radio test at all three, autofocus on desktop) and passed the two "not focused" cases; the restored build passed them.
+
+### Bugs found
+
+1. **Fixed (two lines, `useControlsFold.ts`).** "Show controls" from the playing render, landing after playback stopped, was kept and unfolded the next run. "Show controls" is now dropped on a start as well as a stop.
+2. **Logged, not fixed: Pause moves the score on a short page.** `useStaysOnScreen` makes up for the fold by scrolling the window, which can't scroll past the page's end. On the `groove-120` song page with the panel closed the page is barely taller than the window: Play folds and the page shrinks to no scroll at all, then Pause grows the bar and the score moves down 32 px on a laptop (the hook asked for 131 and the page had 99), about 120 px on a tablet and about 160 px on a phone (Chromium, scroll anchoring off). The UX pass note says a Pause never moves the score from under the next tap; that holds only when the page has room. Fix: room below the score while folded (a bottom padding of the height the fold took), or accept it. Carried forward to Unit 13 in `docs/plan.md`.
+
+### Not covered
+
+- A loop deleted on another device while its menu is open (focus to `<body>`, a known gap): nothing observable in jsdom tells a leaked document listener apart, so no test was kept for it.
+- The compact library switching to the full drop box mid-drag (known gap).
+- Safari: the score-stays test stands in for it by turning scroll anchoring off in Chromium.
+
+### Results
+
+- `npm run check`: 108 files, 4225 tests green (was 107 / 4195).
+- `npm run e2e`: 407 passed, 22 skipped, 0 failed (429 listed, was 420), on a fresh `npm run build -- --mode development` from bash; the `vite preview` on 4173 was reused and left running, and the break check above showed it serving the fresh `dist`.

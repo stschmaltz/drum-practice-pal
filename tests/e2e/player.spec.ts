@@ -18,6 +18,7 @@ import {
   showControls,
   status,
   viewport,
+  windowScrollSettled,
 } from './playerPage';
 
 // Unit 05: the song page's player. Nothing here listens to audio; sound is a Human check.
@@ -334,4 +335,56 @@ test('the controls fold to a strip under the sticky bar while playing, without t
   await expect(muteDrumsButton(page)).toBeVisible();
   // Playing then paused, nothing in between: folding never stopped or reloaded anything.
   expect(await recordedStatuses(page)).toEqual(['ready', 'playing', 'ready']);
+});
+
+// 12 UX pass, Test: the fold changes the bar's height above the score; the score itself must
+// not move on screen, or a bar tapped just after Pause is not the bar that was under the finger.
+// Chromium's scroll anchoring often keeps it still by itself; Safari has none, so it is turned
+// off here and the page's own correction (useStaysOnScreen) is what is tested.
+test('Pause and Play leave the score where it is on screen, with no scroll anchoring to help', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  // A page long enough to scroll by what the bar gives back. A short page can't be (see the
+  // handoff note's Bugs found: the score moves down at Pause there).
+  await page.addStyleTag({
+    content:
+      'html, body, main { overflow-anchor: none !important; } main::after { content: ""; display: block; height: 150vh; }',
+  });
+  const scoreTop = () => viewport(page).evaluate((box) => box.getBoundingClientRect().top);
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect(controls(page).getByRole('button', { name: 'Show controls' })).toBeVisible();
+  // Play brings the score into the window (a smooth scroll); measure once that has ended.
+  await windowScrollSettled(page);
+  // The user scrolls a little while playing; that is where the score is now.
+  await page.evaluate(() => window.scrollBy({ top: 60, behavior: 'instant' }));
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await windowScrollSettled(page);
+  const strip = (await boxOf(controls(page), 'folded controls')).height;
+  const playing = await scoreTop();
+
+  // Pause grows the bar above the score by what folding took away.
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  await expect(muteDrumsButton(page)).toBeVisible();
+  expect((await boxOf(controls(page), 'controls')).height - strip).toBeGreaterThan(40);
+  expect(Math.abs((await scoreTop()) - playing)).toBeLessThanOrEqual(1);
+
+  // Show controls holds for one run; the next Play folds the bar again.
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await showControls(page);
+  await expect(controls(page).getByRole('button', { name: 'Hide controls' })).toBeVisible();
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect(controls(page).getByRole('button', { name: 'Show controls' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await expect(muteDrumsButton(page)).toHaveCount(0);
 });

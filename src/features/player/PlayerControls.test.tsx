@@ -723,6 +723,55 @@ describe('PlayerControls folded', () => {
     expect(player.getSnapshot()).toMatchObject({ metronomeOn: false, speedRatio: 0.75 });
     expect(engine.restartCalls()).toBe(restarts);
   });
+
+  // 12 UX pass, Test: where focus goes as the bar folds, unfolds and its toggle goes.
+  it('Show controls keeps focus as it becomes Hide controls, and back', async () => {
+    const { fold, user } = setupFolded();
+    fold(true);
+    await user.click(screen.getByRole('button', { name: 'Show controls' }));
+    expect(screen.getByRole('button', { name: 'Hide controls' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Show controls' })).toHaveFocus();
+  });
+
+  it('focus on Hide controls when playback stops (the toggle goes) moves to the metronome', async () => {
+    const { fold, user } = setupFolded();
+    fold(true);
+    await user.click(screen.getByRole('button', { name: 'Show controls' }));
+    expect(screen.getByRole('button', { name: 'Hide controls' })).toHaveFocus();
+    fold(false);
+    expect(screen.queryByRole('button', { name: /controls$/ })).not.toBeInTheDocument();
+    expect(metronome()).toHaveFocus();
+  });
+
+  it('a control folded away is no reason to take focus the user has since put elsewhere', () => {
+    const outside = document.createElement('button');
+    outside.textContent = 'Elsewhere';
+    document.body.append(outside);
+    try {
+      const { fold } = setupFolded();
+      muteDrums().focus();
+      outside.focus();
+      fold(true);
+      expect(outside).toHaveFocus();
+    } finally {
+      outside.remove();
+    }
+  });
+
+  it('the metronome and the speed stay pressable after a fold that moved focus, with no restart', async () => {
+    const { engine, player, fold, user } = setupFolded();
+    drumsOnly().focus();
+    fold(true);
+    const restarts = engine.restartCalls();
+    // Focus went to the toggle; the keyboard user goes on from there.
+    await user.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(speed()).toHaveFocus();
+    // jsdom moves no range input by key; a change is what the arrow would send.
+    fireEvent.change(speed(), { target: { value: '105' } });
+    expect(player.getSnapshot().speedRatio).toBeCloseTo(1.05);
+    expect(engine.restartCalls()).toBe(restarts);
+  });
 });
 
 describe('PlayerControls while a loop plays', () => {
@@ -746,5 +795,29 @@ describe('PlayerControls while a loop plays', () => {
     const button = screen.getByRole('button', { name: 'Loop speed 85%' });
     await userEvent.setup().click(button);
     expect(onShow).toHaveBeenCalledTimes(1);
+  });
+
+  it('Loop speed is the same button folded or not, so focus on it survives the fold', () => {
+    const engine = new FakePlayerEngine();
+    const player = new PlayerService(engine, {
+      drumTrackIndex: DRUMS,
+      options: DEFAULT_PLAYER_OPTIONS,
+      wakeLock: { setActive: vi.fn(), dispose: vi.fn() },
+      unlockAudio: vi.fn(),
+    });
+    const at = (folded: boolean) => (
+      <PlayerControls
+        player={player}
+        snapshot={player.getSnapshot()}
+        fold={{ folded, canFold: true, onFoldedChange: () => {} }}
+        onShowLoopSpeed={() => {}}
+      />
+    );
+    const view = render(at(false));
+    const button = screen.getByRole('button', { name: 'Loop speed 100%' });
+    button.focus();
+    view.rerender(at(true));
+    expect(screen.getByRole('button', { name: 'Loop speed 100%' })).toBe(button);
+    expect(button).toHaveFocus();
   });
 });

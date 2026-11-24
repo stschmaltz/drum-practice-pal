@@ -367,4 +367,55 @@ describe('UploadPanel once the library has songs (compact)', () => {
     await user.upload(picker(), gpFile());
     expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
   });
+
+  // 12 UX pass, Test: the list is a second way in, and asks what the button asks.
+  it('offline, a file dragged over the list draws no outline and a drop on it uploads nothing', async () => {
+    serve({});
+    renderCompact();
+    act(() => onlineManager.setOnline(false));
+    expect(picker()).toBeDisabled();
+    const list = screen.getByRole('list', { name: 'Songs' });
+    fireEvent.dragOver(list);
+    expect(screen.queryByText('Drop the file to upload it')).not.toBeInTheDocument();
+    fireEvent.drop(list, { dataTransfer: { files: [gpFile()] } });
+    await settle();
+    expect(storageMethods()).toEqual([]);
+    expect(queryResult).not.toHaveBeenCalled();
+
+    act(() => onlineManager.setOnline(true));
+    fireEvent.drop(list, { dataTransfer: { files: [gpFile()] } });
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+  });
+
+  it('while an upload runs, the list takes no drop and draws no outline', async () => {
+    const upload = deferred();
+    storageResult.mockReturnValueOnce(upload.promise);
+    serve({});
+    const user = renderCompact();
+    await user.upload(picker(), gpFile('first.gp'));
+    expect(await screen.findByText('Uploading first.gp…')).toBeInTheDocument();
+
+    const list = screen.getByRole('list', { name: 'Songs' });
+    fireEvent.dragOver(list);
+    expect(screen.queryByText('Drop the file to upload it')).not.toBeInTheDocument();
+    fireEvent.drop(list, { dataTransfer: { files: [gpFile('second.gp')] } });
+    expect(screen.getByText('Uploading first.gp…')).toBeInTheDocument();
+
+    upload.resolve(ok({}));
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(storageMethods()).toEqual(['upload']);
+    expect(inserts()).toHaveLength(1);
+  });
+
+  it('a drop clears the outline, and several files dropped on the list are refused', async () => {
+    serve({});
+    renderCompact();
+    const list = screen.getByRole('list', { name: 'Songs' });
+    fireEvent.dragOver(list);
+    fireEvent.drop(list, { dataTransfer: { files: [gpFile('a.gp'), gpFile('b.gp')] } });
+    expect(screen.queryByText('Drop the file to upload it')).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Drop one file at a time.');
+    await settle();
+    expect(storageResult).not.toHaveBeenCalled();
+  });
 });

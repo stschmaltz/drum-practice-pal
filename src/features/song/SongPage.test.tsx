@@ -2152,4 +2152,97 @@ describe('SongPage controls while playing (12 UX pass)', () => {
     ).toEqual(['Bars 5 to 8 · 80% (96 BPM)', 'Bars 9 to 12 · 50% (45 BPM)']);
     expect(panel().getAllByRole('group', { name: 'Loop speed' })).toHaveLength(1);
   });
+
+  // 12 UX pass, Test.
+  describe('on a phone, where the loop panel is a closed sheet', () => {
+    beforeEach(() => vi.stubGlobal('innerWidth', 390));
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('Loop speed opens the sheet that Play loop closed, and hands focus to the loop’s speed', async () => {
+      serve({ loops: [verse] });
+      const user = renderSong(SONG_A);
+      await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+      const header = await screen.findByRole('button', { name: /^Loops \(1\)/, expanded: false });
+      await user.click(header);
+      await user.click(panel().getByRole('button', { name: 'Play loop Verse' }));
+      // Play loop started playback from a sheet over the score: it closed.
+      expect(screen.getByRole('button', { name: /^Loop: Verse/ })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+
+      await user.click(controls().getByRole('button', { name: 'Loop speed 80%' }));
+      expect(screen.getByRole('button', { name: /^Loop: Verse/ })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+      await waitFor(() => expect(panel().getByRole('group', { name: 'Loop speed' })).toHaveFocus());
+    });
+  });
+
+  describe('the score stays where it is on screen as the bar folds and unfolds', () => {
+    /**
+     * jsdom lays nothing out: the score box sits 300 px lower while the bar is
+     * full than while it is the strip, less however far the window has
+     * scrolled, which `scrollBy` moves as a browser would.
+     */
+    function layOut() {
+      let scrollY = 0;
+      const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(((
+        options: ScrollToOptions,
+      ) => {
+        scrollY += options.top ?? 0;
+      }) as typeof window.scrollBy);
+      const box = screen.getByTestId('score-viewport');
+      const top = () => (document.querySelector('[data-folded]') ? 200 : 500) - scrollY;
+      vi.spyOn(box, 'getBoundingClientRect').mockImplementation(
+        () =>
+          ({
+            top: top(),
+            bottom: top() + 400,
+            left: 0,
+            right: 400,
+            height: 400,
+            width: 400,
+          }) as DOMRect,
+      );
+      const userScrolls = (by: number) => {
+        scrollY += by;
+        fireEvent.scroll(window);
+      };
+      return { scrollBy, onScreen: top, userScrolls };
+    }
+    afterEach(() => vi.restoreAllMocks());
+
+    it('Play and Pause leave the score where it was, the window scrolled by what the bar gave or took', async () => {
+      const { play, pause, engine } = await openSong();
+      const { scrollBy, onScreen, userScrolls } = layOut();
+      // Where the score is, taken from the last scroll as well as the last render.
+      userScrolls(0);
+      const before = onScreen();
+
+      await play();
+      expect(onScreen()).toBe(before);
+      // Positions while playing redraw the page but fold nothing: no scroll for them.
+      const scrolls = scrollBy.mock.calls.length;
+      act(() => engine.fire('position', { tick: startOfBar(3) }));
+      expect(scrollBy.mock.calls).toHaveLength(scrolls);
+
+      await pause();
+      expect(onScreen()).toBe(before);
+      expect(scrollBy.mock.calls.map(([options]) => (options as ScrollToOptions).top)).toEqual([
+        -300, 300,
+      ]);
+    });
+
+    it('a scroll the user made while playing counts as where the score was', async () => {
+      const { play, pause } = await openSong();
+      const { onScreen, userScrolls } = layOut();
+      await play();
+      userScrolls(120);
+      const before = onScreen();
+      await pause();
+      expect(onScreen()).toBe(before);
+    });
+  });
 });

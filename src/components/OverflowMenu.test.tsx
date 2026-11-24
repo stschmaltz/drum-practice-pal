@@ -141,3 +141,94 @@ describe('OverflowMenu', () => {
     expect(more()).toHaveFocus();
   });
 });
+
+describe('OverflowMenu, gates and late events (12 UX pass, Test)', () => {
+  const picked: string[] = [];
+  beforeEach(() => picked.splice(0));
+
+  function Menus({ editDisabled }: { editDisabled: boolean }) {
+    const chosen = (id: string) => () => picked.push(id);
+    return (
+      <div>
+        <OverflowMenu
+          name="Verse"
+          items={[
+            {
+              id: 'edit',
+              label: 'Edit',
+              icon: 'edit',
+              onSelect: chosen('edit'),
+              disabled: editDisabled,
+            },
+            {
+              id: 'delete',
+              label: 'Delete',
+              icon: 'trash',
+              onSelect: chosen('delete'),
+              danger: true,
+            },
+          ]}
+        />
+        <OverflowMenu
+          name="Chorus"
+          items={[{ id: 'edit', label: 'Edit', icon: 'edit', onSelect: chosen('chorus-edit') }]}
+        />
+      </div>
+    );
+  }
+
+  it('Enter on a disabled item does nothing and keeps the menu open', async () => {
+    render(<Menus editDisabled />);
+    const user = userEvent.setup();
+    more().focus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(picked).toEqual([]);
+    expect(menu()).toBeInTheDocument();
+  });
+
+  it('an item enabled while the menu is open (the score’s bars came in) can be chosen at once', async () => {
+    const view = render(<Menus editDisabled />);
+    const user = userEvent.setup();
+    await user.click(more());
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toHaveAttribute('aria-disabled', 'true');
+
+    view.rerender(<Menus editDisabled={false} />);
+    expect(menu()).toBeInTheDocument();
+    const edit = screen.getByRole('menuitem', { name: 'Edit' });
+    expect(edit).not.toHaveAttribute('aria-disabled');
+    await user.click(edit);
+    expect(picked).toEqual(['edit']);
+  });
+
+  it('opening a second menu closes the first: one menu open at a time', async () => {
+    render(<Menus editDisabled={false} />);
+    const user = userEvent.setup();
+    await user.click(more());
+    await user.click(screen.getByRole('button', { name: 'More actions for Chorus' }));
+    expect(menu()).not.toBeInTheDocument();
+    expect(screen.getByRole('menu', { name: 'Actions for Chorus' })).toBeInTheDocument();
+    expect(screen.getAllByRole('menu')).toHaveLength(1);
+  });
+
+  it('a press on the menu’s own button is not a press outside: the click alone decides', () => {
+    setup();
+    fireEvent.click(more());
+    fireEvent.pointerDown(more());
+    expect(menu()).toBeInTheDocument();
+    fireEvent.click(more());
+    expect(menu()).not.toBeInTheDocument();
+  });
+
+  it('keys it has no rule for are left to the page, on the button and in the menu', () => {
+    setup();
+    expect(fireEvent.keyDown(more(), { key: 'PageDown' })).toBe(true);
+    expect(menu()).not.toBeInTheDocument();
+    fireEvent.click(more());
+    expect(fireEvent.keyDown(items()[0] as HTMLElement, { key: 'PageDown' })).toBe(true);
+    // Space is the song page's play/pause, menu items included (menuKeys.ts).
+    expect(fireEvent.keyDown(items()[0] as HTMLElement, { key: ' ' })).toBe(true);
+    expect(menu()).toBeInTheDocument();
+  });
+});

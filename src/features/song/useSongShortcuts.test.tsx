@@ -515,6 +515,40 @@ describe('the input guard', () => {
     expect(view.engine.play).toHaveBeenCalledTimes(1);
   });
 
+  // 12 UX pass, Test: the count-in's segmented control and the loop item's menu.
+  it.each([
+    ['a radio (the count-in’s segments)', () => focusedInput('radio')],
+    [
+      'a menu item (a loop’s More menu)',
+      () => focused('button', (button) => button.setAttribute('role', 'menuitem')),
+    ],
+  ])(
+    'leaves %s its arrows, while the page keys switch loops and Space still plays',
+    async (_, place) => {
+      const view = await renderShortcuts();
+      const choice = place();
+
+      for (const k of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']) {
+        expect(view.key(k, {}, choice)).toBe(true);
+      }
+      expect(view.player.getSnapshot().speedRatio).toBe(1);
+      expect(view.activeLoop()).toBeNull();
+
+      // A pedal on a focused count-in still switches loops.
+      expect(view.key('PageDown', {}, choice)).toBe(false);
+      expect(view.activeLoop()).not.toBeNull();
+      expect(view.key(' ', {}, choice)).toBe(false);
+      expect(view.engine.play).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('a plain button keeps no arrows: they switch loops with focus on it', async () => {
+    const view = await renderShortcuts();
+    const button = focused('button');
+    expect(view.key('ArrowRight', {}, button)).toBe(false);
+    expect(view.activeLoop()).not.toBeNull();
+  });
+
   it('leaves Ctrl, Cmd and Alt combinations to the browser', async () => {
     const view = await renderShortcuts();
 

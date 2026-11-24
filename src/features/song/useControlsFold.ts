@@ -15,10 +15,12 @@ import type { ControlsFold } from '@/features/player/PlayerControls';
 export function useControlsFold(running: boolean): ControlsFold {
   const [shownWhileRunning, setShownWhileRunning] = useState(false);
   const [wasRunning, setWasRunning] = useState(running);
-  // State from the previous render: a stop drops "Show controls" before this render draws.
+  // State from the previous render: a stop drops "Show controls" before this render draws, and
+  // so does a start, so a "Show controls" that landed while stopped (an event from the playing
+  // render, on its way as playback ended) can't unfold the next run.
   if (running !== wasRunning) {
     setWasRunning(running);
-    if (!running) setShownWhileRunning(false);
+    setShownWhileRunning(false);
   }
   const shown = running && shownWhileRunning;
   return {

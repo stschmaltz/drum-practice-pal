@@ -28,6 +28,10 @@ describe('targetProgress', () => {
     // Shown as 71% and 71%: reached, though the stored ratios differ.
     [0.708333, 0.71, 71, 71, 1, true],
     [0.704, 0.71, 70, 71, 70 / 71, false],
+    // The schema's bounds: the slowest speed towards the fastest target.
+    [0.25, 2, 25, 200, 0.125, false],
+    // 99.5% shows as 100%, so it has reached a 100% target.
+    [0.995, 1, 100, 100, 1, true],
   ])(
     '%f towards %f is %i%% of %i%%',
     (speed, target, speedPercent, targetPercent, fraction, reached) => {
