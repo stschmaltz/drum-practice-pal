@@ -64,6 +64,26 @@ beforeEach(() => {
 });
 
 describe('playing a loop', () => {
+  it('refuses while the sounds are still loading, as its button does: no loop, range or speed', async () => {
+    const { engine, practice, player } = await renderPractice(undefined, { loaded: false });
+    // The score is in, so the bar count is known; the MIDI and the soundfont are not.
+    act(() =>
+      engine.fire('scoreLoaded', {
+        barCount: 16,
+        trackCount: 3,
+        barTempos: Array.from({ length: 16 }, () => 120),
+        barMeters: Array.from({ length: 16 }, () => ({ beats: 4, beatValue: 4 })),
+      }),
+    );
+    expect(player.getSnapshot()).toMatchObject({ status: 'loading', barCount: 16 });
+
+    act(() => practice().playLoop(verse));
+
+    expect(practice().activeLoop).toBeNull();
+    expect(player.getSnapshot()).toMatchObject({ range: null, speedRatio: 1 });
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
   it('sets the range, looping and the saved speed, and starts playing, all inside the call', async () => {
     const { engine, practice, player } = await renderPractice();
 

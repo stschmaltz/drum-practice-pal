@@ -16,6 +16,8 @@ import {
   parseBarNumber,
   parseLoopForm,
   revertLoopEdit,
+  loopsByStatus,
+  loopsInPanelOrder,
   sortLoops,
   type Loop,
   type LoopFormValues,
@@ -367,6 +369,30 @@ describe('sortLoops', () => {
     const loops = [loop({ id: 'b', start_bar: 9 }), loop({ id: 'a', start_bar: 1 })];
     sortLoops(loops);
     expect(loops.map((l) => l.id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('loopsByStatus and loopsInPanelOrder', () => {
+  const loops = [
+    loop({ id: 'late-finished', start_bar: 9, status: 'finished' }),
+    loop({ id: 'late', start_bar: 9 }),
+    loop({ id: 'early-finished', start_bar: 1, status: 'finished' }),
+    loop({ id: 'early', start_bar: 1 }),
+  ];
+
+  it('splits the loops into the two sections, each in song order', () => {
+    const { active, finished } = loopsByStatus(loops);
+    expect(active.map((l) => l.id)).toEqual(['early', 'late']);
+    expect(finished.map((l) => l.id)).toEqual(['early-finished', 'late-finished']);
+  });
+
+  it('lists the loops on the go first, then the finished ones, as the panel does', () => {
+    expect(loopsInPanelOrder(loops).map((l) => l.id)).toEqual([
+      'early',
+      'late',
+      'early-finished',
+      'late-finished',
+    ]);
   });
 });
 

@@ -1,0 +1,159 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { loopsInPanelOrder, type Loop } from '@/features/loops/loopForm';
+import type { LoopPractice } from '@/features/loops/useLoopPractice';
+import { canChangeOptions, canPlay, canUseDrumToggles } from '@/features/player/controlGates';
+import { isRunning, type PlayerService } from '@/features/player/PlayerService';
+import { nudgeSpeedRatio, SPEED_STEP_PERCENT } from '@/features/player/speed';
+import {
+  focusKindOf,
+  neighbourLoop,
+  nextCountInBars,
+  resolveShortcut,
+  steppedBar,
+  type Direction,
+  type ShortcutAction,
+} from '@/features/shortcuts/shortcuts';
+
+interface SongShortcutInputs {
+  player: PlayerService | null;
+  practice: LoopPractice;
+  loops: readonly Loop[] | undefined;
+}
+
+/**
+ * The song page's keyboard shortcuts and pedal keys (`shortcuts.ts` has the
+ * keys and the input guard). One `keydown` listener on the window for as long
+ * as the page is mounted. Each action asks the same gate as the control it
+ * stands for (`controlGates.ts`), of the player's snapshot at the press, not
+ * the last render's: two presses before React has drawn the first still add up.
+ * Everything runs inside the key press, so Space can start audio on iOS.
+ */
+export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs) {
+  const [helpOpen, setHelpOpen] = useState(false);
+  const openHelp = useCallback(() => setHelpOpen(true), []);
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
+
+  // Read by the listener at each press, so it is installed once and never sees an old render.
+  const latest = useRef({ player, practice, loops, helpOpen });
+  useLayoutEffect(() => {
+    latest.current = { player, practice, loops, helpOpen };
+  });
+
+  useEffect(() => {
+    // Space's keyup on a button presses it in some browsers even when its keydown was taken.
+    let swallowSpaceKeyup = false;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const resolved = resolveShortcut(event, {
+        focus: focusKindOf(target),
+        helpOpen: latest.current.helpOpen,
+      });
+      if (!resolved) return;
+      // The key is ours even when this press does nothing: no page scroll or button press under it.
+      event.preventDefault();
+      if (event.key === ' ') swallowSpaceKeyup = true;
+      if (!resolved.run) return;
+      if (resolved.action === 'closeHelp') {
+        setHelpOpen(false);
+        return;
+      }
+      if (resolved.action === 'help') {
+        setHelpOpen((open) => !open);
+        return;
+      }
+      runShortcut(resolved.action, latest.current);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key !== ' ' || !swallowSpaceKeyup) return;
+      swallowSpaceKeyup = false;
+      event.preventDefault();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
+
+  return { helpOpen, openHelp, closeHelp };
+}
+
+export type SongShortcuts = ReturnType<typeof useSongShortcuts>;
+
+function runShortcut(
+  action: Exclude<ShortcutAction, 'help'>,
+  { player, practice, loops }: SongShortcutInputs,
+): void {
+  if (!player) return;
+  const snapshot = player.getSnapshot();
+  switch (action) {
+    case 'togglePlay':
+      if (canPlay(player, snapshot)) player.togglePlay();
+      return;
+    case 'speedUp':
+    case 'speedDown':
+      if (!canChangeOptions(player)) return;
+      player.setSpeed(
+        nudgeSpeedRatio(
+          snapshot.speedRatio,
+          action === 'speedUp' ? SPEED_STEP_PERCENT : -SPEED_STEP_PERCENT,
+        ),
+      );
+      return;
+    case 'previousLoop':
+    case 'nextLoop':
+      stepLoopOrBar(player, practice, loops, action === 'nextLoop' ? 'next' : 'previous');
+      return;
+    case 'metronome':
+      if (canChangeOptions(player)) player.setMetronomeOn(!snapshot.metronomeOn);
+      return;
+    case 'drumsMuted':
+      if (canUseDrumToggles(player, snapshot)) player.setDrumsMuted(!snapshot.drumsMuted);
+      return;
+    case 'drumsOnly':
+      if (canUseDrumToggles(player, snapshot)) player.setDrumsOnly(!snapshot.drumsOnly);
+      return;
+    case 'countIn':
+      if (canChangeOptions(player)) player.setCountInBars(nextCountInBars(snapshot.countInBars));
+      return;
+  }
+}
+
+/**
+ * The previous or next loop in the panel's order. While playing, the loop
+ * plays (`playLoop`, as "Play loop" does, so playback carries on with a
+ * count-in if one is set); while paused it is only set up with its saved
+ * speed (`openLoop`), as a link to it would: a key that switches never starts
+ * sound on its own. A song with no loops steps a bar instead. Nothing while
+ * the loop form is open (the score's taps are picking its bars then), or
+ * before the song's loops have been read.
+ */
+function stepLoopOrBar(
+  player: PlayerService,
+  practice: LoopPractice,
+  loops: readonly Loop[] | undefined,
+  direction: Direction,
+): void {
+  const snapshot = player.getSnapshot();
+  if (!canPlay(player, snapshot) || practice.editor !== null) return;
+  // Not read yet (or the read failed): whether these keys mean loops or bars isn't known.
+  if (!loops) return;
+
+  const order = loopsInPanelOrder(loops);
+  if (order.length === 0) {
+    if (snapshot.barCount === null) return;
+    const bar = steppedBar(snapshot.barNumber ?? 1, snapshot.barCount, direction);
+    if (bar === null || !player.seekToBar(bar)) return;
+    // A key isn't a tap on the score: the bar may be off screen (a no-op while playing).
+    player.showBar(bar);
+    return;
+  }
+
+  const loop = neighbourLoop(order, practice.activeLoop?.id ?? null, direction);
+  if (!loop) return;
+  if (isRunning(snapshot.status)) practice.playLoop(loop);
+  else practice.openLoop(loop);
+}

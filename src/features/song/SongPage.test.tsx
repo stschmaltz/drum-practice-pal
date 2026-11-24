@@ -1724,3 +1724,130 @@ describe('SongPage practice sessions', () => {
     expect(sessionsSent()[3]!.id).toBe(sessionsSent()[1]!.id);
   });
 });
+
+describe('SongPage keyboard shortcuts', () => {
+  const panel = () => within(screen.getByTestId('loop-panel'));
+  const verse = loopOfSongA('verse', { name: 'Verse', start_bar: 5, end_bar: 8, speed_ratio: 0.8 });
+  const late = loopOfSongA('late', { name: 'Late', start_bar: 9, end_bar: 12, speed_ratio: 0.5 });
+
+  async function openSong(savedLoops: Loop[] = [verse, late]) {
+    serve({ loops: savedLoops });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    await panel().findAllByRole('button', { name: /^Play loop / });
+    return { user, engine };
+  }
+
+  it('Shortcuts and ? open the list of keys; Escape closes it and focus goes back', async () => {
+    const { user } = await openSong();
+
+    await user.click(screen.getByRole('button', { name: 'Shortcuts' }));
+    const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(within(dialog).getByText('Play or pause')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Shortcuts' })).toHaveFocus();
+
+    await user.keyboard('?');
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+    await user.keyboard('?');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('a pedal’s Page Down switches loops while playing, and the readout follows each loop', async () => {
+    const { user, engine } = await openSong();
+    document.body.focus();
+
+    await user.keyboard('{PageDown}');
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent(
+      'Looping Verse · Bars 5 to 8',
+    );
+    await user.keyboard(' ');
+    act(() => engine.fire('stateChanged', { playing: true }));
+
+    await user.keyboard('{PageDown}');
+    await waitFor(() =>
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Late · Bars 9 to 12'),
+    );
+    // Half speed against the 90 BPM that bar 9 starts at.
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('50%');
+    expect(screen.getByTestId('jam-bpm')).toHaveTextContent('45');
+    expect(engine.pause).not.toHaveBeenCalled();
+    expect(engine.stop).not.toHaveBeenCalled();
+  });
+
+  it('Space after a mouse press of Play loop pauses, rather than pressing Restart loop', async () => {
+    const { user, engine } = await openSong();
+    await user.click(panel().getByRole('button', { name: 'Play loop Verse' }));
+    act(() => engine.fire('stateChanged', { playing: true }));
+    const restart = panel().getByRole('button', { name: 'Restart loop Verse' });
+    expect(restart).toHaveFocus();
+    const seeks = engine.seek.mock.calls.length;
+
+    await user.keyboard(' ');
+
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+    expect(engine.seek.mock.calls.length).toBe(seeks);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('Space on a focused Mark finished in the prompt pauses and finishes nothing', async () => {
+    const atTarget = loopOfSongA('late', { ...late, speed_ratio: 1, target_ratio: 1 });
+    const { user, engine } = await openSong([atTarget]);
+    await user.click(panel().getByRole('button', { name: 'Play loop Late' }));
+    act(() => engine.fire('stateChanged', { playing: true }));
+    const prompt = within(panel().getByRole('group', { name: 'Mark finished?' }));
+    prompt.getByRole('button', { name: 'Mark finished' }).focus();
+
+    await user.keyboard(' ');
+    await settle();
+
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+    expect(loops.sent('update')).toEqual([]);
+    expect(panel().getByRole('group', { name: 'Mark finished?' })).toBeInTheDocument();
+  });
+
+  it('typing a loop’s name types, and no shortcut fires', async () => {
+    const { user, engine } = await openSong();
+    await user.click(panel().getByRole('button', { name: 'New loop' }));
+
+    await user.type(panel().getByLabelText('Name'), 'Dms c? ');
+
+    expect(panel().getByLabelText('Name')).toHaveValue('Dms c? ');
+    expect(engine.play).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Mute drums' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.getByRole('button', { name: 'Drums only' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('M, D, S and C show on the controls they stand for', async () => {
+    const { user } = await openSong();
+    document.body.focus();
+    const metronome = screen.getByRole('button', { name: 'Metronome' });
+    const metronomeWas = metronome.getAttribute('aria-pressed');
+
+    await user.keyboard('mdc');
+
+    expect(metronome.getAttribute('aria-pressed')).not.toBe(metronomeWas);
+    expect(screen.getByRole('button', { name: 'Mute drums' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByLabelText('Count-in')).toHaveValue('1');
+    await user.keyboard('s');
+    expect(screen.getByRole('button', { name: 'Drums only' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Mute drums' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+});

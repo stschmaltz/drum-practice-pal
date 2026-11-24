@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { canPlay } from '@/features/player/controlGates';
 import {
   isSameBarRange,
   type BarRange,
@@ -119,6 +120,8 @@ export function useLoopPractice(
   const playLoop = useCallback(
     (loop: Loop) => {
       if (!player || barCount === null) return;
+      // The gate "Play loop" and the loop keys go by, asked of the player at the press.
+      if (!canPlay(player, player.getSnapshot())) return;
       if (!isValidBarRange(loop.start_bar, loop.end_bar, barCount)) return;
       setActiveLoopId(loop.id);
       // All inside the tap, with nothing awaited: iOS only starts audio in the gesture.

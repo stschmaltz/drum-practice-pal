@@ -242,6 +242,25 @@ export function sortLoops<T extends Pick<Loop, 'start_bar' | 'end_bar' | 'create
   );
 }
 
+/** The loop panel's two sections, each in song order: the loops on the go, then the finished ones. */
+export function loopsByStatus<
+  T extends Pick<Loop, 'start_bar' | 'end_bar' | 'created_at' | 'id' | 'status'>,
+>(loops: readonly T[]): { active: T[]; finished: T[] } {
+  const sorted = sortLoops(loops);
+  return {
+    active: sorted.filter((loop) => loop.status === 'active'),
+    finished: sorted.filter((loop) => loop.status === 'finished'),
+  };
+}
+
+/** Every loop in the order the panel lists them, which is the order the keys step through. */
+export function loopsInPanelOrder<
+  T extends Pick<Loop, 'start_bar' | 'end_bar' | 'created_at' | 'id' | 'status'>,
+>(loops: readonly T[]): T[] {
+  const { active, finished } = loopsByStatus(loops);
+  return [...active, ...finished];
+}
+
 /** "Bar 5" or "Bars 5 to 8". */
 export function barsLabel(startBar: number, endBar: number): string {
   return startBar === endBar ? `Bar ${startBar}` : `Bars ${startBar} to ${endBar}`;

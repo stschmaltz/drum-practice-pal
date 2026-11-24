@@ -1170,3 +1170,94 @@ describe('LoopPanel history', () => {
     );
   });
 });
+
+describe('LoopPanel keeping focus (Unit 10)', () => {
+  const atTarget = loopRow('late', {
+    name: 'Late',
+    start_bar: 9,
+    end_bar: 12,
+    speed_ratio: 1,
+    target_ratio: 1,
+  });
+
+  it('New loop moves focus into the form, not to a field, and Cancel gives it back to New loop', async () => {
+    const view = renderPanel();
+    await view.press('New loop');
+
+    const form = view.panel.getByRole('form', { name: 'New loop' });
+    expect(form).toHaveFocus();
+    await view.press('Cancel');
+
+    expect(await view.panel.findByRole('button', { name: 'New loop' })).toHaveFocus();
+  });
+
+  it('a saved new loop gives focus back to New loop', async () => {
+    const view = renderPanel();
+    await typeNewLoop(view, { first: '5', last: '8', name: 'Verse' });
+    await view.press('Save loop');
+
+    await waitFor(() => expect(view.panel.getByRole('button', { name: 'New loop' })).toHaveFocus());
+  });
+
+  it('Edit gives focus to the form, and Cancel or a save back to that loop’s Edit', async () => {
+    const view = renderPanel();
+    await view.press('Edit Late');
+    expect(view.panel.getByRole('form', { name: 'Edit Late' })).toHaveFocus();
+
+    await view.press('Cancel');
+    expect(await view.panel.findByRole('button', { name: 'Edit Late' })).toHaveFocus();
+
+    await view.press('Edit Late');
+    await rename(view, 'Later');
+    await view.press('Save loop');
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Edit Later' })).toHaveFocus(),
+    );
+  });
+
+  it('back from a loop deleted elsewhere, focus goes to New loop', async () => {
+    const view = renderPanel();
+    await view.press('Edit Late');
+    view.table.setRows([intro]);
+    await view.refetch();
+
+    await view.press('Back to loops');
+    expect(await view.panel.findByRole('button', { name: 'New loop' })).toHaveFocus();
+  });
+
+  it('a form opened by a drag gives focus to New loop when it closes', async () => {
+    const view = renderPanel();
+    act(() => view.engine.fire('barsDragged', { fromBarIndex: 1, toBarIndex: 3, done: true }));
+    const form = await view.panel.findByRole('form', { name: 'New loop' });
+    expect(form).toHaveFocus();
+
+    await view.press('Cancel');
+    expect(await view.panel.findByRole('button', { name: 'New loop' })).toHaveFocus();
+  });
+
+  it('Mark finished follows the loop to its Reopen under Finished, and Reopen back again', async () => {
+    const view = renderPanel();
+    await view.press('Mark finished Intro');
+
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Reopen Intro' })).toHaveFocus(),
+    );
+    await view.press('Reopen Intro');
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Mark finished Intro' })).toHaveFocus(),
+    );
+  });
+
+  it('the prompt’s Mark finished hands focus to the loop’s Reopen', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+
+    const prompt = within(view.panel.getByRole('group', { name: 'Mark finished?' }));
+    await view.user.click(prompt.getByRole('button', { name: 'Mark finished' }));
+
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toHaveFocus(),
+    );
+  });
+});

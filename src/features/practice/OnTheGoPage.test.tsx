@@ -389,3 +389,38 @@ describe('the tab in the address', () => {
     expect(tab(/^On the go/)).toHaveTextContent('On the go (1)');
   });
 });
+
+describe('focus after a loop leaves the tab (Unit 10)', () => {
+  it('Mark finished hands focus to the next loop’s button', async () => {
+    serve([fill, intro, outro]);
+    const user = renderHome();
+    await waitFor(() => expect(listed()).toEqual(['Intro', 'Chorus fill', 'Outro']));
+
+    await user.click(screen.getByRole('button', { name: 'Mark finished Intro' }));
+
+    await waitFor(() => expect(listed()).toEqual(['Chorus fill', 'Outro']));
+    expect(screen.getByRole('button', { name: 'Mark finished Chorus fill' })).toHaveFocus();
+  });
+
+  it('from the last loop on the list, to the one before it', async () => {
+    serve([fill, intro]);
+    const user = renderHome();
+    await waitFor(() => expect(listed()).toEqual(['Intro', 'Chorus fill']));
+
+    await user.click(screen.getByRole('button', { name: 'Mark finished Chorus fill' }));
+
+    await waitFor(() => expect(listed()).toEqual(['Intro']));
+    expect(screen.getByRole('button', { name: 'Mark finished Intro' })).toHaveFocus();
+  });
+
+  it('from the only loop on the tab, to the tab it went to', async () => {
+    serve([intro, done]);
+    const user = renderHome('/?tab=finished');
+    await waitFor(() => expect(listed()).toEqual(['Done one']));
+
+    await user.click(screen.getByRole('button', { name: 'Reopen Done one' }));
+
+    await waitFor(() => expect(listed()).toEqual([]));
+    expect(tab(/^On the go/)).toHaveFocus();
+  });
+});

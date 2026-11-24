@@ -346,15 +346,6 @@ Handoff notes written before the Visual design unit was added call the release u
 
 **Test focus:** key mapping and input guard. **QA focus:** focus traps, open modals. **Human check:** a real pedal.
 
-**Carried forward**
-
-- Seeking to a bar is tap and click only. Decide whether a key moves a bar back and forward in jam mode, where left and right have no loops to switch. (06 Build)
-- Previous and next loop follow the panel's order, `sortLoops` (by first bar), and switch with `playLoop`, which keeps playing when something already is. While the loop form is open its fields take the keys. (08 Build)
-- The loop panel drops focus to `<body>` when the form opens ("New loop", "Edit") and when it closes (save, cancel). Move focus into the form and back to the button that opened it. (08 QA issue 10)
-- Switching loops with a key ends the practice session of the loop left, like "Play loop" on another loop: logged if it has 30 seconds, dropped if not. A pedal that flips between two loops every few bars logs nothing for either. Decide whether short stretches of several loops should add up. `playLoop` on the loop already active is "Restart loop" and keeps the speed playing now. (09 Build)
-- "Mark finished?" appears in the loop panel while playing. It takes no keys today; if the shortcut overlay or a key answers it, it must not finish a loop by accident (Space stays play/pause). (09 Build)
-- "Mark finished" and "Reopen" take their own item off the list on show (the home page's tab, the panel's section), and focus drops to `<body>`. Move it to the next item's button, or to the tab the loop went to. (09 QA issue 5)
-
 ### 11 PWA and offline
 
 **Goal:** works at the jam space with bad Wi-Fi.
@@ -451,6 +442,8 @@ Handoff notes written before the Visual design unit was added call the release u
 - Time with the page hidden isn't practice time: on a laptop, switching tabs or minimising while a loop plays ends the session there (logged if it has 30 seconds) and a new one starts on return. Right for a phone in a pocket; decide after the week of real practice whether it is right on a laptop. A stop logs a session each time, so one sitting with pauses is several rows in the history; decide whether the history should group them by day. (09 Build)
 - "One tap into practice" from the home page is one tap to the song with the loop set up, then Play: the file has to download and audio has to start inside a tap on that page. If that feels like one tap too many, the home page would need the player. (09 Build)
 - Finish and reopen failures show the server's own message ("Couldn't change the loop: …"), like the other loop writes; do them with the network copy above. (09 Build)
+- Switching loops with a key (or "Play loop") ends the session of the loop left: logged if it has 30 seconds, dropped if not, so a pedal that flips between two loops every few bars logs nothing for either. Decide after the week of practice whether short stretches of several loops should add up. (09 Build, 10 Build)
+- A refused "Mark finished" or "Reopen" moves the loop back after focus has followed it to its new place, and focus falls to `<body>`. Shortcut changes (M, D, S, C, the speed keys) aren't announced to a screen reader when focus is elsewhere; a polite live region would do it. (10 Build)
 - A loop deleted on another device: "Save speed" on it here drops it from the list with no message, and its open edit form says "This loop has been deleted" only after a refetch. A session logged for it is dropped quietly (`loopGone`), which is right, but the list isn't read again, so the page goes on saying "Looping …" over a loop that is gone; invalidate `loopKeys.forUser` on `loopGone`. (08 Build, 08 QA, 09 QA issue 7)
 
 ## Open human checks
@@ -470,6 +463,7 @@ The handoff notes record none of these as done; delete a row once it is. Everyth
 | 08   | Phone: "Play loop" with a 1-bar and a 2-bar count-in (is the number readable now the sheet closes, and does each repeat still land on the downbeat by ear); Play with the sheet open hides the number (N1); changing speed is two taps. Tablet and laptop: the score sliding on the downbeat (N2). `repeats.gp` bars 4 to 5 by ear. Safari and Firefox: everything ran on Chromium only                                                                                                                                                                                                                                                                       |
 | 09   | Phone at the kit: practise a loop for a minute, pause, and check "Practice logged" and the loop's History (duration, speed, passes). Then mid-practice: lock the phone, switch apps, close the tab; each should leave one session, with no hours of pocket time in it. iOS Safari and an installed PWA especially (`pagehide` and `keepalive` were only run on Chromium; the keepalive request is cross-origin with an `Authorization` header, so it needs a CORS preflight that must also outlive the page). Two devices: save a loop on the laptop, then press its "Practice" on a phone that had the song open a minute before; it should open on the loop |
 | 09   | Home page on the phone: the order after practising two loops, "Practice" into a loop (is song-then-Play quick enough), Mark finished and Reopen between the two tabs. With "before every repeat" on: one session for the sitting, its play time without the count-ins                                                                                                                                                                                                                                                                                                                                                                                         |
+| 10   | A real page-turner pedal on a laptop and on an iPad (Page Up / Page Down or the arrows): it switches loops while playing with no gap, and Space or the pedal never restarts a loop by accident. Safari: Space on a focused button plays or pauses and doesn't also press it; a Bluetooth keyboard's Space starts sound on iOS                                                                                                                                                                                                                                                                                                                                 |
 
 ## Risks and mitigations
 

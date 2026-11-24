@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { buttonClass, inputClass, primaryButtonClass } from '@/components/styles';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
@@ -67,6 +67,13 @@ export function LoopEditorForm({
   // The bars are the page's state, and the score changes them without passing through this form.
   useEffect(() => onSavingChange(saving), [saving, onSavingChange]);
 
+  // The button that opened the form has gone with the list, so focus comes here rather
+  // than falling to <body>. The form, not its first field: on a phone a focused field
+  // brings up the keyboard over the score the bars are picked on. No scroll: the page
+  // has just brought the score on screen for the picking.
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => formRef.current?.focus({ preventScroll: true }), []);
+
   const range = formBarRange(values, barCount);
   const hint = selectionHint(
     range ? { ...range, awaitingEnd: editor.awaitingEnd } : null,
@@ -116,8 +123,10 @@ export function LoopEditorForm({
 
   return (
     <form
+      ref={formRef}
+      tabIndex={-1}
       aria-label={loop ? `Edit ${loop.name}` : 'New loop'}
-      className="flex flex-col gap-3"
+      className="flex flex-col gap-3 focus:outline-none"
       onSubmit={onSubmit}
       noValidate
     >

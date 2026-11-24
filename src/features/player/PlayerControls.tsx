@@ -18,7 +18,8 @@ import {
   type CountInMode,
 } from '@/lib/schema';
 import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_LABELS } from './countInLabels';
-import { isLoaded, isRunning, type PlayerService, type PlayerSnapshot } from './PlayerService';
+import { canChangeOptions, canPlay, canUseDrumToggles } from './controlGates';
+import { isRunning, type PlayerService, type PlayerSnapshot } from './PlayerService';
 import { percentToRatio, ratioToPercent, SPEED_STEP_PERCENT } from './speed';
 
 const VOLUME_STEP_PERCENT = 5;
@@ -35,11 +36,6 @@ interface PlayerControlsProps extends PlayerViewProps {
    * bar that stays on screen while the page scrolls to the score.
    */
   showPlayButton?: boolean;
-}
-
-/** Whether Play can be pressed: the song is loaded (or already playing). */
-function canPlay(player: PlayerService | null, snapshot: PlayerSnapshot): boolean {
-  return player !== null && isLoaded(snapshot.status);
 }
 
 /** Play/Pause. Part of `PlayerControls` unless the screen places it itself. */
@@ -64,7 +60,8 @@ export function PlayPauseButton({ player, snapshot }: PlayerViewProps) {
  */
 export function PlayerControls({ player, snapshot, showPlayButton = true }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist.
-  const noPlayer = player === null;
+  const noPlayer = !canChangeOptions(player);
+  const noDrumToggles = !canUseDrumToggles(player, snapshot);
   const noDrumsReason = snapshot.hasDrumTrack ? undefined : 'This song has no drum track';
 
   return (
@@ -117,7 +114,7 @@ export function PlayerControls({ player, snapshot, showPlayButton = true }: Play
       <div className="flex gap-2">
         <ToggleButton
           pressed={snapshot.drumsMuted}
-          disabled={noPlayer || !snapshot.hasDrumTrack}
+          disabled={noDrumToggles}
           onChange={(muted) => player?.setDrumsMuted(muted)}
           title={noDrumsReason}
         >
@@ -125,7 +122,7 @@ export function PlayerControls({ player, snapshot, showPlayButton = true }: Play
         </ToggleButton>
         <ToggleButton
           pressed={snapshot.drumsOnly}
-          disabled={noPlayer || !snapshot.hasDrumTrack}
+          disabled={noDrumToggles}
           onChange={(drumsOnly) => player?.setDrumsOnly(drumsOnly)}
           title={noDrumsReason}
         >
