@@ -221,3 +221,53 @@ No behaviour or visual change. The built stylesheet (`dist/assets/index-*.css`) 
 - After: `npm run check` gave 100 files and 4004 tests, all green.
 - After, e2e on a rebuilt `dist`: the served bundle name was checked against `dist`. The `vite preview` on 4173 from an earlier session was not stopped. First full run: 380 passed, 18 skipped, and 1 failed, `offline.spec.ts:338` on phone. Its error text was lost to a `tail` pipe. It then passed 15 of 15 runs on its own across all three projects.
 - Second full run on the same build: 381 passed, 18 skipped, 0 failed (exit 0). That matches the baseline. The `offline.spec.ts:338` failure in the first run is a one-off flake, not a regression: the refactor doesn't touch the home page's offline path, and the built CSS is unchanged. If it fails again, keep its error context.
+
+## Review
+
+Read AGENTS.md, this note, `docs/review-checklist.md` and every line of `git diff main...HEAD` apart from PNG contents: app code, `index.css`, `index.html`, `vite.config.ts`, `scripts/generate-icons.ts`, the unit and component tests, `tests/e2e/design.spec.ts`, `designPage.ts`, the `playerPage.ts` and `jam.spec.ts` changes, and the docs.
+
+### Inventory
+
+This unit adds no hooks, services, mutations or migrations. What it touched that has behaviour:
+
+- **Controls with handlers, restyled or moved**: `PlayerControls` (regrouped into tiles; `PlayPauseButton`, `ToggleButton`, `PercentSlider` with the phone's `compact` volume, `LabelledSelect`), `LoopPanel` (the sheet's header toggle, `LoopListItem`'s five actions, `FinishPrompt`, `ConfirmDelete`, `ActiveLoopCard`), `LoopStatusButton` (`aria-disabled` lock), `LoopSpeedControl`, `LoopEditorForm`, `ShortcutOverlay` (Close moved to the top), `SongPage` (`ShortcutsButton` and `LoopPanelToggle` now `max-md:hidden`, `ActiveLoopLine`, `SessionNotice`, the sticky `JamBar`, `ScoreBox`), `OnTheGoPage`'s view buttons, `AppShell`'s two navs and the sidebar's `SignOutButton` class, `LoginPage`'s steps, `UploadPanel`'s drop zone and file label, `SongListItem`, `SettingsPage`, `OfflineBanner`'s "Reload to update".
+- **Rendering that runs with playback**: `CountInCounter` (re-keyed per beat), alphaTab's settings in `alphaTabEngine.ts` (`display.scale`, `display.resources` from `scoreTheme.ts`), the `.jam-score` rules (paper, cursors, highlight, `touch-action: manipulation`) and the `prefers-reduced-motion` rule in `index.css`.
+- **PWA**: the manifest colours, `theme-color`, the five icons and `scripts/generate-icons.ts`.
+- **Test helpers**: `scoreSettled` (`playerPage.ts`, now in `openFixture`, `nextBarPoint`, `cursorBarPoint`), `staffLineAt` (`jam.spec.ts`), `auditScreen`, `controlsWithoutFocusRing`, `motionOf`, `rowsOf` (`designPage.ts`).
+
+### Findings
+
+1. **Fixed: under "reduce motion" the beat cursor pointed a beat ahead** (`src/index.css:188`; checklist 5, new row "A blanket style that reaches a library's elements"). The rule cut every transition to 0.01 ms with `!important`, which beats inline styles. alphaTab 1.9 moves its beat cursor by setting an inline `transition: transform <beat>ms linear` and the end-of-beat position at the start of each beat (`ToNextBeatAnimatingCursorHandler.transitionBeatCursor`). With the transition cut, the cursor jumped to the end of each beat as it began and sat on the next beat while the current one played. iOS and macOS users with Reduce Motion on would have read along a beat early. Before Unit 12 the cursor glided as usual. Fix: the rule is `*:not(.at-cursor-beat)`, with a comment on why. Test: `design.spec.ts` "reduced motion" now polls the beat cursor's computed transition once playback has started and expects more than 50 ms, run with and without reduce motion. It failed on all three projects before the fix (0.00001 s) and passes after.
+2. **Fixed: a wrong pointer in a comment** (`src/index.css:57`): the score tokens' comment said `alphaTabEngine.ts` reads them; `scoreTheme.ts` copies them and the token test keeps the copy equal.
+3. **Open: `color-mix()` for the bar cursor and the loop highlight** (`src/index.css:129`, `:159`, `:160`). Safari before 16.2 drops the declaration, so both are invisible there; before Unit 12 they were `rgb()`. A fallback needs a colour outside `@theme`, which the token test refuses, so it's a support decision. Carried to Unit 13.
+4. **Open: the beat cursor under reduced motion** keeps gliding after the fix (as on `main`). alphaTab can place it on each beat's notes instead (`player.enableAnimatedBeatCursor: false`). That is an engine setting chosen at creation, so it isn't a style change, and it belongs to Unit 13 along with the other player decisions. Carried there.
+
+### Checked, nothing found
+
+- **Accessible names**: every icon is `aria-hidden` and `focusable="false"`; each control keeps its words. The phone's volume label and readout are `max-md:sr-only`, so the slider's name and `aria-valuetext` don't change. The sheet header still reads "Loop: … Close" / "Loops (n) Open". The login `h1` reads "Drum Practice Pal" (`Brand.test.tsx`).
+- **Gates**: no `disabled` or `aria-disabled` condition changed. Play, Back to start and "Play loop" still use `canPlay`, the options use `optionsDisabled`, the drum toggles use `drumTogglesDisabled`, and the online-only controls use `!online`. `quietButtonClass` and the tool tiles keep `aria-disabled:` styling, so `LoopStatusButton`'s lock still shows.
+- **Focus**: the overlay still focuses Close on open, keeps Tab on it from the document, makes the rest `inert` and returns focus. Moving Close above the list changes none of that, since it is still the only control. `ShortcutsButton` and `LoopPanelToggle` are `display: none` below 768 px as before (`max-md:hidden` sorts after `inline-flex`).
+- **Elements that moved**: the controls bar keeps one handler per control and the same live engine calls. `JamBar`'s new bottom border is part of the height `useJamMode` measures for the scroll margin. The phone nav is `h-14` (was `min-h-14`). Its tallest content, an icon over a `text-xs` label, is 38 px, so the sheet's `3.5rem + 1px` offset still holds.
+- **Score pointer and touch**: `touch-action: manipulation` keeps panning and pinch-zoom and drops double-tap zoom. The engine listens for `click` and a touch never drags, so nothing it hears changes (`jam.spec.ts` "a touch tap seeks; a touch swipe scrolls" passes). `NOTATION_SCALE` is 1, so `boundsLookup` stays in page pixels for `barIndexAtPoint`, `highlightRects` and `barBounds`. `core.fontDirectory` is still passed. The `display.resources` names exist in alphaTab 1.9's `RenderingResourcesJson`.
+- **CountInCounter re-keying**: only the beat span is replaced, each beat. Nothing holds a ref to it, and e2e locators re-resolve.
+- **Other motion**: nothing in `src/` or `tests/` listens for `transitionend` or `animationend`. alphaTab's other cursor and scroll moves aren't CSS transitions.
+- **PWA**: icon file names and `globPatterns` are unchanged (`png`, `svg` covered). `npm run icons` rerun here leaves `public/` byte-identical to what is committed. The maskable mark (scale 0.72) sits within about 33% of the icon's width from the centre, inside the 40% safe zone. The script closes its browser in `finally`.
+- **Hygiene**: no new supabase-js, fetch or Storage calls, list reads or multi-step writes. `staffLineAt` throws when no line is found, so it can't pass on a miss. `untilStill` fails on its poll's timeout. `auditScreen` awaits finite animations and catches the rejection of a cancelled one, so a replaced cursor transition can't hang it. `scoreSettled` is called while playing at one call site (`jam.spec.ts:385`, within bar 1). It returns on the first two equal reads, about 100 ms, which leaves the same measure-then-tap window as before.
+- **Bars**: no bar arithmetic changed.
+- **AGENTS.md**: named exports only, `@/` imports across features, no palette colours (the token test), no `crypto` or ad hoc fetches.
+
+### `offline.spec.ts:338` on phone
+
+Readability saw it fail once and lost the error text. Here it passed 8 of 8 runs with `--repeat-each=8 --project=phone` on 8 parallel workers, and passed again in the full run below. No failure was reproduced, so nothing was changed. If it fails again, keep `test-results/…/error-context.md`.
+
+### Changed
+
+- `src/index.css`: the reduced-motion rule leaves `.at-cursor-beat` alone; comment fixed.
+- `tests/e2e/design.spec.ts`: the beat cursor's transition is checked in both "reduced motion" tests.
+- `AGENTS.md` (Visual design, Motion): the exemption, and the rule that a global style leaves library-driven elements alone. `docs/review-checklist.md`: the new row in section 5. `docs/plan.md`: one Carried forward line under Unit 13 (findings 3 and 4).
+
+### Results
+
+- `npm run check`: 100 files, 4004 tests green.
+- `npm run e2e`: 381 passed, 18 skipped, 0 failed, on a fresh `vite build --mode development`. The `vite preview` on 4173 (PID 56088, from an earlier session) was left running; the bundle it served (`index-CiRP3sfD.js`, `index-DsIk1PFU.css`) was checked against `dist/index.html` before the run.
+- Not committed.

@@ -10,7 +10,7 @@ import {
   rowsOf,
 } from './designPage';
 import { loopItem, loopPanel, openLoopPanel, saveNewLoop } from './loopsPage';
-import { controls, countInSelect, openFixture, playButton } from './playerPage';
+import { controls, countInSelect, openFixture, playButton, viewport } from './playerPage';
 import { homeItem, navLink, openLoopHistory } from './practicePage';
 
 // Unit 12: what the visual design promises, measured on every screen at the
@@ -211,6 +211,14 @@ test.describe('reduced motion', () => {
         } else {
           expect(pop).toMatchObject({ animationName: 'beat-pop', animationSeconds: 0.16 });
         }
+
+        // alphaTab's beat cursor is timing, not decoration: it glides across each beat
+        // with an inline transition as long as the beat. Cut to nothing, it would jump
+        // to the end of the beat as the beat starts and point a beat ahead throughout.
+        const beatCursor = viewport(page).locator('.at-cursor-beat');
+        await expect
+          .poll(async () => (await motionOf(beatCursor)).transitionSeconds, { timeout: 10_000 })
+          .toBeGreaterThan(0.05);
         await playButton(page).click();
         await expect(playButton(page)).toHaveText('Play');
       },

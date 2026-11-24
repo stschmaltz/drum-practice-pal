@@ -54,7 +54,7 @@
   --color-success-soft: #0f2d1d;
   --color-success-line: #23643f;
 
-  /* The score (alphaTab draws with these too: alphaTabEngine.ts reads them). */
+  /* The score (alphaTab draws with these too: scoreTheme.ts copies them). */
   --color-score-paper: #fbf8f2;
   --color-score-ink: #1b1e26;
   --color-score-muted: #5b6272;
@@ -178,9 +178,14 @@
   isolation: isolate;
 }
 
-/* Motion is decoration only here; nothing waits for a transition or an animation to end. */
+/*
+ * Motion is decoration only here; nothing waits for a transition or an animation to end.
+ * Except alphaTab's beat cursor: its inline transition, as long as the beat, is how it
+ * keeps time. Cut to nothing, it jumps to the end of each beat as the beat starts and
+ * points a beat ahead of the music.
+ */
 @media (prefers-reduced-motion: reduce) {
-  *,
+  *:not(.at-cursor-beat),
   *::before,
   *::after {
     animation-duration: 0.01ms !important;

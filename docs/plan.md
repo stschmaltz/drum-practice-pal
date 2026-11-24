@@ -413,6 +413,7 @@ None left: each item was dealt with in 12 Build or moved to Unit 13 (see docs/un
 - Fixed copy for network failures instead of "Failed to fetch". (04 QA issue 2)
 - On a phone the controls bar's count-in mode select shows a cut-off value ("At the start or" at 390 px, "At tl" at 320 px). Give it shorter option labels on small screens. In the side panel a loop item's five actions take three rows on the desktop too, not only on a tablet. (12 QA issues 1 and 2)
 - Link inline form errors to their inputs with `aria-describedby`. (04 QA issue 6)
+- The score's bar cursor and loop highlight are drawn with `color-mix()` (`index.css`), which Safari before 16.2 drops, leaving both invisible there; decide the oldest iOS to support. Under "reduce motion" the beat cursor still glides (it keeps time); decide whether it should instead sit on each beat's notes (`player.enableAnimatedBeatCursor: false`). (12 Review)
 - Speed, metronome and mute stay enabled after a player error. (05 QA issue 3)
 - Files in Storage with no songs row are possible (failed rollbacks, deleted users). Add a sweep script, or accept it. (02 QA, 04 Review)
 - A bar with a tempo change part-way through shows its starting tempo for the whole bar. No fixture has one. (06 Build)
