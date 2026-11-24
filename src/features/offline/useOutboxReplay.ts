@@ -31,7 +31,7 @@ export function useOutboxReplay(): void {
 }
 
 /** Starts one entry's mutation, unobserved: nothing on screen waits for it. */
-export function replayEntry(queryClient: QueryClient, userId: string, entry: OutboxEntry): void {
+function replayEntry(queryClient: QueryClient, userId: string, entry: OutboxEntry): void {
   if (entry.kind === 'session') {
     void logSessionUnobserved(queryClient, userId, entry.record);
     return;

@@ -323,8 +323,8 @@ function ActiveLoopLine({ loop, onExit }: { loop: Loop; onExit: () => void }) {
 
 /**
  * What became of the last practice session: logged, kept on the device until
- * the connection is back, or refused with a way to send it again. Above the score, because on a phone the loop panel is a
- * closed sheet while practising.
+ * the connection is back, or refused with a way to send it again. Above the
+ * score, because on a phone the loop panel is a closed sheet while practising.
  */
 function SessionNotice({
   tracker,

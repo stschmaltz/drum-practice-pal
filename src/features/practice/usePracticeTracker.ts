@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { removeOutboxEntry } from '@/features/offline/outbox';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { useAuth, useSignedInUser } from '@/lib/auth';
-import { removeOutboxEntry } from '@/features/offline/outbox';
 import { isOnline } from '@/lib/network';
 import { randomUuid } from '@/lib/randomUuid';
 import { sessionMinPlaySeconds } from './debugPractice';
@@ -211,6 +211,7 @@ export function usePracticeTracker(
   return { lastLogged, unsaved, waiting, retryUnsaved };
 }
 
+// Both give back the same array when nothing changes, so the state update renders nothing.
 function withRecord(records: SessionRecord[], record: SessionRecord): SessionRecord[] {
   return records.some((kept) => kept.id === record.id) ? records : [...records, record];
 }

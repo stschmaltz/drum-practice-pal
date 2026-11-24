@@ -189,3 +189,25 @@ Changed:
 - The earlier rows of Open human checks are unchanged.
 
 **Totals.** `npm run check`: 95 files, 3638 tests passed. `tests/e2e/offline.spec.ts`: 18 passed on a fresh build. 75 screenshots.
+
+## Readability
+
+No behaviour change. Diffed against the merge of Unit 10 (`2c5ca2f`), since the local `main` is behind.
+
+### Changes
+
+- **One retry definition for queued writes.** `queuedWriteRetry` in `src/lib/network.ts` (`retry: retryNetworkFailures`, `retryDelay: networkRetryDelay`) is spread into `loopEditOptions` and `logSessionOptions` instead of the pair being written out twice. AGENTS.md says to use it for the next queued write.
+- **`outbox.ts`.** `putOutboxEntry`'s generation check read the generation and compared it in the same moment, so it could never refuse: removed, with a line saying why the put needs none (the guard is for work that awaits before it writes). AGENTS.md now names `songFileStore.ts` as the example and says when the check isn't needed. `takeLeftoverOutboxEntries` reads through `outboxEntries` rather than repeating its query; `outboxEntries`' comment no longer mentions a banner count that doesn't exist.
+- **`useLoops.ts`.** The loop edit's context type is one `LoopEditContext` (`before`, `queueId`), used by `onMutate`, `onError` and `onSettled`, instead of two inline shapes. Imports sorted (the offline import sat after `@/lib/schema`).
+- **Exports narrowed** to what other modules use: `logSessionOptions` (`useSessions.ts`; the replay reaches it through `logSessionUnobserved`, as AGENTS.md now says), `replayEntry` (`useOutboxReplay.ts`), `updateIsWaiting` (`appUpdate.ts`).
+- **Small tidies.** `fakeSupabase.ts`: the keepalive comment had been left above `FAKE_AUTH_STORAGE_KEY`, giving it two doc comments and `FAKE_REST_CONFIG` none. `SongPage.tsx`: `SessionNotice`'s comment reflowed. `useSongs.ts`: `SONG_FILE_IN_MEMORY_MS` declared above `useSongFile`, which uses it. `usePracticeTracker.ts`: a line on why `withRecord` / `withoutRecord` return the same array when nothing changes. Import order in `usePracticeTracker.ts`, `SettingsPage.tsx`, `LoginPage.tsx`.
+
+### Left as is
+
+- The online-only control pattern (`useOnline()` for `disabled` and the `OfflineNote`, `isOnline()` in the handler) is repeated in seven controls. Each is four short lines and AGENTS.md describes them; a shared hook would hide which entry points refuse.
+- The "nothing cached offline" messages differ per screen in wording and size, so they stay inline rather than one component.
+- QA's three minor issues (persist flush, replay order at start, sign-out with an unanswered write) are for later stages, untouched.
+
+### Verify
+
+`npm run check` (95 files, 3638 tests) and `npm run e2e` green before and after.

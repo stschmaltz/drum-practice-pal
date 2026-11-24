@@ -16,7 +16,7 @@ export function setUpdateWaiting(apply: () => void): void {
   for (const listener of listeners) listener();
 }
 
-export function updateIsWaiting(): boolean {
+function updateIsWaiting(): boolean {
   return applyUpdate !== null;
 }
 

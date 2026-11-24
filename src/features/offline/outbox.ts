@@ -12,16 +12,17 @@
  * mutation still sends; only the copy that would survive a reload is missing.
  */
 import { offlineDb, type OutboxEntry } from './offlineDb';
-import { offlineGeneration, stillCurrent } from './offlineData';
 
 /** Ids queued by this page, which the replay at start leaves alone: their own mutation is sending them. */
 const queuedHere = new Set<string>();
 
+/**
+ * No generation check (offlineData.ts): that guards work which awaits
+ * something before it writes, and this writes at once.
+ */
 export async function putOutboxEntry(entry: OutboxEntry): Promise<void> {
   queuedHere.add(entry.id);
-  const startedAt = offlineGeneration();
   try {
-    if (!stillCurrent(startedAt)) return;
     await offlineDb.outbox.put(entry);
   } catch {
     // See the module comment.
@@ -44,18 +45,12 @@ export async function removeOutboxEntry(id: string): Promise<void> {
  * started meanwhile (StrictMode, a remount) gets none of them.
  */
 export async function takeLeftoverOutboxEntries(userId: string): Promise<OutboxEntry[]> {
-  let entries: OutboxEntry[];
-  try {
-    entries = await offlineDb.outbox.where('userId').equals(userId).sortBy('queuedAt');
-  } catch {
-    return [];
-  }
-  const leftover = entries.filter((entry) => !queuedHere.has(entry.id));
+  const leftover = (await outboxEntries(userId)).filter((entry) => !queuedHere.has(entry.id));
   for (const entry of leftover) queuedHere.add(entry.id);
   return leftover;
 }
 
-/** Every entry of the user's on this device, oldest first: for tests and the banner's count. */
+/** Every entry of the user's on this device, oldest first; none if the database can't be read. */
 export async function outboxEntries(userId: string): Promise<OutboxEntry[]> {
   try {
     return await offlineDb.outbox.where('userId').equals(userId).sortBy('queuedAt');

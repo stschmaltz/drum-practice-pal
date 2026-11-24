@@ -71,6 +71,12 @@ export function networkRetryDelay(failureCount: number): number {
   return Math.min(1000 * 2 ** failureCount, 30_000);
 }
 
+/** The retry options every queued write spreads into its mutation. */
+export const queuedWriteRetry = {
+  retry: retryNetworkFailures,
+  retryDelay: networkRetryDelay,
+} as const;
+
 /**
  * A query with nothing cached that is waiting for the connection to fetch:
  * offline, its "Loading…" would never end, so the screen says why instead.

@@ -4,6 +4,7 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass, primaryButtonClass } from '@/components/styles';
+import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
 import { SignOutButton } from '@/features/auth/SignOutButton';
 import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
 import { characterKeysLabel } from '@/features/shortcuts/shortcuts';
@@ -18,7 +19,6 @@ import {
   type Settings,
   type SettingsErrors,
 } from './settingsForm';
-import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
 import { useSettings, useUpdateSettings } from './useSettings';
 
 export function SettingsPage() {

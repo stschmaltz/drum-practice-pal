@@ -7,12 +7,12 @@ import {
 } from '@tanstack/react-query';
 import type { Song } from '@/features/library/songForm';
 import { songKeys } from '@/features/library/useSongs';
-import { sessionKeys } from '@/features/practice/sessionKeys';
-import type { LoopStatus } from '@/lib/schema';
 import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
+import { sessionKeys } from '@/features/practice/sessionKeys';
 import { useSignedInUser } from '@/lib/auth';
-import { networkRetryDelay, retryNetworkFailures } from '@/lib/network';
+import { queuedWriteRetry } from '@/lib/network';
 import { randomUuid } from '@/lib/randomUuid';
+import type { LoopStatus } from '@/lib/schema';
 import { loopKeys } from './loopKeys';
 import { createLoop, deleteLoop, fetchLoops, fetchPracticeLoops, updateLoop } from './loopsApi';
 import {
@@ -154,6 +154,14 @@ function cachedLoop(
   return undefined;
 }
 
+/** What a loop edit's onMutate hands its other callbacks. */
+interface LoopEditContext {
+  /** The loop as cached before the edit, for the rollback. */
+  before: Loop | undefined;
+  /** Its outbox entry, taken out once the server has answered. */
+  queueId: string;
+}
+
 /**
  * One definition of a loop edit, for useUpdateLoop and for the replay of
  * edits an earlier page left unsent.
@@ -175,9 +183,12 @@ export function loopEditOptions(queryClient: QueryClient, userId: string, songId
     mutationKey: loopKeys.writes(userId),
     scope: { id: loopKeys.writes(userId).join('/') },
     mutationFn: ({ loopId, changes }: LoopUpdate) => updateLoop(userId, loopId, changes),
-    retry: retryNetworkFailures,
-    retryDelay: networkRetryDelay,
-    onMutate: async ({ loopId, changes, queueId = randomUuid() }: LoopUpdate) => {
+    ...queuedWriteRetry,
+    onMutate: async ({
+      loopId,
+      changes,
+      queueId = randomUuid(),
+    }: LoopUpdate): Promise<LoopEditContext> => {
       // Started first, awaited last: the screen shows the edit without waiting for the
       // database, and the request goes only once the entry is stored (its removal, when
       // the answer comes, is queued behind it).
@@ -203,7 +214,7 @@ export function loopEditOptions(queryClient: QueryClient, userId: string, songId
     onError: (
       _error: Error,
       { loopId, changes }: LoopUpdate,
-      context: { before: Loop | undefined } | undefined,
+      context: LoopEditContext | undefined,
     ) => {
       const before = context?.before;
       if (!before) return;
@@ -226,7 +237,7 @@ export function loopEditOptions(queryClient: QueryClient, userId: string, songId
       _saved: Loop | undefined,
       _error: Error | null,
       _variables: LoopUpdate,
-      context: { queueId: string } | undefined,
+      context: LoopEditContext | undefined,
     ) => {
       if (context) void removeOutboxEntry(context.queueId);
       return invalidateWhenIdle(queryClient, userId);

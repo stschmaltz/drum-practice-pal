@@ -63,6 +63,8 @@ export function useSong(songId: string, { enabled = true } = {}) {
   });
 }
 
+const SONG_FILE_IN_MEMORY_MS = 5 * 60 * 1000;
+
 /**
  * The song's Guitar Pro bytes: the copy kept on this device if there is one,
  * else a download that is kept for next time, so a song opened once plays
@@ -82,8 +84,6 @@ export function useSongFile(songId: string) {
     networkMode: 'offlineFirst',
   });
 }
-
-const SONG_FILE_IN_MEMORY_MS = 5 * 60 * 1000;
 
 export interface UploadInput extends UploadOptions {
   file: File;

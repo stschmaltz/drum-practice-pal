@@ -3,7 +3,7 @@ import { songKeys } from '@/features/library/useSongs';
 import { loopKeys } from '@/features/loops/loopKeys';
 import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
 import { useSignedInUser } from '@/lib/auth';
-import { networkRetryDelay, retryNetworkFailures } from '@/lib/network';
+import { queuedWriteRetry } from '@/lib/network';
 import { sessionKeys } from './sessionKeys';
 import { fetchLoopSessions, logSession, type LogSessionResult } from './sessionsApi';
 import { sessionFromRecord, type PracticeSession } from './sessions';
@@ -59,13 +59,12 @@ export function queueSession(userId: string, record: SessionRecord): Promise<voi
  * request the connection dropped is tried again, so only the server's refusal
  * fails it.
  */
-export function logSessionOptions(queryClient: QueryClient, userId: string) {
+function logSessionOptions(queryClient: QueryClient, userId: string) {
   return {
     mutationKey: sessionKeys.logs(userId),
     mutationFn: (record: SessionRecord) => logSession(userId, record),
     onMutate: (record: SessionRecord) => queueSession(userId, record),
-    retry: retryNetworkFailures,
-    retryDelay: networkRetryDelay,
+    ...queuedWriteRetry,
     onSuccess: (result: LogSessionResult, record: SessionRecord) => {
       if (result === 'logged') sessionLogged(queryClient, userId, record);
     },
