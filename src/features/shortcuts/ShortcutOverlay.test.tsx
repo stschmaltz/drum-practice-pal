@@ -76,4 +76,32 @@ describe('ShortcutOverlay', () => {
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
+
+  it('unmounted while open, gives focus back to what opened it when that is still on the page', async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <>
+        <button type="button">Shortcuts</button>
+        <ShortcutOverlay open={false} onClose={() => {}} />
+      </>,
+    );
+    const opener = screen.getByRole('button', { name: 'Shortcuts' });
+    await user.click(opener);
+    view.rerender(
+      <>
+        <button type="button">Shortcuts</button>
+        <ShortcutOverlay open onClose={() => {}} />
+      </>,
+    );
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
+
+    view.rerender(
+      <>
+        <button type="button">Shortcuts</button>
+      </>,
+    );
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
 });

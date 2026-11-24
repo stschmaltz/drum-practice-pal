@@ -23,9 +23,12 @@ const finishedFill = loopRow('fill', {
 });
 
 /** The shortcuts over a real player, the song's loops and the practice hook, as the song page wires them. */
-async function renderShortcuts(loops: Loop[] = [verse, outro, intro], { loaded = true } = {}) {
+async function renderShortcuts(
+  loops: Loop[] = [verse, outro, intro],
+  { loaded = true, drumTrackIndex = 0 as number | null } = {},
+) {
   serveLoopTable(loops);
-  const { engine, player, finishLoading } = loopPlayer({ loaded });
+  const { engine, player, finishLoading } = loopPlayer({ loaded, drumTrackIndex });
   const hook = renderHook(
     ({ mounted }: { mounted: PlayerService | null }) => {
       const snapshot = usePlayerSnapshot(player);
@@ -417,4 +420,122 @@ it('in StrictMode, still acts once per press', async () => {
   });
   expect(engine.play).toHaveBeenCalledTimes(1);
   expect(player.getSnapshot().metronomeOn).toBe(!metronomeBefore);
+});
+
+describe('Unit 10 Test: interleavings, gates and round trips', () => {
+  it('two loop keys pressed with nothing awaited between them land two loops on', async () => {
+    const view = await renderShortcuts();
+
+    view.key('PageDown');
+    view.key('PageDown');
+    expect(view.activeLoop()).toBe('verse');
+    expect(view.player.getSnapshot().range).toEqual({ startBar: 5, endBar: 8 });
+  });
+
+  it('a held Page Down moves one loop, not one per repeat', async () => {
+    const view = await renderShortcuts();
+
+    view.key('PageDown');
+    for (let i = 0; i < 3; i++) expect(view.key('PageDown', { repeat: true })).toBe(false);
+    expect(view.activeLoop()).toBe('intro');
+  });
+
+  it('during a count-in, plays the next loop: the count-in starts again on its first bar', async () => {
+    const view = await renderShortcuts();
+    act(() => view.player.setCountInBars(1));
+    view.key(' ');
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+
+    view.key('PageDown');
+    view.key('PageDown');
+
+    expect(view.activeLoop()).toBe('verse');
+    expect(view.player.getSnapshot()).toMatchObject({
+      status: 'countingIn',
+      range: { startBar: 5, endBar: 8 },
+      barNumber: 5,
+      speedRatio: 0.8,
+    });
+    // Still counting: the engine hasn't been told to play the old bar meanwhile.
+    expect(view.engine.play).not.toHaveBeenCalled();
+    expect(view.engine.stop).not.toHaveBeenCalled();
+  });
+
+  it('paused, a loop key shows the loop’s first bar, and keeps a speed typed as a BPM exactly', async () => {
+    const fine = loopRow('fine', {
+      name: 'Fine',
+      start_bar: 9,
+      end_bar: 12,
+      speed_ratio: 0.708333,
+    });
+    const view = await renderShortcuts([fine]);
+    const showBar = vi.spyOn(view.player, 'showBar');
+
+    view.key('ArrowRight');
+    await waitFor(() => expect(view.activeLoop()).toBe('fine'));
+    // Not rounded to the 71% on show: the saved ratio, untouched.
+    expect(view.player.getSnapshot().speedRatio).toBe(0.708333);
+    expect(showBar).toHaveBeenCalledWith(9);
+    expect(view.engine.play).not.toHaveBeenCalled();
+  });
+
+  it('before alphaTab has loaded (no player yet), the player keys do nothing and ? still opens the list', async () => {
+    const view = await renderShortcuts();
+    view.hook.rerender({ mounted: null });
+
+    for (const k of [' ', 'ArrowUp', 'ArrowRight', 'm', 'd', 's', 'c']) view.key(k);
+    expect(view.engine.play).not.toHaveBeenCalled();
+    expect(view.player.getSnapshot()).toMatchObject({ speedRatio: 1, countInBars: 0, range: null });
+    view.key('?', { shiftKey: true });
+    expect(view.hook.result.current.shortcuts.helpOpen).toBe(true);
+  });
+
+  it('opening the list while playing leaves playback going; Space after closing it pauses', async () => {
+    const view = await renderShortcuts();
+    view.key(' ');
+    view.playing();
+
+    view.key('?', { shiftKey: true });
+    view.key(' ');
+    view.key('Escape');
+    expect(view.engine.pause).not.toHaveBeenCalled();
+    expect(view.player.getSnapshot().status).toBe('playing');
+
+    view.key(' ');
+    expect(view.engine.pause).toHaveBeenCalledTimes(1);
+  });
+
+  it('in a song with no drum track, D and S are the page’s keys but change nothing', async () => {
+    const view = await renderShortcuts(undefined, { drumTrackIndex: null });
+    const sounding = view.engine.soundingTracks();
+
+    expect(view.key('d')).toBe(false);
+    expect(view.key('s')).toBe(false);
+    expect(view.player.getSnapshot()).toMatchObject({ drumsMuted: false, drumsOnly: false });
+    expect(view.engine.soundingTracks()).toEqual(sounding);
+  });
+
+  it('cancels the keyup of a Space it took, and leaves a field’s own Space keyup alone', async () => {
+    await renderShortcuts();
+    const keyUp = (target: Element) => {
+      let notPrevented = true;
+      act(() => {
+        notPrevented = fireEvent.keyUp(target, { key: ' ' });
+      });
+      return notPrevented;
+    };
+
+    act(() => {
+      fireEvent.keyDown(document.body, { key: ' ' });
+    });
+    expect(keyUp(document.body)).toBe(false);
+    // Only the one keyup that followed.
+    expect(keyUp(document.body)).toBe(true);
+
+    const input = focusedInput();
+    act(() => {
+      fireEvent.keyDown(input, { key: ' ' });
+    });
+    expect(keyUp(input)).toBe(true);
+  });
 });

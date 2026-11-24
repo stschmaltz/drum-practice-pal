@@ -83,3 +83,46 @@ Changed:
 5. Open "New loop": focus is on the form. Type "dms c" in the name: it types, and nothing toggles. Cancel: focus is back on "New loop". Edit a loop, Cancel: focus is on that loop's Edit.
 6. "Mark finished" on a loop in the panel: focus is on its "Reopen" under Finished. On the home page: focus is on the next loop's button, or on the Finished tab when it was the only loop.
 7. Human check: a real page-turner pedal (Page Up / Page Down, or arrows) on a laptop and on an iPad.
+
+## Test
+
+### Summary
+
+Build's tests already covered most criteria (every key, the input guard, the overlay, focus handling, the pedal on the song page). This stage added the checklist's interleavings, gates and round trip for the keys, three e2e flows for loop mode and the form, and looked into the e2e failure Build reported.
+
+### Tests added (17: 12 Vitest, 5 Playwright)
+
+- `src/features/song/useSongShortcuts.test.tsx`, describe "Unit 10 Test: interleavings, gates and round trips" (8):
+  - two loop keys with nothing awaited between them land two loops on (the second press sees the first's loop);
+  - a held Page Down moves one loop, not one per repeat;
+  - a loop key during a count-in plays the next loop and the count-in starts again on its first bar, at its speed, with the engine not yet told to play;
+  - paused, a loop key shows the loop's first bar (`showBar`) and keeps a saved speed of 0.708333 exactly (round trip: not rounded to the 71% on show);
+  - with no player yet (alphaTab loading), the player keys do nothing and `?` still opens the list;
+  - opening the list while playing leaves playback going; Space after Escape pauses;
+  - a song with no drum track: D and S are the page's keys (default cancelled) but change nothing;
+  - the keyup of a Space the page took is cancelled once; a field's own Space keyup is left alone.
+- `src/features/shortcuts/ShortcutOverlay.test.tsx` (1): unmounted while open, it gives focus back to what opened it.
+- `src/features/song/SongPage.test.tsx` (2): a pedal switching loops while playing logs the loop it left, at that loop's speed and duration, without a pause; in a song with no drum track D and S leave the disabled toggles off (with M pressed the same way as proof the keys arrived).
+- `tests/e2e/shortcuts.spec.ts` (3 tests x 3 projects): with a loop playing, ↓, M, S, D and C work it and the status recorder sees only `playing` (acceptance: every shortcut in loop mode as well as jam mode); the Shortcuts button opens the list from 768 px, a click outside closes it and focus goes back to the button, and on a phone the button is hidden; with the loop form open, Page Down and → do nothing while M still works.
+- `src/test/loopPlayer.ts`: `loopPlayer({ drumTrackIndex: null })` for a song with no drum track.
+
+Each new test was run against a briefly broken build: loop keys acting on `playing` only (count-in test fails), practice read from the first render (two-presses and count-in tests), the Space keyup not cancelled, `nextLoop` made repeatable, the overlay letting Space through, a paused loop key playing, the null-player guard removed (uncaught error), the drum toggles' disabled gate replaced by `canChangeOptions`, the editor guard removed from `stepLoopOrBar` (e2e fails), the Shortcuts button shown on phones (e2e fails on phone). The no-drum hook test fails only with both the key's gate and the service's own `drumTrackIndex` check removed: the service already refuses, so the key's gate is a second line. One drafted overlay test (focus not returned to an opener that has gone) passed with the `isConnected` check removed, since focusing a detached element does nothing; it was dropped as vacuous.
+
+### The e2e failure Build saw
+
+Not reproduced. Here: a full `npx playwright test` before any change (322 passed, 14 skipped), `shortcuts.spec.ts` with `--repeat-each=3` (81 passed), and the final full `npm run e2e` (331 passed, 14 skipped). Specs run `fullyParallel`, so order varies between runs, and none failed.
+
+Likely cause: `playwright.config.ts` has `reuseExistingServer: !process.env.CI`. If anything is already listening on 4173 (a `vite preview` left from QA or from an earlier, interrupted run), Playwright serves that server's `dist` without building. A `dist` from before the keys were wired fails exactly the shortcut specs, all 18, while every older spec passes, which is what Build saw; a later run that started its own server built afresh and passed. Not a flake in the specs. Worth knowing: locally, stop any preview on 4173 (or delete `dist`) before an e2e run after editing app code. CI is unaffected (no reuse there).
+
+### Bugs found
+
+None.
+
+### Not covered
+
+- A refused "Mark finished" moving the loop back after focus has followed it (Build's known gap, focus falls to `<body>`).
+- Real Bluetooth pedals and Safari: Chromium's simulated keys only (Human check).
+
+### Totals
+
+`npm run check`: 89 files, 3495 tests passed. `npm run e2e`: 331 passed, 14 skipped (the existing skips), 0 failed.

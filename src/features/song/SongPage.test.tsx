@@ -1556,6 +1556,25 @@ describe('SongPage practice sessions', () => {
     ]);
   });
 
+  it('a pedal switching loops while playing logs the loop it left, at that loop’s speed (Unit 10)', async () => {
+    serve({ loops: [verse, chorus] });
+    const { user, engine } = await startVerse();
+    later(40);
+    // A drummer's hands on the kit: the pedal, with focus left where the click put it.
+    await user.keyboard('{PageDown}');
+    await waitFor(() =>
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Chorus'),
+    );
+
+    await waitFor(() =>
+      expect(sessionsSent()).toEqual([
+        expect.objectContaining({ loop_id: 'verse', duration_seconds: 40, speed_ratio: 0.8 }),
+      ]),
+    );
+    expect(engine.pause).not.toHaveBeenCalled();
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('60%');
+  });
+
   it('logs nothing for a short go, and nothing for jam mode', async () => {
     const { user, pause, resume } = await playVerseFor(20);
     await user.click(
@@ -1849,5 +1868,26 @@ describe('SongPage keyboard shortcuts', () => {
       'aria-pressed',
       'false',
     );
+  });
+
+  it('in a song with no drum track, D and S leave the disabled toggles off (Unit 10 Test)', async () => {
+    serve({ songs: { [SONG_A]: songRow(SONG_A, { drum_track_index: null }) }, loops: [verse] });
+    const user = renderSong(SONG_A);
+    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    document.body.focus();
+    const muteDrums = screen.getByRole('button', { name: 'Mute drums' });
+    const drumsOnly = screen.getByRole('button', { name: 'Drums only' });
+    expect(muteDrums).toBeDisabled();
+    expect(drumsOnly).toBeDisabled();
+
+    await user.keyboard('ds');
+    // The keys did arrive: M, pressed the same way, works.
+    const metronome = screen.getByRole('button', { name: 'Metronome' });
+    const metronomeWas = metronome.getAttribute('aria-pressed');
+    await user.keyboard('m');
+
+    expect(metronome.getAttribute('aria-pressed')).not.toBe(metronomeWas);
+    expect(muteDrums).toHaveAttribute('aria-pressed', 'false');
+    expect(drumsOnly).toHaveAttribute('aria-pressed', 'false');
   });
 });
