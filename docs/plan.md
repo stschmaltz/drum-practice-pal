@@ -411,6 +411,7 @@ None left: each item was dealt with in 12 Build or moved to Unit 13 (see docs/un
 - Retire the spike: the `/spike` route, `src/features/spike/`, `scripts/spike-measure.ts`, `tests/e2e/spike.spec.ts` and `public/sf-candidates/`. Its fixtures ship in `dist` today. (05 Build)
 - Final soundfont, after the Unit 01 listen. A bigger one is precached by the service worker (`soundfont/sonivox.sf2` in `vite.config.ts`'s `globPatterns`; `maximumFileSizeToCacheInBytes` is 4 MB), so budget its size in the first install. (01 Findings, 11 Build)
 - Fixed copy for network failures instead of "Failed to fetch". (04 QA issue 2)
+- On a phone the controls bar's count-in mode select shows a cut-off value ("At the start or" at 390 px, "At tl" at 320 px). Give it shorter option labels on small screens. In the side panel a loop item's five actions take three rows on the desktop too, not only on a tablet. (12 QA issues 1 and 2)
 - Link inline form errors to their inputs with `aria-describedby`. (04 QA issue 6)
 - Speed, metronome and mute stay enabled after a player error. (05 QA issue 3)
 - Files in Storage with no songs row are possible (failed rollbacks, deleted users). Add a sweep script, or accept it. (02 QA, 04 Review)

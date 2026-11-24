@@ -129,3 +129,67 @@ Noted, not a bug: a button's focus ring fades in with its colours (`transition-c
 
 - `npm run check`: 100 files, 4004 tests green.
 - `npm run e2e`: 381 passed, 18 skipped (the real-fixture and offline-only skips, plus the phone-only design tests on tablet and desktop), on a fresh build of this branch. The `vite preview` on port 4173 left from an earlier session (not started by this stage) was still running and was not stopped; `dist` was rebuilt in place before every run, and the served bundle name was checked against `dist`.
+
+## QA
+
+**Verdict: PASS.** No blocker and no major issue. Every acceptance criterion an agent can judge passes at all three sizes, and also on a landscape phone (844 x 390) and at 320 px. Three cosmetic issues were fixed here. Two minor and two cosmetic issues are left (below).
+
+**How it was run.** Two builds side by side against the same local Supabase. "Before" is `main`, built in a detached git worktree in the scratchpad and served on 4180. "After" is this branch, built with `vite build --mode development` into a scratch `dist-qa` and served on 4181. The stale `vite preview` on 4173 (not this stage's) was left alone and never used. A throwaway Playwright driver (not kept) walked every screen and state in five projects: phone 390 x 844, tablet 820 x 1180 and desktop 1440 x 900 (the plan's three), plus landscape phone 844 x 390 and 320 x 640. It took a shot of each in both builds. On the after build it also ran `auditScreen` from `tests/e2e/designPage.ts` on every shot: 44 px targets, text contrast against what is really behind it, icons hidden, every control named, no sideways scroll. Slow network was a 5 to 6 s delay on the soundfont or on a list read. Errors were a 500 from PostgREST or Storage. Offline was `context.setOffline`. The update line used a real service worker and a changed `sw.js`. Chromium only; nothing was heard.
+
+Shots are `docs/units/12-shots/qa-before-<size>-NN-name.png` and `qa-after-<size>-NN-name.png`. Both builds use the same names, so each pair is a before and after:
+
+- 01 to 05: login (form, sent, bad email, expired link, offline).
+- 10 to 21: home empty, loading and load error; library empty, loading and load error; MIDI and corrupt upload errors; library offline; settings online and offline; not found; song not found.
+- 30 to 51: library with songs and the duplicate warning; song loading; jam; loop form; the "Mark finished?" prompt; loop panel; count-in; loop playing; "Practice logged"; history; a long loop name playing; shortcut overlay; focus ring; song offline; no drum track; song file error; home with loops; the Finished tab.
+- 60 to 67: long song title and artist; 40 loops in the panel and on the home page; a long unbroken loop name; "Reload to update" (phone and desktop), alone and with the offline banner.
+- 70 to 71: the fixes below.
+
+That is about 240 shots per build. A few before shots are missing where the old UI differed under the driver (the phone's 40-loop steps). Nothing is missing from the after set.
+
+**Acceptance criteria**
+
+| Criterion                                                                          | Phone | Tablet | Desktop | What was seen                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------------------------------------------------------------- | ----- | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every screen and state at all three sizes uses the tokens, with no one-off colours | Pass  | Pass   | Pass    | Every screen in the list above is redrawn on the tokens. In `src/` (spike and tests aside) the only colour literals are the token block in `index.css` and the four copies in `scoreTheme.ts`, which `designTokens.test.ts` keeps equal. The only arbitrary colour utility is the sidebar's `shadow-[inset_3px_0_0_var(--color-brand)]`, which uses a token. The same holds at 320 px and in landscape. |
+| e2e passes with no change to behaviour                                             | Pass  | Pass   | Pass    | After this stage's fixes, the whole suite ran against a fresh build on 4181 (the config copied with only the port changed): 381 passed, 18 skipped (the same skips as Test). The scripted walk of every flow found no behaviour difference from `main`: the same copy, states and gates (Play disabled while loading; upload and Save disabled offline; sign-out disabled offline).                     |
+| Shane signs off on the screenshots                                                 | Human | Human  | Human   | Not an agent's call; see Human checks.                                                                                                                                                                                                                                                                                                                                                                  |
+
+**QA focus and the unit's promises**
+
+| Check                         | Result                                                                                                                                                                                                                                                                           |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AA contrast                   | Pass. `auditScreen` found no text under 4.5:1 (3:1 for large text) on any of the ~240 after shots, including error, offline, loading, the count-in veil and the playing loop's card.                                                                                             |
+| 44 px targets                 | Pass on every shot at every size, 320 px and landscape included.                                                                                                                                                                                                                 |
+| Visible focus rings           | Pass. The light-blue ring shows on a controls tile in shots 45 and 46. Test's `design.spec.ts` walk passes in the e2e run above.                                                                                                                                                 |
+| Reduced motion                | Pass (Test's `design.spec.ts` "reduced motion", run both ways, in the e2e run). Play's smooth scroll of the window (Unit 06, JS `scrollIntoView`) isn't under the CSS rule. It is behaviour, not decoration, so it was left.                                                     |
+| Icons hidden, names unchanged | Pass on every shot: no spoken `svg`, no unnamed control. Every e2e locator still finds its control.                                                                                                                                                                              |
+| The score                     | Pass (shots 37 and 40). Warm paper and dark ink. Bar numbers and the beat cursor are in the score accent. The playing bar has a light brand wash. The loop highlight is a brand wash with an accent edge. The count-in veil dims the score, with the number in white on it (39). |
+| Controls bar on a phone       | Pass: three rows at 390 px (four tiles; speed with the volume; count-in), as Test fixed. See minor issue 1 for the count-in mode select.                                                                                                                                         |
+| Long names                    | Pass after fix 1. A long unbroken loop name is clamped with an ellipsis in the "Looping" line and the sheet header (63, 64). A long song title wraps on the song page (61).                                                                                                      |
+| Many loops                    | Pass (62, 65). With 40 loops on one song, the panel and the home page list them all, with no sideways scroll at any size and a clean audit. Paging is Unit 13's (09 QA issue 6).                                                                                                 |
+| Slow network, errors, offline | Pass. Seen: loading lines with the spinner; `LoadErrorAlert` with Try again in the danger card; the song file error; the offline banner over every signed-in screen; the `OfflineNote`s; and "Reload to update" in its brand card, also stacked under the offline banner (67).   |
+
+**Fixed here (cosmetic)**
+
+1. **A long unbroken song title pushed the library page sideways.** The page was 715 px wide in a 390 px window, and 955 px on a tablet (shot 60 before the fix, 71 after). Cause: Test's 44 px fix made the title link `inline-flex self-start`, so the link was as wide as its longest word. Before Unit 12 the title wrapped. The link now has `max-w-full wrap-anywhere` (`SongListItem.tsx`). Normal titles are unchanged.
+2. **The sidebar wordmark wrapped**, leaving "Pal" alone on a second line at every size from 768 px. The sidebar's wordmark is now `text-base` and `whitespace-nowrap` (`Brand.tsx`, the `md` size only; the login page's large wordmark is unchanged). It fits the 224 px sidebar with nothing clipped: the sidebar's scroll width equals its width.
+3. **"Metronome" ran past its tile at 320 px**, 2 px past the padding, touching the edge. Below 360 px the tiles' gap is now `gap-1`, their padding `px-0.5` and the label 11 px (`PlayerControls.tsx`, and `toolButtonClass` in `styles.ts`). `hyphens-auto` and `text-center` were added for wrapped labels. Nothing changed from 360 px up. After the fix, every tile's scroll width equals its width at all five sizes.
+
+After the fixes, the after shots were taken again and every audit was clean. `npm run check` is green (100 files, 4004 tests), and the e2e run above passed.
+
+**Issues left**
+
+1. **Minor: the count-in mode select shows a cut-off value on phones.** At 390 px it reads "At the start or", which could be either option; at 320 px it reads "At tl". Repro: open any song on a phone (shots `qa-after-phone-33`, `qa-after-narrow-33`). The select still works, and its options show in full. Before Unit 12 it read "At the start only", on a row of its own. The Build chose to let this select give way first so the bar fits in three rows. A shorter option label on small screens ("Start only" / "Every repeat") would keep both. Handed to Unit 13.
+2. **Minor (not new): a loop item's actions take three rows in the side panel at every width**, with Delete alone on the last row, on the desktop too (shot `qa-after-desktop-40`). The Build's known gap names only the tablet.
+3. **Cosmetic: at 320 px the login page's wordmark wraps**, with "Pal" centred under "Drum Practice" (`qa-after-narrow-01`). It is readable, so it was left.
+4. **Cosmetic: on the home page, a song title with a very long unbroken word leaves the library icon alone on its line** above the wrapped title (`qa-after-phone-65`). It needs a 40-character word, so it was left.
+
+The Build's other known gaps are unchanged: notation at scale 1, the score opening 47 px sideways on a phone (the clef in shot 33), and the narrow tablet panel.
+
+**Human checks (for Shane, not done by an agent)**
+
+- Sign off on the screenshots: `docs/units/12-shots/qa-before-*` against `qa-after-*` (and the Build's `build-*`). This is the plan's acceptance.
+- Look and feel on the phone at the kit, in a dim room and a bright one. Does the score paper glare? Is the orange too loud? Does notation at alphaTab's default size read from the throne?
+- Installed PWA on iPhone and Android: the new icon, the maskable crop, the status bar colour.
+- Safari (iOS and macOS) and Firefox: range inputs and selects draw with the browser's own chrome, so check the controls bar and the count-in selects there. Everything here ran on Chromium.
+- A real 320 px phone (iPhone SE, 1st gen) if one is around: the controls bar's tiles after fix 3.

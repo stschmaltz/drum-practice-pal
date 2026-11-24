@@ -32,7 +32,7 @@ export function Wordmark({ size = 'md' }: { size?: 'md' | 'lg' }) {
     <span className={`inline-flex items-center ${large ? 'gap-3' : 'gap-2'}`}>
       <BrandMark className={large ? 'size-12' : 'size-8'} />
       <span
-        className={`font-extrabold tracking-tight ${large ? 'text-3xl leading-none' : 'text-lg leading-tight'}`}
+        className={`font-extrabold tracking-tight ${large ? 'text-3xl leading-none' : 'text-base leading-tight whitespace-nowrap'}`}
       >
         Drum Practice <span className="text-brand">Pal</span>
       </span>

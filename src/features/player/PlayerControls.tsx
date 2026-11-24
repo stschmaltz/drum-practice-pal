@@ -71,7 +71,7 @@ export function PlayerControls({ player, snapshot, showPlayButton = true }: Play
       aria-label="Player controls"
       className={`${cardClass} flex flex-col gap-3 p-3 md:p-4 lg:flex-row lg:flex-wrap lg:items-center lg:gap-x-6`}
     >
-      <div className="grid auto-cols-fr grid-flow-col gap-2 lg:flex lg:flex-wrap">
+      <div className="grid auto-cols-fr grid-flow-col gap-2 max-[359px]:gap-1 lg:flex lg:flex-wrap">
         {showPlayButton && <PlayPauseButton player={player} snapshot={snapshot} />}
         <button
           type="button"

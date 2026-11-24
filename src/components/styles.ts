@@ -34,7 +34,7 @@ export const pressedButtonClass = `${buttonBase} ${pressedColors}`;
  * from lg, where a line of them fits.
  */
 export function toolButtonClass(pressed: boolean): string {
-  return `${buttonShape} min-h-14 flex-col gap-1 px-1 py-1.5 text-xs leading-tight lg:min-h-touch lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-sm ${
+  return `${buttonShape} min-h-14 min-w-0 flex-col gap-1 px-1 py-1.5 max-[359px]:px-0.5 text-center text-xs max-[359px]:text-[0.6875rem] leading-tight hyphens-auto lg:min-h-touch lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-sm ${
     pressed ? pressedColors : neutralColors
   }`;
 }
