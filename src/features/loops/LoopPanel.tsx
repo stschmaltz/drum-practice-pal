@@ -8,6 +8,7 @@ import {
   activeCardClass,
   buttonClass,
   dangerButtonClass,
+  dangerPanelClass,
   focusRing,
   ghostButtonClass,
   inlineIconClass,
@@ -15,6 +16,7 @@ import {
   primaryButtonClass,
   quietButtonClass,
   quietPressedButtonClass,
+  sectionHeadingClass,
 } from '@/components/styles';
 import { canPlay } from '@/features/player/controlGates';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
@@ -204,7 +206,7 @@ function LoopPanelBody({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-bold tracking-tight">Loops</h2>
+        <h2 className={sectionHeadingClass}>Loops</h2>
         <button
           type="button"
           className={primaryButtonClass}
@@ -546,7 +548,7 @@ function ConfirmDelete({
     <div
       role="group"
       aria-label={`Delete ${loop.name}`}
-      className="flex flex-col gap-2 rounded-control border border-danger-solid/50 bg-danger-soft p-3"
+      className={`${dangerPanelClass} flex flex-col gap-2`}
     >
       <p className="text-ink">
         Delete “{loop.name}”? Its practice history is deleted too. This can't be undone.

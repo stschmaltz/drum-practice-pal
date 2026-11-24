@@ -26,12 +26,6 @@ const PATHS = {
       <path d="m12 16 5.5-10" />
     </>
   ),
-  drum: (
-    <>
-      <ellipse cx="12" cy="9" rx="8" ry="3" />
-      <path d="M4 9v7c0 1.7 3.6 3 8 3s8-1.3 8-3V9" />
-    </>
-  ),
   drumMuted: (
     <>
       <ellipse cx="12" cy="9" rx="8" ry="3" />
@@ -56,12 +50,6 @@ const PATHS = {
     <>
       <path d="M4 9h3.5L12 5v14l-4.5-4H4z" />
       <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
-    </>
-  ),
-  speed: (
-    <>
-      <path d="M4 18a8 8 0 1 1 16 0" />
-      <path d="m12 18 4-5" />
     </>
   ),
   loop: (

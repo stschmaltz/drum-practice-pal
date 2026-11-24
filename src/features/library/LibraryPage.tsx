@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
-import { inputClass, labelClass } from '@/components/styles';
+import { inputClass, labelClass, sectionHeadingClass } from '@/components/styles';
 import { waitsForNetwork } from '@/lib/network';
 import type { LibrarySong } from './songForm';
 import { isLibrarySort, searchSongs, sortSongs, type LibrarySort } from './songList';
@@ -102,7 +102,7 @@ function SongList({ songs }: { songs: LibrarySong[] }) {
 
   return (
     <section aria-labelledby="songs-heading" className="flex flex-col gap-4">
-      <h2 id="songs-heading" className="text-lg font-bold tracking-tight">
+      <h2 id="songs-heading" className={sectionHeadingClass}>
         Your songs <span className="text-ink-muted">({songs.length})</span>
       </h2>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">

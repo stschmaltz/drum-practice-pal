@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Icon } from './icons';
-import { buttonClass, inlineIconClass } from './styles';
+import { buttonClass, dangerCardClass, inlineIconClass } from './styles';
 
 /**
  * A first load that failed, with a way to read again. For `isLoadingError`
@@ -19,7 +19,7 @@ export function LoadErrorAlert({
   return (
     <div
       role="alert"
-      className={`flex flex-col items-start rounded-card border border-danger-solid/50 bg-danger-soft ${
+      className={`flex flex-col items-start ${dangerCardClass} ${
         compact ? 'gap-2 p-3' : 'gap-3 p-4'
       }`}
     >

@@ -8,6 +8,7 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { Wordmark } from '@/components/Brand';
 import {
   cardClass,
+  dangerPanelClass,
   ghostButtonClass,
   inputClass,
   labelClass,
@@ -61,10 +62,7 @@ export function LoginPage() {
       </header>
       <div className={`${cardClass} flex flex-col gap-5 p-5 sm:p-6`}>
         {linkError && !sentTo && (
-          <p
-            role="alert"
-            className="rounded-control border border-danger-solid/50 bg-danger-soft p-3 text-sm text-danger"
-          >
+          <p role="alert" className={`${dangerPanelClass} text-sm text-danger`}>
             {linkError} Send yourself a new one.
           </p>
         )}

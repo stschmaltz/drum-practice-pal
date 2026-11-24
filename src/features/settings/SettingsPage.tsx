@@ -4,7 +4,12 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
-import { buttonClass, cardClass, primaryButtonClass } from '@/components/styles';
+import {
+  buttonClass,
+  cardClass,
+  primaryButtonClass,
+  sectionHeadingClass,
+} from '@/components/styles';
 import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
 import { SignOutButton } from '@/features/auth/SignOutButton';
 import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
@@ -46,7 +51,7 @@ export function SettingsPage() {
       )}
       <KeyboardSection />
       <section className={`${cardClass} flex max-w-xl flex-col items-start gap-3 p-5`}>
-        <h2 className="text-lg font-bold tracking-tight">Account</h2>
+        <h2 className={sectionHeadingClass}>Account</h2>
         <SignOutButton />
       </section>
     </div>
@@ -142,7 +147,7 @@ function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
 
   return (
     <fieldset className="flex flex-col gap-3">
-      <legend className="mb-2 text-lg font-bold tracking-tight">Metronome</legend>
+      <legend className={`mb-2 ${sectionHeadingClass}`}>Metronome</legend>
       <label className="flex min-h-touch items-center gap-3">
         <input
           type="checkbox"
@@ -188,7 +193,7 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
 
   return (
     <fieldset className="flex flex-col gap-3">
-      <legend className="mb-2 text-lg font-bold tracking-tight">Count-in</legend>
+      <legend className={`mb-2 ${sectionHeadingClass}`}>Count-in</legend>
       <div role="radiogroup" aria-label="Count-in length" className="flex flex-wrap gap-2">
         {COUNT_IN_BAR_OPTIONS.map((bars) => (
           <label
@@ -234,7 +239,7 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
 function DrumsFieldset({ values, edit }: FieldsetProps) {
   return (
     <fieldset className="flex flex-col gap-3">
-      <legend className="mb-2 text-lg font-bold tracking-tight">Drums</legend>
+      <legend className={`mb-2 ${sectionHeadingClass}`}>Drums</legend>
       <label className="flex min-h-touch items-center gap-3">
         <input
           type="checkbox"
@@ -262,7 +267,7 @@ function KeyboardSection() {
 
   return (
     <section className={`${cardClass} flex max-w-xl flex-col gap-3 p-5`}>
-      <h2 className="text-lg font-bold tracking-tight">Keyboard on this device</h2>
+      <h2 className={sectionHeadingClass}>Keyboard on this device</h2>
       <div className="flex flex-col gap-1">
         <label className="flex min-h-touch items-center gap-3">
           <input

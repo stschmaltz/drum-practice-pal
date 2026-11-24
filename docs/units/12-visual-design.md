@@ -193,3 +193,31 @@ The Build's other known gaps are unchanged: notation at scale 1, the score openi
 - Installed PWA on iPhone and Android: the new icon, the maskable crop, the status bar colour.
 - Safari (iOS and macOS) and Firefox: range inputs and selects draw with the browser's own chrome, so check the controls bar and the count-in selects there. Everything here ran on Chromium.
 - A real 320 px phone (iPhone SE, 1st gen) if one is around: the controls bar's tiles after fix 3.
+
+## Readability
+
+No behaviour or visual change. The built stylesheet (`dist/assets/index-*.css`) is byte-identical before and after. Every class a component ends up with is the same set; only where the string is written changed.
+
+### Changes
+
+- **Shared class strings** in `src/components/styles.ts`:
+  - `dangerPanelClass` (`rounded-control`, the danger wash and edge, `p-3`) is now used by the login page's link error and by the two inline delete confirms (`SongListItem`, `LoopPanel`). `dangerCardClass` (`rounded-card` with the same wash) is used by `LoadErrorAlert` and the song page's unsaved-practice notice. All five had repeated `border border-danger-solid/50 bg-danger-soft` by hand.
+  - `sectionHeadingClass` (`text-lg font-bold tracking-tight`) is now used by the library's and the loop panel's h2s, the settings page's h2s and fieldset legends, and the shortcut overlay's title, seven places in all.
+  - Inside the module, `quietButtonClass` and `quietPressedButtonClass` share `quietBase`. `segmentOnClass` / `segmentOffClass` are built on `buttonBase`, which is the same shape they had spelled out.
+- **`PlayerControls.tsx`**: the slider's label and the select's label share `controlLabelClass` and a `LabelIcon` (the muted 20 px icon before the words), instead of two copies of each.
+- **`SongPage.tsx`**: `LoadFailed` had become a one-line pass-through to `LoadErrorAlert`, so it is gone. Its two callers use `LoadErrorAlert` directly, with the same copy.
+- **`Brand.tsx`**: the shape-to-props mapping is `shapeProps(shape)`, with `reactPropName` (was `camel`) and a comment on why the names change.
+- **Dead code**: two icons nothing draws (`drum`, `speed`) are removed from `icons.tsx`. `MIN_TARGET_PX` in `tests/e2e/designPage.ts` is no longer exported, since only that file uses it.
+- **`AGENTS.md`**: the new helpers are in the `styles.ts` list, with the rule that a class string a second component needs moves into `styles.ts` and one used twice in a file becomes a local constant. It also notes that the token test reads comments, so a word that looks like a utility (`stroke-width`) fails "only tokens". The shell bullet's `min-h-11` now reads `min-h-touch`.
+
+### Left alone
+
+- The remaining one-off class strings, such as the warning and success panels, the offline banner and the history box. Each is used once, and a helper would only rename it.
+- `tests/e2e/design.spec.ts` / `designPage.ts` beyond the export, and the spike page, which Unit 13 retires.
+
+### Results
+
+- Before: `npm run check` gave 100 files and 4004 tests, all green. `npm run e2e` on a fresh build gave 381 passed and 18 skipped.
+- After: `npm run check` gave 100 files and 4004 tests, all green.
+- After, e2e on a rebuilt `dist`: the served bundle name was checked against `dist`. The `vite preview` on 4173 from an earlier session was not stopped. First full run: 380 passed, 18 skipped, and 1 failed, `offline.spec.ts:338` on phone. Its error text was lost to a `tail` pipe. It then passed 15 of 15 runs on its own across all three projects.
+- Second full run on the same build: 381 passed, 18 skipped, 0 failed (exit 0). That matches the baseline. The `offline.spec.ts:338` failure in the first run is a one-off flake, not a regression: the refactor doesn't touch the home page's offline path, and the built CSS is unchanged. If it fails again, keep its error context.

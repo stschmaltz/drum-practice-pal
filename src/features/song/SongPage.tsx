@@ -8,6 +8,7 @@ import { EmptyState, LoadingLine } from '@/components/StatusMessages';
 import {
   activeCardClass,
   buttonClass,
+  dangerCardClass,
   ghostButtonClass,
   inlineIconClass,
   linkClass,
@@ -72,7 +73,9 @@ export function SongPage() {
   }
   if (song.isPending) return <LoadingLine>Loading song…</LoadingLine>;
   if (song.isLoadingError) {
-    return <LoadFailed message="Couldn't load this song." onRetry={() => void song.refetch()} />;
+    return (
+      <LoadErrorAlert onRetry={() => void song.refetch()}>Couldn't load this song.</LoadErrorAlert>
+    );
   }
 
   return <SongScreen song={song.data} />;
@@ -100,10 +103,9 @@ function SongBody({ song }: { song: Song }) {
   // isLoadingError, not isError: a failed background refetch keeps the bytes, so a playing song stays mounted.
   if (file.isLoadingError) {
     return (
-      <LoadFailed
-        message="Couldn't download this song's file. Check your connection and try again."
-        onRetry={() => void file.refetch()}
-      />
+      <LoadErrorAlert onRetry={() => void file.refetch()}>
+        Couldn't download this song's file. Check your connection and try again.
+      </LoadErrorAlert>
     );
   }
   if (waitsForNetwork(file)) {
@@ -362,7 +364,7 @@ function SessionNotice({
     return (
       <div
         role="alert"
-        className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-card border border-danger-solid/50 bg-danger-soft py-1 pr-1 pl-3"
+        className={`${dangerCardClass} flex flex-wrap items-center gap-x-4 gap-y-2 py-1 pr-1 pl-3`}
       >
         <p className="flex flex-1 items-start gap-2 text-sm text-danger">
           <Icon name="alert" className="mt-0.5 size-4" />
@@ -478,10 +480,6 @@ function PlayerStatusLine({ snapshot }: { snapshot: PlayerSnapshot }) {
       {snapshot.status === 'countingIn' && ' · Counting in…'}
     </p>
   );
-}
-
-function LoadFailed({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return <LoadErrorAlert onRetry={onRetry}>{message}</LoadErrorAlert>;
 }
 
 function OfflineMessage({ children }: { children: ReactNode }) {

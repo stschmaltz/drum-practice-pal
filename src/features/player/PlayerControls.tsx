@@ -243,6 +243,13 @@ function CountInControls({
   );
 }
 
+/** The words (and icon) before a select or slider in the bar. */
+const controlLabelClass = 'flex items-center gap-2 whitespace-nowrap text-ink-soft';
+
+function LabelIcon({ name }: { name: IconName }) {
+  return <Icon name={name} className="size-5 text-ink-muted" />;
+}
+
 function LabelledSelect({
   label,
   icon,
@@ -265,13 +272,8 @@ function LabelledSelect({
   const id = useId();
   return (
     <div className={`flex min-h-touch items-center gap-2 text-sm ${className}`}>
-      <label
-        htmlFor={id}
-        className={
-          hideLabel ? 'sr-only' : 'flex items-center gap-2 whitespace-nowrap text-ink-soft'
-        }
-      >
-        {icon && <Icon name={icon} className="size-5 text-ink-muted" />}
+      <label htmlFor={id} className={hideLabel ? 'sr-only' : controlLabelClass}>
+        {icon && <LabelIcon name={icon} />}
         {label}
       </label>
       <select
@@ -319,8 +321,8 @@ function PercentSlider({
   const id = useId();
   return (
     <div className={`flex min-h-touch items-center gap-2 text-sm ${className}`}>
-      <label htmlFor={id} className="flex items-center gap-2 whitespace-nowrap text-ink-soft">
-        {icon && <Icon name={icon} className="size-5 text-ink-muted" />}
+      <label htmlFor={id} className={controlLabelClass}>
+        {icon && <LabelIcon name={icon} />}
         <span className={compact ? 'max-md:sr-only' : undefined}>{label}</span>
       </label>
       <input

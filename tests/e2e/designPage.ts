@@ -11,7 +11,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 /** WCAG 2.5.5 / Unit 12's "44 px touch targets". */
-export const MIN_TARGET_PX = 44;
+const MIN_TARGET_PX = 44;
 
 /** The screen's design faults, one string per element at fault. */
 export interface ScreenAudit {

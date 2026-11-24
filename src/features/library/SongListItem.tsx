@@ -8,6 +8,7 @@ import {
   buttonClass,
   cardClass,
   dangerButtonClass,
+  dangerPanelClass,
   focusRing,
   inputClass,
   labelClass,
@@ -217,7 +218,7 @@ function ConfirmDelete({ song, onCancel }: { song: LibrarySong; onCancel: () => 
     <div
       role="group"
       aria-label={`Delete ${song.title}`}
-      className="flex flex-col gap-2 rounded-control border border-danger-solid/50 bg-danger-soft p-3"
+      className={`${dangerPanelClass} flex flex-col gap-2`}
     >
       <p className="text-ink">
         Delete “{song.title}”? Its loops and practice history are deleted too. This can't be undone.

@@ -44,17 +44,19 @@ export const primaryButtonClass = `${buttonBase} bg-brand text-on-brand hover:bg
 /** A quieter button for actions beside a primary one: no fill until hovered. */
 export const ghostButtonClass = `${buttonBase} text-ink-soft hover:bg-raised hover:text-ink`;
 
+const quietBase = `${buttonShape} min-h-touch gap-1.5 px-3 py-2 text-sm`;
+
 /** A list item's secondary actions (Edit, History, Delete): ghost, smaller text, still 44 px tall. */
-export const quietButtonClass = `${buttonShape} min-h-touch gap-1.5 px-3 py-2 text-sm text-ink-soft hover:bg-raised hover:text-ink`;
+export const quietButtonClass = `${quietBase} text-ink-soft hover:bg-raised hover:text-ink`;
 
 /** quietButtonClass while its toggle is on. */
-export const quietPressedButtonClass = `${buttonShape} min-h-touch gap-1.5 px-3 py-2 text-sm ${pressedColors}`;
+export const quietPressedButtonClass = `${quietBase} ${pressedColors}`;
 
 export const dangerButtonClass = `${buttonBase} bg-danger-solid text-on-danger hover:bg-danger-solid-hover`;
 
 /** One of a few views of the same list (the home page's tabs), in a `rounded-card` track. */
-export const segmentOffClass = `${buttonShape} min-h-touch gap-2 px-4 py-2 text-ink-muted hover:text-ink`;
-export const segmentOnClass = `${buttonShape} min-h-touch gap-2 px-4 py-2 ${pressedColors}`;
+export const segmentOffClass = `${buttonBase} text-ink-muted hover:text-ink`;
+export const segmentOnClass = `${buttonBase} ${pressedColors}`;
 
 export const inputClass = `min-h-touch rounded-control border border-field-line bg-canvas px-3 py-2 text-base text-ink placeholder:text-ink-muted ${focusRing}`;
 
@@ -65,6 +67,17 @@ export const cardClass = 'rounded-card border border-line bg-surface shadow-card
 
 /** A card that is the one in play (the repeating loop, a loop's prompt). */
 export const activeCardClass = 'rounded-card border border-brand-line bg-brand-soft/40 shadow-card';
+
+const dangerSurface = 'border border-danger-solid/50 bg-danger-soft';
+
+/** A destructive step's confirm, or an error, inside a card or a form. */
+export const dangerPanelClass = `rounded-control ${dangerSurface} p-3`;
+
+/** An error that is a card of its own on the page (a failed load, unsaved practice). */
+export const dangerCardClass = `rounded-card ${dangerSurface}`;
+
+/** A section's heading inside a page: an h2, or a fieldset's legend. */
+export const sectionHeadingClass = 'text-lg font-bold tracking-tight';
 
 /** A link to another page, on a line of its own (every use so far): a 44 px target like a button. */
 export const linkClass = `inline-flex min-h-touch items-center rounded-sm font-medium text-brand underline underline-offset-4 hover:text-brand-hover ${focusRing}`;

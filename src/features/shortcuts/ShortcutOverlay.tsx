@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '@/components/icons';
-import { ghostButtonClass } from '@/components/styles';
+import { ghostButtonClass, sectionHeadingClass } from '@/components/styles';
 import { characterKeysLabel, shortcutHelp } from './shortcuts';
 import { useCharacterKeysOn } from './useCharacterKeysOn';
 
@@ -80,7 +80,7 @@ function OpenOverlay({ onClose }: { onClose: () => void }) {
         {/* Close first, at the top: focus goes to it on open, and on a landscape phone
             the dialog scrolls to what has focus, so a Close at the end hid the title. */}
         <div className="flex items-center justify-between gap-3">
-          <h2 id={titleId} className="flex items-center gap-2 text-lg font-bold tracking-tight">
+          <h2 id={titleId} className={`flex items-center gap-2 ${sectionHeadingClass}`}>
             <Icon name="keyboard" className="text-brand" />
             Keyboard shortcuts
           </h2>
