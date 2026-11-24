@@ -46,4 +46,10 @@
 .jam-score {
   user-select: none;
   -webkit-user-select: none;
+  /*
+   * alphaTab gives its cursor layer z-index 1000. Its own stacking context keeps
+   * that inside the score, under the count-in number, the shortcut overlay and
+   * anything else drawn over the page.
+   */
+  isolation: isolate;
 }

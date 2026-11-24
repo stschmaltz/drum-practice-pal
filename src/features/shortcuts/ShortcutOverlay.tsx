@@ -58,11 +58,12 @@ function OpenOverlay({ onClose }: { onClose: () => void }) {
           {shortcutHelp().map((row) => (
             <div key={row.label} className="flex items-baseline justify-between gap-4">
               <dt className="text-neutral-200">{row.label}</dt>
-              <dd className="flex shrink-0 flex-wrap justify-end gap-1">
+              {/* At most half the row, so a narrow phone wraps the keys instead of squeezing the label. */}
+              <dd className="flex max-w-[50%] flex-wrap justify-end gap-1">
                 {row.keys.map((key) => (
                   <kbd
                     key={key}
-                    className="rounded border border-neutral-600 bg-neutral-800 px-1.5 py-0.5 font-mono text-xs"
+                    className="whitespace-nowrap rounded border border-neutral-600 bg-neutral-800 px-1.5 py-0.5 font-mono text-xs"
                   >
                     {key}
                   </kbd>
