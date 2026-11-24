@@ -101,9 +101,9 @@ export function LoopPanel({
       data-testid="loop-panel"
       // Phone: fixed just above the tab bar (3.5rem plus its border). Tablet in
       // portrait (md): no tab bar, so on the safe area, and as wide as the content
-      // column to the right of the sidebar (its 2rem padding each side), not under
+      // column to the right of the sidebar (the page's gutter each side), not under
       // it. From lg: a column beside the score that stays put while the page scrolls.
-      className={`fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 rounded-t-card border-t border-line bg-surface shadow-sheet md:right-8 md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+2rem)] md:border-x lg:sticky lg:inset-x-auto lg:top-20 lg:bottom-auto lg:z-auto lg:max-h-[calc(100dvh-6rem)] lg:w-80 lg:shrink-0 lg:self-start lg:overflow-y-auto lg:rounded-card lg:border lg:shadow-card ${
+      className={`fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 rounded-t-card border-t border-line bg-surface shadow-sheet md:right-gutter md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+var(--spacing-gutter))] md:border-x lg:sticky lg:inset-x-auto lg:top-20 lg:bottom-auto lg:z-auto lg:max-h-[calc(100dvh-6rem)] lg:w-80 lg:shrink-0 lg:self-start lg:overflow-y-auto lg:rounded-card lg:border lg:shadow-card ${
         open ? '' : 'lg:hidden'
       }`}
     >

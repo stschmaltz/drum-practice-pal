@@ -82,6 +82,13 @@
   --spacing-touch: 2.75rem;
   /* The sidebar's width from md; the tablet's loop sheet starts to the right of it. */
   --spacing-sidebar: 14rem;
+  /*
+   * The page's side gutter from md (below md it is p-4). 1.25rem on a tablet in
+   * portrait: at 820 px it leaves the score 556 px, and alphaTab puts two bars a
+   * line from 554 (measured; 2rem left 532, one bar a line). 2rem again from lg,
+   * below, where the score has room either way.
+   */
+  --spacing-gutter: 1.25rem;
 
   /* Radius and shadow. */
   --radius-control: 0.625rem;
@@ -109,6 +116,13 @@
     to {
       opacity: 1;
     }
+  }
+}
+
+/* The gutter's lg value: a token whose value follows the width, so its users need no lg: copy. */
+:root {
+  @variant lg {
+    --spacing-gutter: 2rem;
   }
 }
 

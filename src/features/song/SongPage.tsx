@@ -423,7 +423,7 @@ function JamBar({
     <div
       ref={ref}
       data-testid="jam-bar"
-      className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-canvas px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:-mx-8 md:px-8"
+      className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-canvas px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:-mx-gutter md:px-gutter"
     >
       <JamReadout speedRatio={snapshot.speedRatio} tempo={tempo} />
       <PlayPauseButton player={player} snapshot={snapshot} />

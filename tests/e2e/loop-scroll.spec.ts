@@ -448,13 +448,21 @@ test('with a count-in before every repeat, the score box is scrolled back at the
   page,
 }, testInfo) => {
   test.setTimeout(90_000);
-  const lastBar = { phone: 6, tablet: 12, desktop: 12 }[testInfo.project.name];
-  if (!lastBar) throw new Error(`No loop for project ${testInfo.project.name}`);
+  // A loop whose first bar the box leaves behind by its last. On a tablet in portrait, two
+  // bars a line, the whole song is barely taller than the box: only a loop from bar 2 to the
+  // end scrolls its first bar out.
+  const bars = {
+    phone: { firstBar: 5, lastBar: 6 },
+    tablet: { firstBar: 2, lastBar: 16 },
+    desktop: { firstBar: 5, lastBar: 12 },
+  }[testInfo.project.name];
+  if (!bars) throw new Error(`No loop for project ${testInfo.project.name}`);
+  const { firstBar, lastBar } = bars;
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await countInSelect(page).selectOption('2 bars');
   await countInModeSelect(page).selectOption('Before every loop repeat');
   await speedSlider(page).fill('200');
-  await saveNewLoop(page, { name: 'Round', firstBar: 5, lastBar });
+  await saveNewLoop(page, { name: 'Round', firstBar, lastBar });
   if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
   await recordStatuses(page);
   await playButton(page).click();
@@ -466,7 +474,9 @@ test('with a count-in before every repeat, the score box is scrolled back at the
   // The repeat's count-in (two seconds here) has the first bar back from its start: read ten
   // times over its first second, with the status and the boxes taken in the same instant, so
   // a scroll that only came once playback started again would not count.
-  await expect(status(page)).toHaveText('Bar 5 of 16 · Counting in…', { timeout: 10_000 });
+  await expect(status(page)).toHaveText(`Bar ${firstBar} of 16 · Counting in…`, {
+    timeout: 10_000,
+  });
   const reads: string[] = [];
   for (let read = 0; read < 10; read++) {
     reads.push(await loopStartDuringCountIn(page));

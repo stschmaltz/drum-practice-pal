@@ -566,6 +566,21 @@ test('the loop panel is a bottom sheet on a phone and a tablet in portrait, and 
   }
 });
 
+test('on a tablet in portrait the score fits two bars a line', async ({ user, page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'tablet', 'the gutter at md is what this measures');
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  // Bars 2 to 15: bar 1 has the clef, time and tempo and sits alone, as can the last bar.
+  await saveNewLoop(page, { name: 'Middle', firstBar: 2, lastBar: 15 });
+  await closeLoopPanel(page);
+  // One highlight block per line of music the loop touches: 14 bars, two a line.
+  await expect
+    .poll(async () => new Set((await highlightBoxes(page)).map((box) => Math.round(box.y))).size)
+    .toBe(7);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(
+    0,
+  );
+});
+
 test('a loop across the tempo change opens on another device with BPM from its first bar, and keeps it past the change', async ({
   user,
   page,
