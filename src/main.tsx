@@ -4,7 +4,11 @@ import { BrowserRouter } from 'react-router';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { App } from './App';
 import { clearOfflineData } from './features/offline/offlineData';
-import { persistOptions, restoredCacheIsStale } from './features/offline/queryPersister';
+import {
+  persistOptions,
+  restoredCacheIsStale,
+  saveCacheWhenHidden,
+} from './features/offline/queryPersister';
 import { registerServiceWorker } from './features/offline/registerServiceWorker';
 import { AuthProvider } from './lib/AuthProvider';
 import { queryClient } from './lib/queryClient';
@@ -21,7 +25,12 @@ createRoot(root).render(
     <PersistQueryClientProvider
       client={queryClient}
       persistOptions={persistOptions}
-      onSuccess={() => restoredCacheIsStale(queryClient)}
+      onSuccess={() => {
+        restoredCacheIsStale(queryClient);
+        saveCacheWhenHidden(queryClient);
+      }}
+      // A cache that couldn't be read is thrown away; what the page reads from now on is kept.
+      onError={() => saveCacheWhenHidden(queryClient)}
     >
       <AuthProvider onSignedOut={() => void clearOfflineData()}>
         <BrowserRouter>

@@ -8,7 +8,7 @@
  * run. The outbox (outbox.ts) keeps the writes that must survive a reload.
  */
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
-import type { Query, QueryClient } from '@tanstack/react-query';
+import { dehydrate, type Query, type QueryClient } from '@tanstack/react-query';
 import type { PersistQueryClientOptions } from '@tanstack/react-query-persist-client';
 import { songFileKeys } from '@/features/library/useSongs';
 import { QUERY_CACHE_MAX_AGE_MS } from '@/lib/queryClient';
@@ -76,4 +76,35 @@ export const persistOptions: Omit<PersistQueryClientOptions, 'queryClient'> = {
  */
 export function restoredCacheIsStale(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ refetchType: 'none' });
+}
+
+/**
+ * Writes the cache at once whenever the page is hidden or left. The
+ * persister writes up to a second after a change, and a phone locked or an
+ * app closed within that second would otherwise open offline on the older
+ * cache (a loop just saved missing, a speed just saved back at the old one).
+ * Both events, as for session logs: iOS often hides a page without
+ * `pagehide`. Started once the restore is over, never before: a write while
+ * the cache is still being read back would replace it with an empty one.
+ */
+export function saveCacheWhenHidden(queryClient: QueryClient): () => void {
+  const save = () => {
+    void storage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        buster: PERSISTED_CACHE_BUSTER,
+        timestamp: Date.now(),
+        clientState: dehydrate(queryClient, persistOptions.dehydrateOptions),
+      }),
+    );
+  };
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'hidden') save();
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('pagehide', save);
+  return () => {
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    window.removeEventListener('pagehide', save);
+  };
 }

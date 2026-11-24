@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import type { Page } from '@playwright/test';
+import type { BrowserContext, Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
 import {
   activeLoopLine,
@@ -104,6 +104,33 @@ function deviceData(page: Page) {
         };
       }),
   );
+}
+
+/**
+ * Every loop write the browser is asked to send while the context is offline, from the
+ * page or its service worker. Offline, the app must not even try: a queued edit waits for
+ * the connection. Switch the connection with `goingOffline` / `goingOnline`, not
+ * `context.setOffline`, so the record knows which requests were sent offline.
+ */
+function recordLoopWritesWhileOffline(context: BrowserContext) {
+  let offline = false;
+  const sent: string[] = [];
+  context.on('request', (request) => {
+    if (offline && request.method() === 'PATCH' && request.url().includes('/rest/v1/loops')) {
+      sent.push(request.url());
+    }
+  });
+  return {
+    sent,
+    goingOffline: async () => {
+      await context.setOffline(true);
+      offline = true;
+    },
+    goingOnline: async () => {
+      offline = false;
+      await context.setOffline(false);
+    },
+  };
 }
 
 /** The Sign out button in the page's main content (the sidebar has its own). */
@@ -314,6 +341,7 @@ test('offline, a loop opens from the home page and every control that needs the 
   user,
 }) => {
   test.setTimeout(120_000);
+  const writes = recordLoopWritesWhileOffline(context);
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 6 });
   await serviceWorkerReady(page);
@@ -331,7 +359,7 @@ test('offline, a loop opens from the home page and every control that needs the 
   await persistedCacheHolds(page, 'Verse');
 
   // A cold start offline, on the home page, then one tap into practice.
-  await context.setOffline(true);
+  await writes.goingOffline();
   await page.goto('/');
   await expect(banner(page)).toContainText("You're offline.");
   await homeItem(page, 'Verse').getByRole('link', { name: 'Practice Verse' }).click();
@@ -376,8 +404,9 @@ test('offline, a loop opens from the home page and every control that needs the 
   await page.getByRole('button', { name: 'Delete Groove 120' }).click();
   await expect(page.getByRole('button', { name: 'Delete song' })).toBeDisabled();
 
+  expect(writes.sent).toEqual([]);
   expect((await loopsOf(user))[0]?.status).toBe('active');
-  await context.setOffline(false);
+  await writes.goingOnline();
   await expect.poll(async () => (await loopsOf(user))[0]?.status).toBe('finished');
   await expect.poll(() => outboxCount(page)).toBe(0);
   await expect(page.getByRole('button', { name: 'Delete song' })).toBeEnabled();

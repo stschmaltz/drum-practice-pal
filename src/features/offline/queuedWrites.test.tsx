@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { onlineManager } from '@tanstack/react-query';
+import { IsRestoringProvider, onlineManager } from '@tanstack/react-query';
 import { loopKeys } from '@/features/loops/loopKeys';
 import type { Loop } from '@/features/loops/loopForm';
 import { useUpdateLoop } from '@/features/loops/useLoops';
@@ -214,6 +214,93 @@ describe('useOutboxReplay', () => {
     expect((await outboxEntries('someone-else')).map((e) => e.id)).toEqual(['s-other']);
     await settle();
     expect(sessionInserts()).toEqual(['s-left']);
+  });
+
+  /** The replay and a loop's speed control on one page, with the cache restore held until `restored()`. */
+  function renderReplayWithEdit(leftoverSpeed: Loop) {
+    const queryClient = testQueryClient();
+    let restoring = true;
+    const Wrapper = wrapperFor(queryClient);
+    const view = renderHook(
+      () => {
+        useOutboxReplay();
+        return useUpdateLoop(LOOP_SONG_ID);
+      },
+      {
+        wrapper: ({ children }) => (
+          <Wrapper>
+            <IsRestoringProvider value={restoring}>{children}</IsRestoringProvider>
+          </Wrapper>
+        ),
+      },
+    );
+    const restored = (rows: Loop[] = [leftoverSpeed]) => {
+      // As the persisted cache would: the song's loops as the last page left them.
+      queryClient.setQueryData(loopKeys.forSong(USER, LOOP_SONG_ID), rows);
+      restoring = false;
+      view.rerender();
+    };
+    const cached = () =>
+      queryClient.getQueryData<Loop[]>(loopKeys.forSong(USER, LOOP_SONG_ID))?.[0];
+    return { ...view, restored, cached };
+  }
+
+  const leftoverSpeed = (queuedAt: number): OutboxEntry => ({
+    kind: 'loopEdit',
+    id: 'left-speed',
+    userId: USER,
+    queuedAt,
+    songId: LOOP_SONG_ID,
+    loopId: 'a',
+    changes: { speed_ratio: 0.8 },
+  });
+
+  it('waits for the restored cache, so the replayed value lands on the restored list', async () => {
+    await offlineDb.outbox.put(leftoverSpeed(1));
+    answerWith(loopRow('a', { speed_ratio: 1 }));
+    act(() => onlineManager.setOnline(false));
+    const { restored, cached } = renderReplayWithEdit(loopRow('a', { speed_ratio: 1 }));
+    await settle();
+    // Read only after the restore: still claimable, so nothing has taken it yet.
+    expect((await offlineDb.outbox.toArray()).map((entry) => entry.id)).toEqual(['left-speed']);
+
+    act(() => restored());
+    await waitFor(() => expect(cached()?.speed_ratio).toBe(0.8));
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() => expect(loopUpdates()).toEqual([{ speed_ratio: 0.8 }]));
+  });
+
+  it('never sends an older replayed value after an edit the user made before it was read', async () => {
+    await offlineDb.outbox.put(leftoverSpeed(Date.now() - 60_000));
+    answerWith(loopRow('a', { speed_ratio: 1 }));
+    act(() => onlineManager.setOnline(false));
+    const { result, restored, cached } = renderReplayWithEdit(loopRow('a', { speed_ratio: 1 }));
+    // The cache is in memory already (the song page), and the user saves a speed at once.
+    act(() => restored([loopRow('a', { speed_ratio: 1 })]));
+    act(() => result.current.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    await waitFor(() => expect(cached()?.speed_ratio).toBe(0.9));
+    await waitFor(async () =>
+      expect((await offlineDb.outbox.toArray()).map((entry) => entry.id)).not.toContain(
+        'left-speed',
+      ),
+    );
+
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await settle();
+    expect(loopUpdates()).toEqual([{ speed_ratio: 0.9 }]);
+    expect(cached()?.speed_ratio).toBe(0.9);
+  });
+
+  it('keeps the first queued time of a replayed edit that is left unsent again', async () => {
+    await offlineDb.outbox.put(leftoverSpeed(5));
+    act(() => onlineManager.setOnline(false));
+    const { restored } = renderReplayWithEdit(loopRow('a'));
+    act(() => restored());
+    await settle();
+    expect(await outboxEntries(USER)).toEqual([
+      expect.objectContaining({ id: 'left-speed', queuedAt: 5 }),
+    ]);
   });
 
   it('waits for the connection when the app starts offline', async () => {

@@ -14,6 +14,7 @@ import {
   PERSISTED_CACHE_BUSTER,
   queryPersister,
   restoredCacheIsStale,
+  saveCacheWhenHidden,
   shouldPersistQuery,
 } from './queryPersister';
 import { loadSongFile, readStoredSongFile, removeStoredSongFile } from './songFileStore';
@@ -170,6 +171,55 @@ describe('restoredCacheIsStale', () => {
     restoredCacheIsStale(queryClient);
     expect(queryClient.getQueryState(songKeys.forUser('u1'))?.isInvalidated).toBe(true);
     expect(queryFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('saveCacheWhenHidden', () => {
+  /** The songs the persisted cache holds for u1, as the next page would restore them. */
+  async function restoredSongs() {
+    const restored = await queryPersister.restoreClient();
+    const songs = restored?.clientState.queries.find(
+      (query) => JSON.stringify(query.queryKey) === JSON.stringify(songKeys.forUser('u1')),
+    );
+    return songs?.state.data;
+  }
+
+  it.each([
+    [
+      'the page is hidden',
+      () => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+      },
+    ],
+    ['the page is left', () => window.dispatchEvent(new Event('pagehide'))],
+  ])('writes the cache at once when %s, not a second later', async (_case, hide) => {
+    const queryClient = new QueryClient();
+    const stop = saveCacheWhenHidden(queryClient);
+    try {
+      queryClient.setQueryData(songKeys.forUser('u1'), [{ title: 'Just saved' }]);
+      hide();
+      await vi.waitFor(
+        async () => expect(await restoredSongs()).toEqual([{ title: 'Just saved' }]),
+        {
+          timeout: 500,
+        },
+      );
+    } finally {
+      stop();
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    }
+  });
+
+  it('writes nothing while the page stays on show', async () => {
+    const queryClient = new QueryClient();
+    const stop = saveCacheWhenHidden(queryClient);
+    queryClient.setQueryData(songKeys.forUser('u1'), [{ title: 'Just saved' }]);
+    document.dispatchEvent(new Event('visibilitychange'));
+    stop();
+    window.dispatchEvent(new Event('pagehide'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await offlineDb.queryCache.count()).toBe(0);
   });
 });
 

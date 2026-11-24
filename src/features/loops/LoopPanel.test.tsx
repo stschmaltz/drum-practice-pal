@@ -1484,6 +1484,13 @@ describe('LoopPanel offline', () => {
       "You're offline. Loops can be deleted once you're back online.",
     );
     act(() => remove.click());
+    // And a press that comes before the button is drawn off reaches the handler, which refuses.
+    online();
+    act(() => {
+      onlineManager.setOnline(false);
+      expect(remove).toBeEnabled();
+      remove.click();
+    });
     await settle();
     expect(view.table.sent('delete')).toEqual([]);
 

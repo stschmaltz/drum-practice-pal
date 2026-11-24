@@ -134,6 +134,11 @@ export interface LoopUpdate {
   changes: Partial<LoopEdit>;
   /** The edit's outbox entry, when it is one an earlier page left unsent (useOutboxReplay). */
   queueId?: string;
+  /**
+   * When that entry was first queued. Kept as it was, so a replay that is
+   * left unsent again still sorts before edits made after it.
+   */
+  queuedAt?: number;
 }
 
 /** The loop as it is cached now, from whichever list holds it. */
@@ -188,6 +193,7 @@ export function loopEditOptions(queryClient: QueryClient, userId: string, songId
       loopId,
       changes,
       queueId = randomUuid(),
+      queuedAt = Date.now(),
     }: LoopUpdate): Promise<LoopEditContext> => {
       // Started first, awaited last: the screen shows the edit without waiting for the
       // database, and the request goes only once the entry is stored (its removal, when
@@ -196,7 +202,7 @@ export function loopEditOptions(queryClient: QueryClient, userId: string, songId
         kind: 'loopEdit',
         id: queueId,
         userId,
-        queuedAt: Date.now(),
+        queuedAt,
         songId,
         loopId,
         changes,

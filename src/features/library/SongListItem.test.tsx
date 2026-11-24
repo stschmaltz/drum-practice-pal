@@ -259,6 +259,13 @@ describe('SongListItem offline', () => {
       "You're offline. Songs can be deleted once you're back online.",
     );
     fireEvent.click(remove);
+    // And a press that comes before the button is drawn off reaches the handler, which refuses.
+    act(() => onlineManager.setOnline(true));
+    act(() => {
+      onlineManager.setOnline(false);
+      expect(remove).toBeEnabled();
+      fireEvent.click(remove);
+    });
     await settle();
     expect(storageResult).not.toHaveBeenCalled();
     expect(deletes()).toEqual([]);
