@@ -87,6 +87,8 @@ export const fakeSupabase = {
     signInWithOtp: vi.fn<(args: unknown) => Promise<FakeResult>>(),
     verifyOtp: vi.fn<(args: unknown) => Promise<FakeResult>>(),
     signOut: vi.fn<(args: unknown) => Promise<{ error: { message: string } | null }>>(),
+    /** Answers `{ data: { session: null, user: null }, error: null }` unless scripted; script an AuthError for a refused or offline refresh. */
+    refreshSession: vi.fn<() => Promise<{ data: unknown; error: Error | null }>>(),
     onAuthStateChange: vi.fn((callback: AuthCallback) => {
       authListeners.push(callback);
       return {
@@ -152,4 +154,7 @@ export function resetFakeSupabase(): void {
   fakeSupabase.auth.signInWithOtp.mockReset().mockResolvedValue(ok);
   fakeSupabase.auth.verifyOtp.mockReset().mockResolvedValue(ok);
   fakeSupabase.auth.signOut.mockReset().mockResolvedValue({ error: null });
+  fakeSupabase.auth.refreshSession
+    .mockReset()
+    .mockResolvedValue({ data: { session: null, user: null }, error: null });
 }

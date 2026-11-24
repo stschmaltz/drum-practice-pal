@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react';
+import { canPlay } from '@/features/player/controlGates';
 import type { PlayerService } from '@/features/player/PlayerService';
 
 /** Space left between the sticky bar and the score box after the scroll. */
@@ -43,6 +44,8 @@ function useSeekOnTap(player: PlayerService | null, enabled: boolean): void {
   useEffect(() => {
     if (!player || !enabled) return;
     return player.on('barTapped', ({ barNumber }) => {
+      // Taps arrive once the score is drawn (they pick a loop's bars then); a seek waits for the song.
+      if (!canPlay(player, player.getSnapshot())) return;
       player.seekToBar(barNumber);
     });
   }, [player, enabled]);

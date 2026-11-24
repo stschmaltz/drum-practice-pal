@@ -1,4 +1,4 @@
-import { neighbourAfterLeaving } from './loopFocus';
+import { neighbourAfterLeaving } from './itemFocus';
 
 describe('neighbourAfterLeaving', () => {
   it('is the item after the one leaving', () => {

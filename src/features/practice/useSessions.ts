@@ -4,6 +4,7 @@ import { loopKeys } from '@/features/loops/loopKeys';
 import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
 import { useSignedInUser } from '@/lib/auth';
 import { queuedWriteRetry } from '@/lib/network';
+import { sendRefreshingToken } from '@/lib/tokenRefresh';
 import { sessionKeys } from './sessionKeys';
 import { fetchLoopSessions, logSession, type LogSessionResult } from './sessionsApi';
 import { sessionFromRecord, type PracticeSession } from './sessions';
@@ -62,7 +63,7 @@ export function queueSession(userId: string, record: SessionRecord): Promise<voi
 function logSessionOptions(queryClient: QueryClient, userId: string) {
   return {
     mutationKey: sessionKeys.logs(userId),
-    mutationFn: (record: SessionRecord) => logSession(userId, record),
+    mutationFn: (record: SessionRecord) => sendRefreshingToken(() => logSession(userId, record)),
     onMutate: (record: SessionRecord) => queueSession(userId, record),
     ...queuedWriteRetry,
     onSuccess: (result: LogSessionResult, record: SessionRecord) => {

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
@@ -9,7 +9,14 @@ import {
   inputClass,
   primaryButtonClass,
 } from '@/components/styles';
+import {
+  findItemControl,
+  itemAttributes,
+  itemControlAttributes,
+  type ItemControl,
+} from '@/lib/itemFocus';
 import { songPath } from '@/lib/routes';
+import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
   changedSongFields,
   normaliseSongEdit,
@@ -29,8 +36,21 @@ const formatDay = (timestamp: string) => dateFormat.format(new Date(timestamp));
 export function SongListItem({
   song,
   onEditingChange,
+  onEditClosed,
+  onDeletePressed,
 }: {
   song: LibrarySong;
+  /**
+   * The edit form closed (saved or cancelled). A saved rename can take the song
+   * out of the list's search, and its Edit button with it, so the list hands
+   * focus on instead of the item. Without it the item focuses its own Edit.
+   */
+  onEditClosed?: (songId: string) => void;
+  /**
+   * "Delete song" was pressed: the item will leave the list once the server
+   * confirms, and the list hands focus on (its own button goes with it).
+   */
+  onDeletePressed?: (songId: string) => void;
   /**
    * Told when the edit form opens and closes (or the item unmounts), so the
    * list can keep showing a song whose optimistic rename no longer matches
@@ -39,7 +59,12 @@ export function SongListItem({
   onEditingChange?: (songId: string, editing: boolean) => void;
 }) {
   const [mode, setMode] = useState<Mode>('view');
-  const view = () => setMode('view');
+  const focusWhenReady = useFocusWhenReady();
+  /** Back to the buttons, focus on the one that stands for what was just left. */
+  const backTo = (control: ItemControl) => {
+    setMode('view');
+    focusWhenReady(() => findItemControl(song.id, control));
+  };
   const editing = mode === 'edit';
 
   useEffect(() => {
@@ -49,19 +74,49 @@ export function SongListItem({
   }, [editing, song.id, onEditingChange]);
 
   return (
-    <li className="flex flex-col gap-3 rounded-lg border border-neutral-800 p-4">
-      {editing ? <EditSongForm song={song} onDone={view} /> : <SongSummary song={song} />}
+    <li
+      className="flex flex-col gap-3 rounded-lg border border-neutral-800 p-4"
+      {...itemAttributes(song.id)}
+    >
+      {editing ? (
+        <EditSongForm
+          song={song}
+          onDone={() => {
+            if (!onEditClosed) return backTo('edit');
+            setMode('view');
+            onEditClosed(song.id);
+          }}
+        />
+      ) : (
+        <SongSummary song={song} />
+      )}
       {mode === 'view' && (
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={buttonClass} onClick={() => setMode('edit')}>
+          <button
+            type="button"
+            className={buttonClass}
+            {...itemControlAttributes(song.id, 'edit')}
+            onClick={() => setMode('edit')}
+          >
             Edit<span className="sr-only"> {song.title}</span>
           </button>
-          <button type="button" className={buttonClass} onClick={() => setMode('confirm-delete')}>
+          <button
+            type="button"
+            className={buttonClass}
+            {...itemControlAttributes(song.id, 'delete')}
+            onClick={() => setMode('confirm-delete')}
+          >
             Delete<span className="sr-only"> {song.title}</span>
           </button>
         </div>
       )}
-      {mode === 'confirm-delete' && <ConfirmDelete song={song} onCancel={view} />}
+      {mode === 'confirm-delete' && (
+        <ConfirmDelete
+          song={song}
+          onCancel={() => backTo('delete')}
+          onDeletePressed={() => onDeletePressed?.(song.id)}
+        />
+      )}
     </li>
   );
 }
@@ -107,6 +162,10 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
   // stop showing its progress or error and allow a second save alongside it.
   const saving = update.isPending;
   const online = useOnline();
+  // In place of the Edit button that opened it. The form, not its first field: on a
+  // phone a focused field brings up the keyboard.
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => formRef.current?.focus({ preventScroll: true }), []);
 
   const edit = (changes: Partial<SongEdit>) => {
     if (saving) return;
@@ -131,7 +190,13 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
   };
 
   return (
-    <form className="flex flex-col gap-3" onSubmit={onSubmit} noValidate>
+    <form
+      ref={formRef}
+      tabIndex={-1}
+      className="flex flex-col gap-3 focus:outline-none"
+      onSubmit={onSubmit}
+      noValidate
+    >
       <TextField
         label="Title"
         value={values.title}
@@ -193,12 +258,29 @@ function TextField({
   );
 }
 
-function ConfirmDelete({ song, onCancel }: { song: LibrarySong; onCancel: () => void }) {
+function ConfirmDelete({
+  song,
+  onCancel,
+  onDeletePressed,
+}: {
+  song: LibrarySong;
+  onCancel: () => void;
+  onDeletePressed: () => void;
+}) {
   const remove = useDeleteSong();
   const online = useOnline();
+  // In place of the Delete button that asked: the question is read out, and Tab reaches its buttons.
+  const groupRef = useRef<HTMLDivElement>(null);
+  useEffect(() => groupRef.current?.focus({ preventScroll: true }), []);
 
   return (
-    <div role="group" aria-label={`Delete ${song.title}`} className="flex flex-col gap-2">
+    <div
+      ref={groupRef}
+      tabIndex={-1}
+      role="group"
+      aria-label={`Delete ${song.title}`}
+      className="flex flex-col gap-2 focus:outline-none"
+    >
       <p className="text-neutral-200">
         Delete “{song.title}”? Its loops and practice history are deleted too. This can't be undone.
       </p>
@@ -208,7 +290,9 @@ function ConfirmDelete({ song, onCancel }: { song: LibrarySong; onCancel: () => 
           className={dangerButtonClass}
           disabled={remove.isPending || !online}
           onClick={() => {
-            if (isOnline()) remove.mutate(song.id);
+            if (!isOnline()) return;
+            remove.mutate(song.id);
+            onDeletePressed();
           }}
         >
           {remove.isPending ? 'Deleting…' : 'Delete song'}

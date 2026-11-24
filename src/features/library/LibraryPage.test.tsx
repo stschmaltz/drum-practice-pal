@@ -223,6 +223,67 @@ describe('LibraryPage', () => {
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
     await waitFor(() => expect(shownTitles()).toEqual(['Waltz 3-4', 'Chorus Fill']));
   });
+
+  it('hands focus to the next song’s Delete once a song is deleted (bug hunt S4)', async () => {
+    serveLibrary(library);
+    const { user } = renderLibrary();
+    await screen.findByRole('list');
+    const before = shownTitles();
+    const index = before.indexOf('Halo');
+    const next = before[index + 1] ?? before[index - 1];
+    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await user.click(screen.getByRole('button', { name: 'Delete song' }));
+    await waitFor(() => expect(shownTitles()).not.toContain('Halo'));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: `Delete ${next}` })).toHaveFocus(),
+    );
+  });
+
+  describe('focus after a rename that leaves the search (Copilot review)', () => {
+    const rename = async (path: string, from: string, to: string) => {
+      serveLibrary(library);
+      const { user } = renderLibrary(path);
+      await screen.findByRole('list');
+      await user.click(screen.getByRole('button', { name: `Edit ${from}` }));
+      const title = screen.getByLabelText('Title');
+      await user.clear(title);
+      await user.type(title, to);
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      return user;
+    };
+
+    it('goes to the search field when no song is left on show', async () => {
+      await rename('/library?q=fill', 'Chorus Fill', 'Intro Groove');
+      expect(await screen.findByText('No songs match your search.')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByLabelText('Search title or artist')).toHaveFocus());
+    });
+
+    it('goes to the next song’s Edit when others are still on show', async () => {
+      // "fixture" matches Waltz and Chorus Fill; renaming Waltz's artist drops it.
+      serveLibrary(library);
+      const { user } = renderLibrary('/library?q=fixture');
+      await screen.findByRole('list');
+      const before = shownTitles();
+      const index = before.indexOf('Waltz 3-4');
+      const next = before[index + 1] ?? before[index - 1];
+      await user.click(screen.getByRole('button', { name: 'Edit Waltz 3-4' }));
+      const artist = screen.getByLabelText('Artist');
+      await user.clear(artist);
+      await user.type(artist, 'Someone');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(shownTitles()).not.toContain('Waltz 3-4'));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: `Edit ${next}` })).toHaveFocus(),
+      );
+    });
+
+    it('stays on the song’s own Edit when it still matches', async () => {
+      await rename('/library?q=fill', 'Chorus Fill', 'Chorus Fill 2');
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Edit Chorus Fill 2' })).toHaveFocus(),
+      );
+    });
+  });
 });
 
 describe('LibraryPage offline (Unit 11)', () => {

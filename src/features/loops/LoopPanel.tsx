@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
@@ -8,11 +8,18 @@ import {
   pressedButtonClass,
   primaryButtonClass,
 } from '@/components/styles';
-import { canPlay } from '@/features/player/controlGates';
+import { canPickBars, canPlay } from '@/features/player/controlGates';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { ratioToPercent } from '@/features/player/speed';
 import { LoopHistory } from '@/features/practice/LoopHistory';
 import { lastPracticedLabel } from '@/features/practice/sessions';
+import {
+  findItemControl,
+  isItemListed,
+  itemAttributes,
+  itemControlAttributes,
+  neighbourAfterLeaving,
+} from '@/lib/itemFocus';
 import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
 import type { LoopStatus } from '@/lib/schema';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
@@ -23,7 +30,13 @@ import {
   NEW_LOOP_BUTTON_ATTRIBUTES,
   type LoopFormOpener,
 } from './loopFocus';
-import { barsLabel, hasReachedTarget, loopsByStatus, type Loop } from './loopForm';
+import {
+  barsLabel,
+  hasReachedTarget,
+  loopsByStatus,
+  loopsInPanelOrder,
+  type Loop,
+} from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';
 import { speedLabel } from './loopLabels';
 import { LoopSpeedControl } from './LoopSpeedControl';
@@ -123,6 +136,8 @@ type LoopListProps = LoopPanelBodyProps & {
   onEdit: (loop: Loop) => void;
   /** A loop's status was changed from its item, which moves it to the other section. */
   onStatusSet: (loop: Loop, status: LoopStatus) => void;
+  /** "Delete loop" was pressed: the item leaves once the server confirms, taking focus with it. */
+  onDeletePressed: (loop: Loop) => void;
 };
 
 function LoopPanelBody({
@@ -144,8 +159,8 @@ function LoopPanelBody({
   const formOpener = useRef<LoopFormOpener | null>(null);
 
   const openForm = (loop: Loop | null) => {
+    if (!practice.openEditor(loop)) return;
     formOpener.current = loop ? { kind: 'edit', loopId: loop.id } : { kind: 'new' };
-    practice.openEditor(loop);
   };
   const closeForm = () => {
     // A form a drag opened goes back to "New loop", if focus was in the form.
@@ -157,6 +172,19 @@ function LoopPanelBody({
   // The loop now has its button in the other section; focus follows it there.
   const followStatusButton = (loop: Loop, status: LoopStatus) =>
     focusWhenReady(() => findStatusButton(loop.id, status));
+  // A deleted loop takes its buttons with it: focus goes to the next loop's Delete (the one
+  // before, for the last loop listed), or to "New loop" when no loop is left.
+  const followDelete = (loop: Loop) => {
+    const listed = loops.data ? loopsInPanelOrder(loops.data).map((each) => each.id) : [];
+    const nextId = neighbourAfterLeaving(listed, loop.id);
+    focusWhenReady(() => {
+      if (isItemListed(loop.id)) return null;
+      return (
+        (nextId === null ? null : findItemControl(nextId, 'delete')) ??
+        findFormOpener({ kind: 'new' })
+      );
+    });
+  };
 
   if (editor && barCount !== null) {
     if (editor.loopId !== null && !editedLoop) {
@@ -191,7 +219,7 @@ function LoopPanelBody({
         <button
           type="button"
           className={primaryButtonClass}
-          disabled={barCount === null}
+          disabled={!canPickBars(snapshot)}
           {...NEW_LOOP_BUTTON_ATTRIBUTES}
           onClick={() => openForm(null)}
         >
@@ -221,6 +249,7 @@ function LoopPanelBody({
         onPlayLoop={onPlayLoop}
         onEdit={openForm}
         onStatusSet={followStatusButton}
+        onDeletePressed={followDelete}
       />
     </div>
   );
@@ -346,6 +375,7 @@ function LoopList({
   onPlayLoop,
   onEdit,
   onStatusSet,
+  onDeletePressed,
 }: LoopListProps) {
   if (waitsForNetwork(loops)) {
     return (
@@ -383,9 +413,12 @@ function LoopList({
           tempo={player?.tempoAtBar(loop.start_bar) ?? null}
           // The same gate as playLoop itself and the loop keys.
           canPlay={canPlay(player, snapshot)}
+          // The form needs the score's bars, as "New loop" does.
+          canEdit={canPickBars(snapshot)}
           onPlay={() => onPlayLoop(loop)}
           onEdit={() => onEdit(loop)}
           onStatusSet={(status) => onStatusSet(loop, status)}
+          onDeletePressed={() => onDeletePressed(loop)}
         />
       ))}
     </ul>
@@ -414,9 +447,11 @@ function LoopListItem({
   active,
   tempo,
   canPlay,
+  canEdit,
   onPlay,
   onEdit,
   onStatusSet,
+  onDeletePressed,
 }: {
   songId: string;
   loop: Loop;
@@ -424,11 +459,18 @@ function LoopListItem({
   /** The file's tempo at the loop's first bar, for the BPM. */
   tempo: number | null;
   canPlay: boolean;
+  canEdit: boolean;
   onPlay: () => void;
   onEdit: () => void;
   onStatusSet: (status: LoopStatus) => void;
+  onDeletePressed: () => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const focusWhenReady = useFocusWhenReady();
+  const keepIt = () => {
+    setConfirmingDelete(false);
+    focusWhenReady(() => findItemControl(loop.id, 'delete'));
+  };
   const [showingHistory, setShowingHistory] = useState(false);
   const named = <span className="sr-only"> {loop.name}</span>;
 
@@ -437,6 +479,7 @@ function LoopListItem({
       className={`flex flex-col gap-3 rounded-lg border p-3 ${
         active ? 'border-sky-700' : 'border-neutral-800'
       }`}
+      {...itemAttributes(loop.id)}
     >
       <div className="flex flex-col gap-1">
         <p className="font-semibold break-words">{loop.name}</p>
@@ -449,7 +492,12 @@ function LoopListItem({
         </p>
       </div>
       {confirmingDelete ? (
-        <ConfirmDelete songId={songId} loop={loop} onCancel={() => setConfirmingDelete(false)} />
+        <ConfirmDelete
+          songId={songId}
+          loop={loop}
+          onCancel={keepIt}
+          onDeletePressed={onDeletePressed}
+        />
       ) : (
         <div className="flex flex-wrap gap-2">
           <button
@@ -465,6 +513,7 @@ function LoopListItem({
           <button
             type="button"
             className={buttonClass}
+            disabled={!canEdit}
             {...editButtonAttributes(loop.id)}
             onClick={onEdit}
           >
@@ -479,7 +528,12 @@ function LoopListItem({
             History{named}
           </button>
           <LoopStatusButton loop={loop} onSet={onStatusSet} />
-          <button type="button" className={buttonClass} onClick={() => setConfirmingDelete(true)}>
+          <button
+            type="button"
+            className={buttonClass}
+            {...itemControlAttributes(loop.id, 'delete')}
+            onClick={() => setConfirmingDelete(true)}
+          >
             Delete{named}
           </button>
         </div>
@@ -494,16 +548,27 @@ function ConfirmDelete({
   songId,
   loop,
   onCancel,
+  onDeletePressed,
 }: {
   songId: string;
   loop: Loop;
   onCancel: () => void;
+  onDeletePressed: () => void;
 }) {
   const remove = useDeleteLoop(songId);
   const online = useOnline();
+  // In place of the Delete button that asked: the question is read out, and Tab reaches its buttons.
+  const groupRef = useRef<HTMLDivElement>(null);
+  useEffect(() => groupRef.current?.focus({ preventScroll: true }), []);
 
   return (
-    <div role="group" aria-label={`Delete ${loop.name}`} className="flex flex-col gap-2">
+    <div
+      ref={groupRef}
+      tabIndex={-1}
+      role="group"
+      aria-label={`Delete ${loop.name}`}
+      className="flex flex-col gap-2 focus:outline-none"
+    >
       <p className="text-neutral-200">
         Delete “{loop.name}”? Its practice history is deleted too. This can't be undone.
       </p>
@@ -513,7 +578,9 @@ function ConfirmDelete({
           className={dangerButtonClass}
           disabled={remove.isPending || !online}
           onClick={() => {
-            if (isOnline()) remove.mutate(loop.id);
+            if (!isOnline()) return;
+            remove.mutate(loop.id);
+            onDeletePressed();
           }}
         >
           {remove.isPending ? 'Deleting…' : 'Delete loop'}

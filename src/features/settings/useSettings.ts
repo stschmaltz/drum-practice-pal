@@ -7,6 +7,8 @@ import type { Settings } from './settingsForm';
 export const settingsKeys = {
   all: ['settings'] as const,
   forUser: (userId: string) => [...settingsKeys.all, userId] as const,
+  /** The settings save, so the sign-out gate can see it pending (unsentWrites.ts). */
+  writes: (userId: string) => [...settingsKeys.forUser(userId), 'write'] as const,
 };
 
 export function useSettings() {
@@ -27,6 +29,7 @@ export function useUpdateSettings() {
   const queryKey = settingsKeys.forUser(user.id);
 
   return useMutation({
+    mutationKey: settingsKeys.writes(user.id),
     // Online only (Save is off offline), so a dropped connection fails it rather than pausing it.
     networkMode: 'always',
     mutationFn: (changes: Partial<Settings>) => updateSettings(user.id, changes),

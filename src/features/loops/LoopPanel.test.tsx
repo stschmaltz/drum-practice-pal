@@ -217,13 +217,15 @@ describe('LoopPanel list', () => {
     expect(view.item('Late').getByText('Bars 9 to 12 · 50% · target 100%')).toBeInTheDocument();
     expect(view.play('Intro')).toBeDisabled();
     expect(view.panel.getByRole('button', { name: 'New loop' })).toBeDisabled();
-    // Editing and deleting need no score.
-    expect(view.panel.getByRole('button', { name: 'Edit Intro' })).toBeEnabled();
+    // The form needs the score's bar count, as "New loop" does (bug hunt S3). Deleting needs no score.
+    expect(view.panel.getByRole('button', { name: 'Edit Intro' })).toBeDisabled();
+    expect(view.panel.getByRole('button', { name: 'Delete Intro' })).toBeEnabled();
 
     act(() => view.finishLoading());
 
     expect(view.play('Intro')).toBeEnabled();
     expect(view.panel.getByRole('button', { name: 'New loop' })).toBeEnabled();
+    expect(view.panel.getByRole('button', { name: 'Edit Intro' })).toBeEnabled();
     expect(view.item('Late').getByText(/50% \(45 BPM\)/)).toBeInTheDocument();
   });
 
@@ -255,6 +257,26 @@ describe('LoopPanel list', () => {
       view.engine.fire('readyForPlayback', undefined);
     });
     expect(view.play('Intro')).toBeEnabled();
+  });
+
+  it('picks a new loop’s bars on the score while the sounds are still loading (bug hunt P3)', async () => {
+    const view = renderPanel({ loaded: false });
+    await waitFor(() => expect(view.names()).toEqual(['Intro', 'Late']));
+    act(() =>
+      view.engine.fire('scoreLoaded', {
+        barCount: 16,
+        trackCount: 3,
+        barTempos: [...TEMPO_CHANGE_BAR_TEMPOS],
+        barMeters: Array.from({ length: 16 }, () => ({ beats: 4, beatValue: 4 })),
+      }),
+    );
+    await view.press('New loop');
+
+    act(() => view.engine.fire('barTapped', { barIndex: 2 }));
+    act(() => view.engine.fire('barTapped', { barIndex: 5 }));
+
+    expect(view.panel.getByLabelText('First bar')).toHaveValue('3');
+    expect(view.panel.getByLabelText('Last bar')).toHaveValue('6');
   });
 
   it('cannot play a loop once the player has failed', async () => {
@@ -764,6 +786,34 @@ describe('LoopPanel deleting a loop', () => {
     await waitFor(() => expect(view.names()).toEqual(['Intro']));
     expect(view.panel.getByRole('region', { name: 'Practicing Intro' })).toBeInTheDocument();
     expect(view.player.getSnapshot().range).toEqual({ startBar: 1, endBar: 4 });
+  });
+
+  // Bug hunt S4: Delete, "Keep it" and a confirmed delete each took their button away,
+  // and focus fell to <body>.
+  it('Delete hands focus to the question, and "Keep it" back to Delete', async () => {
+    const view = renderPanel();
+    await view.press('Delete Late');
+    expect(view.panel.getByRole('group', { name: 'Delete Late' })).toHaveFocus();
+
+    await view.user.click(confirmFor(view, 'Late').getByRole('button', { name: 'Keep it' }));
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Delete Late' })).toHaveFocus(),
+    );
+  });
+
+  it('a deleted loop hands focus to its neighbour’s Delete, or to New loop when it was the last', async () => {
+    const view = renderPanel();
+    await view.press('Delete Intro');
+    await view.user.click(confirmFor(view, 'Intro').getByRole('button', { name: 'Delete loop' }));
+    await waitFor(() => expect(view.names()).toEqual(['Late']));
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Delete Late' })).toHaveFocus(),
+    );
+
+    await view.press('Delete Late');
+    await view.user.click(confirmFor(view, 'Late').getByRole('button', { name: 'Delete loop' }));
+    expect(await view.panel.findByText(/No loops yet/)).toBeInTheDocument();
+    await waitFor(() => expect(view.panel.getByRole('button', { name: 'New loop' })).toHaveFocus());
   });
 
   it('deleting the last loop leaves the empty note', async () => {
