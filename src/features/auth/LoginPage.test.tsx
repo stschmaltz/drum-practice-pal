@@ -1,8 +1,16 @@
-import { screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
+import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import { fakeSupabase, resetFakeSupabase } from '@/test/fakeSupabase';
-import { loadingAuth, renderRoutes, RouteMarker, signedInAs, signedOut } from '@/test/render';
+import {
+  loadingAuth,
+  renderRoutes,
+  RouteMarker,
+  settle,
+  signedInAs,
+  signedOut,
+} from '@/test/render';
 import { LoginPage } from './LoginPage';
 import { EXPIRED_LINK_MESSAGE } from './loginRedirect';
 
@@ -179,5 +187,44 @@ describe('LoginPage', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       `${EXPIRED_LINK_MESSAGE} Send yourself a new one.`,
     );
+  });
+});
+
+describe('LoginPage offline', () => {
+  it('turns sending the email off with a reason, and an Enter in the field sends nothing', async () => {
+    const user = renderLogin();
+    act(() => onlineManager.setOnline(false));
+    expect(screen.getByTestId('offline-note')).toHaveTextContent('Signing in needs a connection.');
+    const send = screen.getByRole('button', { name: 'Email me a sign-in link' });
+    expect(send).toBeDisabled();
+    await user.type(screen.getByLabelText('Email'), 'drummer@drumpal.test{Enter}');
+    fireEvent.submit(send.closest('form')!);
+    await settle();
+    expect(fakeSupabase.auth.signInWithOtp).not.toHaveBeenCalled();
+
+    act(() => onlineManager.setOnline(true));
+    expect(send).toBeEnabled();
+    await user.click(send);
+    expect(fakeSupabase.auth.signInWithOtp).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns the code and "send again" off when the connection goes after the email was sent', async () => {
+    const user = renderLogin();
+    await sendEmail(user, 'drummer@drumpal.test');
+    const code = await screen.findByLabelText('Code');
+    await user.type(code, '123456');
+    act(() => onlineManager.setOnline(false));
+
+    const verify = screen.getByRole('button', { name: 'Sign in with code' });
+    expect(verify).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send again' })).toBeDisabled();
+    fireEvent.submit(verify.closest('form')!);
+    await settle();
+    expect(fakeSupabase.auth.verifyOtp).not.toHaveBeenCalled();
+    expect(fakeSupabase.auth.signInWithOtp).toHaveBeenCalledTimes(1);
+
+    act(() => onlineManager.setOnline(true));
+    await user.click(verify);
+    expect(fakeSupabase.auth.verifyOtp).toHaveBeenCalledTimes(1);
   });
 });

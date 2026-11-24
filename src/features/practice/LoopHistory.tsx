@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { buttonClass } from '@/components/styles';
 import { speedLabel } from '@/features/loops/loopLabels';
+import { waitsForNetwork } from '@/lib/network';
 import {
   durationLabel,
   practiceDateLabel,
@@ -35,6 +36,13 @@ export function LoopHistory({
   const sessions = useLoopSessions(loopId);
   const [showAll, setShowAll] = useState(false);
 
+  if (waitsForNetwork(sessions)) {
+    return (
+      <p className="text-sm text-neutral-400">
+        You're offline. This loop's history shows once you're back online.
+      </p>
+    );
+  }
   if (sessions.isPending) return <p className="text-sm text-neutral-400">Loading history…</p>;
   // isLoadingError, not isError: a failed background refetch keeps the history that is showing.
   if (sessions.isLoadingError) {

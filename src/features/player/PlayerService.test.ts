@@ -142,6 +142,46 @@ describe('PlayerService loading', () => {
     expect(engine.loadSoundFont).toHaveBeenCalledTimes(2);
     expect(service.getSnapshot().status).toBe('ready');
   });
+
+  it('fetches the soundfont again on retrySoundFont, and is ready once it is in', async () => {
+    const { engine, service } = setup();
+    engine.soundFont = Promise.reject(new Error('Failed to fetch'));
+    service.load(bytes);
+    engine.finishLoading();
+    await vi.waitFor(() => expect(service.getSnapshot().error).toBe('soundFont'));
+
+    engine.soundFont = Promise.resolve();
+    service.retrySoundFont();
+    expect(service.getSnapshot()).toMatchObject({ status: 'loading', error: null });
+    expect(engine.loadScore).toHaveBeenCalledTimes(1);
+    engine.fire('readyForPlayback', undefined);
+    expect(service.getSnapshot().status).toBe('ready');
+    expect(engine.loadSoundFont).toHaveBeenCalledTimes(2);
+  });
+
+  it('goes back to the error when the retry fails too', async () => {
+    const { engine, service } = setup();
+    engine.soundFont = Promise.reject(new Error('Failed to fetch'));
+    service.load(bytes);
+    await vi.waitFor(() => expect(service.getSnapshot().error).toBe('soundFont'));
+    service.retrySoundFont();
+    await vi.waitFor(() => expect(service.getSnapshot().error).toBe('soundFont'));
+    expect(engine.loadSoundFont).toHaveBeenCalledTimes(2);
+  });
+
+  it('retrySoundFont does nothing unless the soundfont is what failed', () => {
+    const { engine, service } = setup();
+    service.load(bytes);
+    engine.finishLoading();
+    service.retrySoundFont();
+    expect(engine.loadSoundFont).toHaveBeenCalledTimes(1);
+    expect(service.getSnapshot().status).toBe('ready');
+
+    engine.fire('error', { error: new Error('bad score') });
+    service.retrySoundFont();
+    expect(service.getSnapshot()).toMatchObject({ status: 'error', error: 'score' });
+    expect(engine.loadSoundFont).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('PlayerService transport', () => {

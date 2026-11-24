@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
@@ -306,5 +307,41 @@ describe('SettingsPage', () => {
       expect(readCharacterKeysOn()).toBe(false);
       expect(screen.getByText(/won’t keep this after the app is closed/)).toBeInTheDocument();
     });
+  });
+});
+
+describe('SettingsPage offline', () => {
+  it('keeps your edit but turns Save off with a reason, and saves it once back online', async () => {
+    serveSettings(saved);
+    const { user } = renderSettings();
+    await user.click(await screen.findByRole('radio', { name: '2 bars' }));
+    act(() => onlineManager.setOnline(false));
+    expect(saveButton()).toBeDisabled();
+    expect(
+      screen.getByText("You're offline. Settings can be saved once you're back online."),
+    ).toBeVisible();
+    fireEvent.submit(saveButton().closest('form')!);
+    await settle();
+    expect(writes()).toEqual([]);
+    expect(screen.getByRole('radio', { name: '2 bars' })).toBeChecked();
+
+    act(() => onlineManager.setOnline(true));
+    await user.click(saveButton());
+    expect(await screen.findByText('Saved')).toBeInTheDocument();
+    expect(writes()).toEqual([{ count_in_bars: 2 }]);
+  });
+
+  it('says why, rather than loading for ever, when the settings were never read on this device', async () => {
+    serveSettings(saved);
+    act(() => onlineManager.setOnline(false));
+    renderSettings();
+    expect(
+      await screen.findByText(/settings haven't been opened on this device yet/),
+    ).toBeVisible();
+    expect(screen.queryByText('Loading settings…')).not.toBeInTheDocument();
+    expect(queryResult).not.toHaveBeenCalled();
+
+    act(() => onlineManager.setOnline(true));
+    expect(await screen.findByRole('radio', { name: 'Off' })).toBeInTheDocument();
   });
 });

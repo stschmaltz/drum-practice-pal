@@ -96,6 +96,14 @@ export function usePlayer({
     player?.setLayout(layout);
   }, [player, layout]);
 
+  // Sounds that failed for want of a connection load when it comes back.
+  useEffect(() => {
+    if (!player) return;
+    const retry = () => player.retrySoundFont();
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, [player]);
+
   // Stable objects, so useSyncExternalStore sees no change between renders.
   const [loadingSnapshot] = useState(() => initialPlayerSnapshot(drumTrackIndex, initialOptions));
   const [failedSnapshot] = useState<PlayerSnapshot>(() => ({

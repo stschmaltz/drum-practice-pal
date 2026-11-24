@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Link } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
+import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass, primaryButtonClass } from '@/components/styles';
+import { isOnline, useOnline } from '@/lib/network';
 import { songPath } from '@/lib/routes';
 import { GUITAR_PRO_EXTENSIONS } from './songFile';
 import { NO_DRUM_TRACK_NOTE } from './songMetadata';
@@ -20,9 +22,13 @@ const STEP_LABELS: Record<UploadStep, string> = {
  * `accept` filter: iOS greys out extensions it has no type for, such as .gp,
  * so the file's content is checked instead (songFile.ts). Leaving the page
  * doesn't cancel: the upload finishes and the song shows up in the list.
+ * Offline both are off: an upload can't wait for the connection (the file
+ * would have to be held, and the duplicate check needs the server).
  */
 export function UploadPanel() {
   const upload = useUploadSong();
+  const online = useOnline();
+  const blocked = upload.isPending || !online;
   const [step, setStep] = useState<UploadStep>('reading');
   const [dragging, setDragging] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -30,6 +36,7 @@ export function UploadPanel() {
   useIgnoreStrayFileDrops();
 
   const start = (file: File) => {
+    if (!isOnline()) return;
     setDropError(null);
     controller.current = new AbortController();
     setStep('reading');
@@ -39,7 +46,7 @@ export function UploadPanel() {
   const onDrop = (event: DragEvent) => {
     event.preventDefault();
     setDragging(false);
-    if (upload.isPending) return;
+    if (upload.isPending || !isOnline()) return;
     const files = event.dataTransfer.files;
     const [file] = files;
     if (!file) return;
@@ -54,7 +61,7 @@ export function UploadPanel() {
   const onDragOver = (event: DragEvent) => {
     // Without preventDefault the browser opens the dropped file instead.
     event.preventDefault();
-    if (!upload.isPending) setDragging(true);
+    if (!blocked) setDragging(true);
   };
 
   const fileName = upload.variables?.file.name;
@@ -84,7 +91,7 @@ export function UploadPanel() {
           <input
             type="file"
             className="sr-only"
-            disabled={upload.isPending}
+            disabled={blocked}
             onChange={(event) => {
               const file = event.target.files?.[0];
               // Cleared so picking the same file again still fires a change.
@@ -99,6 +106,9 @@ export function UploadPanel() {
         </p>
       </div>
 
+      {!online && (
+        <OfflineNote>You're offline. Songs can be uploaded once you're back online.</OfflineNote>
+      )}
       <div aria-live="polite" className="flex flex-col gap-2">
         {upload.isPending && (
           <UploadProgress

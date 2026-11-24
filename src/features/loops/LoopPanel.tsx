@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
+import { OfflineNote } from '@/components/OfflineNote';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import {
   buttonClass,
@@ -12,6 +13,7 @@ import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerServ
 import { ratioToPercent } from '@/features/player/speed';
 import { LoopHistory } from '@/features/practice/LoopHistory';
 import { lastPracticedLabel } from '@/features/practice/sessions';
+import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
 import type { LoopStatus } from '@/lib/schema';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
@@ -345,6 +347,13 @@ function LoopList({
   onEdit,
   onStatusSet,
 }: LoopListProps) {
+  if (waitsForNetwork(loops)) {
+    return (
+      <p className="text-neutral-400">
+        You're offline, and this song's loops haven't been opened on this device yet.
+      </p>
+    );
+  }
   if (loops.isPending) return <p className="text-neutral-400">Loading loops…</p>;
   // isLoadingError, not isError: a failed background refetch keeps the list (and a playing loop).
   if (loops.isLoadingError) {
@@ -491,6 +500,7 @@ function ConfirmDelete({
   onCancel: () => void;
 }) {
   const remove = useDeleteLoop(songId);
+  const online = useOnline();
 
   return (
     <div role="group" aria-label={`Delete ${loop.name}`} className="flex flex-col gap-2">
@@ -501,8 +511,10 @@ function ConfirmDelete({
         <button
           type="button"
           className={dangerButtonClass}
-          disabled={remove.isPending}
-          onClick={() => remove.mutate(loop.id)}
+          disabled={remove.isPending || !online}
+          onClick={() => {
+            if (isOnline()) remove.mutate(loop.id);
+          }}
         >
           {remove.isPending ? 'Deleting…' : 'Delete loop'}
         </button>
@@ -515,6 +527,9 @@ function ConfirmDelete({
           Keep it
         </button>
       </div>
+      {!online && (
+        <OfflineNote>You're offline. Loops can be deleted once you're back online.</OfflineNote>
+      )}
       {remove.isError && <ErrorAlert>Couldn't delete the loop: {remove.error.message}</ErrorAlert>}
     </div>
   );

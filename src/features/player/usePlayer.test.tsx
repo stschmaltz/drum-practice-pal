@@ -236,3 +236,42 @@ describe('usePlayer layout', () => {
     expect(engine.restartCalls()).toBe(restartsBefore);
   });
 });
+
+describe('usePlayer and the connection (Unit 11)', () => {
+  it('loads sounds that failed again when the connection comes back, and stops listening on unmount', async () => {
+    const engine = new FakePlayerEngine();
+    engine.soundFont = Promise.reject(new Error('Failed to fetch'));
+    const { unmount } = render(<Harness createEngine={fakeEngineFactory(engine)} />);
+    expect(await screen.findByText('error soundFont')).toBeInTheDocument();
+
+    engine.soundFont = Promise.resolve();
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    expect(await screen.findByText('error none')).toBeInTheDocument();
+    expect(engine.loadSoundFont).toHaveBeenCalledTimes(2);
+    act(() => engine.fire('readyForPlayback', undefined));
+    expect(await screen.findByText('status ready')).toBeInTheDocument();
+
+    unmount();
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    expect(engine.loadSoundFont).toHaveBeenCalledTimes(2);
+  });
+
+  it('a second `online` while the retry is on its way fetches nothing more', async () => {
+    const engine = new FakePlayerEngine();
+    engine.soundFont = Promise.reject(new Error('Failed to fetch'));
+    render(<Harness createEngine={fakeEngineFactory(engine)} />);
+    expect(await screen.findByText('error soundFont')).toBeInTheDocument();
+
+    engine.soundFont = new Promise(() => {});
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(new Event('online'));
+    });
+    expect(await screen.findByText('status loading')).toBeInTheDocument();
+    expect(engine.loadSoundFont).toHaveBeenCalledTimes(2);
+  });
+});

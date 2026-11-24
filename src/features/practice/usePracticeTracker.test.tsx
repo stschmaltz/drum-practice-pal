@@ -1,4 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { onlineManager } from '@tanstack/react-query';
+import { outboxEntries } from '@/features/offline/outbox';
+import { hasUnsentWrites, useHasUnsentWrites } from '@/features/offline/unsentWrites';
 import { loopKeys } from '@/features/loops/loopKeys';
 import { songKeys } from '@/features/library/useSongs';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
@@ -576,6 +579,38 @@ describe('a keepalive log on a page that lives on', () => {
   });
 });
 
+describe('a keepalive log still on its way', () => {
+  it('counts as an unsent write until it is answered, through its fallback too', async () => {
+    let answer!: (response: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => (answer = resolve)));
+    let landLog!: (result: FakeResult) => void;
+    queryResult.mockReturnValueOnce(new Promise<FakeResult>((resolve) => (landLog = resolve)));
+    const view = renderTracker();
+    const unsent = renderHook(() => useHasUnsentWrites(USER), {
+      wrapper: wrapperFor(view.queryClient, signedInAs(USER)),
+    });
+    expect(hasUnsentWrites(view.queryClient, USER)).toBe(false);
+    view.playOn(40);
+
+    setVisibility('hidden');
+    expect(keptAlive()).toHaveLength(1);
+    // Back on show before the keepalive's answer: Sign out must still wait.
+    setVisibility('visible');
+    expect(hasUnsentWrites(view.queryClient, USER)).toBe(true);
+    await waitFor(() => expect(unsent.result.current).toBe(true));
+
+    // It failed: the same record goes through the mutation, still unsent.
+    await act(async () => answer(new Response('{}', { status: 401 })));
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(hasUnsentWrites(view.queryClient, USER)).toBe(true);
+    expect(unsent.result.current).toBe(true);
+
+    await act(async () => landLog(ok));
+    await waitFor(() => expect(unsent.result.current).toBe(false));
+    expect(hasUnsentWrites(view.queryClient, USER)).toBe(false);
+  });
+});
+
 describe('a keepalive log answered after the screen has gone', () => {
   it('is sent again without the hook when it failed, and the caches hear of it', async () => {
     let refuse!: (response: Response) => void;
@@ -685,5 +720,108 @@ describe('with effects run twice (StrictMode)', () => {
     await waitFor(() => expect(logged()).toHaveLength(1));
     expect(logged()[0]).toMatchObject({ duration_seconds: 45 });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('offline (Unit 11)', () => {
+  const goOffline = () => act(() => onlineManager.setOnline(false));
+  const goOnline = () => act(() => onlineManager.setOnline(true));
+  const queued = async () => (await outboxEntries(USER)).map((entry) => entry.id);
+  const dropped: FakeResult = {
+    data: null,
+    error: { message: 'TypeError: Failed to fetch', code: '' },
+  };
+
+  it('a stop offline sends nothing, keeps the session on the device and says it waits; back online it is logged once', async () => {
+    const view = renderTracker();
+    goOffline();
+    view.playFor(45);
+
+    await waitFor(() => expect(view.tracker().waiting).toHaveLength(1));
+    const id = view.tracker().waiting[0]!.id;
+    await waitFor(async () => expect(await queued()).toEqual([id]));
+    await settle();
+    expect(logged()).toEqual([]);
+    expect(view.tracker().unsaved).toEqual([]);
+
+    goOnline();
+    await waitFor(() => expect(view.tracker().lastLogged?.id).toBe(id));
+    expect(logged().map((row) => row.id)).toEqual([id]);
+    expect(view.tracker().waiting).toEqual([]);
+    await waitFor(async () => expect(await queued()).toEqual([]));
+  });
+
+  it('a page hidden offline tries no keepalive (it could only fail): the session waits for the connection', async () => {
+    const view = renderTracker();
+    view.playOn(40);
+    goOffline();
+
+    firePageEvent('pagehide');
+    setVisibility('hidden');
+    await waitFor(async () => expect(await queued()).toHaveLength(1));
+    await settle();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(logged()).toEqual([]);
+
+    goOnline();
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject({ loop_id: 'loop-a', duration_seconds: 40 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await waitFor(async () => expect(await queued()).toEqual([]));
+  });
+
+  it('a session waiting offline when the screen goes is still logged, once, when the connection is back', async () => {
+    const view = renderTracker();
+    view.cacheEmptyHistory();
+    goOffline();
+    view.playFor(45);
+    await waitFor(() => expect(view.tracker().waiting).toHaveLength(1));
+
+    view.hook.unmount();
+    // renderHook's unmount takes the QueryClientProvider too; in the app it stays (the
+    // signed-in layout), still listening for the connection.
+    view.queryClient.mount();
+    await settle();
+    expect(logged()).toEqual([]);
+
+    goOnline();
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    await waitFor(() =>
+      expect(view.cachedHistory()).toEqual([
+        expect.objectContaining({ loop_id: 'loop-a', duration_seconds: 45 }),
+      ]),
+    );
+    await settle();
+    expect(logged()).toHaveLength(1);
+    view.queryClient.unmount();
+  });
+
+  it('is in the outbox before the keepalive leaves, and out of it once the keepalive is in', async () => {
+    let answer!: (response: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => (answer = resolve)));
+    const view = renderTracker();
+    view.playOn(40);
+
+    firePageEvent('pagehide');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const id = keptAlive()[0]!.id as string;
+    await waitFor(async () => expect(await queued()).toEqual([id]));
+
+    answer(new Response(null, { status: 201 }));
+    await waitFor(async () => expect(await queued()).toEqual([]));
+    expect(logged()).toEqual([]);
+    expect(view.tracker().lastLogged?.id).toBe(id);
+  });
+
+  it('a request the connection dropped is sent again by itself, the same session, and never offered as "Try again"', async () => {
+    queryResult.mockResolvedValueOnce(dropped).mockResolvedValue(ok);
+    const view = renderTracker();
+    view.playFor(45);
+
+    await waitFor(() => expect(view.tracker().lastLogged).not.toBeNull(), { timeout: 3000 });
+    expect(view.tracker().unsaved).toEqual([]);
+    const ids = logged().map((row) => row.id);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe(ids[1]);
   });
 });

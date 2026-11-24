@@ -1,8 +1,10 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useLocation, useSearchParams } from 'react-router';
 import { useAuth } from '@/lib/auth';
+import { isOnline, useOnline } from '@/lib/network';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { FullPageMessage } from '@/components/FullPageMessage';
+import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass, inputClass, primaryButtonClass } from '@/components/styles';
 import { safeNextPath, type LoginRedirectState } from './loginRedirect';
 import { useSendSignInEmail, useVerifySignInCode } from './useAuthActions';
@@ -25,11 +27,13 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [sentTo, setSentTo] = useState<string | null>(null);
   const sendEmail = useSendSignInEmail();
+  const online = useOnline();
 
   if (auth.status === 'loading') return <FullPageMessage>Loading…</FullPageMessage>;
   if (auth.status === 'signedIn') return <Navigate to={next} replace />;
 
   const send = (to: string) => {
+    if (!isOnline()) return;
     sendEmail.mutate(
       { email: to, redirectTo: `${window.location.origin}${next}` },
       { onSuccess: () => setSentTo(to) },
@@ -53,11 +57,14 @@ export function LoginPage() {
         </p>
       )}
 
+      {!online && <OfflineNote>You're offline. Signing in needs a connection.</OfflineNote>}
+
       {sentTo === null ? (
         <EmailStep
           email={email}
           onEmailChange={setEmail}
           sending={sendEmail.isPending}
+          offline={!online}
           onSend={send}
           sendError={sendError}
         />
@@ -65,6 +72,7 @@ export function LoginPage() {
         <CodeStep
           email={sentTo}
           sending={sendEmail.isPending}
+          offline={!online}
           onSendAgain={() => send(sentTo)}
           onUseDifferentEmail={() => {
             setSentTo(null);
@@ -81,12 +89,15 @@ function EmailStep({
   email,
   onEmailChange,
   sending,
+  offline,
   onSend,
   sendError,
 }: {
   email: string;
   onEmailChange: (email: string) => void;
   sending: boolean;
+  /** Nothing can be sent: the button is off. */
+  offline: boolean;
   onSend: (email: string) => void;
   sendError: ReactNode;
 }) {
@@ -111,7 +122,7 @@ function EmailStep({
           onChange={(event) => onEmailChange(event.target.value)}
         />
       </label>
-      <button type="submit" className={primaryButtonClass} disabled={sending}>
+      <button type="submit" className={primaryButtonClass} disabled={sending || offline}>
         {sending ? 'Sending…' : 'Email me a sign-in link'}
       </button>
       {sendError}
@@ -122,12 +133,14 @@ function EmailStep({
 function CodeStep({
   email,
   sending,
+  offline,
   onSendAgain,
   onUseDifferentEmail,
   sendError,
 }: {
   email: string;
   sending: boolean;
+  offline: boolean;
   onSendAgain: () => void;
   onUseDifferentEmail: () => void;
   sendError: ReactNode;
@@ -139,7 +152,7 @@ function CodeStep({
     event.preventDefault();
     const normalized = normalizeSignInCode(code);
     // On success AuthProvider sees SIGNED_IN and LoginPage's redirect takes over.
-    if (normalized) verifyCode.mutate({ email, code: normalized });
+    if (normalized && isOnline()) verifyCode.mutate({ email, code: normalized });
   };
 
   return (
@@ -162,7 +175,11 @@ function CodeStep({
             onChange={(event) => setCode(event.target.value)}
           />
         </label>
-        <button type="submit" className={primaryButtonClass} disabled={verifyCode.isPending}>
+        <button
+          type="submit"
+          className={primaryButtonClass}
+          disabled={verifyCode.isPending || offline}
+        >
           {verifyCode.isPending ? 'Checking…' : 'Sign in with code'}
         </button>
         {verifyCode.error && (
@@ -173,7 +190,7 @@ function CodeStep({
         <button
           type="button"
           className={buttonClass}
-          disabled={sending}
+          disabled={sending || offline}
           onClick={() => {
             // A new email means a new code, so the last code's error no longer applies.
             verifyCode.reset();

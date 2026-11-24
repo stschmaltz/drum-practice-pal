@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { inputClass } from '@/components/styles';
+import { waitsForNetwork } from '@/lib/network';
 import type { LibrarySong } from './songForm';
 import { isLibrarySort, searchSongs, sortSongs, type LibrarySort } from './songList';
 import { SongListItem } from './SongListItem';
@@ -24,7 +25,12 @@ export function LibraryPage() {
     <div className="flex flex-col gap-6">
       <PageHeader title="Library" />
       <UploadPanel />
-      {songs.isPending ? (
+      {waitsForNetwork(songs) ? (
+        <p className="text-neutral-400">
+          You're offline, and your library hasn't been opened on this device yet. It shows once
+          you're back online.
+        </p>
+      ) : songs.isPending ? (
         <p className="text-neutral-400">Loading your songs…</p>
       ) : songs.isLoadingError ? (
         <LoadErrorAlert onRetry={() => void songs.refetch()}>

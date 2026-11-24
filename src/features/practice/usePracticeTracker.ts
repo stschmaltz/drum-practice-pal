@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { removeOutboxEntry } from '@/features/offline/outbox';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { useAuth, useSignedInUser } from '@/lib/auth';
+import { isOnline } from '@/lib/network';
 import { randomUuid } from '@/lib/randomUuid';
 import { sessionMinPlaySeconds } from './debugPractice';
+import { startKeepaliveSend } from './keepaliveSends';
 import { logSessionOnExit } from './sessionsApi';
 import {
   countRepeat,
@@ -12,7 +15,7 @@ import {
   type SessionRecord,
   type TrackerState,
 } from './sessionTracker';
-import { logSessionUnobserved, sessionLogged, useLogSession } from './useSessions';
+import { logSessionUnobserved, queueSession, sessionLogged, useLogSession } from './useSessions';
 
 /**
  * How a session that ended gets sent. `mutation`: the hook's mutation, for a
@@ -40,8 +43,12 @@ const STAYING: Departure = { leaving: false, via: 'mutation' };
  *   browser finishes after the page has gone. iOS often hides a page without
  *   ever firing `pagehide`, so both are listened to; whichever comes first
  *   ends the session and the other finds nothing left to send.
- * - A send that failed is kept (`unsaved`) for `retryUnsaved`. Sending a
- *   session again is safe: its id is the row's.
+ * - Every session is put in the device's outbox before it is sent, so one
+ *   that never got an answer (offline, a page closed mid-send) is sent again
+ *   at the next start (useOutboxReplay). Offline the mutation waits for the
+ *   connection (`waiting`) rather than failing, and a keepalive isn't tried.
+ * - A send the server refused is kept (`unsaved`) for `retryUnsaved`. Sending
+ *   a session again is safe: its id is the row's.
  */
 export function usePracticeTracker(
   player: PlayerService | null,
@@ -56,6 +63,8 @@ export function usePracticeTracker(
   const tracker = useRef<TrackerState>(null);
   const [lastLogged, setLastLogged] = useState<SessionRecord | null>(null);
   const [unsaved, setUnsaved] = useState<SessionRecord[]>([]);
+  // Sent through the mutation and not answered yet: offline, these are waiting for the connection.
+  const [waiting, setWaiting] = useState<SessionRecord[]>([]);
 
   const { status, speedRatio } = snapshot;
   const userId = user.id;
@@ -72,17 +81,18 @@ export function usePracticeTracker(
   /** Through the mutation, for a page that is staying. */
   const sendNow = useCallback(
     (record: SessionRecord) => {
+      setWaiting((records) => withRecord(records, record));
       // The promise, not mutate()'s callbacks: those only run for the latest call,
       // and two sessions can be on their way at once (a retry of several, say).
       logSession(record).then(
         (result) => {
-          setUnsaved((records) => records.filter((kept) => kept.id !== record.id));
+          setWaiting((records) => withoutRecord(records, record));
+          setUnsaved((records) => withoutRecord(records, record));
           if (result === 'logged') setLastLogged(record);
         },
         () => {
-          setUnsaved((records) =>
-            records.some((kept) => kept.id === record.id) ? records : [...records, record],
-          );
+          setWaiting((records) => withoutRecord(records, record));
+          setUnsaved((records) => withRecord(records, record));
         },
       );
     },
@@ -92,16 +102,27 @@ export function usePracticeTracker(
   /** With `keepalive`, for a page that is hidden or going away. */
   const sendOnExit = useCallback(
     (record: SessionRecord, token: string) => {
+      // Counted as on its way until its answer is dealt with (keepaliveSends.ts).
+      const answered = startKeepaliveSend(userId);
       void logSessionOnExit(token, userId, record).then((result) => {
-        // Only reached when the page lived on: a hidden tab that came back.
-        // `loopGone` needs nothing: the loop's history went with it.
-        if (result === 'failed') {
-          // The hook's own mutation observer went with the screen; see `unobserved`.
-          if (screenGone.current) void logSessionUnobserved(queryClient, userId, record);
-          else sendNow(record);
-        } else if (result === 'logged') {
-          sessionLogged(queryClient, userId, record);
-          setLastLogged(record);
+        try {
+          // Only reached when the page lived on: a hidden tab that came back.
+          // `loopGone` needs nothing: the loop's history went with it.
+          if (result === 'failed') {
+            // The hook's own mutation observer went with the screen; see `unobserved`.
+            if (screenGone.current) void logSessionUnobserved(queryClient, userId, record);
+            else sendNow(record);
+            return;
+          }
+          void removeOutboxEntry(record.id);
+          if (result === 'logged') {
+            sessionLogged(queryClient, userId, record);
+            setLastLogged(record);
+          }
+        } finally {
+          // After the fallback has started: it is pending in the mutation cache from its
+          // first synchronous step, so the record is never counted by neither.
+          answered();
         }
       });
     },
@@ -110,13 +131,17 @@ export function usePracticeTracker(
 
   const send = useCallback(
     (record: SessionRecord, via: SendVia) => {
+      // Kept on the device first, started here in the same task: a page going away may
+      // run nothing after this handler, and the next start sends what it finds.
+      void queueSession(userId, record);
       const token = accessToken.current;
       if (via === 'unobserved') {
         void logSessionUnobserved(queryClient, userId, record);
-      } else if (via === 'keepalive' && token !== null) {
+      } else if (via === 'keepalive' && token !== null && isOnline()) {
         sendOnExit(record, token);
       } else {
-        // Also when there is no token to build a keepalive request with.
+        // Also with no token to build a keepalive request with, and offline, where a
+        // keepalive can only fail: the mutation waits for the connection instead.
         sendNow(record);
       }
     },
@@ -192,7 +217,18 @@ export function usePracticeTracker(
     for (const record of unsaved) sendNow(record);
   }, [sendNow, unsaved]);
 
-  return { lastLogged, unsaved, retryUnsaved };
+  return { lastLogged, unsaved, waiting, retryUnsaved };
+}
+
+// Both give back the same array when nothing changes, so the state update renders nothing.
+function withRecord(records: SessionRecord[], record: SessionRecord): SessionRecord[] {
+  return records.some((kept) => kept.id === record.id) ? records : [...records, record];
+}
+
+function withoutRecord(records: SessionRecord[], record: SessionRecord): SessionRecord[] {
+  return records.some((kept) => kept.id === record.id)
+    ? records.filter((kept) => kept.id !== record.id)
+    : records;
 }
 
 export type PracticeTracker = ReturnType<typeof usePracticeTracker>;

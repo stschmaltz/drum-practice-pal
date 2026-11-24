@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode, type Ref } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link, useParams } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
@@ -30,6 +30,7 @@ import { durationLabel } from '@/features/practice/sessions';
 import { usePracticeTracker, type PracticeTracker } from '@/features/practice/usePracticeTracker';
 import { ShortcutOverlay } from '@/features/shortcuts/ShortcutOverlay';
 import { useSettings } from '@/features/settings/useSettings';
+import { useOnline, waitsForNetwork } from '@/lib/network';
 import { isUuid } from '@/lib/randomUuid';
 import { useJamMode } from './useJamMode';
 import { useRequestedLoop } from './useRequestedLoop';
@@ -52,6 +53,13 @@ export function SongPage() {
   const song = useSong(id, { enabled: validId });
 
   if (!validId || song.data === null) return <SongNotFound />;
+  if (waitsForNetwork(song)) {
+    return (
+      <OfflineMessage>
+        This song hasn't been opened on this device yet, so it can't be played offline.
+      </OfflineMessage>
+    );
+  }
   if (song.isPending) return <p className="text-neutral-400">Loading song…</p>;
   if (song.isLoadingError) {
     return <LoadFailed message="Couldn't load this song." onRetry={() => void song.refetch()} />;
@@ -73,6 +81,11 @@ function SongScreen({ song }: { song: Song }) {
 function SongBody({ song }: { song: Song }) {
   const file = useSongFile(song.id);
   const settings = useSettings();
+  // Settings are waited for only before the player first opens: usePlayer reads them
+  // once. Opened offline on the defaults, the settings read that starts on reconnect
+  // (pending, now fetching) must not take the playing song off the page.
+  const [playerOpenedFor, setPlayerOpenedFor] = useState<string | null>(null);
+  const playerOpened = playerOpenedFor === song.id;
 
   // isLoadingError, not isError: a failed background refetch keeps the bytes, so a playing song stays mounted.
   if (file.isLoadingError) {
@@ -83,9 +96,21 @@ function SongBody({ song }: { song: Song }) {
       />
     );
   }
-  if (file.isPending || settings.isPending) {
+  if (waitsForNetwork(file)) {
+    return (
+      <OfflineMessage>
+        This song's file isn't on this device yet. Open the song once while online to play it
+        offline.
+      </OfflineMessage>
+    );
+  }
+  // Settings that can't be fetched offline give way to the defaults, like a failed fetch.
+  if (file.isPending || (settings.isPending && !waitsForNetwork(settings) && !playerOpened)) {
     return <p className="text-neutral-400">Downloading the song…</p>;
   }
+  // Remembered during render, so the next render already knows (React's "state from
+  // the previous render" pattern); per song, since another song's file is waited for again.
+  if (!playerOpened) setPlayerOpenedFor(song.id);
 
   return (
     <>
@@ -305,9 +330,9 @@ function ActiveLoopLine({ loop, onExit }: { loop: Loop; onExit: () => void }) {
 }
 
 /**
- * What became of the last practice session: logged, or not saved with a way
- * to send it again. Above the score, because on a phone the loop panel is a
- * closed sheet while practising.
+ * What became of the last practice session: logged, kept on the device until
+ * the connection is back, or refused with a way to send it again. Above the
+ * score, because on a phone the loop panel is a closed sheet while practising.
  */
 function SessionNotice({
   tracker,
@@ -316,7 +341,8 @@ function SessionNotice({
   tracker: PracticeTracker;
   loops: readonly Loop[] | undefined;
 }) {
-  const { lastLogged, unsaved, retryUnsaved } = tracker;
+  const { lastLogged, unsaved, waiting, retryUnsaved } = tracker;
+  const online = useOnline();
   if (unsaved.length > 0) {
     return (
       <div role="alert" className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -329,6 +355,13 @@ function SessionNotice({
           Try again
         </button>
       </div>
+    );
+  }
+  if (waiting.length > 0 && !online) {
+    return (
+      <p role="status" className="text-sm text-neutral-400" data-testid="session-waiting">
+        Practice saved on this device. It's logged when you're back online.
+      </p>
     );
   }
   if (!lastLogged) return null;
@@ -429,6 +462,18 @@ function LoadFailed({ message, onRetry }: { message: string; onRetry: () => void
       <button type="button" className={buttonClass} onClick={onRetry}>
         Try again
       </button>
+    </div>
+  );
+}
+
+function OfflineMessage({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-amber-300">You're offline.</p>
+      <p className="text-neutral-300">{children}</p>
+      <Link to="/library" className="text-sky-400 underline">
+        Go to Library
+      </Link>
     </div>
   );
 }

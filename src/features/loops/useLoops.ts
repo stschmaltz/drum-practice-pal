@@ -7,9 +7,12 @@ import {
 } from '@tanstack/react-query';
 import type { Song } from '@/features/library/songForm';
 import { songKeys } from '@/features/library/useSongs';
+import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
 import { sessionKeys } from '@/features/practice/sessionKeys';
-import type { LoopStatus } from '@/lib/schema';
 import { useSignedInUser } from '@/lib/auth';
+import { queuedWriteRetry } from '@/lib/network';
+import { randomUuid } from '@/lib/randomUuid';
+import type { LoopStatus } from '@/lib/schema';
 import { loopKeys } from './loopKeys';
 import { createLoop, deleteLoop, fetchLoops, fetchPracticeLoops, updateLoop } from './loopsApi';
 import {
@@ -107,6 +110,8 @@ export function useCreateLoop(songId: string) {
 
   return useMutation({
     mutationKey: loopKeys.writes(user.id),
+    // Online only (the form refuses offline), so a dropped connection fails it rather than pausing it.
+    networkMode: 'always',
     mutationFn: (loop: Omit<NewLoop, 'song_id'>) =>
       createLoop(user.id, { ...loop, song_id: songId }),
     onSuccess: (saved) => {
@@ -127,6 +132,13 @@ export function useCreateLoop(songId: string) {
 export interface LoopUpdate {
   loopId: string;
   changes: Partial<LoopEdit>;
+  /** The edit's outbox entry, when it is one an earlier page left unsent (useOutboxReplay). */
+  queueId?: string;
+  /**
+   * When that entry was first queued. Kept as it was, so a replay that is
+   * left unsent again still sorts before edits made after it.
+   */
+  queuedAt?: number;
 }
 
 /** The loop as it is cached now, from whichever list holds it. */
@@ -147,32 +159,72 @@ function cachedLoop(
   return undefined;
 }
 
-/**
- * Optimistic: shows the edit at once and rolls back only that loop's sent
- * fields on error. Finishing and reopening a loop are edits of its status, so
- * they go through here too, from the song page and from the home page.
- */
-export function useUpdateLoop(songId: string) {
-  const user = useSignedInUser();
-  const queryClient = useQueryClient();
+/** What a loop edit's onMutate hands its other callbacks. */
+interface LoopEditContext {
+  /** The loop as cached before the edit, for the rollback. */
+  before: Loop | undefined;
+  /** Its outbox entry, taken out once the server has answered. */
+  queueId: string;
+}
 
-  return useMutation({
-    mutationKey: loopKeys.writes(user.id),
-    mutationFn: ({ loopId, changes }: LoopUpdate) => updateLoop(user.id, loopId, changes),
-    onMutate: async ({ loopId, changes }) => {
+/**
+ * One definition of a loop edit, for useUpdateLoop and for the replay of
+ * edits an earlier page left unsent.
+ *
+ * Optimistic: shows the edit at once and rolls back only that loop's sent
+ * fields when the server refuses it. A connection that is missing or drops
+ * is not a refusal: offline the edit waits (TanStack Query pauses it) and a
+ * dropped request is tried again, so "Save speed" or "Mark finished" made at
+ * the kit with no Wi-Fi stays on screen and goes when the connection is
+ * back. Until the server has answered, the edit is kept in the outbox, so a
+ * reload or a closed tab doesn't lose it.
+ *
+ * Every loop edit of the user's runs in one queue (`scope`): two waiting
+ * offline would otherwise be sent at once when the connection came back, and
+ * the server could get the newer speed first and keep the older one.
+ */
+export function loopEditOptions(queryClient: QueryClient, userId: string, songId: string) {
+  return {
+    mutationKey: loopKeys.writes(userId),
+    scope: { id: loopKeys.writes(userId).join('/') },
+    mutationFn: ({ loopId, changes }: LoopUpdate) => updateLoop(userId, loopId, changes),
+    ...queuedWriteRetry,
+    onMutate: async ({
+      loopId,
+      changes,
+      queueId = randomUuid(),
+      queuedAt = Date.now(),
+    }: LoopUpdate): Promise<LoopEditContext> => {
+      // Started first, awaited last: the screen shows the edit without waiting for the
+      // database, and the request goes only once the entry is stored (its removal, when
+      // the answer comes, is queued behind it).
+      const queued = putOutboxEntry({
+        kind: 'loopEdit',
+        id: queueId,
+        userId,
+        queuedAt,
+        songId,
+        loopId,
+        changes,
+      });
       // A refetch landing after this would overwrite the optimistic value. Every
       // loops query, since the home page's list holds the loop too.
-      await queryClient.cancelQueries({ queryKey: loopKeys.forUser(user.id) });
-      const before = cachedLoop(queryClient, user.id, songId, loopId);
-      setCachedLoop(queryClient, user.id, songId, loopId, (loop) => ({ ...loop, ...changes }));
-      return { before };
+      await queryClient.cancelQueries({ queryKey: loopKeys.forUser(userId) });
+      const before = cachedLoop(queryClient, userId, songId, loopId);
+      setCachedLoop(queryClient, userId, songId, loopId, (loop) => ({ ...loop, ...changes }));
+      await queued;
+      return { before, queueId };
     },
     // Only this loop's sent fields, not a snapshot of the whole list: other
     // loops may have been edited, deleted or added since onMutate.
-    onError: (_error, { loopId, changes }, context) => {
+    onError: (
+      _error: Error,
+      { loopId, changes }: LoopUpdate,
+      context: LoopEditContext | undefined,
+    ) => {
       const before = context?.before;
       if (!before) return;
-      setCachedLoop(queryClient, user.id, songId, loopId, (loop) =>
+      setCachedLoop(queryClient, userId, songId, loopId, (loop) =>
         revertLoopEdit(loop, before, changes),
       );
     },
@@ -181,14 +233,33 @@ export function useUpdateLoop(songId: string) {
     // taken whole, its old bars would move the playing loop back until the edit
     // lands. Then only the sent fields are taken; the refetch once every write
     // has settled brings the rest.
-    onSuccess: (saved, { changes }) => {
-      const othersPending = anotherWriteIsPending(queryClient, user.id);
-      setCachedLoop(queryClient, user.id, songId, saved.id, (loop) =>
+    onSuccess: (saved: Loop, { changes }: LoopUpdate) => {
+      const othersPending = anotherWriteIsPending(queryClient, userId);
+      setCachedLoop(queryClient, userId, songId, saved.id, (loop) =>
         othersPending ? applySavedLoopEdit(loop, saved, changes) : { ...loop, ...saved },
       );
     },
-    onSettled: () => invalidateWhenIdle(queryClient, user.id),
-  });
+    onSettled: (
+      _saved: Loop | undefined,
+      _error: Error | null,
+      _variables: LoopUpdate,
+      context: LoopEditContext | undefined,
+    ) => {
+      if (context) void removeOutboxEntry(context.queueId);
+      return invalidateWhenIdle(queryClient, userId);
+    },
+  };
+}
+
+/**
+ * Edits a loop (loopEditOptions has the rules). Finishing and reopening a
+ * loop are edits of its status, so they go through here too, from the song
+ * page and from the home page.
+ */
+export function useUpdateLoop(songId: string) {
+  const user = useSignedInUser();
+  const queryClient = useQueryClient();
+  return useMutation(loopEditOptions(queryClient, user.id, songId));
 }
 
 /** Whether a mutation's variables are a write of this loop's status. */
@@ -251,6 +322,7 @@ export function useDeleteLoop(songId: string) {
 
   return useMutation({
     mutationKey: loopKeys.writes(user.id),
+    networkMode: 'always',
     mutationFn: (loopId: string) => deleteLoop(user.id, loopId),
     onSuccess: (_result, loopId) => {
       setCachedLoops(queryClient, user.id, songId, (loops) =>

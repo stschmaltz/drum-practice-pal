@@ -1,4 +1,5 @@
-import { createEvent, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, createEvent, fireEvent, screen, waitFor } from '@testing-library/react';
+import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import {
@@ -8,7 +9,7 @@ import {
   storageResult,
   type FakeResult,
 } from '@/test/fakeSupabase';
-import { renderRoutes } from '@/test/render';
+import { renderRoutes, settle } from '@/test/render';
 import type { ParseResult } from './parseScore';
 import type { SongMetadata } from './songMetadata';
 import { UploadPanel } from './UploadPanel';
@@ -280,5 +281,31 @@ describe('UploadPanel', () => {
     await user.upload(picker(), gpFile());
     expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+describe('UploadPanel offline', () => {
+  it('turns the picker off, says why, and refuses a dropped file', async () => {
+    serve({});
+    renderPanel();
+    act(() => onlineManager.setOnline(false));
+    expect(picker()).toBeDisabled();
+    expect(screen.getByTestId('offline-note')).toHaveTextContent(
+      "You're offline. Songs can be uploaded once you're back online.",
+    );
+
+    // The drop zone is a second way in, and must ask the same question.
+    fireEvent.drop(screen.getByTestId('drop-zone'), { dataTransfer: { files: [gpFile()] } });
+    await settle();
+    expect(storageMethods()).toEqual([]);
+    expect(queryResult).not.toHaveBeenCalled();
+
+    act(() => onlineManager.setOnline(true));
+    expect(picker()).toBeEnabled();
+    expect(screen.queryByTestId('offline-note')).not.toBeInTheDocument();
+    // The same drop, online, does upload: the one above was heard and refused.
+    fireEvent.drop(screen.getByTestId('drop-zone'), { dataTransfer: { files: [gpFile()] } });
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(storageMethods()).toEqual(['upload']);
   });
 });

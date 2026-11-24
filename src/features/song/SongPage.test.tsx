@@ -1,10 +1,13 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient } from '@tanstack/react-query';
+import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { Link, Outlet, Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
+import { songKeys } from '@/features/library/useSongs';
 import type { Loop } from '@/features/loops/loopForm';
 import { loopKeys } from '@/features/loops/loopKeys';
+import { offlineDb } from '@/features/offline/offlineDb';
+import { restoredCacheIsStale } from '@/features/offline/queryPersister';
 import type { EngineMount } from '@/features/player/playerEngine';
 import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
 import type { Settings } from '@/features/settings/settingsForm';
@@ -187,6 +190,86 @@ describe('SongPage not found and load failures', () => {
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     await loadPlayer();
     expect(status()).toHaveTextContent('Bar 1 of 16');
+  });
+});
+
+describe('SongPage offline', () => {
+  it('plays a song opened before from the copy on the device, with no download', async () => {
+    serve();
+    renderSong(SONG_A);
+    await loadPlayer();
+    expect(downloads()).toHaveLength(1);
+
+    // A later visit, in a new page: nothing in memory, the file on the device.
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+    act(() => onlineManager.setOnline(false));
+    cleanup();
+    renderSong(SONG_A, queryClient);
+    await waitFor(() => expect(engines[1]?.loadScore).toHaveBeenCalled());
+    expect(Array.from(engines[1]!.loadScore.mock.calls[0]![0])).toEqual(fileBytes(SONG_A));
+    expect(downloads()).toHaveLength(1);
+  });
+
+  it('keeps playing on the defaults when settings never cached come in on reconnect', async () => {
+    serve();
+    // A song row and file on the device, but no settings cached: offline, the player
+    // starts on the defaults rather than waiting for them.
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+    await offlineDb.songFiles.put({
+      userId: USER,
+      songId: SONG_A,
+      bytes: new Uint8Array(fileBytes(SONG_A)),
+    });
+    let answerSettings!: (result: FakeResult) => void;
+    const settingsAnswer = new Promise<FakeResult>((resolve) => (answerSettings = resolve));
+    const answer = queryResult.getMockImplementation()!;
+    queryResult.mockImplementation((call) =>
+      call.table === 'user_settings' ? settingsAnswer : answer(call),
+    );
+    act(() => onlineManager.setOnline(false));
+    const user = renderSong(SONG_A, queryClient);
+    await loadPlayer();
+    await user.click(playButton());
+    act(() => engines[0]!.fire('stateChanged', { playing: true }));
+    expect(playButton()).toHaveAccessibleName('Pause');
+
+    // Back online: the settings read goes out (pending, fetching), then lands.
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() =>
+      expect(queryResult.mock.calls.some(([call]) => call.table === 'user_settings')).toBe(true),
+    );
+    await settle();
+    expect(engines).toHaveLength(1);
+    expect(playButton()).toHaveAccessibleName('Pause');
+    await act(async () => answerSettings(ok(settingsRow)));
+    await settle();
+    expect(engines).toHaveLength(1);
+    expect(engines[0]!.destroy).not.toHaveBeenCalled();
+    expect(playButton()).toHaveAccessibleName('Pause');
+  });
+
+  it('says why, rather than loading for ever, for a song never opened on this device', async () => {
+    serve();
+    act(() => onlineManager.setOnline(false));
+    renderSong(SONG_A);
+    expect(await screen.findByText(/hasn't been opened on this device yet/)).toBeInTheDocument();
+    expect(queryResult).not.toHaveBeenCalled();
+  });
+
+  it('says why when the row is cached but the file never came down', async () => {
+    serve();
+    storageResult.mockResolvedValue(fail('TypeError: Failed to fetch'));
+    // The app's own retries: the first try fails, the retry waits for the connection.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
+    queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+    act(() => onlineManager.setOnline(false));
+    renderSong(SONG_A, queryClient);
+    expect(
+      await screen.findByText(/file isn't on this device yet/, {}, { timeout: 3000 }),
+    ).toBeInTheDocument();
+    expect(downloads()).toHaveLength(1);
   });
 });
 
@@ -1398,6 +1481,33 @@ describe('SongPage opened on a loop (?loop=)', () => {
       );
       expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
       expect(status()).toHaveTextContent('Bar 9 of 16');
+    });
+
+    it('opens on a cold start offline, from the restored cache: the read is paused, not pending for ever', async () => {
+      serve({ loops: [chorus, other] });
+      // As the app finds the device after a reload with no connection: the song's row and
+      // loops restored from IndexedDB and marked stale (restoredCacheIsStale), its file stored.
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+      queryClient.setQueryData(loopsKey, [chorus, other]);
+      restoredCacheIsStale(queryClient);
+      await offlineDb.songFiles.put({
+        userId: USER,
+        songId: SONG_A,
+        bytes: new Uint8Array(fileBytes(SONG_A)),
+      });
+      act(() => onlineManager.setOnline(false));
+
+      renderSong(`${SONG_A}?loop=${LOOP_ID}`, queryClient);
+      await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent(
+        'Looping Chorus fill · Bars 9 to 12',
+      );
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+      expect(queryClient.getQueryState(loopsKey)?.fetchStatus).toBe('paused');
+      expect(queryResult).not.toHaveBeenCalled();
+      expect(downloads()).toEqual([]);
     });
 
     it('reads a list too fresh to be read on arrival once more when it lacks the loop', async () => {

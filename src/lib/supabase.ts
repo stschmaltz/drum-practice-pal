@@ -22,14 +22,24 @@ export const supabaseRestConfig: { url: string; publishableKey: string } | null 
   ? { url: config.url, publishableKey: config.publishableKey }
   : null;
 
+const apiUrl = config.ok ? config.url : 'http://supabase-not-configured.invalid';
+
+/**
+ * Where supabase-js keeps the session in localStorage. Its own default,
+ * written out so the app can read a session it kept but won't report
+ * (storedSession.ts); changing it would sign every device out.
+ */
+export const authStorageKey = `sb-${new URL(apiUrl).hostname.split('.')[0]}-auth-token`;
+
 // createClient throws on an empty URL, which would leave a blank page. A client
 // pointed at an unroutable host keeps the module importable; App never renders
 // anything that uses it while supabaseConfigError is set.
 export const supabase: DbClient = createClient<Database>(
-  config.ok ? config.url : 'http://supabase-not-configured.invalid',
+  apiUrl,
   config.ok ? config.publishableKey : 'not-configured',
   {
     auth: {
+      storageKey: authStorageKey,
       persistSession: true,
       // Refreshes the access token before it expires, and pauses while the tab is hidden.
       autoRefreshToken: true,

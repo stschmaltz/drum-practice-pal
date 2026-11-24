@@ -1,8 +1,10 @@
 import { useId, useState, type FormEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
+import { OfflineNote } from '@/components/OfflineNote';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass, primaryButtonClass } from '@/components/styles';
+import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
 import { SignOutButton } from '@/features/auth/SignOutButton';
 import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
 import { characterKeysLabel } from '@/features/shortcuts/shortcuts';
@@ -25,7 +27,12 @@ export function SettingsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Settings" />
-      {settings.isPending ? (
+      {waitsForNetwork(settings) ? (
+        <p className="text-neutral-400">
+          You're offline, and your settings haven't been opened on this device yet. They show once
+          you're back online.
+        </p>
+      ) : settings.isPending ? (
         <p className="text-neutral-400">Loading settings…</p>
       ) : // Only a failed first load blocks the form. A failed background refetch
       // keeps the cached row, and unmounting the form would drop unsaved edits.
@@ -64,6 +71,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
   // Locked while saving: an edit would reset() the mutation, so the form would
   // stop showing its progress or error and allow a second save alongside it.
   const saving = update.isPending;
+  const online = useOnline();
 
   const edit = (edited: Partial<Settings>) => {
     if (saving) return;
@@ -79,7 +87,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (!draft || saving) return;
+    if (!draft || saving || !isOnline()) return;
     const found = validateSettings(values);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
@@ -105,7 +113,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
       <DrumsFieldset {...fieldsetProps} />
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" className={primaryButtonClass} disabled={!dirty || saving}>
+        <button type="submit" className={primaryButtonClass} disabled={!dirty || saving || !online}>
           {saving ? 'Saving…' : 'Save settings'}
         </button>
         {dirty && (
@@ -117,6 +125,9 @@ function SettingsForm({ saved }: { saved: Settings }) {
           {update.isSuccess && !dirty ? 'Saved' : ''}
         </p>
       </div>
+      {!online && (
+        <OfflineNote>You're offline. Settings can be saved once you're back online.</OfflineNote>
+      )}
       {update.isError && (
         <ErrorAlert>Couldn't save your settings: {update.error.message}</ErrorAlert>
       )}

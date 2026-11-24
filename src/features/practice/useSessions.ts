@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { songKeys } from '@/features/library/useSongs';
 import { loopKeys } from '@/features/loops/loopKeys';
+import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
 import { useSignedInUser } from '@/lib/auth';
+import { queuedWriteRetry } from '@/lib/network';
 import { sessionKeys } from './sessionKeys';
 import { fetchLoopSessions, logSession, type LogSessionResult } from './sessionsApi';
 import { sessionFromRecord, type PracticeSession } from './sessions';
@@ -41,13 +43,37 @@ export function sessionLogged(queryClient: QueryClient, userId: string, record: 
   }
 }
 
-/** One definition of the write, for the hook and for a send after the screen has gone. */
+/**
+ * Keeps a session on this device until the server has it (outbox.ts), so
+ * practice done offline, or on a page closed before its log got through, is
+ * logged at the next start. Called before every send, whichever way it goes.
+ */
+export function queueSession(userId: string, record: SessionRecord): Promise<void> {
+  return putOutboxEntry({ kind: 'session', id: record.id, userId, queuedAt: Date.now(), record });
+}
+
+/**
+ * One definition of the write, for the hook, for a send after the screen has
+ * gone and for the replay of sessions an earlier page left unsent. Offline it
+ * waits (TanStack Query pauses it) and goes when the connection is back; a
+ * request the connection dropped is tried again, so only the server's refusal
+ * fails it.
+ */
 function logSessionOptions(queryClient: QueryClient, userId: string) {
   return {
+    mutationKey: sessionKeys.logs(userId),
     mutationFn: (record: SessionRecord) => logSession(userId, record),
+    onMutate: (record: SessionRecord) => queueSession(userId, record),
+    ...queuedWriteRetry,
     onSuccess: (result: LogSessionResult, record: SessionRecord) => {
       if (result === 'logged') sessionLogged(queryClient, userId, record);
     },
+    // Answered either way: logged, its loop gone, or refused (it would be refused again).
+    onSettled: (
+      _result: LogSessionResult | undefined,
+      _error: Error | null,
+      record: SessionRecord,
+    ) => removeOutboxEntry(record.id),
   };
 }
 
