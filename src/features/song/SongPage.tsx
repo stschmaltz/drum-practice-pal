@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode, type Ref } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link, useParams } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
@@ -81,6 +81,11 @@ function SongScreen({ song }: { song: Song }) {
 function SongBody({ song }: { song: Song }) {
   const file = useSongFile(song.id);
   const settings = useSettings();
+  // Settings are waited for only before the player first opens: usePlayer reads them
+  // once. Opened offline on the defaults, the settings read that starts on reconnect
+  // (pending, now fetching) must not take the playing song off the page.
+  const [playerOpenedFor, setPlayerOpenedFor] = useState<string | null>(null);
+  const playerOpened = playerOpenedFor === song.id;
 
   // isLoadingError, not isError: a failed background refetch keeps the bytes, so a playing song stays mounted.
   if (file.isLoadingError) {
@@ -100,9 +105,12 @@ function SongBody({ song }: { song: Song }) {
     );
   }
   // Settings that can't be fetched offline give way to the defaults, like a failed fetch.
-  if (file.isPending || (settings.isPending && !waitsForNetwork(settings))) {
+  if (file.isPending || (settings.isPending && !waitsForNetwork(settings) && !playerOpened)) {
     return <p className="text-neutral-400">Downloading the song…</p>;
   }
+  // Remembered during render, so the next render already knows (React's "state from
+  // the previous render" pattern); per song, since another song's file is waited for again.
+  if (!playerOpened) setPlayerOpenedFor(song.id);
 
   return (
     <>

@@ -142,6 +142,28 @@ describe('loop edits, offline', () => {
     await waitFor(() => expect(cached()?.speed_ratio).toBe(0.8));
   });
 
+  it("keeps the newer speed on show while the older edit's answer lands and the newer is still on its way", async () => {
+    answerWith(loop);
+    const answer = queryResult.getMockImplementation()!;
+    let updates = 0;
+    // The second update never answers: a connection that stalls after the first.
+    queryResult.mockImplementation((call: QueryCall) =>
+      opArgs(call, 'update') && ++updates === 2 ? new Promise<FakeResult>(() => {}) : answer(call),
+    );
+    const { result, cached } = renderEdit();
+    act(() => onlineManager.setOnline(false));
+    act(() => result.current.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    act(() => result.current.mutate({ loopId: 'a', changes: { speed_ratio: 0.8 } }));
+    await waitFor(() => expect(cached()?.speed_ratio).toBe(0.8));
+    await waitFor(async () => expect(await outboxEntries(USER)).toHaveLength(2));
+
+    act(() => onlineManager.setOnline(true));
+    // The first has been answered once the second is sent (one queue).
+    await waitFor(() => expect(loopUpdates()).toHaveLength(2));
+    await settle();
+    expect(cached()?.speed_ratio).toBe(0.8);
+  });
+
   it('does not roll back an edit whose request the connection dropped', async () => {
     answerWith(loop);
     const answer = queryResult.getMockImplementation()!;

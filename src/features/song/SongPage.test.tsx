@@ -211,6 +211,45 @@ describe('SongPage offline', () => {
     expect(downloads()).toHaveLength(1);
   });
 
+  it('keeps playing on the defaults when settings never cached come in on reconnect', async () => {
+    serve();
+    // A song row and file on the device, but no settings cached: offline, the player
+    // starts on the defaults rather than waiting for them.
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+    await offlineDb.songFiles.put({
+      userId: USER,
+      songId: SONG_A,
+      bytes: new Uint8Array(fileBytes(SONG_A)),
+    });
+    let answerSettings!: (result: FakeResult) => void;
+    const settingsAnswer = new Promise<FakeResult>((resolve) => (answerSettings = resolve));
+    const answer = queryResult.getMockImplementation()!;
+    queryResult.mockImplementation((call) =>
+      call.table === 'user_settings' ? settingsAnswer : answer(call),
+    );
+    act(() => onlineManager.setOnline(false));
+    const user = renderSong(SONG_A, queryClient);
+    await loadPlayer();
+    await user.click(playButton());
+    act(() => engines[0]!.fire('stateChanged', { playing: true }));
+    expect(playButton()).toHaveAccessibleName('Pause');
+
+    // Back online: the settings read goes out (pending, fetching), then lands.
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() =>
+      expect(queryResult.mock.calls.some(([call]) => call.table === 'user_settings')).toBe(true),
+    );
+    await settle();
+    expect(engines).toHaveLength(1);
+    expect(playButton()).toHaveAccessibleName('Pause');
+    await act(async () => answerSettings(ok(settingsRow)));
+    await settle();
+    expect(engines).toHaveLength(1);
+    expect(engines[0]!.destroy).not.toHaveBeenCalled();
+    expect(playButton()).toHaveAccessibleName('Pause');
+  });
+
   it('says why, rather than loading for ever, for a song never opened on this device', async () => {
     serve();
     act(() => onlineManager.setOnline(false));

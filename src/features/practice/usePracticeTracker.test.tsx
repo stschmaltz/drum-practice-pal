@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { onlineManager } from '@tanstack/react-query';
 import { outboxEntries } from '@/features/offline/outbox';
+import { hasUnsentWrites, useHasUnsentWrites } from '@/features/offline/unsentWrites';
 import { loopKeys } from '@/features/loops/loopKeys';
 import { songKeys } from '@/features/library/useSongs';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
@@ -575,6 +576,38 @@ describe('a keepalive log on a page that lives on', () => {
     await waitFor(() => expect(view.tracker().unsaved).toHaveLength(1));
     expect(view.tracker().unsaved[0]!.id).toBe(keptAlive()[0]!.id);
     expect(logged()).toHaveLength(1);
+  });
+});
+
+describe('a keepalive log still on its way', () => {
+  it('counts as an unsent write until it is answered, through its fallback too', async () => {
+    let answer!: (response: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => (answer = resolve)));
+    let landLog!: (result: FakeResult) => void;
+    queryResult.mockReturnValueOnce(new Promise<FakeResult>((resolve) => (landLog = resolve)));
+    const view = renderTracker();
+    const unsent = renderHook(() => useHasUnsentWrites(USER), {
+      wrapper: wrapperFor(view.queryClient, signedInAs(USER)),
+    });
+    expect(hasUnsentWrites(view.queryClient, USER)).toBe(false);
+    view.playOn(40);
+
+    setVisibility('hidden');
+    expect(keptAlive()).toHaveLength(1);
+    // Back on show before the keepalive's answer: Sign out must still wait.
+    setVisibility('visible');
+    expect(hasUnsentWrites(view.queryClient, USER)).toBe(true);
+    await waitFor(() => expect(unsent.result.current).toBe(true));
+
+    // It failed: the same record goes through the mutation, still unsent.
+    await act(async () => answer(new Response('{}', { status: 401 })));
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(hasUnsentWrites(view.queryClient, USER)).toBe(true);
+    expect(unsent.result.current).toBe(true);
+
+    await act(async () => landLog(ok));
+    await waitFor(() => expect(unsent.result.current).toBe(false));
+    expect(hasUnsentWrites(view.queryClient, USER)).toBe(false);
   });
 });
 

@@ -310,11 +310,25 @@ describe('applySavedLoopEdit', () => {
   });
 
   it('takes a null the server saved', () => {
-    // The cache was put back to 0.9 by something else while the clearing was on its way.
-    const current = loop({ target_ratio: 0.9 });
+    const current = loop({ target_ratio: null, name: 'Verse' });
     expect(
-      applySavedLoopEdit(current, loop({ target_ratio: null }), { target_ratio: null }),
-    ).toEqual({ ...current, target_ratio: null });
+      applySavedLoopEdit(current, loop({ target_ratio: null, name: 'Other' }), {
+        target_ratio: null,
+      }),
+    ).toEqual(current);
+  });
+
+  it('leaves a sent field that a newer edit has changed since', () => {
+    // 90% then 80%, both pending: the answer to 90% must not put 90% back over 80%.
+    const current = loop({ speed_ratio: 0.8 });
+    expect(applySavedLoopEdit(current, loop({ speed_ratio: 0.9 }), { speed_ratio: 0.9 })).toEqual(
+      current,
+    );
+    // A cleared target, then a new one.
+    const retargeted = loop({ target_ratio: 0.9 });
+    expect(
+      applySavedLoopEdit(retargeted, loop({ target_ratio: null }), { target_ratio: null }),
+    ).toEqual(retargeted);
   });
 
   it('with nothing sent, changes nothing, and never changes the loop it was given', () => {

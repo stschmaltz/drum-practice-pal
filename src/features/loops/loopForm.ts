@@ -191,8 +191,12 @@ function showsAsSameTarget(saved: number | null, typed: number | null): boolean 
 
 /**
  * The server's answer to an edit, taken for the fields that edit sent and no
- * others. For while another write is pending: the server's row may be from
- * before that write, and its other fields would undo the optimistic values.
+ * others, and for each of those only while the cache still holds the value
+ * this edit sent. For while another write is pending: the server's row may be
+ * from before that write, so its other fields would undo the optimistic
+ * values, and so would a field both edits sent (90% then 80%: the first
+ * answer would show 90% while 80% is still on its way). The same rule as
+ * `revertLoopEdit`.
  */
 export function applySavedLoopEdit<T extends LoopEdit>(
   current: T,
@@ -201,7 +205,8 @@ export function applySavedLoopEdit<T extends LoopEdit>(
 ): T {
   const merged = { ...current };
   for (const field of LOOP_EDIT_FIELDS) {
-    if (changes[field] !== undefined) assign(merged, field, saved[field]);
+    const sent = changes[field];
+    if (sent !== undefined && current[field] === sent) assign(merged, field, saved[field]);
   }
   return merged;
 }

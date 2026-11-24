@@ -6,6 +6,7 @@ import { useAuth, useSignedInUser } from '@/lib/auth';
 import { isOnline } from '@/lib/network';
 import { randomUuid } from '@/lib/randomUuid';
 import { sessionMinPlaySeconds } from './debugPractice';
+import { startKeepaliveSend } from './keepaliveSends';
 import { logSessionOnExit } from './sessionsApi';
 import {
   countRepeat,
@@ -101,19 +102,27 @@ export function usePracticeTracker(
   /** With `keepalive`, for a page that is hidden or going away. */
   const sendOnExit = useCallback(
     (record: SessionRecord, token: string) => {
+      // Counted as on its way until its answer is dealt with (keepaliveSends.ts).
+      const answered = startKeepaliveSend(userId);
       void logSessionOnExit(token, userId, record).then((result) => {
-        // Only reached when the page lived on: a hidden tab that came back.
-        // `loopGone` needs nothing: the loop's history went with it.
-        if (result === 'failed') {
-          // The hook's own mutation observer went with the screen; see `unobserved`.
-          if (screenGone.current) void logSessionUnobserved(queryClient, userId, record);
-          else sendNow(record);
-          return;
-        }
-        void removeOutboxEntry(record.id);
-        if (result === 'logged') {
-          sessionLogged(queryClient, userId, record);
-          setLastLogged(record);
+        try {
+          // Only reached when the page lived on: a hidden tab that came back.
+          // `loopGone` needs nothing: the loop's history went with it.
+          if (result === 'failed') {
+            // The hook's own mutation observer went with the screen; see `unobserved`.
+            if (screenGone.current) void logSessionUnobserved(queryClient, userId, record);
+            else sendNow(record);
+            return;
+          }
+          void removeOutboxEntry(record.id);
+          if (result === 'logged') {
+            sessionLogged(queryClient, userId, record);
+            setLastLogged(record);
+          }
+        } finally {
+          // After the fallback has started: it is pending in the mutation cache from its
+          // first synchronous step, so the record is never counted by neither.
+          answered();
         }
       });
     },

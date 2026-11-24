@@ -1,6 +1,7 @@
 /**
  * Whether the user has writes the server hasn't answered yet: loop edits and
- * creates and deletes (one mutation key), and practice session logs. Signing
+ * creates and deletes (one mutation key), and practice session logs, those
+ * sent with `keepalive` from a hidden page included (keepaliveSends.ts). Signing
  * out empties the device, the outbox with it, so it waits until these have
  * gone (SignOutButton). Paused offline or retrying a dropped request, a write
  * is still pending, so this covers both.
@@ -9,8 +10,10 @@
  * before the replay has read them (useOutboxReplay), a fraction of a second
  * after the app opens.
  */
+import { useSyncExternalStore } from 'react';
 import { useIsMutating, type QueryClient } from '@tanstack/react-query';
 import { loopKeys } from '@/features/loops/loopKeys';
+import { keepaliveSendsPending, subscribeKeepaliveSends } from '@/features/practice/keepaliveSends';
 import { sessionKeys } from '@/features/practice/sessionKeys';
 
 const unsentFilters = (userId: string) => [
@@ -20,7 +23,10 @@ const unsentFilters = (userId: string) => [
 
 /** At the press: asked of the mutation cache, not taken from the last render. */
 export function hasUnsentWrites(queryClient: QueryClient, userId: string): boolean {
-  return unsentFilters(userId).some((filters) => queryClient.isMutating(filters) > 0);
+  return (
+    keepaliveSendsPending(userId) > 0 ||
+    unsentFilters(userId).some((filters) => queryClient.isMutating(filters) > 0)
+  );
 }
 
 /** `hasUnsentWrites` for React, for the control's `disabled` and its note. */
@@ -28,5 +34,8 @@ export function useHasUnsentWrites(userId: string): boolean {
   const [loops, sessions] = unsentFilters(userId);
   const loopWrites = useIsMutating(loops);
   const sessionLogs = useIsMutating(sessions);
-  return loopWrites + sessionLogs > 0;
+  const keepalives = useSyncExternalStore(subscribeKeepaliveSends, () =>
+    keepaliveSendsPending(userId),
+  );
+  return loopWrites + sessionLogs + keepalives > 0;
 }

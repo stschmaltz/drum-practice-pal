@@ -141,15 +141,22 @@ describe('outbox', () => {
 });
 
 describe('shouldPersistQuery', () => {
-  const query = (queryKey: readonly unknown[], status: 'success' | 'pending' | 'error') =>
-    ({ queryKey, state: { status } }) as unknown as Pick<Query, 'queryKey' | 'state'>;
+  const query = (
+    queryKey: readonly unknown[],
+    status: 'success' | 'pending' | 'error',
+    data: unknown = status === 'success' ? [] : undefined,
+  ) => ({ queryKey, state: { status, data } }) as unknown as Pick<Query, 'queryKey' | 'state'>;
 
   it('keeps loaded rows', () => {
     expect(shouldPersistQuery(query(songKeys.forUser('u1'), 'success'))).toBe(true);
     expect(shouldPersistQuery(query(loopKeys.practice('u1'), 'success'))).toBe(true);
   });
 
-  it('leaves out song files (stored on their own) and anything not loaded', () => {
+  it('keeps loaded rows whose background refetch failed', () => {
+    expect(shouldPersistQuery(query(songKeys.forUser('u1'), 'error', []))).toBe(true);
+  });
+
+  it('leaves out song files (stored on their own) and anything never loaded', () => {
     expect(shouldPersistQuery(query(songFileKeys.forSong('u1', 's1'), 'success'))).toBe(false);
     expect(shouldPersistQuery(query(songKeys.forUser('u1'), 'pending'))).toBe(false);
     expect(shouldPersistQuery(query(songKeys.forUser('u1'), 'error'))).toBe(false);
@@ -208,6 +215,34 @@ describe('saveCacheWhenHidden', () => {
     } finally {
       stop();
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    }
+  });
+
+  it('keeps rows whose background refetch failed, restored as loaded rows', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(songKeys.forUser('u1'), [{ title: 'Opened before' }]);
+    await queryClient
+      .fetchQuery({
+        queryKey: songKeys.forUser('u1'),
+        queryFn: () => Promise.reject(new Error('Failed to fetch')),
+      })
+      .catch(() => {});
+    expect(queryClient.getQueryState(songKeys.forUser('u1'))?.status).toBe('error');
+
+    const stop = saveCacheWhenHidden(queryClient);
+    try {
+      window.dispatchEvent(new Event('pagehide'));
+      await vi.waitFor(
+        async () => expect(await restoredSongs()).toEqual([{ title: 'Opened before' }]),
+        { timeout: 500 },
+      );
+      const restored = await queryPersister.restoreClient();
+      expect(restored?.clientState.queries[0]?.state).toMatchObject({
+        status: 'success',
+        error: null,
+      });
+    } finally {
+      stop();
     }
   });
 
