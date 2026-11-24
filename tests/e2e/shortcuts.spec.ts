@@ -163,6 +163,39 @@ test('? lists the shortcuts and Escape closes the list; keys typed in a field st
   await expect(dialog).toHaveCount(0);
 });
 
+test('focus stays in the shortcut list after a click on its heading, and the page behind takes no clicks', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await focusNothing(page);
+  await page.keyboard.press('?');
+  const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+  const close = dialog.getByRole('button', { name: 'Close' });
+  await expect(close).toBeFocused();
+
+  // Chromium moves its Tab starting point to where the click landed, the heading, with focus on <body>.
+  await dialog.getByRole('heading', { name: 'Keyboard shortcuts' }).click();
+  const focusInDialog = () =>
+    page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null);
+  for (const key of ['Shift+Tab', 'Shift+Tab', 'Tab', 'Tab']) {
+    await page.keyboard.press(key);
+    expect(await focusInDialog(), `focus after ${key}`).toBe(true);
+  }
+  await dialog.getByText('Keys do nothing while you type', { exact: false }).click();
+  await page.keyboard.press('Shift+Tab');
+  await expect(close).toBeFocused();
+
+  // Behind the backdrop the page is inert: Play under it can't be reached by a press either.
+  expect(await playButton(page).evaluate((button) => button.closest('[inert]') !== null)).toBe(
+    true,
+  );
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => document.querySelector('[inert]') === null)).toBe(true);
+  await expect(playButton(page)).toHaveText('Play');
+});
+
 test('Space after clicking Play loop pauses, rather than pressing the focused Restart loop', async ({
   user,
   page,

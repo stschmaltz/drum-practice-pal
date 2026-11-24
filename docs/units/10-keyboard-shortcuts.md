@@ -67,6 +67,10 @@ Changed:
 - **A refused action.** `setStatus` returns false when another status write to the loop is on its way; then nothing is sent and no focus is scheduled. `playLoop` refused by `canPlay` sets no loop, range or speed. Each key's gate failing still cancels the browser's default (no scroll under a key that is the page's), but does nothing else.
 - **StrictMode** mounts the listener twice; cleanup removes the first. Counted in "in StrictMode, still acts once per press".
 
+### Totals
+
+`npm run check`: 89 files, 3506 tests passed. `npm run e2e`: 337 passed, 14 skipped (the existing skips), 0 failed, built afresh (`dist` deleted, nothing on 4173).
+
 ### Known gaps
 
 - A refused "Mark finished" or "Reopen" moves the loop back after focus has followed it; focus then falls to `<body>`. Rare (a refused write), and left for Unit 13 with the other failure copy.
@@ -204,6 +208,10 @@ Fixes QA issue 1: "Mark finished" and "Reopen" in the song page's loop panel, an
 ### Async windows and inputs
 
 - **A status write in flight, focus on the loop's new button (now possible).** Enter or a click on it: `setStatus` sees the pending write in the mutation cache and sends nothing, schedules no focus. Space: play/pause, as everywhere (the page's shortcut). A press on another loop's status button: that loop isn't locked and acts as before. The write lands: `aria-disabled` goes, focus stays. The write is refused: the optimistic move is undone, the loop's button moves back to its first section (a new element), focus falls to `<body>` and the error shows under the loop. Checked with a held, refused write; that is the known gap Build recorded, unchanged.
+
+### Totals
+
+`npm run check`: 89 files, 3506 tests passed. `npm run e2e`: 337 passed, 14 skipped (the existing skips), 0 failed, built afresh (`dist` deleted, nothing on 4173).
 
 ### Known gaps
 
@@ -343,3 +351,45 @@ None new. The known gaps Build recorded (focus after a refused status write, no 
 ### Totals
 
 `npm run check`: 89 files, 3503 tests passed. `npm run e2e`: 334 passed, 14 skipped (the existing skips), 0 failed, built afresh (`dist` deleted, nothing on 4173).
+
+## Build: Copilot review
+
+### Summary
+
+One comment on PR #13 (`ShortcutOverlay.tsx:41`): after a click on the shortcut list's heading or help text, Shift+Tab could focus a control behind the open overlay. **Real.** Clicking non-focusable text leaves focus on `<body>`, outside the dialog, so the dialog's own `onKeyDown` (which kept Tab on Close) never heard the key, and nothing behind the backdrop was inert. QA's "Tab comes back to Close" held only because Chromium starts Tab from where the click landed, the heading, whose next focusable is Close; Shift+Tab goes to the one before it, which is on the page behind. Confirmed before the fix: the new e2e test failed on desktop at the first Shift+Tab (focus outside the dialog), and in jsdom Shift+Tab from `<body>` reached a button behind the overlay.
+
+Fix: the overlay is drawn into `<body>` with `createPortal`, and while it is open every other child of `<body>` (the app's `#root`) gets `inert`, so the page behind takes no focus, clicks or screen reader; Tab is kept on Close by a `document` keydown listener, so it holds from wherever focus is. On close the listener goes, the `inert` it added is taken off (only what it added) and then focus returns to the opener, since an inert element can't take focus. Escape stays on the dialog; from `<body>` the page's window listener already closes it (`resolveShortcut` with `helpOpen`). Unchanged: Escape and a press-and-release outside close it, focus back to the opener, page shortcuts off while open.
+
+### Files
+
+- `src/features/shortcuts/ShortcutOverlay.tsx`: portal, `makeOthersInert`, document-level Tab.
+- `src/features/shortcuts/ShortcutOverlay.test.tsx`: harness gains a button after the overlay; three tests.
+- `tests/e2e/shortcuts.spec.ts`: one test.
+- `docs/review-checklist.md` (new row), `AGENTS.md` (the dialog bullet).
+
+### Tests
+
+- "keeps Tab and Shift+Tab on Close after a click on its text has left focus on the page": click the heading, assert focus is on `<body>`, Shift+Tab lands on Close; the same with the help text and Tab. Failed before the fix (focus went to "Behind").
+- "makes the page behind it inert while open, and only then": opener and the button after the overlay are under `[inert]`, the dialog isn't; after Escape no `[inert]` is left and the opener has focus. Failed before the fix.
+- "leaves alone a part of the page that was inert already".
+- e2e "focus stays in the shortcut list after a click on its heading, and the page behind takes no clicks" (all three sizes): Shift+Tab twice and Tab twice after a click on the heading keep focus in the dialog, Shift+Tab after a click on the help text lands on Close, Play is under `[inert]`, and after Escape nothing is inert. Failed before the fix on desktop.
+
+### Checklist
+
+No row covered it. "Where a click lands" (section 3) is about which element a `click` reaches, not where focus sits afterwards. Added **Containment that depends on where focus is** under section 5 (Validated paths: a trap on the dialog is a check focus can get around), with this miss as its example.
+
+### Async windows and inputs
+
+None added. The open overlay is not async; inputs while it is open: Tab and Shift+Tab from anywhere go to Close; Escape closes it from the dialog or `<body>`; `?` closes it; clicks on the page behind do nothing (inert, and the backdrop covers it).
+
+### Totals
+
+`npm run check`: 89 files, 3506 tests passed. `npm run e2e`: 337 passed, 14 skipped (the existing skips), 0 failed, built afresh (`dist` deleted, nothing on 4173).
+
+### Known gaps
+
+- Only children of `<body>` present at open are made inert. Nothing else in the app portals into `<body>` today; a later toast or dialog that does would sit outside the inert set.
+
+### Manual verify
+
+Open `?` on the song page at 1440 px, click the heading, press Shift+Tab and Tab a few times: the focus ring stays on Close. Click a control behind the backdrop: nothing happens apart from the overlay closing (the press began outside). Escape: focus back on what had it.

@@ -13,6 +13,7 @@ function Harness() {
       </button>
       <button type="button">After</button>
       <ShortcutOverlay open={open} onClose={() => setOpen(false)} />
+      <button type="button">Behind</button>
     </>
   );
 }
@@ -45,6 +46,48 @@ describe('ShortcutOverlay', () => {
     expect(close).toHaveFocus();
     await user.tab({ shift: true });
     expect(close).toHaveFocus();
+  });
+
+  it('keeps Tab and Shift+Tab on Close after a click on its text has left focus on the page', async () => {
+    const { user, dialog } = await openOverlay();
+    const close = within(dialog).getByRole('button', { name: 'Close' });
+
+    // The heading can't take focus, so the click leaves it on <body>, outside the dialog.
+    await user.click(within(dialog).getByRole('heading', { name: 'Keyboard shortcuts' }));
+    expect(document.body).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(close).toHaveFocus();
+
+    await user.click(within(dialog).getByText(/Keys do nothing while you type/));
+    expect(document.body).toHaveFocus();
+    await user.tab();
+    expect(close).toHaveFocus();
+  });
+
+  it('makes the page behind it inert while open, and only then', async () => {
+    const { user, dialog } = await openOverlay();
+    const opener = screen.getByRole('button', { name: 'Shortcuts' });
+
+    expect(opener.closest('[inert]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Behind' }).closest('[inert]')).not.toBeNull();
+    expect(dialog.closest('[inert]')).toBeNull();
+
+    await user.keyboard('{Escape}');
+    expect(document.querySelector('[inert]')).toBeNull();
+    expect(opener).toHaveFocus();
+  });
+
+  it('leaves alone a part of the page that was inert already', async () => {
+    const asleep = document.createElement('div');
+    asleep.setAttribute('inert', '');
+    document.body.append(asleep);
+    try {
+      const { user } = await openOverlay();
+      await user.keyboard('{Escape}');
+      expect(asleep).toHaveAttribute('inert');
+    } finally {
+      asleep.remove();
+    }
   });
 
   it('Escape closes it and focus goes back to what opened it', async () => {

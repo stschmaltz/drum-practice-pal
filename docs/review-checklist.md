@@ -40,6 +40,7 @@ For every async window (a pending mutation, a load, a count-in, a hand-over betw
 ## 5. Validated paths: is there a way around the check?
 
 - **A second entry point that skips validation.** _05: downloaded bytes went straight to `api.load`, bypassing the Guitar Pro-only `parseScore`, so a damaged file became a one-bar alphaTex score._ Every input that a check exists for reaches the code only through that check.
+- **Containment that depends on where focus is.** A trap or guard attached to the element it protects only hears events from inside it, and focus can be outside without the user leaving: a click on non-focusable text puts it on `<body>`. _10: the shortcut list kept Tab on Close with a listener on the dialog; after a click on its heading Shift+Tab went to a control behind the open overlay, which could then be pressed._ Make what is behind `inert` (or use a native modal), handle the key at the document, and test from focus on `<body>`.
 - **Accessibility claims.** A wrapper class doesn't change the target size of the control inside it. _05: `min-h-11` on a wrapper left the range inputs short._ Measure the control itself.
 
 ## 6. Hygiene (Review already catches these; keep checking)
