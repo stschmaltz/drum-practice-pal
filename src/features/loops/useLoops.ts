@@ -227,10 +227,12 @@ export function useSetLoopStatus(songId: string, loopId: string) {
   });
   const latest = writes.at(-1);
 
-  const setStatus = (status: LoopStatus) => {
+  /** False, sending nothing, while another status write to the loop is on its way. */
+  const setStatus = (status: LoopStatus): boolean => {
     // Asked of the cache at the press, not taken from the last render.
-    if (queryClient.isMutating(filters) > 0) return;
+    if (queryClient.isMutating(filters) > 0) return false;
     mutate({ loopId, changes: { status } });
+    return true;
   };
   return {
     setStatus,

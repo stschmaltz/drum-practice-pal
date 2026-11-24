@@ -4,6 +4,9 @@ import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass, primaryButtonClass } from '@/components/styles';
 import { SignOutButton } from '@/features/auth/SignOutButton';
+import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
+import { characterKeysLabel } from '@/features/shortcuts/shortcuts';
+import { useCharacterKeysOn } from '@/features/shortcuts/useCharacterKeysOn';
 import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_LABELS } from '@/features/player/countInLabels';
 import { COUNT_IN_BAR_OPTIONS, type CountInMode } from '@/lib/schema';
 import {
@@ -33,6 +36,7 @@ export function SettingsPage() {
       ) : (
         <SettingsForm saved={settings.data} />
       )}
+      <KeyboardSection />
       <section className="flex flex-col items-start gap-2 border-t border-neutral-800 pt-6">
         <h2 className="text-lg font-semibold">Account</h2>
         <SignOutButton />
@@ -228,5 +232,44 @@ function DrumsFieldset({ values, edit }: FieldsetProps) {
         Mute the drum track by default (play along to the band)
       </label>
     </fieldset>
+  );
+}
+
+/**
+ * The single-letter shortcuts switch (WCAG 2.1.4). Kept on this device, not
+ * in `user_settings`, and saved the moment it changes: it isn't part of the
+ * account's form, its draft or its Save button, and it is there whether or
+ * not the account's settings have loaded.
+ */
+function KeyboardSection() {
+  const on = useCharacterKeysOn();
+  // Storage refused the last save: it applies to this page only.
+  const [notKept, setNotKept] = useState(false);
+  const descriptionId = useId();
+
+  return (
+    <section className="flex max-w-xl flex-col gap-3 border-t border-neutral-800 pt-6">
+      <h2 className="text-lg font-semibold">Keyboard on this device</h2>
+      <div className="flex flex-col gap-1">
+        <label className="flex min-h-11 items-center gap-3">
+          <input
+            type="checkbox"
+            className="size-5 accent-sky-500"
+            checked={on}
+            aria-describedby={descriptionId}
+            onChange={(event) => setNotKept(!saveCharacterKeysOn(event.target.checked))}
+          />
+          Single-letter shortcuts
+        </label>
+        <p id={descriptionId} className="text-sm text-neutral-400">
+          {characterKeysLabel()} on the song page. For this device only, and saved as soon as you
+          change it. Turn them off if speech input or a stray key press sets them off. Space, the
+          arrow keys and Page Up / Page Down (pedals) keep working either way.
+        </p>
+      </div>
+      <p role="status" className="text-sm text-amber-300">
+        {notKept ? 'This browser won’t keep this after the app is closed.' : ''}
+      </p>
+    </section>
   );
 }

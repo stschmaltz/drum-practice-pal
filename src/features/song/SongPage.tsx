@@ -28,10 +28,12 @@ import { bpmAtSpeed } from '@/features/player/tempo';
 import { usePlayer } from '@/features/player/usePlayer';
 import { durationLabel } from '@/features/practice/sessions';
 import { usePracticeTracker, type PracticeTracker } from '@/features/practice/usePracticeTracker';
+import { ShortcutOverlay } from '@/features/shortcuts/ShortcutOverlay';
 import { useSettings } from '@/features/settings/useSettings';
 import { isUuid } from '@/lib/randomUuid';
 import { useJamMode } from './useJamMode';
 import { useRequestedLoop } from './useRequestedLoop';
+import { useSongShortcuts } from './useSongShortcuts';
 
 /**
  * /songs/:id. Lazy-loaded from App.tsx with the player. Opens in jam mode
@@ -41,7 +43,8 @@ import { useRequestedLoop } from './useRequestedLoop';
  * plays on repeat at its saved speed, and while the loop form is open a tap
  * on the score picks a bar instead of seeking. Time spent playing a loop is
  * logged as practice sessions (Unit 09), and `?loop=<id>` opens the page on
- * that loop, which is how the home page's lists link here.
+ * that loop, which is how the home page's lists link here. Keys and pedals
+ * (Unit 10) work the player and switch loops; `?` lists them.
  */
 export function SongPage() {
   const { id = '' } = useParams();
@@ -132,6 +135,7 @@ function SongPlayer({
     practice.openLoop,
     practice.activeLoop !== null,
   );
+  const shortcuts = useSongShortcuts({ player, practice, loops: loops.data });
   const loopPanel = useLoopPanelOpen();
   const { setOpen: setLoopPanelOpen } = loopPanel;
   const pickingBars = practice.editor !== null;
@@ -166,11 +170,14 @@ function SongPlayer({
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <PlayerStatusLine snapshot={snapshot} />
-            <LoopPanelToggle
-              open={loopPanel.open}
-              panelBodyId={loopPanel.bodyId}
-              onOpenChange={setLoopPanelOpen}
-            />
+            <div className="flex gap-2">
+              <ShortcutsButton onOpen={shortcuts.openHelp} />
+              <LoopPanelToggle
+                open={loopPanel.open}
+                panelBodyId={loopPanel.bodyId}
+                onOpenChange={setLoopPanelOpen}
+              />
+            </div>
           </div>
           {practice.activeLoop && (
             <ActiveLoopLine loop={practice.activeLoop} onExit={practice.exitLoop} />
@@ -194,7 +201,25 @@ function SongPlayer({
           bodyId={loopPanel.bodyId}
         />
       </div>
+      <ShortcutOverlay open={shortcuts.helpOpen} onClose={shortcuts.closeHelp} />
     </div>
+  );
+}
+
+/**
+ * Opens the shortcut overlay, which `?` also does. From 768 px only: a tablet
+ * or laptop is where a keyboard is likely, and the phone's row has no room.
+ */
+function ShortcutsButton({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      className={`hidden md:inline-flex md:items-center ${buttonClass}`}
+      aria-haspopup="dialog"
+      onClick={onOpen}
+    >
+      Shortcuts
+    </button>
   );
 }
 

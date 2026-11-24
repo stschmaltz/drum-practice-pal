@@ -229,10 +229,11 @@ function assign<K extends keyof LoopEdit>(target: Partial<LoopEdit>, field: K, v
   target[field] = value;
 }
 
+/** The columns `sortLoops` orders by. */
+type SortableLoop = Pick<Loop, 'start_bar' | 'end_bar' | 'created_at' | 'id'>;
+
 /** In the order the bars come in the song, which is how a drummer looks for a section. */
-export function sortLoops<T extends Pick<Loop, 'start_bar' | 'end_bar' | 'created_at' | 'id'>>(
-  loops: readonly T[],
-): T[] {
+export function sortLoops<T extends SortableLoop>(loops: readonly T[]): T[] {
   return [...loops].sort(
     (a, b) =>
       a.start_bar - b.start_bar ||
@@ -240,6 +241,26 @@ export function sortLoops<T extends Pick<Loop, 'start_bar' | 'end_bar' | 'create
       Date.parse(a.created_at) - Date.parse(b.created_at) ||
       a.id.localeCompare(b.id),
   );
+}
+
+/** The columns the panel's sections are built from. */
+type ListedLoop = SortableLoop & Pick<Loop, 'status'>;
+
+/** The loop panel's two sections, each in song order: the loops on the go, then the finished ones. */
+export function loopsByStatus<T extends ListedLoop>(
+  loops: readonly T[],
+): { active: T[]; finished: T[] } {
+  const sorted = sortLoops(loops);
+  return {
+    active: sorted.filter((loop) => loop.status === 'active'),
+    finished: sorted.filter((loop) => loop.status === 'finished'),
+  };
+}
+
+/** Every loop in the order the panel lists them, which is the order the keys step through. */
+export function loopsInPanelOrder<T extends ListedLoop>(loops: readonly T[]): T[] {
+  const { active, finished } = loopsByStatus(loops);
+  return [...active, ...finished];
 }
 
 /** "Bar 5" or "Bars 5 to 8". */

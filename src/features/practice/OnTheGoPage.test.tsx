@@ -5,6 +5,7 @@ import type { Loop } from '@/features/loops/loopForm';
 import { loopKeys } from '@/features/loops/loopKeys';
 import { PRACTICE_LOOP_SELECT, type PracticeLoop } from '@/features/loops/practiceList';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
+import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow } from '@/test/loopTable';
 import { renderRoutes, RouteMarker, settle } from '@/test/render';
 import { OnTheGoPage } from './OnTheGoPage';
@@ -243,14 +244,16 @@ describe('finishing and reopening from the home page', () => {
     await waitFor(() => expect(tab(/^Finished/)).toHaveTextContent('Finished (1)'));
     await user.click(tab(/^Finished/));
     const reopen = screen.getByRole('button', { name: 'Reopen Chorus fill' });
-    expect(reopen).toBeDisabled();
+    expectLocked(reopen);
     await user.click(reopen);
+    reopen.focus();
+    await user.keyboard('{Enter}');
+    await user.keyboard(' ');
+    await settle();
     expect(table.writes()).toEqual([{ status: 'finished' }]);
 
     release();
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Reopen Chorus fill' })).toBeEnabled(),
-    );
+    await waitFor(() => expectUnlocked(screen.getByRole('button', { name: 'Reopen Chorus fill' })));
   });
 
   it('a refused change puts the loop back and says so, though its button left the tab meanwhile', async () => {
@@ -387,5 +390,40 @@ describe('the tab in the address', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/?tab=finished');
     expect(table.writes()).toEqual([{ status: 'active' }]);
     expect(tab(/^On the go/)).toHaveTextContent('On the go (1)');
+  });
+});
+
+describe('focus after a loop leaves the tab', () => {
+  it('Mark finished hands focus to the next loop’s button', async () => {
+    serve([fill, intro, outro]);
+    const user = renderHome();
+    await waitFor(() => expect(listed()).toEqual(['Intro', 'Chorus fill', 'Outro']));
+
+    await user.click(screen.getByRole('button', { name: 'Mark finished Intro' }));
+
+    await waitFor(() => expect(listed()).toEqual(['Chorus fill', 'Outro']));
+    expect(screen.getByRole('button', { name: 'Mark finished Chorus fill' })).toHaveFocus();
+  });
+
+  it('from the last loop on the list, to the one before it', async () => {
+    serve([fill, intro]);
+    const user = renderHome();
+    await waitFor(() => expect(listed()).toEqual(['Intro', 'Chorus fill']));
+
+    await user.click(screen.getByRole('button', { name: 'Mark finished Chorus fill' }));
+
+    await waitFor(() => expect(listed()).toEqual(['Intro']));
+    expect(screen.getByRole('button', { name: 'Mark finished Intro' })).toHaveFocus();
+  });
+
+  it('from the only loop on the tab, to the tab it went to', async () => {
+    serve([intro, done]);
+    const user = renderHome('/?tab=finished');
+    await waitFor(() => expect(listed()).toEqual(['Done one']));
+
+    await user.click(screen.getByRole('button', { name: 'Reopen Done one' }));
+
+    await waitFor(() => expect(listed()).toEqual([]));
+    expect(tab(/^On the go/)).toHaveFocus();
   });
 });

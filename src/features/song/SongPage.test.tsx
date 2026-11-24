@@ -23,6 +23,7 @@ import {
   TEMPO_CHANGE_BAR_TEMPOS,
   TICKS_PER_BAR,
 } from '@/test/fakePlayerEngine';
+import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
 import { SongPage } from './SongPage';
@@ -1556,6 +1557,25 @@ describe('SongPage practice sessions', () => {
     ]);
   });
 
+  it('a pedal switching loops while playing logs the loop it left, at that loop’s speed', async () => {
+    serve({ loops: [verse, chorus] });
+    const { user, engine } = await startVerse();
+    later(40);
+    // A drummer's hands on the kit: the pedal, with focus left where the click put it.
+    await user.keyboard('{PageDown}');
+    await waitFor(() =>
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Chorus'),
+    );
+
+    await waitFor(() =>
+      expect(sessionsSent()).toEqual([
+        expect.objectContaining({ loop_id: 'verse', duration_seconds: 40, speed_ratio: 0.8 }),
+      ]),
+    );
+    expect(engine.pause).not.toHaveBeenCalled();
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('60%');
+  });
+
   it('logs nothing for a short go, and nothing for jam mode', async () => {
     const { user, pause, resume } = await playVerseFor(20);
     await user.click(
@@ -1722,5 +1742,166 @@ describe('SongPage practice sessions', () => {
     expect(sessionsSent().map((row) => row.duration_seconds)).toEqual([40, 50, 40, 50]);
     expect(sessionsSent()[2]!.id).toBe(sessionsSent()[0]!.id);
     expect(sessionsSent()[3]!.id).toBe(sessionsSent()[1]!.id);
+  });
+});
+
+describe('SongPage keyboard shortcuts', () => {
+  const panel = () => within(screen.getByTestId('loop-panel'));
+  const verse = loopOfSongA('verse', { name: 'Verse', start_bar: 5, end_bar: 8, speed_ratio: 0.8 });
+  const late = loopOfSongA('late', { name: 'Late', start_bar: 9, end_bar: 12, speed_ratio: 0.5 });
+
+  async function openSong(savedLoops: Loop[] = [verse, late], { song = songRow(SONG_A) } = {}) {
+    serve({ songs: { [SONG_A]: song, [SONG_B]: songRow(SONG_B) }, loops: savedLoops });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    await panel().findAllByRole('button', { name: /^Play loop / });
+    return {
+      user,
+      engine,
+      /** Presses "Play loop <name>" with the mouse, and alphaTab reports playing. */
+      playLoop: async (name: string) => {
+        await user.click(panel().getByRole('button', { name: `Play loop ${name}` }));
+        act(() => engine.fire('stateChanged', { playing: true }));
+      },
+    };
+  }
+
+  /** A toggle in the controls bar, and whether it shows pressed. */
+  const toggle = (name: string) => screen.getByRole('button', { name });
+  const pressed = (name: string) => toggle(name).getAttribute('aria-pressed');
+
+  it('Shortcuts and ? open the list of keys; Escape closes it and focus goes back', async () => {
+    const { user } = await openSong();
+
+    await user.click(screen.getByRole('button', { name: 'Shortcuts' }));
+    const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(within(dialog).getByText('Play or pause')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Shortcuts' })).toHaveFocus();
+
+    await user.keyboard('?');
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+    await user.keyboard('?');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('a pedal’s Page Down switches loops while playing, and the readout follows each loop', async () => {
+    const { user, engine } = await openSong();
+    document.body.focus();
+
+    await user.keyboard('{PageDown}');
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent(
+      'Looping Verse · Bars 5 to 8',
+    );
+    await user.keyboard(' ');
+    act(() => engine.fire('stateChanged', { playing: true }));
+
+    await user.keyboard('{PageDown}');
+    await waitFor(() =>
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Late · Bars 9 to 12'),
+    );
+    // Half speed against the 90 BPM that bar 9 starts at.
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('50%');
+    expect(screen.getByTestId('jam-bpm')).toHaveTextContent('45');
+    expect(engine.pause).not.toHaveBeenCalled();
+    expect(engine.stop).not.toHaveBeenCalled();
+  });
+
+  it('Space after a mouse press of Play loop pauses, rather than pressing Restart loop', async () => {
+    const { user, engine, playLoop } = await openSong();
+    await playLoop('Verse');
+    const restart = panel().getByRole('button', { name: 'Restart loop Verse' });
+    expect(restart).toHaveFocus();
+    const seeks = engine.seek.mock.calls.length;
+
+    await user.keyboard(' ');
+
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+    expect(engine.seek.mock.calls.length).toBe(seeks);
+    expect(engine.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('Space on a focused Mark finished in the prompt pauses and finishes nothing', async () => {
+    const atTarget = loopOfSongA('late', { ...late, speed_ratio: 1, target_ratio: 1 });
+    const { user, engine, playLoop } = await openSong([atTarget]);
+    await playLoop('Late');
+    const prompt = within(panel().getByRole('group', { name: 'Mark finished?' }));
+    prompt.getByRole('button', { name: 'Mark finished' }).focus();
+
+    await user.keyboard(' ');
+    await settle();
+
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+    expect(loops.sent('update')).toEqual([]);
+    expect(panel().getByRole('group', { name: 'Mark finished?' })).toBeInTheDocument();
+  });
+
+  it('Space on a loop’s Reopen, focused while its write is on its way, pauses and sends nothing', async () => {
+    const { user, engine, playLoop } = await openSong();
+    await playLoop('Verse');
+    const release = loops.holdNext('update');
+    panel().getByRole('button', { name: 'Mark finished Late' }).focus();
+    await user.keyboard('{Enter}');
+    const reopen = await panel().findByRole('button', { name: 'Reopen Late' });
+    await waitFor(() => expect(reopen).toHaveFocus());
+    expectLocked(reopen);
+
+    await user.keyboard(' ');
+    await user.keyboard('{Enter}');
+    await settle();
+
+    expect(engine.pause).toHaveBeenCalledTimes(1);
+    expect(loops.sent('update')).toEqual([{ status: 'finished' }]);
+    release();
+    await waitFor(() => expectUnlocked(reopen));
+    expect(reopen).toHaveFocus();
+    expect(loops.sent('update')).toEqual([{ status: 'finished' }]);
+  });
+
+  it('typing a loop’s name types, and no shortcut fires', async () => {
+    const { user, engine } = await openSong();
+    await user.click(panel().getByRole('button', { name: 'New loop' }));
+
+    await user.type(panel().getByLabelText('Name'), 'Dms c? ');
+
+    expect(panel().getByLabelText('Name')).toHaveValue('Dms c? ');
+    expect(engine.play).not.toHaveBeenCalled();
+    expect(pressed('Mute drums')).toBe('false');
+    expect(pressed('Drums only')).toBe('false');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('M, D, S and C show on the controls they stand for', async () => {
+    const { user } = await openSong();
+    document.body.focus();
+    const metronomeWas = pressed('Metronome');
+
+    await user.keyboard('mdc');
+
+    expect(pressed('Metronome')).not.toBe(metronomeWas);
+    expect(pressed('Mute drums')).toBe('true');
+    expect(screen.getByLabelText('Count-in')).toHaveValue('1');
+    await user.keyboard('s');
+    expect(pressed('Drums only')).toBe('true');
+    expect(pressed('Mute drums')).toBe('false');
+  });
+
+  it('in a song with no drum track, D and S leave the disabled toggles off', async () => {
+    const { user } = await openSong([verse], {
+      song: songRow(SONG_A, { drum_track_index: null }),
+    });
+    document.body.focus();
+    expect(toggle('Mute drums')).toBeDisabled();
+    expect(toggle('Drums only')).toBeDisabled();
+
+    await user.keyboard('ds');
+    // The keys did arrive: M, pressed the same way, works.
+    const metronomeWas = pressed('Metronome');
+    await user.keyboard('m');
+
+    expect(pressed('Metronome')).not.toBe(metronomeWas);
+    expect(pressed('Mute drums')).toBe('false');
+    expect(pressed('Drums only')).toBe('false');
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import {
@@ -7,11 +7,21 @@ import {
   pressedButtonClass,
   primaryButtonClass,
 } from '@/components/styles';
-import { isLoaded, type PlayerService, type PlayerSnapshot } from '@/features/player/PlayerService';
+import { canPlay } from '@/features/player/controlGates';
+import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { ratioToPercent } from '@/features/player/speed';
 import { LoopHistory } from '@/features/practice/LoopHistory';
 import { lastPracticedLabel } from '@/features/practice/sessions';
-import { barsLabel, hasReachedTarget, sortLoops, type Loop } from './loopForm';
+import type { LoopStatus } from '@/lib/schema';
+import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
+import {
+  editButtonAttributes,
+  findFormOpener,
+  findStatusButton,
+  NEW_LOOP_BUTTON_ATTRIBUTES,
+  type LoopFormOpener,
+} from './loopFocus';
+import { barsLabel, hasReachedTarget, loopsByStatus, type Loop } from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';
 import { speedLabel } from './loopLabels';
 import { LoopSpeedControl } from './LoopSpeedControl';
@@ -107,6 +117,12 @@ type LoopPanelBodyProps = Pick<
   onPlayLoop: (loop: Loop) => void;
 };
 
+type LoopListProps = LoopPanelBodyProps & {
+  onEdit: (loop: Loop) => void;
+  /** A loop's status was changed from its item, which moves it to the other section. */
+  onStatusSet: (loop: Loop, status: LoopStatus) => void;
+};
+
 function LoopPanelBody({
   songId,
   player,
@@ -121,10 +137,28 @@ function LoopPanelBody({
   // "Not yet" to "Mark finished?", for the loop at the speed it was asked about:
   // saving a faster speed asks again. Here, not in the card, which the form replaces.
   const [declinedFinish, setDeclinedFinish] = useState<string | null>(null);
+  // The form replaces the list, and with it the button that opened it; focus goes back there.
+  const focusWhenReady = useFocusWhenReady();
+  const formOpener = useRef<LoopFormOpener | null>(null);
+
+  const openForm = (loop: Loop | null) => {
+    formOpener.current = loop ? { kind: 'edit', loopId: loop.id } : { kind: 'new' };
+    practice.openEditor(loop);
+  };
+  const closeForm = () => {
+    // A form a drag opened goes back to "New loop", if focus was in the form.
+    const opener = formOpener.current ?? { kind: 'new' };
+    formOpener.current = null;
+    focusWhenReady(() => findFormOpener(opener));
+    practice.closeEditor();
+  };
+  // The loop now has its button in the other section; focus follows it there.
+  const followStatusButton = (loop: Loop, status: LoopStatus) =>
+    focusWhenReady(() => findStatusButton(loop.id, status));
 
   if (editor && barCount !== null) {
     if (editor.loopId !== null && !editedLoop) {
-      return <DeletedLoopNotice onBack={practice.closeEditor} />;
+      return <DeletedLoopNotice onBack={closeForm} />;
     }
     return (
       <LoopEditorForm
@@ -139,11 +173,11 @@ function LoopPanelBody({
         onBarsChange={practice.setEditorBars}
         onSavingChange={practice.setEditorSaving}
         onSaved={(saved) => {
-          practice.closeEditor();
+          closeForm();
           // A new loop is what the user wants to practice next; an edit leaves playback as it is.
           if (!editedLoop) practice.selectLoop(saved.id);
         }}
-        onCancel={practice.closeEditor}
+        onCancel={closeForm}
       />
     );
   }
@@ -156,7 +190,8 @@ function LoopPanelBody({
           type="button"
           className={primaryButtonClass}
           disabled={barCount === null}
-          onClick={() => practice.openEditor(null)}
+          {...NEW_LOOP_BUTTON_ATTRIBUTES}
+          onClick={() => openForm(null)}
         >
           New loop
         </button>
@@ -172,6 +207,7 @@ function LoopPanelBody({
             hasReachedTarget(activeLoop) && declinedFinish !== finishQuestionKey(activeLoop)
           }
           onDeclineFinish={() => setDeclinedFinish(finishQuestionKey(activeLoop))}
+          onFinished={() => followStatusButton(activeLoop, 'finished')}
         />
       )}
       <LoopList
@@ -181,6 +217,8 @@ function LoopPanelBody({
         practice={practice}
         loops={loops}
         onPlayLoop={onPlayLoop}
+        onEdit={openForm}
+        onStatusSet={followStatusButton}
       />
     </div>
   );
@@ -210,12 +248,15 @@ function ActiveLoopCard({
   onExit,
   askToFinish,
   onDeclineFinish,
+  onFinished,
 }: Pick<LoopPanelProps, 'songId' | 'player' | 'snapshot'> & {
   loop: Loop;
   onExit: () => void;
   /** The saved speed has reached the target, and the user hasn't said "Not yet" to it. */
   askToFinish: boolean;
   onDeclineFinish: () => void;
+  /** "Mark finished" in the prompt was sent; the prompt goes with the loop's move. */
+  onFinished: () => void;
 }) {
   return (
     <section
@@ -229,7 +270,14 @@ function ActiveLoopCard({
         </p>
       </div>
       <LoopSpeedControl songId={songId} loop={loop} player={player} snapshot={snapshot} />
-      {askToFinish && <FinishPrompt songId={songId} loop={loop} onDecline={onDeclineFinish} />}
+      {askToFinish && (
+        <FinishPrompt
+          songId={songId}
+          loop={loop}
+          onDecline={onDeclineFinish}
+          onFinished={onFinished}
+        />
+      )}
       <button type="button" className={buttonClass} onClick={onExit}>
         Back to whole song
       </button>
@@ -245,10 +293,12 @@ function FinishPrompt({
   songId,
   loop,
   onDecline,
+  onFinished,
 }: {
   songId: string;
   loop: Loop;
   onDecline: () => void;
+  onFinished: () => void;
 }) {
   const status = useSetLoopStatus(songId, loop.id);
   return (
@@ -266,8 +316,11 @@ function FinishPrompt({
         <button
           type="button"
           className={primaryButtonClass}
-          disabled={status.isPending}
-          onClick={() => status.setStatus('finished')}
+          // Locked like the list's status button (`LoopStatusButton`), which says why.
+          aria-disabled={status.isPending || undefined}
+          onClick={() => {
+            if (status.setStatus('finished')) onFinished();
+          }}
         >
           Mark finished
         </button>
@@ -282,7 +335,16 @@ function FinishPrompt({
   );
 }
 
-function LoopList({ songId, player, snapshot, practice, loops, onPlayLoop }: LoopPanelBodyProps) {
+function LoopList({
+  songId,
+  player,
+  snapshot,
+  practice,
+  loops,
+  onPlayLoop,
+  onEdit,
+  onStatusSet,
+}: LoopListProps) {
   if (loops.isPending) return <p className="text-neutral-400">Loading loops…</p>;
   // isLoadingError, not isError: a failed background refetch keeps the list (and a playing loop).
   if (loops.isLoadingError) {
@@ -299,9 +361,7 @@ function LoopList({ songId, player, snapshot, practice, loops, onPlayLoop }: Loo
       </p>
     );
   }
-  const sorted = sortLoops(loops.data);
-  const active = sorted.filter((loop) => loop.status === 'active');
-  const finished = sorted.filter((loop) => loop.status === 'finished');
+  const { active, finished } = loopsByStatus(loops.data);
   const items = (listed: Loop[]) => (
     <ul className="flex flex-col gap-3">
       {listed.map((loop) => (
@@ -312,11 +372,11 @@ function LoopList({ songId, player, snapshot, practice, loops, onPlayLoop }: Loo
           active={loop.id === practice.activeLoop?.id}
           // Null until the score loads: the item then shows the percent alone.
           tempo={player?.tempoAtBar(loop.start_bar) ?? null}
-          // Not on the bar count alone: the score loads before the MIDI and the
-          // soundfont, and until those are in play() does nothing.
-          canPlay={player !== null && isLoaded(snapshot.status)}
+          // The same gate as playLoop itself and the loop keys.
+          canPlay={canPlay(player, snapshot)}
           onPlay={() => onPlayLoop(loop)}
-          onEdit={() => practice.openEditor(loop)}
+          onEdit={() => onEdit(loop)}
+          onStatusSet={(status) => onStatusSet(loop, status)}
         />
       ))}
     </ul>
@@ -347,6 +407,7 @@ function LoopListItem({
   canPlay,
   onPlay,
   onEdit,
+  onStatusSet,
 }: {
   songId: string;
   loop: Loop;
@@ -356,6 +417,7 @@ function LoopListItem({
   canPlay: boolean;
   onPlay: () => void;
   onEdit: () => void;
+  onStatusSet: (status: LoopStatus) => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showingHistory, setShowingHistory] = useState(false);
@@ -391,7 +453,12 @@ function LoopListItem({
             {active ? 'Restart loop' : 'Play loop'}
             {named}
           </button>
-          <button type="button" className={buttonClass} onClick={onEdit}>
+          <button
+            type="button"
+            className={buttonClass}
+            {...editButtonAttributes(loop.id)}
+            onClick={onEdit}
+          >
             Edit{named}
           </button>
           <button
@@ -402,7 +469,7 @@ function LoopListItem({
           >
             History{named}
           </button>
-          <LoopStatusButton loop={loop} />
+          <LoopStatusButton loop={loop} onSet={onStatusSet} />
           <button type="button" className={buttonClass} onClick={() => setConfirmingDelete(true)}>
             Delete{named}
           </button>

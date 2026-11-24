@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { enginePlays } from '@/test/countInPlayer';
+import { expectLocked, expectUnlocked } from '@/test/locked';
 import { queryResult, resetFakeSupabase } from '@/test/fakeSupabase';
 import { startOfBar, straightBars, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
@@ -893,11 +894,9 @@ describe('LoopPanel finishing a loop', () => {
     await view.press('Mark finished Intro');
 
     const reopen = await view.panel.findByRole('button', { name: 'Reopen Intro' });
-    expect(reopen).toBeDisabled();
+    expectLocked(reopen);
     release();
-    await waitFor(() =>
-      expect(view.panel.getByRole('button', { name: 'Reopen Intro' })).toBeEnabled(),
-    );
+    await waitFor(() => expectUnlocked(view.panel.getByRole('button', { name: 'Reopen Intro' })));
 
     // Held, so the loop is seen to move back among the active ones before the refusal:
     // the button that was pressed is gone by then, and the one that returns must say why.
@@ -956,19 +955,51 @@ describe('LoopPanel finishing a loop', () => {
     await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
 
     const reopen = await view.panel.findByRole('button', { name: 'Reopen Late' });
-    expect(reopen).toBeDisabled();
+    expectLocked(reopen);
     // Another loop's button is not held up by it.
-    expect(view.panel.getByRole('button', { name: 'Mark finished Intro' })).toBeEnabled();
+    expectUnlocked(view.panel.getByRole('button', { name: 'Mark finished Intro' }));
     await view.user.click(reopen);
     expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
 
     release();
 
-    await waitFor(() =>
-      expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toBeEnabled(),
-    );
+    await waitFor(() => expectUnlocked(view.panel.getByRole('button', { name: 'Reopen Late' })));
     expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
     expect(savedLate(view)?.status).toBe('finished');
+  });
+
+  it('while the list’s Reopen is on its way, the prompt’s Mark finished is locked, and a press sends nothing', async () => {
+    const finishedAtTarget = loopRow('late', {
+      ...atTarget,
+      status: 'finished',
+      finished_at: '2026-11-20T10:00:00Z',
+    });
+    const view = renderPanel({ loops: [intro, finishedAtTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+    const release = view.table.holdNext('update');
+    await view.press('Reopen Late');
+
+    // Reopened at its target, so the prompt asks at once, with the reopen still pending.
+    const finish = await prompt(view).findByRole('button', { name: 'Mark finished' });
+    expectLocked(finish);
+    await view.user.click(finish);
+    finish.focus();
+    await view.user.keyboard('{Enter}');
+    await view.user.keyboard(' ');
+    await settle();
+    expect(view.table.sent('update')).toEqual([{ status: 'active' }]);
+    // The refused press had no other effect: the prompt is still asking.
+    expect(view.panel.getByTestId('finish-prompt')).toBeInTheDocument();
+
+    release();
+    await waitFor(() => expectUnlocked(finish));
+    await view.user.click(finish);
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ status: 'active' }, { status: 'finished' }]),
+    );
+    await waitFor(() => expect(finishedNames(view)).toEqual(['Late']));
   });
 
   it('"Save speed" answered while "Mark finished" is on its way does not put the loop back among the active', async () => {
@@ -1004,9 +1035,7 @@ describe('LoopPanel finishing a loop', () => {
         speed_ratio: 0.95,
       }),
     );
-    await waitFor(() =>
-      expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toBeEnabled(),
-    );
+    await waitFor(() => expectUnlocked(view.panel.getByRole('button', { name: 'Reopen Late' })));
     expect(finishedNames(view)).toEqual(['Late']);
     expect(view.item('Late').getByText(/95% \(86 BPM\)/)).toBeInTheDocument();
   });
@@ -1168,5 +1197,185 @@ describe('LoopPanel history', () => {
     expect(view.item('Intro').getByTestId('loop-last-practiced')).toHaveTextContent(
       'Not practiced yet',
     );
+  });
+});
+
+describe('LoopPanel keeping focus', () => {
+  const atTarget = loopRow('late', {
+    name: 'Late',
+    start_bar: 9,
+    end_bar: 12,
+    speed_ratio: 1,
+    target_ratio: 1,
+  });
+
+  it('New loop moves focus into the form, not to a field, and Cancel gives it back to New loop', async () => {
+    const view = renderPanel();
+    await view.press('New loop');
+
+    const form = view.panel.getByRole('form', { name: 'New loop' });
+    expect(form).toHaveFocus();
+    await view.press('Cancel');
+
+    expect(await view.panel.findByRole('button', { name: 'New loop' })).toHaveFocus();
+  });
+
+  it('a saved new loop gives focus back to New loop', async () => {
+    const view = renderPanel();
+    await typeNewLoop(view, { first: '5', last: '8', name: 'Verse' });
+    await view.press('Save loop');
+
+    await waitFor(() => expect(view.panel.getByRole('button', { name: 'New loop' })).toHaveFocus());
+  });
+
+  it('Edit gives focus to the form, and Cancel or a save back to that loop’s Edit', async () => {
+    const view = renderPanel();
+    await view.press('Edit Late');
+    expect(view.panel.getByRole('form', { name: 'Edit Late' })).toHaveFocus();
+
+    await view.press('Cancel');
+    expect(await view.panel.findByRole('button', { name: 'Edit Late' })).toHaveFocus();
+
+    await view.press('Edit Late');
+    await rename(view, 'Later');
+    await view.press('Save loop');
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Edit Later' })).toHaveFocus(),
+    );
+  });
+
+  it('back from a loop deleted elsewhere, focus goes to New loop', async () => {
+    const view = renderPanel();
+    await view.press('Edit Late');
+    view.table.setRows([intro]);
+    await view.refetch();
+
+    await view.press('Back to loops');
+    expect(await view.panel.findByRole('button', { name: 'New loop' })).toHaveFocus();
+  });
+
+  it('a form opened by a drag gives focus to New loop when it closes', async () => {
+    const view = renderPanel();
+    act(() => view.engine.fire('barsDragged', { fromBarIndex: 1, toBarIndex: 3, done: true }));
+    const form = await view.panel.findByRole('form', { name: 'New loop' });
+    expect(form).toHaveFocus();
+
+    await view.press('Cancel');
+    expect(await view.panel.findByRole('button', { name: 'New loop' })).toHaveFocus();
+  });
+
+  it('Mark finished follows the loop to its Reopen under Finished, and Reopen back again', async () => {
+    const view = renderPanel();
+    await view.press('Mark finished Intro');
+
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Reopen Intro' })).toHaveFocus(),
+    );
+    await view.press('Reopen Intro');
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Mark finished Intro' })).toHaveFocus(),
+    );
+  });
+
+  it('the prompt’s Mark finished hands focus to the loop’s Reopen', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+
+    const prompt = within(view.panel.getByRole('group', { name: 'Mark finished?' }));
+    await view.user.click(prompt.getByRole('button', { name: 'Mark finished' }));
+
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toHaveFocus(),
+    );
+  });
+
+  // Held: the loop's new button is rendered while its write is still pending, as on a real network.
+  it('with the write on its way, focus is on the loop’s Reopen at once, and Enter there sends nothing', async () => {
+    const view = renderPanel();
+    const release = view.table.holdNext('update');
+    await view.press('Mark finished Intro');
+
+    const reopen = await view.panel.findByRole('button', { name: 'Reopen Intro' });
+    await waitFor(() => expect(reopen).toHaveFocus());
+    expectLocked(reopen);
+    await view.user.keyboard('{Enter}');
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+
+    release();
+    await waitFor(() => expectUnlocked(reopen));
+    expect(reopen).toHaveFocus();
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+
+    // And back: Reopen, held, focuses Mark finished.
+    const releaseReopen = view.table.holdNext('update');
+    await view.user.keyboard('{Enter}');
+    const finish = await view.panel.findByRole('button', { name: 'Mark finished Intro' });
+    await waitFor(() => expect(finish).toHaveFocus());
+    expectLocked(finish);
+    releaseReopen();
+    await waitFor(() => expectUnlocked(finish));
+    expect(finish).toHaveFocus();
+  });
+
+  it('Space on the locked Reopen sends nothing either', async () => {
+    const view = renderPanel();
+    const release = view.table.holdNext('update');
+    await view.press('Mark finished Intro');
+    const reopen = await view.panel.findByRole('button', { name: 'Reopen Intro' });
+    await waitFor(() => expect(reopen).toHaveFocus());
+
+    await view.user.keyboard(' ');
+    await settle();
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+    release();
+    await waitFor(() => expectUnlocked(reopen));
+    expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+  });
+
+  it('a refused write unlocks the loop’s button where it lands, and a press there sends again', async () => {
+    const view = renderPanel();
+    const refuse = view.table.holdNext('update');
+    view.table.failNext('update', 'nope');
+    (await view.panel.findByRole('button', { name: 'Mark finished Intro' })).focus();
+    await view.user.keyboard('{Enter}');
+    const reopen = await view.panel.findByRole('button', { name: 'Reopen Intro' });
+    await waitFor(() => expect(reopen).toHaveFocus());
+    expectLocked(reopen);
+
+    refuse();
+
+    await waitFor(() =>
+      expect(view.panel.queryByRole('region', { name: 'Finished loops' })).not.toBeInTheDocument(),
+    );
+    expect(await view.item('Intro').findByRole('alert')).toHaveTextContent(
+      "Couldn't change the loop: nope",
+    );
+    const finish = view.panel.getByRole('button', { name: 'Mark finished Intro' });
+    expectUnlocked(finish);
+    await view.user.click(finish);
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ status: 'finished' }, { status: 'finished' }]),
+    );
+    await waitFor(() =>
+      expect(view.panel.getByRole('button', { name: 'Reopen Intro' })).toHaveFocus(),
+    );
+  });
+
+  it('with the prompt’s write on its way, focus is on the loop’s Reopen at once', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+    const release = view.table.holdNext('update');
+
+    const prompt = within(view.panel.getByRole('group', { name: 'Mark finished?' }));
+    await view.user.click(prompt.getByRole('button', { name: 'Mark finished' }));
+
+    const reopen = await view.panel.findByRole('button', { name: 'Reopen Late' });
+    await waitFor(() => expect(reopen).toHaveFocus());
+    expectLocked(reopen);
+    release();
+    await waitFor(() => expectUnlocked(reopen));
+    expect(reopen).toHaveFocus();
   });
 });

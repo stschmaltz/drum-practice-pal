@@ -2,6 +2,7 @@ import { Link, useSearchParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass, pressedButtonClass, primaryButtonClass } from '@/components/styles';
+import { findStatusButton, neighbourAfterLeaving } from '@/features/loops/loopFocus';
 import { barsLabel } from '@/features/loops/loopForm';
 import {
   PRACTICE_TABS,
@@ -14,6 +15,8 @@ import { LoopStatusButton } from '@/features/loops/LoopStatusButton';
 import { usePracticeLoops } from '@/features/loops/useLoops';
 import { ratioToPercent } from '@/features/player/speed';
 import { loopPracticePath } from '@/lib/routes';
+import type { LoopStatus } from '@/lib/schema';
+import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import { lastPracticedLabel, practiceDayInSentence } from './sessions';
 
 const TAB_PARAM = 'tab';
@@ -35,6 +38,23 @@ export function OnTheGoPage() {
   const [params, setParams] = useSearchParams();
   // In the URL, so coming back from a song returns to the same tab.
   const tab = practiceTabFrom(params.get(TAB_PARAM));
+  const focusWhenReady = useFocusWhenReady();
+  const listed = loops.data ? practiceLoopsFor(loops.data, tab) : [];
+
+  // "Mark finished" and "Reopen" take their loop off the tab on show, button and all.
+  // Focus goes to the next loop's button, or to the tab the loop went to when it was the last.
+  const followStatusChange = (loop: PracticeLoop, status: LoopStatus) => {
+    const nextId = neighbourAfterLeaving(
+      listed.map((item) => item.id),
+      loop.id,
+    );
+    const wentTo: PracticeTab = status === 'finished' ? 'finished' : 'active';
+    focusWhenReady(() => {
+      // Still listed: the optimistic move hasn't rendered yet.
+      if (findStatusButton(loop.id)) return null;
+      return (nextId === null ? null : findStatusButton(nextId)) ?? findTabButton(wentTo);
+    });
+  };
 
   const showTab = (next: PracticeTab) =>
     setParams(
@@ -59,7 +79,7 @@ export function OnTheGoPage() {
           Couldn't load your loops.
         </LoadErrorAlert>
       ) : (
-        <PracticeLoopList loops={practiceLoopsFor(loops.data, tab)} tab={tab} />
+        <PracticeLoopList loops={listed} tab={tab} onStatusSet={followStatusChange} />
       )}
     </div>
   );
@@ -84,6 +104,7 @@ function PracticeTabButtons({
           type="button"
           className={option === tab ? pressedButtonClass : buttonClass}
           aria-pressed={option === tab}
+          data-practice-tab={option}
           onClick={() => onShow(option)}
         >
           {TAB_LABELS[option]}
@@ -94,7 +115,19 @@ function PracticeTabButtons({
   );
 }
 
-function PracticeLoopList({ loops, tab }: { loops: PracticeLoop[]; tab: PracticeTab }) {
+function findTabButton(tab: PracticeTab): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-practice-tab="${tab}"]`);
+}
+
+function PracticeLoopList({
+  loops,
+  tab,
+  onStatusSet,
+}: {
+  loops: PracticeLoop[];
+  tab: PracticeTab;
+  onStatusSet: (loop: PracticeLoop, status: LoopStatus) => void;
+}) {
   if (loops.length === 0) {
     return (
       <div className="flex flex-col items-start gap-3">
@@ -110,13 +143,23 @@ function PracticeLoopList({ loops, tab }: { loops: PracticeLoop[]; tab: Practice
   return (
     <ul aria-label={TAB_LABELS[tab]} className="flex flex-col gap-3">
       {loops.map((loop) => (
-        <PracticeLoopItem key={loop.id} loop={loop} />
+        <PracticeLoopItem
+          key={loop.id}
+          loop={loop}
+          onStatusSet={(status) => onStatusSet(loop, status)}
+        />
       ))}
     </ul>
   );
 }
 
-function PracticeLoopItem({ loop }: { loop: PracticeLoop }) {
+function PracticeLoopItem({
+  loop,
+  onStatusSet,
+}: {
+  loop: PracticeLoop;
+  onStatusSet: (status: LoopStatus) => void;
+}) {
   const finished = loop.status === 'finished';
   const now = new Date();
 
@@ -147,7 +190,7 @@ function PracticeLoopItem({ loop }: { loop: PracticeLoop }) {
         >
           Practice<span className="sr-only"> {loop.name}</span>
         </Link>
-        <LoopStatusButton loop={loop} />
+        <LoopStatusButton loop={loop} onSet={onStatusSet} />
       </div>
     </li>
   );

@@ -13,3 +13,10 @@ if (typeof Blob !== 'undefined' && !('arrayBuffer' in Blob.prototype)) {
     },
   });
 }
+
+// Per-device preferences (the single-key shortcuts switch) live in localStorage, which
+// jsdom keeps for the whole file: start every test from a device that has saved nothing.
+// Node-environment files have no window, and nothing of theirs to clear.
+afterEach(() => {
+  if (typeof window !== 'undefined') window.localStorage.clear();
+});

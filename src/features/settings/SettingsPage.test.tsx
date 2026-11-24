@@ -2,7 +2,12 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
-import { renderRoutes } from '@/test/render';
+import {
+  CHARACTER_KEYS_STORAGE_KEY,
+  readCharacterKeysOn,
+  saveCharacterKeysOn,
+} from '@/features/shortcuts/characterKeysPreference';
+import { renderRoutes, settle } from '@/test/render';
 import type { Settings } from './settingsForm';
 import { SettingsPage } from './SettingsPage';
 import { settingsKeys } from './useSettings';
@@ -239,5 +244,67 @@ describe('SettingsPage', () => {
     serveSettings(saved);
     renderSettings();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+  });
+  describe('single-letter shortcuts (this device only)', () => {
+    const toggle = () => screen.getByRole('checkbox', { name: /Single-letter shortcuts/ });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      // A save that works clears what a failed one held in memory for this page.
+      expect(saveCharacterKeysOn(true)).toBe(true);
+    });
+
+    it('is on by default, and saves to this device at once, not to your account', async () => {
+      serveSettings(saved);
+      const { user } = renderSettings();
+      await screen.findByRole('button', { name: 'Save settings' });
+      expect(toggle()).toBeChecked();
+      expect(toggle()).toHaveAccessibleDescription(/this device only/i);
+
+      await user.click(toggle());
+      expect(toggle()).not.toBeChecked();
+      expect(readCharacterKeysOn()).toBe(false);
+      // The account's form saw nothing: no draft to save, nothing sent.
+      expect(saveButton()).toBeDisabled();
+      await settle();
+      expect(writes()).toEqual([]);
+
+      await user.click(toggle());
+      expect(toggle()).toBeChecked();
+      expect(readCharacterKeysOn()).toBe(true);
+      expect(writes()).toEqual([]);
+    });
+
+    it('is there while your account settings are loading or failed to load', async () => {
+      queryResult.mockResolvedValue({ data: null, error: { message: 'down' } });
+      renderSettings();
+      await screen.findByRole('button', { name: 'Try again' });
+      expect(toggle()).toBeChecked();
+    });
+
+    it('follows a change made in another tab', async () => {
+      serveSettings(saved);
+      renderSettings();
+      expect(toggle()).toBeChecked();
+
+      act(() => {
+        localStorage.setItem(CHARACTER_KEYS_STORAGE_KEY, 'off');
+        window.dispatchEvent(new StorageEvent('storage', { key: CHARACTER_KEYS_STORAGE_KEY }));
+      });
+      expect(toggle()).not.toBeChecked();
+    });
+
+    it('says when this browser won’t keep it, and still applies it for now', async () => {
+      serveSettings(saved);
+      const { user } = renderSettings();
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('Blocked', 'SecurityError');
+      });
+
+      await user.click(toggle());
+      expect(toggle()).not.toBeChecked();
+      expect(readCharacterKeysOn()).toBe(false);
+      expect(screen.getByText(/won’t keep this after the app is closed/)).toBeInTheDocument();
+    });
   });
 });

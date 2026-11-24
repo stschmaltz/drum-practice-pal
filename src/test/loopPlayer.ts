@@ -12,13 +12,17 @@ import { FakeClickOutput, FakePlayerEngine, TEMPO_CHANGE_BAR_TEMPOS } from './fa
 
 /**
  * A player over a fake engine: 16 bars, 120 BPM for bars 1 to 8 and 90 from
- * bar 9, like the tempo-change fixture. `loaded: false` leaves the song loading.
+ * bar 9, like the tempo-change fixture. `loaded: false` leaves the song loading;
+ * `drumTrackIndex: null` is a song with no drum track.
  */
-export function loopPlayer({ loaded = true }: { loaded?: boolean } = {}) {
+export function loopPlayer({
+  loaded = true,
+  drumTrackIndex = 0,
+}: { loaded?: boolean; drumTrackIndex?: number | null } = {}) {
   const engine = new FakePlayerEngine();
   const wakeLock = { setActive: vi.fn(), dispose: vi.fn() } satisfies WakeLockControl;
   const player = new PlayerService(engine, {
-    drumTrackIndex: 0,
+    drumTrackIndex,
     wakeLock,
     unlockAudio: vi.fn(),
     clicks: new FakeClickOutput(),

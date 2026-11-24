@@ -28,6 +28,8 @@ For every async window (a pending mutation, a load, a count-in, a hand-over betw
 
 - **A path that returns to its start.** Drag-or-tap decided by comparing the end point with the start misses a drag that came back. _08: the drag emitted both `barsDragged` and `barTapped`._ Keep state for the whole press (did it ever leave the slop?) and carry it to the trailing `click`.
 - **Points outside the visible area.** Hit-testing a window-level move against the full surface picks things the user can't see (clipped by a scroll box, under a sticky bar). _08: a drag past the score box picked hidden bars._ Reject points outside the visible client rectangle.
+- **Where a click lands.** A `click` goes to the nearest element that both the press and the release were on. _10: selecting text in the shortcut list and letting go past its edge clicked the backdrop, which closed it._ A "click outside" handler checks where the press began, not only the click's target.
+- **The other half never comes.** A flag set on one event and cleared by its pair (keydown and keyup, pointerdown and pointerup) stays set when the pair goes to another window or is cancelled. _10: a Space held while switching windows left "cancel the next Space keyup" set, so a later Space on the list's Close didn't press it._ Reset the flag at the start of each new first half, and say what a lost second half leaves behind.
 - **Every event a gesture produces.** Write down the full sequence the browser fires (`pointerdown`, `pointermove`s, `pointerup`, `click`, touch vs mouse, pan cancels) and say what each does.
 
 ## 4. Round trips: does a value survive display, edit and save unchanged?
@@ -38,7 +40,9 @@ For every async window (a pending mutation, a load, a count-in, a hand-over betw
 ## 5. Validated paths: is there a way around the check?
 
 - **A second entry point that skips validation.** _05: downloaded bytes went straight to `api.load`, bypassing the Guitar Pro-only `parseScore`, so a damaged file became a one-bar alphaTex score._ Every input that a check exists for reaches the code only through that check.
+- **Containment that depends on where focus is.** A trap or guard attached to the element it protects only hears events from inside it, and focus can be outside without the user leaving: a click on non-focusable text puts it on `<body>`. _10: the shortcut list kept Tab on Close with a listener on the dialog; after a click on its heading Shift+Tab went to a control behind the open overlay, which could then be pressed._ Make what is behind `inert` (or use a native modal), handle the key at the document, and test from focus on `<body>`.
 - **Accessibility claims.** A wrapper class doesn't change the target size of the control inside it. _05: `min-h-11` on a wrapper left the range inputs short._ Measure the control itself.
+- **Requirements that come with the kind of feature.** Some features carry a WCAG success criterion of their own, met by design rather than by markup: shortcuts on single character keys (2.1.4: a way to turn them off or remap them), anything on a time limit (2.2.1), motion set off by interaction (2.3.3), a gesture that only works as a drag (2.5.7), content shown on hover or focus (1.4.13). _10: M, D, S, C and `?` acted wherever focus was outside a field and couldn't be turned off, so speech input could change playback; the input guard only covered typing._ When a unit adds one of these kinds, its Build note names the criterion and how it is met, and a test proves it (here, the per-device "Single-letter shortcuts" switch).
 
 ## 6. Hygiene (Review already catches these; keep checking)
 

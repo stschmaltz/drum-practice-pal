@@ -1,0 +1,399 @@
+/// <reference lib="dom" />
+import type { Page } from '@playwright/test';
+import { expect, test } from './auth';
+import {
+  activeLoopLine,
+  loopItem,
+  loopNameField,
+  loopPanel,
+  newLoopButton,
+  openLoopPanel,
+  playLoopButton,
+  saveNewLoop,
+} from './loopsPage';
+import {
+  barNumber,
+  countInSelect,
+  drumsOnlyButton,
+  expectedLayout,
+  metronomeButton,
+  muteDrumsButton,
+  openFixture,
+  playButton,
+  recordedStatuses,
+  recordStatuses,
+  status,
+} from './playerPage';
+import { loopsOf } from './practicePage';
+
+// Unit 10: keyboard shortcuts and page-turner pedals on the song page. A
+// pedal is a keyboard to the browser: it sends Page Up and Page Down (or the
+// arrow keys), which is what these press.
+
+const speed = (page: Page) => page.getByTestId('jam-speed');
+
+/** Takes focus off whatever was last clicked, as a drummer's hands leave the screen for the kit. */
+const focusNothing = (page: Page) =>
+  page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+
+/** Presses M and waits for the Metronome toggle to flip, whichever way it started. */
+async function pressMAndSeeMetronomeFlip(page: Page): Promise<void> {
+  const was = await metronomeButton(page).getAttribute('aria-pressed');
+  await page.keyboard.press('m');
+  await expect(metronomeButton(page)).not.toHaveAttribute('aria-pressed', was ?? '');
+}
+
+test('Space plays and pauses; the arrows, M, D, S and C work the controls', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'multi-track', 'Multi Track');
+  await focusNothing(page);
+
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Pause');
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Play');
+
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await expect(speed(page)).toHaveText('110%');
+  await page.keyboard.press('ArrowDown');
+  await expect(speed(page)).toHaveText('105%');
+
+  await pressMAndSeeMetronomeFlip(page);
+
+  await page.keyboard.press('d');
+  await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('s');
+  await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'false');
+
+  const countInWas = Number(await countInSelect(page).inputValue());
+  await page.keyboard.press('c');
+  await expect(countInSelect(page)).toHaveValue(String((countInWas + 1) % 3));
+});
+
+test('a pedal’s Page Up and Page Down, or the arrows, switch loops without stopping playback', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await countInSelect(page).selectOption('0');
+  await saveNewLoop(page, { name: 'Intro', firstBar: 1, lastBar: 2 });
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await focusNothing(page);
+
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Pause');
+  await recordStatuses(page);
+
+  await page.keyboard.press('PageUp');
+  await expect(activeLoopLine(page)).toContainText('Looping Intro');
+  await expect.poll(() => barNumber(page)).toBeLessThanOrEqual(2);
+  await page.keyboard.press('ArrowRight');
+  await expect(activeLoopLine(page)).toContainText('Looping Verse');
+  await expect.poll(() => barNumber(page)).toBeGreaterThanOrEqual(5);
+  // The last loop: nowhere further to go.
+  await page.keyboard.press('PageDown');
+  await expect(activeLoopLine(page)).toContainText('Looping Verse');
+  await page.keyboard.press('ArrowLeft');
+  await expect(activeLoopLine(page)).toContainText('Looping Intro');
+
+  await expect(playButton(page)).toHaveText('Pause');
+  expect(await recordedStatuses(page)).toEqual(['playing']);
+  // The recorder does hear a change when there is one.
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Play');
+  expect((await recordedStatuses(page)).length).toBeGreaterThan(1);
+});
+
+test('paused, a pedal sets the next loop up without playing it', async ({ user, page }) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await page.getByRole('button', { name: 'Exit loop' }).click();
+  await focusNothing(page);
+
+  await page.keyboard.press('PageDown');
+
+  await expect(activeLoopLine(page)).toContainText('Looping Verse');
+  await expect(status(page)).toHaveText('Bar 5 of 16');
+  await expect(playButton(page)).toHaveText('Play');
+});
+
+test('with no loops, the right and left arrows step a bar', async ({ user, page }) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await focusNothing(page);
+
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(status(page)).toHaveText('Bar 3 of 16');
+  await page.keyboard.press('ArrowLeft');
+  await expect(status(page)).toHaveText('Bar 2 of 16');
+});
+
+test('? lists the shortcuts and Escape closes the list; keys typed in a field stay in it', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await focusNothing(page);
+
+  await page.keyboard.press('?');
+  const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused();
+  // Space presses Close rather than playing.
+  await page.keyboard.press('Space');
+  await expect(dialog).toHaveCount(0);
+  await expect(playButton(page)).toHaveText('Play');
+  await page.keyboard.press('?');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+
+  await openLoopPanel(page);
+  await newLoopButton(page).click();
+  await loopNameField(page).pressSequentially('Dms c ?');
+  await expect(loopNameField(page)).toHaveValue('Dms c ?');
+  await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(playButton(page)).toHaveText('Play');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('focus stays in the shortcut list after a click on its heading, and the page behind takes no clicks', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await focusNothing(page);
+  await page.keyboard.press('?');
+  const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+  const close = dialog.getByRole('button', { name: 'Close' });
+  await expect(close).toBeFocused();
+
+  // Chromium moves its Tab starting point to where the click landed, the heading, with focus on <body>.
+  await dialog.getByRole('heading', { name: 'Keyboard shortcuts' }).click();
+  const focusInDialog = () =>
+    page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null);
+  for (const key of ['Shift+Tab', 'Shift+Tab', 'Tab', 'Tab']) {
+    await page.keyboard.press(key);
+    expect(await focusInDialog(), `focus after ${key}`).toBe(true);
+  }
+  await dialog.getByText('Keys do nothing while you type', { exact: false }).click();
+  await page.keyboard.press('Shift+Tab');
+  await expect(close).toBeFocused();
+
+  // Behind the backdrop the page is inert: Play under it can't be reached by a press either.
+  expect(await playButton(page).evaluate((button) => button.closest('[inert]') !== null)).toBe(
+    true,
+  );
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => document.querySelector('[inert]') === null)).toBe(true);
+  await expect(playButton(page)).toHaveText('Play');
+});
+
+test('Space after clicking Play loop pauses, rather than pressing the focused Restart loop', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await countInSelect(page).selectOption('0');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await openLoopPanel(page);
+  await playLoopButton(page, 'Verse').click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await recordStatuses(page);
+  // Clicked, the button keeps focus in Chromium. On a phone the press closes the sheet it is in.
+  if (expectedLayout(page) === 'page') {
+    await expect(page.getByRole('button', { name: 'Restart loop Verse' })).toBeFocused();
+  }
+
+  await page.keyboard.press('Space');
+
+  await expect(playButton(page)).toHaveText('Play');
+  // Paused once and left so: Restart loop would have played again.
+  await page.waitForTimeout(500);
+  expect(await recordedStatuses(page)).toEqual(['playing', 'ready']);
+});
+
+test('with a loop playing, the speed keys, M, D, S and C work it and playback never stops', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'multi-track', 'Multi Track');
+  await countInSelect(page).selectOption('0');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 2, lastBar: 3 });
+  await focusNothing(page);
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Pause');
+  await recordStatuses(page);
+
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(speed(page)).toHaveText('90%');
+  await pressMAndSeeMetronomeFlip(page);
+  await page.keyboard.press('s');
+  await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('d');
+  await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');
+  await page.keyboard.press('c');
+  await expect(countInSelect(page)).toHaveValue('1');
+
+  // Still the loop, at the speed the keys set, and never stopped on the way.
+  await expect(activeLoopLine(page)).toContainText('Looping Verse');
+  await expect.poll(() => barNumber(page)).toBeGreaterThanOrEqual(2);
+  expect(await barNumber(page)).toBeLessThanOrEqual(3);
+  await expect(playButton(page)).toHaveText('Pause');
+  expect(await recordedStatuses(page)).toEqual(['playing']);
+});
+
+test('the Shortcuts button opens the list from 768 px; on a phone it is ? alone', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  const shortcutsButton = page.getByRole('button', { name: 'Shortcuts' });
+  const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+
+  if (expectedLayout(page) === 'horizontal') {
+    await expect(shortcutsButton).toBeHidden();
+    return;
+  }
+  await shortcutsButton.click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('Previous or next loop', { exact: false })).toBeVisible();
+  // A click outside it closes it, and focus goes back to the button.
+  await page.mouse.click(5, 5);
+  await expect(dialog).toHaveCount(0);
+  await expect(shortcutsButton).toBeFocused();
+});
+
+test('while the loop form is open, the loop keys do nothing and the others still work', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await page.getByRole('button', { name: 'Exit loop' }).click();
+  await openLoopPanel(page);
+  await newLoopButton(page).click();
+  // The form has the focus, not one of its fields.
+  await expect(loopNameField(page)).not.toBeFocused();
+  const barBefore = await status(page).textContent();
+
+  await page.keyboard.press('PageDown');
+  await page.keyboard.press('ArrowRight');
+  // The keys arrived: M, pressed the same way, works.
+  await pressMAndSeeMetronomeFlip(page);
+
+  await expect(activeLoopLine(page)).toHaveCount(0);
+  await expect(status(page)).toHaveText(barBefore ?? '');
+});
+
+test('Mark finished and Reopen keep focus on the loop while the write is on its way', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await saveNewLoop(page, { name: 'Chorus', firstBar: 9, lastBar: 12 });
+  await page.getByRole('button', { name: 'Exit loop' }).click();
+  await openLoopPanel(page);
+
+  // Each status write is held until let go: the loop's new button renders while it is pending.
+  const held: (() => void)[] = [];
+  await page.route('**/rest/v1/loops*', async (route) => {
+    if (route.request().method() !== 'PATCH') return route.continue();
+    await new Promise<void>((resolve) => held.push(resolve));
+    await route.continue();
+  });
+  const releaseWrite = async () => {
+    await expect.poll(() => held.length).toBe(1);
+    held.shift()?.();
+  };
+
+  await loopItem(page, 'Verse').getByRole('button', { name: 'Mark finished Verse' }).focus();
+  await page.keyboard.press('Enter');
+  const reopen = loopPanel(page).getByRole('button', { name: 'Reopen Verse' });
+  await expect(reopen).toBeFocused();
+  await expect(reopen).toHaveAttribute('aria-disabled', 'true');
+  // Locked as assistive tech and the eye see it (dimmed by `buttonBase`), not only by attribute.
+  await expect(reopen).toBeDisabled();
+  await expect(reopen).toHaveCSS('opacity', '0.5');
+  // Enter on it sends nothing: a second PATCH would be held too, and the next release counts them.
+  await page.keyboard.press('Enter');
+  await releaseWrite();
+  await expect(reopen).not.toHaveAttribute('aria-disabled');
+  await expect(reopen).toBeEnabled();
+  await expect(reopen).toHaveCSS('opacity', '1');
+  await expect(reopen).toBeFocused();
+  await expect
+    .poll(async () => (await loopsOf(user)).map((loop) => loop.status))
+    .toContain('finished');
+
+  await page.keyboard.press('Enter');
+  const finish = loopPanel(page).getByRole('button', { name: 'Mark finished Verse' });
+  await expect(finish).toBeFocused();
+  await releaseWrite();
+  await expect(finish).not.toHaveAttribute('aria-disabled');
+  await expect(finish).toBeFocused();
+  await expect
+    .poll(async () => (await loopsOf(user)).map((loop) => loop.status))
+    .toEqual(['active', 'active']);
+});
+
+/** This device's single-letter shortcuts switch in Settings, on a page of its own. */
+const letterShortcutsToggle = (page: Page) =>
+  page.getByRole('checkbox', { name: 'Single-letter shortcuts' });
+
+test('with single-letter shortcuts off in Settings, M, D, S, C and ? do nothing; Space and the arrows still work', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'multi-track', 'Multi Track');
+  const songUrl = page.url();
+
+  await page.goto('/settings');
+  await expect(letterShortcutsToggle(page)).toBeChecked();
+  await letterShortcutsToggle(page).uncheck();
+  await expect(letterShortcutsToggle(page)).not.toBeChecked();
+
+  await page.goto(songUrl);
+  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+  await focusNothing(page);
+  const metronomeWas = await metronomeButton(page).getAttribute('aria-pressed');
+  const countInWas = await countInSelect(page).inputValue();
+
+  for (const key of ['m', 'd', 's', 'c', 'Shift+?']) await page.keyboard.press(key);
+  // The keys did reach the page: one that isn't a single character, pressed after them, acts.
+  await page.keyboard.press('ArrowUp');
+  await expect(speed(page)).toHaveText('105%');
+  await expect(metronomeButton(page)).toHaveAttribute('aria-pressed', metronomeWas ?? '');
+  await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(countInSelect(page)).toHaveValue(countInWas);
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toHaveCount(0);
+
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Pause');
+  await page.keyboard.press('Space');
+  await expect(playButton(page)).toHaveText('Play');
+
+  // Turned back on in another tab, with the song page left open: the next press acts, no reload.
+  const settingsTab = await page.context().newPage();
+  try {
+    await settingsTab.goto('/settings');
+    await letterShortcutsToggle(settingsTab).check();
+    await expect(letterShortcutsToggle(settingsTab)).toBeChecked();
+  } finally {
+    await settingsTab.close();
+  }
+  await page.bringToFront();
+  await focusNothing(page);
+  await pressMAndSeeMetronomeFlip(page);
+});
