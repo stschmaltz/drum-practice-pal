@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
-import { inputClass, labelClass, sectionHeadingClass } from '@/components/styles';
+import { cardGridClass, inputClass, labelClass, sectionHeadingClass } from '@/components/styles';
 import { findItemControl, isItemListed, neighbourAfterLeaving } from '@/lib/itemFocus';
 import { waitsForNetwork } from '@/lib/network';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
@@ -23,29 +23,32 @@ const DEFAULT_SORT: LibrarySort = 'practiced';
 
 export function LibraryPage() {
   const songs = useSongs();
+  // Once there are songs the upload is a button, and the list takes a dropped file.
+  const hasSongs = songs.data !== undefined && songs.data.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Library" />
-      <UploadPanel />
-      {waitsForNetwork(songs) ? (
-        <EmptyState icon="offline">
-          You're offline, and your library hasn't been opened on this device yet. It shows once
-          you're back online.
-        </EmptyState>
-      ) : songs.isPending ? (
-        <LoadingLine>Loading your songs…</LoadingLine>
-      ) : songs.isLoadingError ? (
-        <LoadErrorAlert onRetry={() => void songs.refetch()}>
-          Couldn't load your songs: {songs.error.message}
-        </LoadErrorAlert>
-      ) : songs.data.length === 0 ? (
-        <EmptyState icon="library">
-          No songs yet. Upload a Guitar Pro file to start your library.
-        </EmptyState>
-      ) : (
-        <SongList songs={songs.data} />
-      )}
+      <UploadPanel compact={hasSongs}>
+        {waitsForNetwork(songs) ? (
+          <EmptyState icon="offline">
+            You're offline, and your library hasn't been opened on this device yet. It shows once
+            you're back online.
+          </EmptyState>
+        ) : songs.isPending ? (
+          <LoadingLine>Loading your songs…</LoadingLine>
+        ) : songs.isLoadingError ? (
+          <LoadErrorAlert onRetry={() => void songs.refetch()}>
+            Couldn't load your songs: {songs.error.message}
+          </LoadErrorAlert>
+        ) : songs.data.length === 0 ? (
+          <EmptyState icon="library">
+            No songs yet. Upload a Guitar Pro file to start your library.
+          </EmptyState>
+        ) : (
+          <SongList songs={songs.data} />
+        )}
+      </UploadPanel>
     </div>
   );
 }
@@ -176,7 +179,7 @@ function SongList({ songs }: { songs: LibrarySong[] }) {
         // Not the query itself: it comes from the URL.
         <p className="text-ink-muted">No songs match your search.</p>
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className={cardGridClass}>
           {shown.map((song) => (
             <SongListItem
               key={song.id}

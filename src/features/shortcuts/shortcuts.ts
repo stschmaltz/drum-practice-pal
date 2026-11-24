@@ -86,22 +86,42 @@ const SLIDER_KEYS: ReadonlySet<string> = new Set([
   'PageDown',
 ]);
 
+/** The keys a focused radio (a segmented control) or menu item moves the choice with. */
+const ARROW_KEYS: ReadonlySet<string> = new Set([
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+]);
+
 /**
  * What the focused element does with keys of its own. `typing`: every key
  * (text fields, selects with their type-ahead, contenteditable). `slider`: the
- * arrows and page keys. `other`: none that a shortcut uses, buttons included:
+ * arrows and page keys. `choice`: the arrows (a radio in a segmented control
+ * moves to the next option, a menu item to the next item); the page keys still
+ * switch loops, as a pedal on a focused count-in must. `other`: none that a shortcut uses, buttons included:
  * Space is play/pause wherever the focus is, so a loop's "Play loop" pressed
  * with the mouse (which leaves it focused) isn't pressed again by Space, and
  * "Mark finished" can't be answered by it. Enter still presses a button.
  */
-export type FocusKind = 'typing' | 'slider' | 'other';
+export type FocusKind = 'typing' | 'slider' | 'choice' | 'other';
 
 /** The parts of an element the guard looks at, so it can be tested without a DOM. */
 export interface FocusedElement {
   tagName: string;
   type?: string;
   isContentEditable?: boolean;
+  /** `getAttribute('role')`: a menu item takes its arrows. */
+  role?: string | null;
 }
+
+/** The roles whose arrows move within a group of choices. */
+const CHOICE_ROLES: ReadonlySet<string> = new Set([
+  'menuitem',
+  'menuitemradio',
+  'menuitemcheckbox',
+  'radio',
+]);
 
 /** Input types that take no typed text. Everything else (text, number, search, email…) types. */
 const NON_TEXT_INPUT_TYPES: ReadonlySet<string> = new Set([
@@ -118,11 +138,13 @@ const NON_TEXT_INPUT_TYPES: ReadonlySet<string> = new Set([
 export function focusKindOf(element: FocusedElement | null): FocusKind {
   if (!element) return 'other';
   if (element.isContentEditable) return 'typing';
+  if (element.role && CHOICE_ROLES.has(element.role)) return 'choice';
   const tag = element.tagName.toUpperCase();
   if (tag === 'TEXTAREA' || tag === 'SELECT') return 'typing';
   if (tag !== 'INPUT') return 'other';
   const type = (element.type ?? 'text').toLowerCase();
   if (type === 'range') return 'slider';
+  if (type === 'radio') return 'choice';
   return NON_TEXT_INPUT_TYPES.has(type) ? 'other' : 'typing';
 }
 
@@ -176,6 +198,7 @@ export function resolveShortcut(
 
   if (context.focus === 'typing') return null;
   if (context.focus === 'slider' && SLIDER_KEYS.has(press.key)) return null;
+  if (context.focus === 'choice' && ARROW_KEYS.has(press.key)) return null;
 
   const action = KEY_BINDINGS[press.key.length === 1 ? press.key.toLowerCase() : press.key];
   if (!action) return null;

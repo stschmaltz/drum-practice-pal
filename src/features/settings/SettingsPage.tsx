@@ -4,6 +4,7 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
+import { Icon } from '@/components/icons';
 import {
   buttonClass,
   cardClass,
@@ -106,14 +107,21 @@ function SettingsForm({ saved }: { saved: Settings }) {
   };
 
   const fieldsetProps: FieldsetProps = { values, errors, edit };
+  const saveModelId = useId();
 
   return (
     <form
       className={`${cardClass} flex max-w-xl flex-col gap-8 p-5`}
       onSubmit={onSubmit}
       aria-busy={saving}
+      aria-describedby={saveModelId}
       noValidate
     >
+      {/* Two ways of saving on one page: each section says which it is (12 UX pass). */}
+      <p id={saveModelId} className="flex items-start gap-2 text-sm text-ink-muted">
+        <Icon name="settings" className="mt-0.5 size-4" />
+        For your account, on every device. Saved when you press Save settings.
+      </p>
       <MetronomeFieldset {...fieldsetProps} />
       <CountInFieldset {...fieldsetProps} />
       <DrumsFieldset {...fieldsetProps} />
@@ -190,6 +198,7 @@ function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
 function CountInFieldset({ values, errors, edit }: FieldsetProps) {
   // The mode only matters when there's a count-in to play.
   const countInOff = values.count_in_bars === 0;
+  const modeNoteId = useId();
 
   return (
     <fieldset className="flex flex-col gap-3">
@@ -199,7 +208,7 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
           <label
             key={bars}
             // The radio is visible, so its own focus ring shows; the pill shows which is chosen.
-            className="flex min-h-touch cursor-pointer items-center gap-2 rounded-control border border-field-line px-4 transition-colors duration-150 hover:bg-raised has-[:checked]:border-brand has-[:checked]:bg-brand-soft"
+            className="flex min-h-touch cursor-pointer items-center gap-2 rounded-control border border-field-line px-4 transition-colors duration-150 hover:bg-raised has-[:checked]:border-selected-line has-[:checked]:bg-selected"
           >
             <input
               type="radio"
@@ -213,7 +222,12 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
         ))}
       </div>
       {errors.count_in_bars && <p className="text-sm text-danger">{errors.count_in_bars}</p>}
-      <div role="radiogroup" aria-label="When the count-in plays" className="flex flex-col gap-1">
+      <div
+        role="radiogroup"
+        aria-label="When the count-in plays"
+        aria-describedby={countInOff ? modeNoteId : undefined}
+        className="flex flex-col gap-1"
+      >
         {(Object.keys(COUNT_IN_MODE_LABELS) as CountInMode[]).map((mode) => (
           <label
             key={mode}
@@ -231,6 +245,12 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
           </label>
         ))}
       </div>
+      {/* Off controls say why they are off (NN/g): otherwise they read as broken. */}
+      {countInOff && (
+        <p id={modeNoteId} className="text-sm text-ink-muted">
+          Choose 1 bar or 2 bars to say when the count-in plays.
+        </p>
+      )}
       {errors.count_in_mode && <p className="text-sm text-danger">{errors.count_in_mode}</p>}
     </fieldset>
   );
@@ -264,25 +284,32 @@ function KeyboardSection() {
   // Storage refused the last save: it applies to this page only.
   const [notKept, setNotKept] = useState(false);
   const descriptionId = useId();
+  const saveModelId = useId();
 
   return (
     <section className={`${cardClass} flex max-w-xl flex-col gap-3 p-5`}>
-      <h2 className={sectionHeadingClass}>Keyboard on this device</h2>
+      <div className="flex flex-col gap-1">
+        <h2 className={sectionHeadingClass}>Keyboard on this device</h2>
+        <p id={saveModelId} className="flex items-start gap-2 text-sm text-ink-muted">
+          <Icon name="keyboard" className="mt-0.5 size-4" />
+          Saved on this device as soon as you change it.
+        </p>
+      </div>
       <div className="flex flex-col gap-1">
         <label className="flex min-h-touch items-center gap-3">
           <input
             type="checkbox"
             className="size-5 accent-brand"
             checked={on}
-            aria-describedby={descriptionId}
+            aria-describedby={`${saveModelId} ${descriptionId}`}
             onChange={(event) => setNotKept(!saveCharacterKeysOn(event.target.checked))}
           />
           Single-letter shortcuts
         </label>
         <p id={descriptionId} className="text-sm text-ink-muted">
-          {characterKeysLabel()} on the song page. For this device only, and saved as soon as you
-          change it. Turn them off if speech input or a stray key press sets them off. Space, the
-          arrow keys and Page Up / Page Down (pedals) keep working either way.
+          {characterKeysLabel()} on the song page. Turn them off if speech input or a stray key
+          press sets them off. Space, the arrow keys and Page Up / Page Down (pedals) keep working
+          either way.
         </p>
       </div>
       <p role="status" className="text-sm text-warning">

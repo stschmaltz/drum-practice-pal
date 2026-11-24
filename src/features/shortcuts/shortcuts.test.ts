@@ -120,6 +120,17 @@ describe('resolveShortcut', () => {
       expect(resolveShortcut(press(' '), slider)?.action).toBe('togglePlay');
       expect(resolveShortcut(press('m'), slider)?.action).toBe('metronome');
     });
+
+    it('gives a radio or a menu item its arrows, and leaves the page keys to the pedal', () => {
+      const choice: ShortcutContext = { focus: 'choice', helpOpen: false, characterKeys: true };
+      for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']) {
+        expect(resolveShortcut(press(key), choice)).toBeNull();
+      }
+      expect(resolveShortcut(press('PageDown'), choice)?.action).toBe('nextLoop');
+      expect(resolveShortcut(press('PageUp'), choice)?.action).toBe('previousLoop');
+      expect(resolveShortcut(press(' '), choice)?.action).toBe('togglePlay');
+      expect(resolveShortcut(press('c'), choice)?.action).toBe('countIn');
+    });
   });
 
   describe('with the overlay open', () => {
@@ -205,7 +216,11 @@ describe('focusKindOf', () => {
     [{ tagName: 'DIV', isContentEditable: true }, 'typing'],
     [{ tagName: 'INPUT', type: 'range' }, 'slider'],
     [{ tagName: 'INPUT', type: 'checkbox' }, 'other'],
-    [{ tagName: 'INPUT', type: 'radio' }, 'other'],
+    [{ tagName: 'INPUT', type: 'radio' }, 'choice'],
+    [{ tagName: 'BUTTON', role: 'menuitem' }, 'choice'],
+    [{ tagName: 'DIV', role: 'radio' }, 'choice'],
+    [{ tagName: 'BUTTON', role: 'tab' }, 'other'],
+    [{ tagName: 'BUTTON', role: null }, 'other'],
     [{ tagName: 'INPUT', type: 'submit' }, 'other'],
     [{ tagName: 'INPUT', type: 'button' }, 'other'],
     [{ tagName: 'BUTTON' }, 'other'],

@@ -38,6 +38,14 @@
   --color-brand-line: #8a4a20;
   --color-on-brand: #1a0c02;
 
+  /*
+   * Selected and on: a toggle that is on, the current page in the nav, the view
+   * on show. Cool and quiet, so the brand is left for the main action and for
+   * what is playing (12 UX pass: the accent marks one thing per area).
+   */
+  --color-selected: #22324d;
+  --color-selected-line: #7ea6dc;
+
   /* Keyboard focus, apart from the brand so it shows on a brand button too. */
   --color-focus: #8ecbff;
 
@@ -59,6 +67,8 @@
   --color-score-ink: #1b1e26;
   --color-score-muted: #5b6272;
   --color-score-accent: #c2410c;
+  /* A loop's bars on the score: calm blue, apart from the orange cursor and beat. */
+  --color-score-range: #2f64a8;
 
   /* Type: the system stack (no web font, so nothing to fetch offline). */
   --font-sans:
@@ -180,8 +190,9 @@
 }
 .jam-score .bar-highlight > div {
   position: absolute;
-  background: color-mix(in srgb, var(--color-brand) 16%, transparent);
-  outline: 2px solid color-mix(in srgb, var(--color-score-accent) 75%, transparent);
+  /* A faint tint and a dashed edge: quieter than the bar cursor's orange wash, never mistaken for it. */
+  background: color-mix(in srgb, var(--color-score-range) 7%, transparent);
+  outline: 2px dashed var(--color-score-range);
   outline-offset: -2px;
   border-radius: 4px;
 }

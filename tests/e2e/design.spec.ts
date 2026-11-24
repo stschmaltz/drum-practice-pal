@@ -11,7 +11,7 @@ import {
   textSpillingOutOf,
 } from './designPage';
 import { loopItem, loopPanel, openLoopPanel, saveNewLoop } from './loopsPage';
-import { controls, countInSelect, openFixture, playButton, viewport } from './playerPage';
+import { controls, chooseCountIn, openFixture, playButton, viewport } from './playerPage';
 import { homeItem, navLink, openLoopHistory } from './practicePage';
 
 // Unit 12: what the visual design promises, measured on every screen at the
@@ -123,8 +123,12 @@ test('icons are hidden from screen readers and every control keeps its words', a
   await expect(bar.getByRole('slider', { name: 'Speed', exact: true })).toBeVisible();
   // Its words are screen-reader only on a phone; the name is the same at every size.
   await expect(bar.getByRole('slider', { name: 'Metronome volume', exact: true })).toBeVisible();
-  await expect(bar.getByRole('combobox', { name: 'Count-in', exact: true })).toBeVisible();
-  await expect(bar.getByRole('combobox', { name: 'When to count in', exact: true })).toBeVisible();
+  // Segmented controls since the 12 UX pass; the mode shows only with a count-in to play.
+  await expect(bar.getByRole('radiogroup', { name: 'Count-in', exact: true })).toBeVisible();
+  for (const name of ['Off', '1 bar', '2 bars']) {
+    await expect(bar.getByRole('radio', { name, exact: true })).toBeAttached();
+  }
+  await expect(bar.getByRole('radiogroup', { name: 'When to count in' })).toHaveCount(0);
   await expect(playButton(page)).toHaveAccessibleName('Play');
   for (const name of ['On the go', 'Library', 'Settings']) {
     await expect(
@@ -133,10 +137,13 @@ test('icons are hidden from screen readers and every control keeps its words', a
   }
 });
 
-/** The boxes of the controls bar's controls on show. */
+/**
+ * The boxes of the controls bar's controls on show: a segmented control's
+ * option by its label, which is what draws it (the radio is visually hidden).
+ */
 const controlBoxes = (page: Page) =>
   controls(page)
-    .locator('button, input, select')
+    .locator('button, input:not([type="radio"]), select, label:has(> input[type="radio"])')
     .evaluateAll((els) =>
       els
         .filter((el) => el.checkVisibility())
@@ -160,8 +167,9 @@ test('the controls bar fits a phone in three rows, and spills nowhere at 320 px'
     const region = await controls(page).boundingBox();
     if (!region) throw new Error('No controls bar');
     const boxes = await controlBoxes(page);
-    // Back to start, Metronome, Mute drums, Drums only, Speed, volume, Count-in, mode.
-    expect(boxes, `${width} px: controls on show`).toHaveLength(8);
+    // Back to start, Metronome, Mute drums, Drums only, Speed, volume, and the count-in's
+    // Off / 1 bar / 2 bars (its mode shows only once a count-in is chosen).
+    expect(boxes, `${width} px: controls on show`).toHaveLength(9);
     if (width >= 360) {
       expect(rowsOf(boxes), `${width} px: rows of ${JSON.stringify(boxes)}`).toBeLessThanOrEqual(3);
     }
@@ -206,7 +214,7 @@ test.describe('reduced motion', () => {
         await expect(shortcutDialog(page)).toHaveCount(0);
 
         // Two bars at 120 BPM: four seconds of count-in to read the number's motion in.
-        await countInSelect(page).selectOption({ label: '2 bars' });
+        await chooseCountIn(page, 2);
         await playButton(page).click();
         const beat = page.getByTestId('count-in-beat');
         await expect(beat).toHaveText(/\d/);

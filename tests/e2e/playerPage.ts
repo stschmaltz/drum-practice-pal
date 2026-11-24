@@ -178,10 +178,52 @@ export const windowScrollSettled = (page: Page) =>
 export const scrollScoreToStart = (page: Page) =>
   viewport(page).evaluate((box) => box.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
 
-export const countInSelect = (page: Page) =>
-  controls(page).getByRole('combobox', { name: 'Count-in', exact: true });
-export const countInModeSelect = (page: Page) =>
-  controls(page).getByRole('combobox', { name: 'When to count in' });
+/**
+ * The controls bar folds while playback runs (12 UX pass): the metronome, the
+ * speed and "Show controls" stay; the rest is behind that button. Opens the
+ * whole bar if it is folded; does nothing otherwise. Call it before using a
+ * control that folds away (Back to start, the drum toggles, the volume, the
+ * count-in) while the song may be playing.
+ */
+export async function showControls(page: Page): Promise<void> {
+  const show = controls(page).getByRole('button', { name: 'Show controls' });
+  if (await show.isVisible()) await show.click();
+}
+
+/** The count-in's segmented controls: how many bars, and (only with a count-in) when. */
+export const countInGroup = (page: Page) =>
+  controls(page).getByRole('radiogroup', { name: 'Count-in', exact: true });
+export const countInModeGroup = (page: Page) =>
+  controls(page).getByRole('radiogroup', { name: 'When to count in' });
+/** The option on in each: assert with `toHaveValue('2')`, `toHaveValue('every_repeat')`. */
+export const checkedCountIn = (page: Page) => countInGroup(page).locator('input:checked');
+export const checkedCountInMode = (page: Page) => countInModeGroup(page).locator('input:checked');
+
+const COUNT_IN_LABELS = { 0: 'Off', 1: '1 bar', 2: '2 bars' } as const;
+const COUNT_IN_MODE_LABELS = { start: 'At the start', every_repeat: 'Every repeat' } as const;
+
+/** Chooses the count-in's bars in the controls bar, opening the bar first if playback folded it. */
+export async function chooseCountIn(page: Page, bars: 0 | 1 | 2): Promise<void> {
+  await showControls(page);
+  await countInGroup(page)
+    .locator('label')
+    .filter({ hasText: new RegExp(`^${COUNT_IN_LABELS[bars]}$`) })
+    .click();
+  await expect(checkedCountIn(page)).toHaveValue(String(bars));
+}
+
+/** Chooses when the count-in plays; there must be a count-in for the choice to show. */
+export async function chooseCountInMode(
+  page: Page,
+  mode: keyof typeof COUNT_IN_MODE_LABELS,
+): Promise<void> {
+  await showControls(page);
+  await countInModeGroup(page)
+    .locator('label')
+    .filter({ hasText: new RegExp(`^${COUNT_IN_MODE_LABELS[mode]}$`) })
+    .click();
+  await expect(checkedCountInMode(page)).toHaveValue(mode);
+}
 
 interface StatusWindow {
   __drumPalPlayer?: { getSnapshot(): { status: string }; subscribe(listener: () => void): void };

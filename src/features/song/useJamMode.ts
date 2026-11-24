@@ -10,6 +10,8 @@ interface JamModeRefs {
   scrollRef: RefObject<HTMLElement | null>;
   /** The sticky bar (readout and Pause) at the top of the window. */
   stickyBarRef: RefObject<HTMLElement | null>;
+  /** The controls bar, which sticks under the sticky bar while folded (playing). */
+  stickyControlsRef?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -56,13 +58,19 @@ function useSeekOnTap(player: PlayerService | null, enabled: boolean): void {
  * sure the box itself is in the window, which on a short screen it may not
  * be, without sliding it under the sticky bar.
  */
-function useScoreOnScreen({ scrollRef, stickyBarRef }: JamModeRefs, when: ScoreOnScreen): void {
+function useScoreOnScreen(
+  { scrollRef, stickyBarRef, stickyControlsRef }: JamModeRefs,
+  when: ScoreOnScreen,
+): void {
   useEffect(() => {
     if (when === null) return;
     const box = scrollRef.current;
     if (!box) return;
     // Measured, not a fixed class: the bar's height depends on wrapping and the safe area.
-    const barHeight = stickyBarRef.current?.getBoundingClientRect().height ?? 0;
+    // The controls fold in the same render that starts playback, so by now they are the strip.
+    const barHeight =
+      (stickyBarRef.current?.getBoundingClientRect().height ?? 0) +
+      stickyHeight(stickyControlsRef?.current ?? null);
     box.style.scrollMarginTop = `${Math.ceil(barHeight) + GAP_BELOW_STICKY_BAR_PX}px`;
     // 'nearest' leaves the page alone when the box is already fully visible,
     // and only once per start, so it never fights the user scrolling the page.
@@ -71,5 +79,11 @@ function useScoreOnScreen({ scrollRef, stickyBarRef }: JamModeRefs, when: ScoreO
       block: when === 'picking-bars' ? 'start' : 'nearest',
       behavior: 'smooth',
     });
-  }, [when, scrollRef, stickyBarRef]);
+  }, [when, scrollRef, stickyBarRef, stickyControlsRef]);
+}
+
+/** The height an element covers at the top of the window: its own when it sticks, else none. */
+function stickyHeight(element: HTMLElement | null): number {
+  if (!element || getComputedStyle(element).position !== 'sticky') return 0;
+  return element.getBoundingClientRect().height;
 }

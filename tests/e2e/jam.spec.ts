@@ -328,9 +328,10 @@ for (const size of [
 
     await playButton(page).click();
     await expect(playButton(page)).toHaveText('Pause');
-    // Play scrolls the score box into view (smoothly). Neither size fits the
-    // header, controls and score, so the window did scroll.
-    expect(await windowScrollSettled(page)).toBeGreaterThan(0);
+    // Play folds the controls and scrolls the score box into view (smoothly) if it
+    // still isn't all on show; either way, once the window is still, all of it is.
+    await windowScrollSettled(page);
+    expect(await onScreen(viewport(page))).toBe(true);
 
     for (let sample = 0; sample < 12; sample++) {
       await page.waitForTimeout(250);

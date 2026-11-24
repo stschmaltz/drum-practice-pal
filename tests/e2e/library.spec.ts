@@ -291,3 +291,34 @@ test('sorts by recent practice, and deleting a song removes its file, loops and 
   expect(loops).toEqual([{ song_id: waltz.id }]);
   expect(await childRows('practice_sessions', user)).toHaveLength(1);
 });
+
+// 12 UX pass, item 11.
+test('once there are songs, a song opens from anywhere on its card, and a file dropped on the list uploads', async ({
+  user,
+  page,
+}) => {
+  await signIn(page, user, '/library');
+  await upload(page, fixture('groove-120'));
+  await expect(page.getByRole('status').filter({ hasText: 'Added' })).toBeVisible();
+
+  // The big drop box has become an Upload button with the same name.
+  await expect(page.getByText(/or drop one here/)).toHaveCount(0);
+  await expect(uploadInput(page)).toBeAttached();
+
+  const bytes = Array.from(readFileSync(fixture('waltz-34')));
+  const dataTransfer = await page.evaluateHandle((data) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array(data)], 'waltz.gp'));
+    return transfer;
+  }, bytes);
+  await page.getByRole('list').dispatchEvent('drop', { dataTransfer });
+  await expect(page.getByRole('status').filter({ hasText: 'Added “Waltz 3-4”.' })).toBeVisible();
+
+  // A press on the card away from its title (near its top right corner) opens the song.
+  const card = page.getByRole('listitem').filter({ hasText: 'Groove 120' });
+  await card.scrollIntoViewIfNeeded();
+  const box = await card.boundingBox();
+  if (!box) throw new Error('No card');
+  await page.mouse.click(box.x + box.width - 12, box.y + 12);
+  await expect(page.getByRole('heading', { level: 1, name: 'Groove 120' })).toBeVisible();
+});

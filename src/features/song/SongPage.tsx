@@ -1,4 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type Ref,
+  type RefObject,
+} from 'react';
 import { Link, useParams } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
@@ -6,7 +15,6 @@ import { Icon } from '@/components/icons';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
 import {
-  activeCardClass,
   buttonClass,
   dangerCardClass,
   ghostButtonClass,
@@ -16,7 +24,8 @@ import {
 } from '@/components/styles';
 import type { Song } from '@/features/library/songForm';
 import { useSong, useSongFile } from '@/features/library/useSongs';
-import { barsLabel, type Loop } from '@/features/loops/loopForm';
+import type { Loop } from '@/features/loops/loopForm';
+import { findLoopSpeed } from '@/features/loops/loopFocus';
 import { LoopPanel } from '@/features/loops/LoopPanel';
 import { useLoopPanelOpen } from '@/features/loops/useLoopPanelOpen';
 import { useLoopPractice } from '@/features/loops/useLoopPractice';
@@ -43,6 +52,8 @@ import { ShortcutOverlay } from '@/features/shortcuts/ShortcutOverlay';
 import { useSettings } from '@/features/settings/useSettings';
 import { useOnline, waitsForNetwork } from '@/lib/network';
 import { isUuid } from '@/lib/randomUuid';
+import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
+import { useControlsFold } from './useControlsFold';
 import { useJamMode } from './useJamMode';
 import { useRequestedLoop } from './useRequestedLoop';
 import { useSongShortcuts } from './useSongShortcuts';
@@ -164,6 +175,13 @@ function SongPlayer({
     initialOptions,
   });
   const stickyBarRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const stickyBarHeight = useHeightOf(stickyBarRef);
+  const fold = useControlsFold(isRunning(snapshot.status));
+  const focusWhenReady = useFocusWhenReady();
+  // The controls fold and unfold above the score at Play and Pause: the score stays where it
+  // is on screen, so a bar tapped just after a Pause is the bar that was under the finger.
+  useStaysOnScreen(scrollRef, fold.folded);
   const loops = useLoops(songId);
   const practice = useLoopPractice(player, snapshot, loops.data);
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
@@ -184,7 +202,7 @@ function SongPlayer({
 
   useJamMode(
     player,
-    { scrollRef, stickyBarRef },
+    { scrollRef, stickyBarRef, stickyControlsRef: controlsRef },
     {
       seekOnTap: !pickingBars,
       // The count-in counter sits over the score, so the score comes on screen for it too.
@@ -197,13 +215,46 @@ function SongPlayer({
   const readoutTempo = practice.activeLoop
     ? (player?.tempoAtBar(practice.activeLoop.start_bar) ?? snapshot.barTempo)
     : snapshot.barTempo;
+  // The controls bar's slider gives way to the playing loop's own speed control: this shows it.
+  const showLoopSpeed = () => {
+    // Open already (the column), nothing re-renders to run a hand-over: focus it now.
+    if (loopPanel.open) {
+      findLoopSpeed()?.focus();
+      return;
+    }
+    setLoopPanelOpen(true);
+    focusWhenReady(findLoopSpeed);
+  };
 
   return (
-    // The bottom padding keeps the end of the page clear of the loop sheet's header.
-    <div className="flex flex-col gap-3 pb-12 lg:pb-0">
+    // The bottom padding keeps the end of the page clear of the loop sheet's header and,
+    // while the sheet is open, leaves room to scroll the score up above it: below 768 px the
+    // score box is one line of music, so the page alone is too short to bring it clear.
+    <div
+      className={`flex flex-col gap-3 lg:pb-0 ${
+        loopPanel.open ? 'pb-[calc(45dvh+4rem)] md:pb-[calc(min(40dvh,30rem)+4rem)]' : 'pb-12'
+      }`}
+      style={{ '--jam-bar-height': `${stickyBarHeight}px` } as CSSProperties}
+    >
       <JamBar ref={stickyBarRef} player={player} snapshot={snapshot} tempo={readoutTempo} />
-      {/* Above the two columns: beside the panel the controls would be squeezed. */}
-      <PlayerControls player={player} snapshot={snapshot} showPlayButton={false} />
+      {/* Above the two columns: beside the panel the controls would be squeezed. Folded
+          while playing, it is a strip that sticks under the sticky bar. */}
+      <div
+        ref={controlsRef}
+        className={
+          fold.folded
+            ? 'sticky top-(--jam-bar-height) z-10 -mx-4 -mt-3 border-b border-line bg-canvas px-4 md:-mx-gutter md:px-gutter'
+            : undefined
+        }
+      >
+        <PlayerControls
+          player={player}
+          snapshot={snapshot}
+          showPlayButton={false}
+          fold={fold}
+          onShowLoopSpeed={practice.activeLoop ? showLoopSpeed : null}
+        />
+      </div>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-4">
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -217,9 +268,6 @@ function SongPlayer({
               />
             </div>
           </div>
-          {practice.activeLoop && (
-            <ActiveLoopLine loop={practice.activeLoop} onExit={practice.exitLoop} />
-          )}
           <SessionNotice tracker={tracker} loops={loops.data} />
           <ScoreBox
             scrollRef={scrollRef}
@@ -242,6 +290,59 @@ function SongPlayer({
       <ShortcutOverlay open={shortcuts.helpOpen} onClose={shortcuts.closeHelp} />
     </div>
   );
+}
+
+/**
+ * Keeps an element where it is in the window when `key` changes something
+ * above it (the controls folding): the window is scrolled by however far the
+ * element moved on screen. Where it was is kept from the last render and the
+ * last scroll, so a scroll the user made since counts as where it was, and
+ * Chrome's own scroll anchoring, when it has already kept the element still,
+ * leaves nothing to do (Safari has none). At the top of the page a fold can't
+ * be made up for (there is nothing above to scroll back), so the score comes
+ * up with the press of Play, which never lands on the score.
+ */
+function useStaysOnScreen(ref: RefObject<HTMLElement | null>, key: unknown): void {
+  const lastTop = useRef<number | null>(null);
+  const lastKey = useRef(key);
+  useEffect(() => {
+    const onScroll = () => {
+      if (ref.current) lastTop.current = ref.current.getBoundingClientRect().top;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [ref]);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const top = element.getBoundingClientRect().top;
+    const before = lastTop.current;
+    if (lastKey.current !== key && before !== null && top !== before) {
+      window.scrollBy({ top: top - before, behavior: 'instant' });
+    }
+    lastKey.current = key;
+    lastTop.current = element.getBoundingClientRect().top;
+  });
+}
+
+/**
+ * An element's height, kept up to date as it wraps or the safe area changes:
+ * the folded controls stick right under the sticky bar, at this offset.
+ */
+function useHeightOf(ref: RefObject<HTMLElement | null>): number {
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => setHeight(Math.ceil(element.getBoundingClientRect().height));
+    measure();
+    // jsdom has no ResizeObserver; the one measure above is all a test needs.
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  return height;
 }
 
 /**
@@ -316,33 +417,13 @@ function ScoreBox({
         // margin keeps the box clear of the loop sheet's header (and on a phone the
         // fixed tab bar under it) when playback scrolls it into view; the column from
         // lg covers nothing (useJamMode sets the top one from the sticky bar's height).
-        className="jam-score relative h-[60dvh] scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))] lg:scroll-mb-4"
+        // Below 768 px the score is one line of music scrolling sideways, so the box is as tall
+        // as that line (alphaTab sizes it) rather than a fixed height of blank paper under it.
+        // At least as tall as the count-in number drawn over it.
+        className="jam-score relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:h-[60dvh] md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))] lg:scroll-mb-4"
       >
         <div ref={scoreRef} />
       </div>
-    </div>
-  );
-}
-
-/**
- * Which loop is repeating, with the way back to the whole song. Above the
- * score rather than only in the panel, which below 1024 px is a closed sheet.
- */
-function ActiveLoopLine({ loop, onExit }: { loop: Loop; onExit: () => void }) {
-  return (
-    <div
-      data-testid="active-loop"
-      className={`${activeCardClass} flex items-center justify-between gap-3 py-1 pr-1 pl-3`}
-    >
-      <Icon name="loop" className="size-5 text-brand" />
-      {/* Two lines at most: a long unbroken name is cut short, not stacked a letter per line. */}
-      <p className="line-clamp-2 min-w-0 flex-1 text-sm break-words" title={loop.name}>
-        Looping <span className="font-semibold">{loop.name}</span> ·{' '}
-        {barsLabel(loop.start_bar, loop.end_bar)}
-      </p>
-      <button type="button" className={`${ghostButtonClass} shrink-0`} onClick={onExit}>
-        Exit loop
-      </button>
     </div>
   );
 }

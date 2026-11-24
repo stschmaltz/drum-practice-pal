@@ -25,17 +25,16 @@ export function AppShell() {
           <NavLinks
             linkClass={(isActive) =>
               `flex min-h-touch items-center gap-3 rounded-control px-3 transition-colors duration-150 ${focusRing} ${
+                // The current page: a quiet fill and an edge, in the selected colour, not the brand.
                 isActive
-                  ? 'bg-raised font-semibold text-ink shadow-[inset_3px_0_0_var(--color-brand)]'
+                  ? 'bg-selected font-semibold text-ink shadow-[inset_3px_0_0_var(--color-selected-line)]'
                   : 'text-ink-soft hover:bg-raised hover:text-ink'
               }`
             }
           />
         </nav>
         <div className="mt-auto flex flex-col gap-2 border-t border-line px-1 pt-4 text-sm">
-          <p className="truncate px-2 text-ink-muted" title={user.email}>
-            {user.email}
-          </p>
+          <AccountLine email={user.email ?? ''} />
           <SignOutButton className={`${ghostButtonClass} w-full justify-start`} />
         </div>
       </aside>
@@ -55,12 +54,34 @@ export function AppShell() {
         <NavLinks
           linkClass={(isActive) =>
             `flex h-14 flex-1 flex-col items-center justify-center gap-0.5 text-xs ${focusRing} focus-visible:-outline-offset-2 ${
-              isActive ? 'font-semibold text-brand' : 'text-ink-muted'
+              // Bold and a bar along the top as well as the colour, so the current tab isn't told by colour alone.
+              isActive
+                ? 'font-semibold text-ink shadow-[inset_0_2px_0_var(--color-selected-line)]'
+                : 'text-ink-muted'
             }`
           }
         />
       </nav>
     </div>
+  );
+}
+
+/**
+ * Who is signed in: the address's first letter in a circle, as account
+ * pickers draw it, and the address cut short with the whole of it in `title`.
+ */
+function AccountLine({ email }: { email: string }) {
+  const initial = email.trim().charAt(0).toUpperCase() || '?';
+  return (
+    <p className="flex min-w-0 items-center gap-2 px-2 text-ink-soft" title={email}>
+      <span
+        aria-hidden="true"
+        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-selected font-semibold text-ink ring-1 ring-selected-line"
+      >
+        {initial}
+      </span>
+      <span className="truncate">{email}</span>
+    </p>
   );
 }
 

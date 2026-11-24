@@ -22,6 +22,7 @@ export type LoopFormOpener = { kind: 'new' } | { kind: 'edit'; loopId: string };
 
 export const NEW_LOOP_BUTTON_ATTRIBUTES = { 'data-loop-form-opener': 'new' } as const;
 
+/** On what opens the loop's form: its "More" button, whose menu holds Edit (12 UX pass). */
 export function editButtonAttributes(loopId: string) {
   return { 'data-loop-form-opener': `edit:${loopId}` };
 }
@@ -31,4 +32,11 @@ export function findFormOpener(opener: LoopFormOpener): HTMLElement | null {
   const find = (value: string) =>
     document.querySelector<HTMLElement>(`[data-loop-form-opener="${value}"]`);
   return (opener.kind === 'edit' ? find(`edit:${opener.loopId}`) : null) ?? find('new');
+}
+
+/** On the playing loop's speed control, for the controls bar's "Loop speed" to hand focus to. */
+export const LOOP_SPEED_ATTRIBUTES = { 'data-loop-speed': '' } as const;
+
+export function findLoopSpeed(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-loop-speed]');
 }

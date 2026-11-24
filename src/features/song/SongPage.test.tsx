@@ -9,6 +9,7 @@ import { loopKeys } from '@/features/loops/loopKeys';
 import { offlineDb } from '@/features/offline/offlineDb';
 import { restoredCacheIsStale } from '@/features/offline/queryPersister';
 import type { EngineMount } from '@/features/player/playerEngine';
+import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_SHORT_LABELS } from '@/features/player/countInLabels';
 import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
 import type { Settings } from '@/features/settings/settingsForm';
 import { songFilePath } from '@/lib/schema';
@@ -27,10 +28,33 @@ import {
   TEMPO_CHANGE_BAR_TEMPOS,
   TICKS_PER_BAR,
 } from '@/test/fakePlayerEngine';
+import {
+  chooseIn,
+  chosenCountIn,
+  chosenCountInMode,
+  countInGroup,
+  countInModeGroup,
+} from '@/test/countInControls';
 import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
 import { SongPage } from './SongPage';
+
+/** Unfolds the controls bar, which folds to a strip while playback runs. */
+async function showControls(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Show controls' }));
+}
+
+/** A loop's Edit, History or Delete, which live in its "More" menu. */
+async function chooseFromMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  panel: ReturnType<typeof within>,
+  loopName: string,
+  action: 'Edit' | 'Delete',
+) {
+  await user.click(panel.getByRole('button', { name: `More actions for ${loopName}` }));
+  await user.click(panel.getByRole('menuitem', { name: action }));
+}
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -372,7 +396,9 @@ describe('SongPage player', () => {
     act(() => engine.fire('position', { tick: 3840 * 2 }));
     const restartsBefore = engine.restartCalls();
 
+    // The metronome is in the folded strip; Mute drums is behind "Show controls".
     await user.click(screen.getByRole('button', { name: 'Metronome' }));
+    await showControls(user);
     await user.click(screen.getByRole('button', { name: 'Mute drums' }));
 
     expect(engine.setMetronomeVolume).toHaveBeenLastCalledWith(0);
@@ -482,6 +508,7 @@ describe('SongPage drums only', () => {
     act(() => engine.fire('stateChanged', { playing: true }));
     const restartsBefore = engine.restartCalls();
 
+    await showControls(user);
     await user.click(drumsOnly());
     expect(drumsOnly()).toHaveAttribute('aria-pressed', 'true');
     // The song row says the drums are track 1 of the three.
@@ -751,8 +778,8 @@ describe('SongPage count-in', () => {
     });
     const user = renderSong(SONG_A);
     const engine = await loadPlayer();
-    expect(screen.getByRole('combobox', { name: 'Count-in' })).toHaveValue('2');
-    expect(screen.getByRole('combobox', { name: 'When to count in' })).toHaveValue('every_repeat');
+    expect(chosenCountIn()).toBe('2 bars');
+    expect(chosenCountInMode()).toBe('Every repeat');
     expect(screen.queryByTestId('count-in')).not.toBeInTheDocument();
 
     await user.click(playButton());
@@ -781,8 +808,11 @@ describe('SongPage count-in', () => {
       serve({ settings: ok({ ...settingsRow, count_in_bars, count_in_mode }) });
       renderSong(SONG_A);
       await loadPlayer();
-      expect(screen.getByRole('combobox', { name: 'Count-in' })).toHaveValue(String(count_in_bars));
-      expect(screen.getByRole('combobox', { name: 'When to count in' })).toHaveValue(count_in_mode);
+      expect(chosenCountIn()).toBe(COUNT_IN_BARS_LABELS[count_in_bars]);
+      // The mode shows only with a count-in to play.
+      expect(chosenCountInMode()).toBe(
+        count_in_bars === 0 ? null : COUNT_IN_MODE_SHORT_LABELS[count_in_mode],
+      );
     },
   );
 
@@ -802,11 +832,8 @@ describe('SongPage count-in', () => {
     const user = renderSong(SONG_A);
     const engine = await loadPlayer();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Count-in' }), '2 bars');
-    await user.selectOptions(
-      screen.getByRole('combobox', { name: 'When to count in' }),
-      'Before every loop repeat',
-    );
+    await chooseIn(user, countInGroup(), '2 bars');
+    await chooseIn(user, countInModeGroup(), 'Every repeat');
 
     // The override is live: Play now counts in.
     await user.click(playButton());
@@ -822,9 +849,8 @@ describe('SongPage count-in', () => {
 
     await user.click(screen.getByRole('link', { name: 'Song B' }));
     await loadPlayer(1);
-    expect(screen.getByRole('combobox', { name: 'Count-in' })).toHaveValue('0');
-    expect(screen.getByRole('combobox', { name: 'When to count in' })).toHaveValue('start');
-    expect(screen.getByRole('combobox', { name: 'When to count in' })).toBeDisabled();
+    expect(chosenCountIn()).toBe('Off');
+    expect(countInModeGroup()).not.toBeInTheDocument();
   });
 
   it('shows the counter inside the score box, over the score', async () => {
@@ -950,9 +976,7 @@ describe('SongPage loops', () => {
     expect(engine.seek).toHaveBeenLastCalledWith(startOfBar(7));
     expect(engine.play).toHaveBeenCalledTimes(1);
     expect(status()).toHaveTextContent('Bar 7 of 16');
-    expect(screen.getByTestId('active-loop')).toHaveTextContent(
-      'Looping Across the change · Bars 7 to 10',
-    );
+    expect(screen.getByTestId('active-loop')).toHaveTextContent(/Across the change.*Bars 7 to 10/);
     expect(engine.setHighlight).toHaveBeenLastCalledWith({ startBarIndex: 6, endBarIndex: 9 });
   });
 
@@ -1083,9 +1107,7 @@ describe('SongPage loops', () => {
     });
 
     // The form closes and the new loop is the one playing, without Play being pressed.
-    expect(await screen.findByTestId('active-loop')).toHaveTextContent(
-      'Second half · Bars 9 to 12',
-    );
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent(/Second half.*Bars 9 to 12/);
     expect(panel().queryByRole('form')).not.toBeInTheDocument();
     expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
       startTick: startOfBar(9),
@@ -1172,7 +1194,7 @@ describe('SongPage loops', () => {
     const { user, engine } = await openSong([acrossTheChange]);
     await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
 
-    await user.click(panel().getByRole('button', { name: 'Edit Across the change' }));
+    await chooseFromMenu(user, panel(), 'Across the change', 'Edit');
     expect(form().getByLabelText('Name')).toHaveValue('Across the change');
     expect(form().getByLabelText(/Target speed/)).toHaveValue('100');
     const lastBar = form().getByLabelText('Last bar');
@@ -1195,13 +1217,15 @@ describe('SongPage loops', () => {
     const { user, engine } = await openSong([acrossTheChange]);
     await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
 
-    await user.click(panel().getByRole('button', { name: 'Delete Across the change' }));
+    await chooseFromMenu(user, panel(), 'Across the change', 'Delete');
     const confirm = within(panel().getByRole('group', { name: 'Delete Across the change' }));
     expect(loops.sent('delete')).toHaveLength(0);
     await user.click(confirm.getByRole('button', { name: 'Keep it' }));
-    expect(panel().getByRole('button', { name: 'Delete Across the change' })).toBeInTheDocument();
+    expect(
+      panel().getByRole('button', { name: 'More actions for Across the change' }),
+    ).toBeInTheDocument();
 
-    await user.click(panel().getByRole('button', { name: 'Delete Across the change' }));
+    await chooseFromMenu(user, panel(), 'Across the change', 'Delete');
     await user.click(
       within(panel().getByRole('group', { name: 'Delete Across the change' })).getByRole('button', {
         name: 'Delete loop',
@@ -1336,9 +1360,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
   it('sets the loop up at its saved speed, ready for Play, without starting playback', async () => {
     const { user, engine } = await openSongAt(`?loop=${LOOP_ID}`);
 
-    expect(await screen.findByTestId('active-loop')).toHaveTextContent(
-      'Looping Chorus fill · Bars 9 to 12',
-    );
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent(/Chorus fill.*Bars 9 to 12/);
     expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
     // 90 BPM from bar 9, times the saved speed.
     expect(screen.getByTestId('jam-bpm')).toHaveTextContent('64');
@@ -1398,7 +1420,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
 
     release();
 
-    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Chorus fill');
     expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
     expect(status()).toHaveTextContent('Bar 9 of 16');
     expect(engine.play).not.toHaveBeenCalled();
@@ -1412,7 +1434,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
 
     await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
 
-    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Chorus fill');
     // Opened once there was a player to give the saved speed to, not before.
     expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
     expect(status()).toHaveTextContent('Bar 9 of 16');
@@ -1430,7 +1452,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
 
     release();
 
-    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Chorus fill');
     expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
     expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
       startTick: startOfBar(9),
@@ -1448,7 +1470,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
       other,
     ]);
 
-    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Chorus fill');
     expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
   });
 
@@ -1478,7 +1500,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
 
       release();
 
-      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Chorus fill');
       expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
     });
 
@@ -1494,7 +1516,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
       release();
 
       expect(await screen.findByTestId('active-loop')).toHaveTextContent(
-        'Looping Chorus fill · Bars 9 to 12',
+        /Chorus fill.*Bars 9 to 12/,
       );
       expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
       expect(status()).toHaveTextContent('Bar 9 of 16');
@@ -1519,7 +1541,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
       await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
 
       expect(await screen.findByTestId('active-loop')).toHaveTextContent(
-        'Looping Chorus fill · Bars 9 to 12',
+        /Chorus fill.*Bars 9 to 12/,
       );
       expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
       expect(queryClient.getQueryState(loopsKey)?.fetchStatus).toBe('paused');
@@ -1534,7 +1556,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
       });
       await openWithCache([other], fresh);
 
-      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Chorus fill');
       expect(selects()).toBe(1);
     });
 
@@ -1558,7 +1580,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
       });
       await openWithCache([chorus, other], fresh);
 
-      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Chorus fill');
       expect(selects()).toBe(0);
     });
 
@@ -1571,7 +1593,7 @@ describe('SongPage opened on a loop (?loop=)', () => {
 
       release();
 
-      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Chorus fill');
       expect(screen.getByTestId('jam-speed')).toHaveTextContent('90%');
     });
 
@@ -1581,14 +1603,14 @@ describe('SongPage opened on a loop (?loop=)', () => {
       const { user } = await openWithCache([{ ...chorus, speed_ratio: 1 }, other]);
       const panel = within(screen.getByTestId('loop-panel'));
       await user.click(await panel.findByRole('button', { name: 'Play loop Other' }));
-      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Other');
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Other');
 
       release();
       // The read has landed (the list shows the server's speed) before saying what it did not do.
       await panel.findByText(/71% \(/);
       await settle();
 
-      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Other');
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Other');
       expect(screen.getByTestId('jam-speed')).toHaveTextContent('100%');
     });
   });
@@ -1690,9 +1712,7 @@ describe('SongPage practice sessions', () => {
     later(40);
     // A drummer's hands on the kit: the pedal, with focus left where the click put it.
     await user.keyboard('{PageDown}');
-    await waitFor(() =>
-      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Chorus'),
-    );
+    await waitFor(() => expect(screen.getByTestId('active-loop')).toHaveTextContent('Chorus'));
 
     await waitFor(() =>
       expect(sessionsSent()).toEqual([
@@ -1799,7 +1819,7 @@ describe('SongPage practice sessions', () => {
     const { user, panel, pause } = await startVerse();
     later(20);
 
-    await user.click(panel.getByRole('button', { name: 'Edit Verse' }));
+    await chooseFromMenu(user, panel, 'Verse', 'Edit');
     const lastBar = panel.getByLabelText('Last bar');
     await user.clear(lastBar);
     await user.type(lastBar, '6');
@@ -1831,7 +1851,7 @@ describe('SongPage practice sessions', () => {
     const { user, panel } = await startVerse();
     later(45);
 
-    await user.click(panel.getByRole('button', { name: 'Delete Verse' }));
+    await chooseFromMenu(user, panel, 'Verse', 'Delete');
     await user.click(panel.getByRole('button', { name: 'Delete loop' }));
 
     // The session was sent and refused; only then is it worth saying nothing was shown.
@@ -1918,15 +1938,13 @@ describe('SongPage keyboard shortcuts', () => {
     document.body.focus();
 
     await user.keyboard('{PageDown}');
-    expect(await screen.findByTestId('active-loop')).toHaveTextContent(
-      'Looping Verse · Bars 5 to 8',
-    );
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent(/Verse.*Bars 5 to 8/);
     await user.keyboard(' ');
     act(() => engine.fire('stateChanged', { playing: true }));
 
     await user.keyboard('{PageDown}');
     await waitFor(() =>
-      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Late · Bars 9 to 12'),
+      expect(screen.getByTestId('active-loop')).toHaveTextContent(/Late.*Bars 9 to 12/),
     );
     // Half speed against the 90 BPM that bar 9 starts at.
     expect(screen.getByTestId('jam-speed')).toHaveTextContent('50%');
@@ -2008,7 +2026,7 @@ describe('SongPage keyboard shortcuts', () => {
 
     expect(pressed('Metronome')).not.toBe(metronomeWas);
     expect(pressed('Mute drums')).toBe('true');
-    expect(screen.getByLabelText('Count-in')).toHaveValue('1');
+    expect(chosenCountIn()).toBe('1 bar');
     await user.keyboard('s');
     expect(pressed('Drums only')).toBe('true');
     expect(pressed('Mute drums')).toBe('false');
@@ -2030,5 +2048,108 @@ describe('SongPage keyboard shortcuts', () => {
     expect(pressed('Metronome')).not.toBe(metronomeWas);
     expect(pressed('Mute drums')).toBe('false');
     expect(pressed('Drums only')).toBe('false');
+  });
+});
+
+describe('SongPage controls while playing (12 UX pass)', () => {
+  const panel = () => within(screen.getByTestId('loop-panel'));
+  const verse = loopOfSongA('verse', { name: 'Verse', start_bar: 5, end_bar: 8, speed_ratio: 0.8 });
+  const controls = () => within(screen.getByRole('region', { name: 'Player controls' }));
+
+  async function openSong(savedLoops: Loop[] = [verse]) {
+    serve({ loops: savedLoops });
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    await panel().findAllByRole('button', { name: /^Play loop / });
+    const play = async () => {
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+    };
+    const pause = async () => {
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: false }));
+    };
+    return { user, engine, play, pause };
+  }
+
+  it('fold to the metronome, the speed and Show controls while playing, and unfold on Pause', async () => {
+    const { play, pause, engine } = await openSong();
+    expect(controls().getByRole('button', { name: 'Mute drums' })).toBeInTheDocument();
+    const restarts = engine.restartCalls();
+
+    await play();
+    expect(controls().getByRole('button', { name: 'Metronome' })).toBeInTheDocument();
+    expect(controls().getByRole('slider', { name: 'Speed' })).toBeInTheDocument();
+    expect(controls().getByRole('button', { name: 'Show controls' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(controls().queryByRole('button', { name: 'Mute drums' })).not.toBeInTheDocument();
+    expect(controls().queryByRole('radiogroup', { name: 'Count-in' })).not.toBeInTheDocument();
+    // Play/Pause stays in the sticky bar, outside the controls.
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(controls().queryByRole('button', { name: /^(Play|Pause)$/ })).not.toBeInTheDocument();
+
+    await pause();
+    expect(controls().getByRole('button', { name: 'Mute drums' })).toBeInTheDocument();
+    expect(controls().queryByRole('button', { name: 'Show controls' })).not.toBeInTheDocument();
+    // Folding is drawing only: the Play and the Pause pressed, and nothing else stopped or reloaded.
+    expect(engine.restartCalls()).toBe(restarts + 2);
+  });
+
+  it('the folded strip sticks under the sticky bar', async () => {
+    const { play } = await openSong();
+    await play();
+    const strip = screen.getByRole('region', { name: 'Player controls' }).parentElement;
+    expect(strip).toHaveClass('sticky');
+    expect(strip?.className).toContain('top-(--jam-bar-height)');
+  });
+
+  it('keys still work on the controls folded away, and show once the bar is out', async () => {
+    const { user, play } = await openSong();
+    await play();
+    document.body.focus();
+    await user.keyboard('dc');
+    await user.click(screen.getByRole('button', { name: 'Show controls' }));
+    expect(screen.getByRole('button', { name: 'Mute drums' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(chosenCountIn()).toBe('1 bar');
+    expect(screen.getByRole('button', { name: 'Hide controls' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+  });
+
+  it('while a loop plays, the slider gives way to Loop speed, which opens the loop’s own speed control', async () => {
+    const { user } = await openSong();
+    expect(controls().getByRole('slider', { name: 'Speed' })).toBeInTheDocument();
+
+    await user.click(panel().getByRole('button', { name: 'Play loop Verse' }));
+    expect(controls().queryByRole('slider', { name: 'Speed' })).not.toBeInTheDocument();
+    await user.click(controls().getByRole('button', { name: 'Loop speed 80%' }));
+    await waitFor(() => expect(panel().getByRole('group', { name: 'Loop speed' })).toHaveFocus());
+
+    await user.click(panel().getByRole('button', { name: 'Exit loop' }));
+    expect(controls().getByRole('slider', { name: 'Speed' })).toBeInTheDocument();
+  });
+
+  it('shows the playing loop once: in its own item, with no line above the score and no second card', async () => {
+    const { user } = await openSong([
+      verse,
+      loopOfSongA('late', { name: 'Late', start_bar: 9, end_bar: 12, speed_ratio: 0.5 }),
+    ]);
+    await user.click(panel().getByRole('button', { name: 'Play loop Verse' }));
+
+    expect(screen.getAllByTestId('active-loop')).toHaveLength(1);
+    expect(screen.getByTestId('active-loop').tagName).toBe('LI');
+    expect(screen.queryByText(/^Looping/)).not.toBeInTheDocument();
+    expect(
+      panel()
+        .getAllByRole('listitem')
+        .map((li) => within(li).getByText(/Bars/).textContent),
+    ).toEqual(['Bars 5 to 8 · 80% (96 BPM)', 'Bars 9 to 12 · 50% (45 BPM)']);
+    expect(panel().getAllByRole('group', { name: 'Loop speed' })).toHaveLength(1);
   });
 });

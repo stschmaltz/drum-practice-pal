@@ -11,3 +11,9 @@ export const COUNT_IN_MODE_LABELS: Record<CountInMode, string> = {
   start: 'At the start only',
   every_repeat: 'Before every loop repeat',
 };
+
+/** The same choices in a segmented control on the controls bar, where a phone has room for two words each. */
+export const COUNT_IN_MODE_SHORT_LABELS: Record<CountInMode, string> = {
+  start: 'At the start',
+  every_repeat: 'Every repeat',
+};

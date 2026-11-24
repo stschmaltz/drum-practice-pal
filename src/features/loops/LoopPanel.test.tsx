@@ -78,8 +78,22 @@ function renderPanel({
     player,
     finishLoading,
     panel,
-    /** Presses the panel's button of this name, once it is there. */
-    press: async (name: string) => user.click(await panel.findByRole('button', { name })),
+    /**
+     * Presses the panel's button of this name, once it is there. "Edit X",
+     * "History X" and "Delete X" are in loop X's "More" menu: it opens that and
+     * chooses the item.
+     */
+    press: async (name: string) => {
+      const inMenu = MENU_ACTION.exec(name);
+      if (!inMenu) return user.click(await panel.findByRole('button', { name }));
+      const [, action = '', loopName = ''] = inMenu;
+      await user.click(await panel.findByRole('button', { name: moreFor(loopName) }));
+      await user.click(
+        panel.getByRole('menuitem', { name: action === 'History' ? /history$/ : action }),
+      );
+    },
+    /** Loop X's "More" button, which stands for the actions in its menu. */
+    more: (name: string) => panel.getByRole('button', { name: moreFor(name) }),
     /** Reads the list again, as a refocus or another write would. */
     refetch: () =>
       act(() =>
@@ -111,6 +125,10 @@ function renderPanel({
 }
 
 type View = ReturnType<typeof renderPanel>;
+
+/** The loop actions that live in a loop's "More" menu (12 UX pass). */
+const MENU_ACTION = /^(Edit|History|Delete) (.+)$/;
+const moreFor = (loopName: string) => `More actions for ${loopName}`;
 
 /** Opens the new-loop form and types its bars and name, without saving. */
 async function typeNewLoop(view: View, loop: { first: string; last: string; name: string }) {
@@ -222,14 +240,26 @@ describe('LoopPanel list', () => {
     expect(view.play('Intro')).toBeDisabled();
     expect(view.panel.getByRole('button', { name: 'New loop' })).toBeDisabled();
     // The form needs the score's bar count, as "New loop" does (bug hunt S3). Deleting needs no score.
-    expect(view.panel.getByRole('button', { name: 'Edit Intro' })).toBeDisabled();
-    expect(view.panel.getByRole('button', { name: 'Delete Intro' })).toBeEnabled();
+    await view.user.click(view.more('Intro'));
+    expect(view.panel.getByRole('menuitem', { name: 'Edit' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    expect(view.panel.getByRole('menuitem', { name: 'Delete' })).not.toHaveAttribute(
+      'aria-disabled',
+    );
+    // A disabled item does nothing: no form.
+    await view.user.click(view.panel.getByRole('menuitem', { name: 'Edit' }));
+    expect(view.panel.queryByRole('form')).not.toBeInTheDocument();
+    await view.user.keyboard('{Escape}');
 
     act(() => view.finishLoading());
 
     expect(view.play('Intro')).toBeEnabled();
     expect(view.panel.getByRole('button', { name: 'New loop' })).toBeEnabled();
-    expect(view.panel.getByRole('button', { name: 'Edit Intro' })).toBeEnabled();
+    await view.user.click(view.more('Intro'));
+    expect(view.panel.getByRole('menuitem', { name: 'Edit' })).not.toHaveAttribute('aria-disabled');
+    await view.user.keyboard('{Escape}');
     expect(view.item('Late').getByText(/50% \(45 BPM\)/)).toBeInTheDocument();
   });
 
@@ -325,8 +355,11 @@ describe('LoopPanel playing a loop', () => {
       speedRatio: 0.5,
       barNumber: 9,
     });
+    // Marked in its own item, which holds its speed control: not a second card for it.
     const card = within(view.panel.getByRole('region', { name: 'Practicing Late' }));
-    expect(card.getByText('Bars 9 to 12, repeating')).toBeInTheDocument();
+    expect(view.item('Late').getByRole('region', { name: 'Practicing Late' })).toBeInTheDocument();
+    expect(view.item('Late').getByText('Now looping')).toBeInTheDocument();
+    expect(view.panel.getAllByText('Late', { selector: 'p' })).toHaveLength(1);
     expect(card.getByLabelText('BPM')).toHaveValue('45');
     // Its own button now restarts it; the other loop's still says Play.
     expect(view.panel.getByRole('button', { name: 'Restart loop Late' })).toBeInTheDocument();
@@ -359,10 +392,10 @@ describe('LoopPanel playing a loop', () => {
     expect(view.engine.loadScore).toHaveBeenCalledTimes(1);
   });
 
-  it('Back to whole song leaves the loop, and its card goes', async () => {
+  it('Exit loop leaves the loop, and its speed control goes', async () => {
     const view = renderPanel();
     await view.press('Play loop Intro');
-    await view.press('Back to whole song');
+    await view.press('Exit loop');
 
     expect(view.panel.queryByRole('region', { name: /Practicing/ })).not.toBeInTheDocument();
     expect(view.player.getSnapshot()).toMatchObject({ range: null, looping: false });
@@ -425,8 +458,7 @@ describe('LoopPanel Play loop and the sheet', () => {
     await view.user.click(view.header());
 
     expect(view.header()).toHaveAttribute('aria-expanded', 'true');
-    const card = within(view.panel.getByRole('region', { name: 'Practicing Late' }));
-    expect(card.getByText('Bars 9 to 12, repeating')).toBeVisible();
+    expect(view.item('Late').getByText('Now looping')).toBeVisible();
     const speed = within(view.panel.getByRole('group', { name: 'Loop speed' }));
     expect(speed.getByLabelText('Speed %')).toBeVisible();
     expect(speed.getByLabelText('Speed %')).toHaveValue('50');
@@ -804,25 +836,21 @@ describe('LoopPanel deleting a loop', () => {
 
   // Bug hunt S4: Delete, "Keep it" and a confirmed delete each took their button away,
   // and focus fell to <body>.
-  it('Delete hands focus to the question, and "Keep it" back to Delete', async () => {
+  it('Delete hands focus to the question, and "Keep it" back to the menu that held Delete', async () => {
     const view = renderPanel();
     await view.press('Delete Late');
     expect(view.panel.getByRole('group', { name: 'Delete Late' })).toHaveFocus();
 
     await view.user.click(confirmFor(view, 'Late').getByRole('button', { name: 'Keep it' }));
-    await waitFor(() =>
-      expect(view.panel.getByRole('button', { name: 'Delete Late' })).toHaveFocus(),
-    );
+    await waitFor(() => expect(view.more('Late')).toHaveFocus());
   });
 
-  it('a deleted loop hands focus to its neighbour’s Delete, or to New loop when it was the last', async () => {
+  it('a deleted loop hands focus to its neighbour’s More, or to New loop when it was the last', async () => {
     const view = renderPanel();
     await view.press('Delete Intro');
     await view.user.click(confirmFor(view, 'Intro').getByRole('button', { name: 'Delete loop' }));
     await waitFor(() => expect(view.names()).toEqual(['Late']));
-    await waitFor(() =>
-      expect(view.panel.getByRole('button', { name: 'Delete Late' })).toHaveFocus(),
-    );
+    await waitFor(() => expect(view.more('Late')).toHaveFocus());
 
     await view.press('Delete Late');
     await view.user.click(confirmFor(view, 'Late').getByRole('button', { name: 'Delete loop' }));
@@ -1097,7 +1125,7 @@ describe('LoopPanel finishing a loop', () => {
     );
     await waitFor(() => expectUnlocked(view.panel.getByRole('button', { name: 'Reopen Late' })));
     expect(finishedNames(view)).toEqual(['Late']);
-    expect(view.item('Late').getByText(/95% \(86 BPM\)/)).toBeInTheDocument();
+    expect(view.item('Late').getByText(/· 95% \(86 BPM\)/)).toBeInTheDocument();
   });
 
   it('a finer target survives finishing and reopening: only the status is sent', async () => {
@@ -1151,7 +1179,7 @@ describe('LoopPanel history', () => {
         session('other-loop', { loop_id: 'intro' }),
       ]),
     });
-    await view.panel.findByRole('button', { name: 'History Late' });
+    await view.panel.findByRole('button', { name: 'More actions for Late' });
     const sessionQueries = () =>
       queryResult.mock.calls.filter(([call]) => call.table === 'practice_sessions');
     expect(sessionQueries()).toHaveLength(0);
@@ -1167,10 +1195,11 @@ describe('LoopPanel history', () => {
     // BPM from the tempo at the loop's first bar (90 from bar 9).
     expect(rows[0]).toMatch(/· 1 min 5 s · 71% \(64 BPM\) · 1 pass$/);
     expect(rows[1]).toMatch(/· 5 min · 50% \(45 BPM\) · 9 passes$/);
-    expect(view.panel.getByRole('button', { name: 'History Late' })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    );
+    // The menu says what choosing it again does, and focus went back to its button.
+    expect(view.more('Late')).toHaveFocus();
+    await view.user.click(view.more('Late'));
+    expect(view.panel.getByRole('menuitem', { name: 'Hide history' })).toBeInTheDocument();
+    await view.user.keyboard('{Escape}');
 
     await view.press('History Late');
     expect(view.panel.queryByRole('region', { name: 'History of Late' })).not.toBeInTheDocument();
@@ -1249,7 +1278,7 @@ describe('LoopPanel history', () => {
       loops: [intro, loopRow('late', { ...late, last_practiced_at: new Date().toISOString() })],
     });
 
-    await view.panel.findByRole('button', { name: 'History Late' });
+    await view.panel.findByRole('button', { name: 'More actions for Late' });
 
     expect(view.item('Late').getByTestId('loop-last-practiced')).toHaveTextContent(
       'Last practiced today',
@@ -1288,20 +1317,18 @@ describe('LoopPanel keeping focus', () => {
     await waitFor(() => expect(view.panel.getByRole('button', { name: 'New loop' })).toHaveFocus());
   });
 
-  it('Edit gives focus to the form, and Cancel or a save back to that loop’s Edit', async () => {
+  it('Edit gives focus to the form, and Cancel or a save back to the menu that held Edit', async () => {
     const view = renderPanel();
     await view.press('Edit Late');
     expect(view.panel.getByRole('form', { name: 'Edit Late' })).toHaveFocus();
 
     await view.press('Cancel');
-    expect(await view.panel.findByRole('button', { name: 'Edit Late' })).toHaveFocus();
+    expect(await view.panel.findByRole('button', { name: 'More actions for Late' })).toHaveFocus();
 
     await view.press('Edit Late');
     await rename(view, 'Later');
     await view.press('Save loop');
-    await waitFor(() =>
-      expect(view.panel.getByRole('button', { name: 'Edit Later' })).toHaveFocus(),
-    );
+    await waitFor(() => expect(view.more('Later')).toHaveFocus());
   });
 
   it('back from a loop deleted elsewhere, focus goes to New loop', async () => {

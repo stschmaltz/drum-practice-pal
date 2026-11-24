@@ -4,17 +4,19 @@ import { expect, signIn, test } from './auth';
 import {
   activeLoopLine,
   commit,
+  playLoopButton,
   loopPanel,
   loopPercentField,
   openLoopPanel,
-  playLoopButton,
   saveLoopSpeed,
   saveNewLoop,
   saveSpeedButton,
+  exitLoop,
+  expectLooping,
 } from './loopsPage';
 import {
-  countInModeSelect,
-  countInSelect,
+  chooseCountIn,
+  chooseCountInMode,
   openFixture,
   playButton,
   recordedStatuses,
@@ -90,7 +92,7 @@ test('a short go is not logged, and jam mode never is', async ({ page, user }) =
 
   await playButton(page).click();
   await playFor(page, 3_000);
-  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
+  await exitLoop(page);
   await playButton(page).click();
   await playFor(page, 3_000);
 
@@ -190,7 +192,7 @@ test('the home page lists loops by last practiced and opens a loop ready to play
   // The song opens on the loop at its saved speed: one tap in, then Play.
   await expect(page.getByRole('heading', { level: 1, name: 'Tempo Change' })).toBeVisible();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
-  await expect(activeLoopLine(page)).toContainText('Looping Late one · Bars 9 to 10');
+  await expectLooping(page, 'Late one', 'Bars 9 to 10');
   await expect(speed(page)).toHaveText('70%');
   // 90 BPM from bar 9, at 70%.
   await expect(page.getByTestId('jam-bpm')).toHaveText('63');
@@ -317,8 +319,8 @@ test('with a count-in before every repeat, a sitting is one session of play time
 }) => {
   await shortSessions(page, 2);
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('1 bar');
-  await countInModeSelect(page).selectOption('Before every loop repeat');
+  await chooseCountIn(page, 1);
+  await chooseCountInMode(page, 'every_repeat');
   // Two bars at 120 BPM: 4 s a pass, with a 2 s count-in before each.
   await saveNewLoop(page, { name: 'Counted', firstBar: 1, lastBar: 2 });
   await recordStatuses(page);

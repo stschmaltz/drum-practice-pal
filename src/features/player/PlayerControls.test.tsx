@@ -1,6 +1,6 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { FakeClickOutput, FakePlayerEngine } from '@/test/fakePlayerEngine';
 import { PlayerControls, PlayPauseButton } from './PlayerControls';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
@@ -398,29 +398,49 @@ describe('PlayPauseButton', () => {
 });
 
 describe('PlayerControls count-in', () => {
-  const countIn = () => screen.getByRole('combobox', { name: 'Count-in' });
-  const countInMode = () => screen.getByRole('combobox', { name: 'When to count in' });
+  const countIn = () => screen.getByRole('radiogroup', { name: 'Count-in' });
+  const countInMode = () => screen.queryByRole('radiogroup', { name: 'When to count in' });
+  /** The label of the option a segmented control has on, or null for none. */
+  const chosen = (group: HTMLElement | null) => {
+    if (!group) return null;
+    const radio = within(group)
+      .getAllByRole<HTMLInputElement>('radio')
+      .find((each) => each.checked);
+    return radio?.closest('label')?.textContent ?? null;
+  };
+  const choose = (user: ReturnType<typeof userEvent.setup>, group: HTMLElement, label: string) =>
+    user.click(within(group).getByRole('radio', { name: label }));
 
   it('starts from the options it is given', () => {
     setup({
       options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2, countInMode: 'every_repeat' },
     });
-    expect(countIn()).toHaveValue('2');
-    expect(countInMode()).toHaveValue('every_repeat');
-    expect(countInMode()).toBeEnabled();
+    expect(chosen(countIn())).toBe('2 bars');
+    expect(chosen(countInMode())).toBe('Every repeat');
   });
 
-  it('offers off, 1 bar and 2 bars, with the mode disabled while off', () => {
+  it('offers off, 1 bar and 2 bars as a segmented control, and no mode while off', () => {
     setup();
-    expect(countIn()).toHaveValue('0');
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
-      'Off',
-      '1 bar',
-      '2 bars',
-      'At the start only',
-      'Before every loop repeat',
-    ]);
-    expect(countInMode()).toBeDisabled();
+    expect(chosen(countIn())).toBe('Off');
+    expect(
+      within(countIn())
+        .getAllByRole('radio')
+        .map((radio) => radio.closest('label')?.textContent),
+    ).toEqual(['Off', '1 bar', '2 bars']);
+    // Progressive disclosure: the mode only matters with a count-in to play.
+    expect(countInMode()).not.toBeInTheDocument();
+  });
+
+  it('shows the mode once a count-in is chosen, with both of its choices in full', async () => {
+    const { user } = setup();
+    await choose(user, countIn(), '1 bar');
+    const mode = countInMode();
+    expect(mode).not.toBeNull();
+    expect(
+      within(mode as HTMLElement)
+        .getAllByRole('radio')
+        .map((radio) => radio.closest('label')?.textContent),
+    ).toEqual(['At the start', 'Every repeat']);
   });
 
   it('changes the player without restarting playback', async () => {
@@ -429,11 +449,11 @@ describe('PlayerControls count-in', () => {
     engine.play.mockClear();
     engine.loadScore.mockClear();
 
-    await user.selectOptions(countIn(), '1 bar');
-    await user.selectOptions(countInMode(), 'Before every loop repeat');
+    await choose(user, countIn(), '1 bar');
+    await choose(user, countInMode() as HTMLElement, 'Every repeat');
 
     expect(player.getSnapshot()).toMatchObject({ countInBars: 1, countInMode: 'every_repeat' });
-    expect(countIn()).toHaveValue('1');
+    expect(chosen(countIn())).toBe('1 bar');
     expect(engine.restartCalls()).toBe(0);
   });
 
@@ -448,18 +468,20 @@ describe('PlayerControls count-in', () => {
         })}
       />,
     );
-    expect(countIn()).toHaveValue('1');
-    expect(countIn()).toBeDisabled();
-    expect(countInMode()).toHaveValue('every_repeat');
-    expect(countInMode()).toBeDisabled();
+    expect(chosen(countIn())).toBe('1 bar');
+    for (const radio of within(countIn()).getAllByRole('radio')) expect(radio).toBeDisabled();
+    expect(chosen(countInMode())).toBe('Every repeat');
+    for (const radio of within(countInMode() as HTMLElement).getAllByRole('radio')) {
+      expect(radio).toBeDisabled();
+    }
   });
 
   it('can be set while the song is still loading', async () => {
     const { player, user } = setup({ loaded: false });
-    expect(countIn()).toBeEnabled();
-    await user.selectOptions(countIn(), '2 bars');
+    expect(within(countIn()).getByRole('radio', { name: '2 bars' })).toBeEnabled();
+    await choose(user, countIn(), '2 bars');
     expect(player.getSnapshot().countInBars).toBe(2);
-    expect(countInMode()).toBeEnabled();
+    expect(countInMode()).toBeInTheDocument();
   });
 
   it.each([
@@ -471,36 +493,42 @@ describe('PlayerControls count-in', () => {
       // Start from a different value so each choice is a change.
       options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: bars === 1 ? 2 : 1 },
     });
-    await user.selectOptions(countIn(), label);
+    await choose(user, countIn(), label);
     expect(player.getSnapshot().countInBars).toBe(bars);
-    expect(countIn()).toHaveValue(String(bars));
-    expect(countIn()).toHaveDisplayValue(label);
+    expect(chosen(countIn())).toBe(label);
   });
 
   it.each([
-    ['At the start only', 'start', 'every_repeat'],
-    ['Before every loop repeat', 'every_repeat', 'start'],
+    ['At the start', 'start', 'every_repeat'],
+    ['Every repeat', 'every_repeat', 'start'],
   ] as const)('choosing "%s" sets the mode to %s', async (label, mode, from) => {
     const { player, user } = setup({
       options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1, countInMode: from },
     });
-    await user.selectOptions(countInMode(), label);
+    await choose(user, countInMode() as HTMLElement, label);
     expect(player.getSnapshot().countInMode).toBe(mode);
-    expect(countInMode()).toHaveDisplayValue(label);
+    expect(chosen(countInMode())).toBe(label);
   });
 
-  it('keeps the chosen mode while the count-in is off, and offers it again when it is back on', async () => {
+  it('keeps the chosen mode while the count-in is off, and shows it again when it is back on', async () => {
     const { player, user } = setup({
       options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1, countInMode: 'every_repeat' },
     });
-    await user.selectOptions(countIn(), 'Off');
-    expect(countInMode()).toBeDisabled();
-    expect(countInMode()).toHaveValue('every_repeat');
+    await choose(user, countIn(), 'Off');
+    expect(countInMode()).not.toBeInTheDocument();
+    expect(player.getSnapshot().countInMode).toBe('every_repeat');
 
-    await user.selectOptions(countIn(), '2 bars');
-    expect(countInMode()).toBeEnabled();
-    expect(countInMode()).toHaveValue('every_repeat');
+    await choose(user, countIn(), '2 bars');
+    expect(chosen(countInMode())).toBe('Every repeat');
     expect(player.getSnapshot()).toMatchObject({ countInBars: 2, countInMode: 'every_repeat' });
+  });
+
+  it('the arrow keys move the choice, as in any radio group', async () => {
+    const { player, user } = setup();
+    within(countIn()).getByRole('radio', { name: 'Off' }).focus();
+    await user.keyboard('{ArrowRight}');
+    expect(player.getSnapshot().countInBars).toBe(1);
+    expect(chosen(countIn())).toBe('1 bar');
   });
 
   it('the choice made in the bar is what the next Play counts', async () => {
@@ -515,7 +543,7 @@ describe('PlayerControls count-in', () => {
     await user.click(playButton());
     act(() => engine.fire('stateChanged', { playing: false }));
 
-    await user.selectOptions(countIn(), '2 bars');
+    await choose(user, countIn(), '2 bars');
     await user.click(playButton());
     expect(player.getSnapshot().status).toBe('countingIn');
     // Two bars of 4/4: eight clicks, two of them accented.
@@ -527,7 +555,7 @@ describe('PlayerControls count-in', () => {
     expect(player.getSnapshot().status).toBe('ready');
   });
 
-  it('changing either select during a count-in leaves it running', async () => {
+  it('changing either choice during a count-in leaves it running', async () => {
     const clicks = new FakeClickOutput();
     const { engine, player, user } = setup({
       clicks,
@@ -537,8 +565,8 @@ describe('PlayerControls count-in', () => {
     expect(player.getSnapshot().status).toBe('countingIn');
     const restartsBefore = engine.restartCalls();
 
-    await user.selectOptions(countInMode(), 'Before every loop repeat');
-    await user.selectOptions(countIn(), '1 bar');
+    await choose(user, countInMode() as HTMLElement, 'Every repeat');
+    await choose(user, countIn(), '1 bar');
 
     expect(player.getSnapshot().status).toBe('countingIn');
     expect(playButton()).toHaveTextContent('Pause');
@@ -562,10 +590,10 @@ describe('PlayerControls count-in', () => {
     expect(engine.play).not.toHaveBeenCalled();
   });
 
-  it('both selects have an accessible name', () => {
-    setup();
-    expect(screen.getByLabelText('Count-in')).toBe(countIn());
-    expect(screen.getByLabelText('When to count in')).toBe(countInMode());
+  it('both groups have an accessible name, the first from the words beside it', () => {
+    setup({ options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1 } });
+    expect(countIn()).toHaveAccessibleName('Count-in');
+    expect(countInMode()).toHaveAccessibleName('When to count in');
   });
 
   it('shows Pause during a count-in, and Pause calls it off', async () => {
@@ -580,5 +608,143 @@ describe('PlayerControls count-in', () => {
     await user.click(playButton());
     expect(playButton()).toHaveTextContent('Play');
     expect(player.getSnapshot().status).toBe('ready');
+  });
+});
+
+describe('PlayerControls toggles and actions', () => {
+  it('draws each toggle’s state as a mark as well as aria-pressed: a check when on, a ring when off', async () => {
+    const { user } = setup({ options: { ...DEFAULT_PLAYER_OPTIONS, metronomeOn: true } });
+    const mark = (button: HTMLElement) => button.querySelector('[data-toggle-mark]');
+    expect(metronome()).toHaveAttribute('aria-pressed', 'true');
+    expect(mark(metronome())).toHaveAttribute('data-toggle-mark', 'on');
+    expect(mark(metronome())?.querySelector('svg')).not.toBeNull();
+    expect(mark(muteDrums())).toHaveAttribute('data-toggle-mark', 'off');
+    expect(mark(muteDrums())?.querySelector('svg')).toBeNull();
+
+    await user.click(muteDrums());
+    expect(mark(muteDrums())).toHaveAttribute('data-toggle-mark', 'on');
+    // Hidden from screen readers: aria-pressed already says it.
+    expect(mark(muteDrums())).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('Back to start is an action: no toggle state, no mark', () => {
+    setup();
+    expect(backToStart()).not.toHaveAttribute('aria-pressed');
+    expect(backToStart().querySelector('[data-toggle-mark]')).toBeNull();
+  });
+});
+
+describe('PlayerControls folded', () => {
+  function Folding({ player, folded }: { player: PlayerService; folded: boolean }) {
+    const snapshot = useSyncExternalStore(player.subscribe, player.getSnapshot);
+    const [shown, setShown] = useState(false);
+    return (
+      <PlayerControls
+        player={player}
+        snapshot={snapshot}
+        fold={{ folded: folded && !shown, canFold: folded, onFoldedChange: (f) => setShown(!f) }}
+      />
+    );
+  }
+
+  function setupFolded() {
+    const engine = new FakePlayerEngine();
+    const player = new PlayerService(engine, {
+      drumTrackIndex: DRUMS,
+      options: DEFAULT_PLAYER_OPTIONS,
+      wakeLock: { setActive: vi.fn(), dispose: vi.fn() },
+      unlockAudio: vi.fn(),
+    });
+    player.load(new Uint8Array([1]));
+    const view = render(<Folding player={player} folded={false} />);
+    act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+    return {
+      engine,
+      player,
+      user: userEvent.setup(),
+      fold: (folded: boolean) => view.rerender(<Folding player={player} folded={folded} />),
+    };
+  }
+
+  it('keeps only the metronome, the speed and Show controls, in the same region', () => {
+    const { fold } = setupFolded();
+    fold(true);
+    const bar = screen.getByRole('region', { name: 'Player controls' });
+    expect(
+      within(bar)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Metronome', 'Show controls']);
+    expect(speed()).toBeInTheDocument();
+    expect(screen.queryByRole('slider', { name: 'Metronome volume' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Count-in' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show controls' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+  });
+
+  it('Show controls brings the whole bar back while playing, with Hide controls to fold it', async () => {
+    const { fold, user } = setupFolded();
+    fold(true);
+    await user.click(screen.getByRole('button', { name: 'Show controls' }));
+    expect(muteDrums()).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide controls' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    await user.click(screen.getByRole('button', { name: 'Hide controls' }));
+    expect(screen.queryByRole('button', { name: 'Mute drums' })).not.toBeInTheDocument();
+  });
+
+  it('folding keeps the metronome and the speed as they were: the same elements, focus kept', () => {
+    const { fold } = setupFolded();
+    const before = { metronome: metronome(), speed: speed() };
+    metronome().focus();
+    fold(true);
+    expect(metronome()).toBe(before.metronome);
+    expect(speed()).toBe(before.speed);
+    expect(metronome()).toHaveFocus();
+  });
+
+  it('a control folded away with focus on it hands focus to Show controls', () => {
+    const { fold } = setupFolded();
+    muteDrums().focus();
+    fold(true);
+    expect(screen.getByRole('button', { name: 'Show controls' })).toHaveFocus();
+  });
+
+  it('the strip changes the player live, as the full bar does, without a restart', async () => {
+    const { engine, player, fold, user } = setupFolded();
+    fold(true);
+    const restarts = engine.restartCalls();
+    await user.click(metronome());
+    fireEvent.change(speed(), { target: { value: '75' } });
+    expect(player.getSnapshot()).toMatchObject({ metronomeOn: false, speedRatio: 0.75 });
+    expect(engine.restartCalls()).toBe(restarts);
+  });
+});
+
+describe('PlayerControls while a loop plays', () => {
+  it('the slider gives way to Loop speed, which shows the loop’s own control', async () => {
+    const onShow = vi.fn();
+    const engine = new FakePlayerEngine();
+    const player = new PlayerService(engine, {
+      drumTrackIndex: DRUMS,
+      options: DEFAULT_PLAYER_OPTIONS,
+      wakeLock: { setActive: vi.fn(), dispose: vi.fn() },
+      unlockAudio: vi.fn(),
+    });
+    render(
+      <PlayerControls
+        player={player}
+        snapshot={{ ...player.getSnapshot(), speedRatio: 0.85 }}
+        onShowLoopSpeed={onShow}
+      />,
+    );
+    expect(screen.queryByRole('slider', { name: 'Speed' })).not.toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Loop speed 85%' });
+    await userEvent.setup().click(button);
+    expect(onShow).toHaveBeenCalledTimes(1);
   });
 });

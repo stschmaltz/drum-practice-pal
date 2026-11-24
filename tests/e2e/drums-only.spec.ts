@@ -8,6 +8,7 @@ import {
   muteDrumsButton,
   openFixture,
   playButton,
+  showControls,
 } from './playerPage';
 
 // Unit 07: Drums only. Nothing here listens to audio; whether the drums are
@@ -126,6 +127,8 @@ test('drums only mutes every channel but the drums in the synth, and unmutes the
   expect(transportBefore).toBeGreaterThan(0);
   const barBefore = await barNumber(page);
 
+  // Playing folds the controls bar; the drum toggles are behind "Show controls".
+  await showControls(page);
   await drumsOnlyButton(page).click();
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'true');
   const others = await mutedChannels(page);
@@ -189,6 +192,7 @@ test('drums only pressed before the sounds have loaded holds once the song is re
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
   expect(await mutedChannels(page)).toEqual(mutedWhenReady);
 
+  await showControls(page);
   await drumsOnlyButton(page).click();
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');
   expect(await mutedChannels(page)).toEqual([]);
@@ -230,6 +234,7 @@ test('a song that is only drums plays on with drums only on', async ({ user, pag
   expect(transportBefore).toBeGreaterThan(0);
   const barBefore = await barNumber(page);
 
+  await showControls(page);
   await drumsOnlyButton(page).click();
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'true');
   expect(await mutedChannels(page)).toEqual([]);

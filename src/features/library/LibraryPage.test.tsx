@@ -314,3 +314,48 @@ describe('LibraryPage offline (Unit 11)', () => {
     expect(queryResult).not.toHaveBeenCalled();
   });
 });
+
+describe('LibraryPage layout (12 UX pass)', () => {
+  it('has the big drop box while empty, and a compact Upload once there are songs', async () => {
+    serveLibrary([]);
+    const view = renderLibrary();
+    await screen.findByText(/No songs yet/);
+    expect(screen.getByText(/or drop one here/)).toBeInTheDocument();
+    view.unmount();
+
+    serveLibrary(library);
+    renderLibrary();
+    await screen.findByRole('heading', { name: 'Your songs (3)' });
+    expect(screen.queryByText(/or drop one here/)).not.toBeInTheDocument();
+    // The whole library takes a dropped file now, the list included.
+    expect(screen.getByTestId('drop-zone')).toContainElement(screen.getByRole('list'));
+    expect(screen.getByLabelText('Upload a Guitar Pro file')).toBeInTheDocument();
+  });
+
+  it('opens a song from anywhere on its card: one link stretched over it, with Edit and Delete apart from it', async () => {
+    serveLibrary(library);
+    renderLibrary();
+    await screen.findByRole('heading', { name: 'Your songs (3)' });
+    const card = screen.getAllByRole('listitem')[0] as HTMLElement;
+    const links = within(card).getAllByRole('link');
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAccessibleName('Halo');
+    // Stretched by its ::after over the card, which is the positioned box.
+    expect(card).toHaveClass('relative');
+    expect(links[0]?.className).toMatch(/after:absolute/);
+    expect(links[0]?.className).toMatch(/after:inset-0/);
+    // Not nested: the buttons are siblings of the link, raised above its stretched area.
+    for (const name of ['Edit Halo', 'Delete Halo']) {
+      const button = within(card).getByRole('button', { name });
+      expect(links[0]).not.toContainElement(button);
+      expect(button.parentElement).toHaveClass('relative', 'z-10');
+    }
+  });
+
+  it('lays the songs out as a grid that goes to columns on a wide screen', async () => {
+    serveLibrary(library);
+    renderLibrary();
+    await screen.findByRole('heading', { name: 'Your songs (3)' });
+    expect(screen.getByRole('list')).toHaveClass('grid', 'lg:grid-cols-2', 'xl:grid-cols-3');
+  });
+});

@@ -2,17 +2,18 @@
 import type { BrowserContext, Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
 import {
-  activeLoopLine,
-  loopItem,
-  newLoopButton,
-  saveLoopButton,
-  loopPanel,
-  openLoopPanel,
+  expectLooping,
+  chooseLoopAction,
+  commit,
   playLoopButton,
+  loopItem,
+  loopPanel,
+  loopPercentField,
+  newLoopButton,
+  openLoopPanel,
+  saveLoopButton,
   saveNewLoop,
   saveSpeedButton,
-  commit,
-  loopPercentField,
 } from './loopsPage';
 import { openFixture, playButton } from './playerPage';
 import {
@@ -363,7 +364,7 @@ test('offline, a loop opens from the home page and every control that needs the 
   await page.goto('/');
   await expect(banner(page)).toContainText("You're offline.");
   await homeItem(page, 'Verse').getByRole('link', { name: 'Practice Verse' }).click();
-  await expect(activeLoopLine(page)).toContainText('Looping Verse');
+  await expectLooping(page, 'Verse');
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
 
   // Loops can't be created or deleted offline.
@@ -374,9 +375,7 @@ test('offline, a loop opens from the home page and every control that needs the 
     loopPanel(page).getByText("You're offline. Loops can be saved once you're back online."),
   ).toBeVisible();
   await loopPanel(page).getByRole('button', { name: 'Cancel' }).click();
-  await loopItem(page, 'Verse')
-    .getByRole('button', { name: /^Delete/ })
-    .click();
+  await chooseLoopAction(page, 'Verse', 'Delete');
   await expect(loopPanel(page).getByRole('button', { name: 'Delete loop' })).toBeDisabled();
   await loopPanel(page).getByRole('button', { name: 'Keep it' }).click();
 

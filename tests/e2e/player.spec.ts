@@ -13,6 +13,9 @@ import {
   muteDrumsButton,
   openFixture,
   playButton,
+  recordedStatuses,
+  recordStatuses,
+  showControls,
   status,
   viewport,
 } from './playerPage';
@@ -95,6 +98,8 @@ test('speed, metronome and drum mute change live without restarting playback', a
   const pressedBefore = await metronome.getAttribute('aria-pressed');
   await metronome.click();
   await expect(metronome).not.toHaveAttribute('aria-pressed', pressedBefore ?? '');
+  // The volume and the drum mute fold away while playing; "Show controls" brings them.
+  await showControls(page);
   await controls(page).getByRole('slider', { name: 'Metronome volume' }).fill('30');
   const mute = muteDrumsButton(page);
   await mute.click();
@@ -163,6 +168,8 @@ test('drums only and mute drums exclude each other and change live on a multi-tr
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
   let before = await barNumber(page);
 
+  // Playing folds the controls bar; the drum toggles are behind "Show controls".
+  await showControls(page);
   await drumsOnly.click();
   await expect(drumsOnly).toHaveAttribute('aria-pressed', 'true');
   await mute.click();
@@ -282,4 +289,49 @@ test('crossing the layout breakpoint mid-play relayouts and keeps playing', asyn
   const afterResize = await barNumber(page);
   await expect(playButton(page)).toHaveText('Pause');
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(afterResize);
+});
+
+// 12 UX pass, item 1: the score gets the screen while playing.
+test('the controls fold to a strip under the sticky bar while playing, without touching playback', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  const bar = controls(page);
+  const fullHeight = (await boxOf(bar, 'controls')).height;
+  await recordStatuses(page);
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  const show = bar.getByRole('button', { name: 'Show controls' });
+  await expect(show).toHaveAttribute('aria-expanded', 'false');
+  await expect(bar.getByRole('button', { name: 'Metronome' })).toBeVisible();
+  await expect(bar.getByRole('slider', { name: 'Speed' })).toBeVisible();
+  await expect(bar.getByRole('button', { name: 'Mute drums' })).toHaveCount(0);
+  const strip = await boxOf(bar, 'folded controls');
+  expect(strip.height).toBeLessThan(fullHeight / 2);
+
+  // It sticks right under the sticky bar when the page scrolls.
+  await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight }));
+  const jamBar = await boxOf(page.getByTestId('jam-bar'), 'sticky bar');
+  await expect
+    .poll(async () => Math.round((await boxOf(bar, 'folded controls')).y))
+    .toBe(Math.round(jamBar.y + jamBar.height));
+
+  // The keys for what folded away still work: D mutes the drums, seen once the bar is out.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('d');
+  await show.click();
+  await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect(bar.getByRole('button', { name: 'Hide controls' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  await expect(bar.getByRole('button', { name: /^(Show|Hide) controls$/ })).toHaveCount(0);
+  await expect(muteDrumsButton(page)).toBeVisible();
+  // Playing then paused, nothing in between: folding never stopped or reloaded anything.
+  expect(await recordedStatuses(page)).toEqual(['ready', 'playing', 'ready']);
 });

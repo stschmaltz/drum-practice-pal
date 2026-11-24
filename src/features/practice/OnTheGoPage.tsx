@@ -5,6 +5,7 @@ import { Icon } from '@/components/icons';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
 import {
   cardClass,
+  cardGridClass,
   inlineIconClass,
   linkClass,
   primaryButtonClass,
@@ -23,6 +24,7 @@ import {
 } from '@/features/loops/practiceList';
 import { LoopStatusButton } from '@/features/loops/LoopStatusButton';
 import { usePracticeLoops } from '@/features/loops/useLoops';
+import { targetProgress } from '@/features/loops/loopLabels';
 import { ratioToPercent } from '@/features/player/speed';
 import { loopPracticePath } from '@/lib/routes';
 import type { LoopStatus } from '@/lib/schema';
@@ -165,7 +167,8 @@ function PracticeLoopList({
     );
   }
   return (
-    <ul aria-label={TAB_LABELS[tab]} className="flex flex-col gap-3">
+    // Two or three cards a row on a wide screen, so a laptop shows more than a column of them.
+    <ul aria-label={TAB_LABELS[tab]} className={cardGridClass}>
       {loops.map((loop) => (
         <PracticeLoopItem
           key={loop.id}
@@ -188,7 +191,7 @@ function PracticeLoopItem({
   const now = new Date();
 
   return (
-    <li className={`${cardClass} flex flex-col gap-3 p-4`}>
+    <li className={`${cardClass} flex flex-col justify-between gap-3 p-4`}>
       <div className="flex flex-col gap-1">
         <p className="text-lg font-semibold break-words">{loop.name}</p>
         <p className="break-words text-ink-soft">
@@ -200,6 +203,7 @@ function PracticeLoopItem({
           {barsLabel(loop.start_bar, loop.end_bar)} · {ratioToPercent(loop.speed_ratio)}%
           {loop.target_ratio !== null && ` · target ${ratioToPercent(loop.target_ratio)}%`}
         </p>
+        <TargetProgressBar loop={loop} />
         <p className="text-sm text-ink-muted">
           {lastPracticedLabel(loop.last_practiced_at, now)}
           {finished &&
@@ -216,5 +220,32 @@ function PracticeLoopItem({
         <LoopStatusButton loop={loop} onSet={onStatusSet} />
       </div>
     </li>
+  );
+}
+
+/**
+ * The saved speed's way to the target, as a bar: a labelled progressbar whose
+ * numbers are the percents written above it. Only for a loop with a target.
+ */
+function TargetProgressBar({ loop }: { loop: PracticeLoop }) {
+  const progress = targetProgress(loop.speed_ratio, loop.target_ratio);
+  if (!progress) return null;
+  const { speedPercent, targetPercent, fraction, reached } = progress;
+  return (
+    <div
+      role="progressbar"
+      aria-label={`Speed towards the target of ${loop.name}`}
+      aria-valuemin={0}
+      aria-valuemax={targetPercent}
+      aria-valuenow={Math.min(speedPercent, targetPercent)}
+      aria-valuetext={`${speedPercent}% of a ${targetPercent}% target`}
+      data-testid="target-progress"
+      className="mt-1 h-2 overflow-hidden rounded-full bg-raised ring-1 ring-line-strong ring-inset"
+    >
+      <div
+        className={`h-full rounded-full ${reached ? 'bg-success' : 'bg-selected-line'}`}
+        style={{ width: `${Math.round(fraction * 100)}%` }}
+      />
+    </div>
   );
 }

@@ -309,3 +309,62 @@ describe('UploadPanel offline', () => {
     expect(storageMethods()).toEqual(['upload']);
   });
 });
+
+describe('UploadPanel once the library has songs (compact)', () => {
+  function renderCompact() {
+    renderRoutes(
+      <Route
+        path="/library"
+        element={
+          <UploadPanel compact>
+            <ul aria-label="Songs">
+              <li>Groove</li>
+            </ul>
+          </UploadPanel>
+        }
+      />,
+      { path: '/library' },
+    );
+    return userEvent.setup();
+  }
+
+  it('is an Upload button with the same name, and no drop box', () => {
+    renderCompact();
+    const label = picker().closest('label');
+    expect(label).toHaveTextContent(/^Upload a Guitar Pro file$/);
+    // "Upload" on screen; the rest is for screen readers.
+    expect(label?.querySelector('.sr-only')).toHaveTextContent('a Guitar Pro file');
+    expect(screen.queryByText(/or drop one here/)).not.toBeInTheDocument();
+    expect(screen.getByText(/drop a Guitar Pro file anywhere here/)).toBeInTheDocument();
+  });
+
+  it('takes a file dropped anywhere over the library, the list included', async () => {
+    serve({});
+    renderCompact();
+    const zone = screen.getByTestId('drop-zone');
+    expect(zone).toContainElement(screen.getByRole('list', { name: 'Songs' }));
+    fireEvent.drop(screen.getByRole('list', { name: 'Songs' }), {
+      dataTransfer: { files: [gpFile('dropped.gp')] },
+    });
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(storageMethods()).toEqual(['upload']);
+  });
+
+  it('outlines the library while a file is dragged over it, and not after it leaves', () => {
+    renderCompact();
+    const zone = screen.getByTestId('drop-zone');
+    fireEvent.dragOver(screen.getByRole('list', { name: 'Songs' }));
+    expect(screen.getByText('Drop the file to upload it')).toBeInTheDocument();
+    dragLeaveTo(zone, screen.getByRole('list', { name: 'Songs' }));
+    expect(screen.getByText('Drop the file to upload it')).toBeInTheDocument();
+    dragLeaveTo(zone, document.body);
+    expect(screen.queryByText('Drop the file to upload it')).not.toBeInTheDocument();
+  });
+
+  it('uploads from the picker as the drop box does', async () => {
+    serve({});
+    const user = renderCompact();
+    await user.upload(picker(), gpFile());
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+  });
+});

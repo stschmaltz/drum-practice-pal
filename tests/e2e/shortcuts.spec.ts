@@ -3,18 +3,21 @@ import type { Page } from '@playwright/test';
 import { expect, test } from './auth';
 import {
   activeLoopLine,
+  playLoopButton,
   loopItem,
   loopNameField,
   loopPanel,
   newLoopButton,
   openLoopPanel,
-  playLoopButton,
   saveNewLoop,
+  exitLoop,
+  expectLooping,
   expectedLoopPanel,
 } from './loopsPage';
 import {
   barNumber,
-  countInSelect,
+  chooseCountIn,
+  checkedCountIn,
   drumsOnlyButton,
   expectedLayout,
   metronomeButton,
@@ -23,6 +26,7 @@ import {
   playButton,
   recordedStatuses,
   recordStatuses,
+  showControls,
   status,
 } from './playerPage';
 import { loopsOf } from './practicePage';
@@ -72,9 +76,9 @@ test('Space plays and pauses; the arrows, M, D, S and C work the controls', asyn
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'true');
   await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'false');
 
-  const countInWas = Number(await countInSelect(page).inputValue());
+  const countInWas = Number(await checkedCountIn(page).inputValue());
   await page.keyboard.press('c');
-  await expect(countInSelect(page)).toHaveValue(String((countInWas + 1) % 3));
+  await expect(checkedCountIn(page)).toHaveValue(String((countInWas + 1) % 3));
 });
 
 test('a pedal’s Page Up and Page Down, or the arrows, switch loops without stopping playback', async ({
@@ -82,7 +86,7 @@ test('a pedal’s Page Up and Page Down, or the arrows, switch loops without sto
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('0');
+  await chooseCountIn(page, 0);
   await saveNewLoop(page, { name: 'Intro', firstBar: 1, lastBar: 2 });
   await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
   await focusNothing(page);
@@ -92,16 +96,16 @@ test('a pedal’s Page Up and Page Down, or the arrows, switch loops without sto
   await recordStatuses(page);
 
   await page.keyboard.press('PageUp');
-  await expect(activeLoopLine(page)).toContainText('Looping Intro');
+  await expectLooping(page, 'Intro');
   await expect.poll(() => barNumber(page)).toBeLessThanOrEqual(2);
   await page.keyboard.press('ArrowRight');
-  await expect(activeLoopLine(page)).toContainText('Looping Verse');
+  await expectLooping(page, 'Verse');
   await expect.poll(() => barNumber(page)).toBeGreaterThanOrEqual(5);
   // The last loop: nowhere further to go.
   await page.keyboard.press('PageDown');
-  await expect(activeLoopLine(page)).toContainText('Looping Verse');
+  await expectLooping(page, 'Verse');
   await page.keyboard.press('ArrowLeft');
-  await expect(activeLoopLine(page)).toContainText('Looping Intro');
+  await expectLooping(page, 'Intro');
 
   await expect(playButton(page)).toHaveText('Pause');
   expect(await recordedStatuses(page)).toEqual(['playing']);
@@ -114,12 +118,12 @@ test('a pedal’s Page Up and Page Down, or the arrows, switch loops without sto
 test('paused, a pedal sets the next loop up without playing it', async ({ user, page }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
-  await page.getByRole('button', { name: 'Exit loop' }).click();
+  await exitLoop(page);
   await focusNothing(page);
 
   await page.keyboard.press('PageDown');
 
-  await expect(activeLoopLine(page)).toContainText('Looping Verse');
+  await expectLooping(page, 'Verse');
   await expect(status(page)).toHaveText('Bar 5 of 16');
   await expect(playButton(page)).toHaveText('Play');
 });
@@ -202,7 +206,7 @@ test('Space after clicking Play loop pauses, rather than pressing the focused Re
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('0');
+  await chooseCountIn(page, 0);
   await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
   await openLoopPanel(page);
   await playLoopButton(page, 'Verse').click();
@@ -226,7 +230,7 @@ test('with a loop playing, the speed keys, M, D, S and C work it and playback ne
   page,
 }) => {
   await openFixture(page, user, 'multi-track', 'Multi Track');
-  await countInSelect(page).selectOption('0');
+  await chooseCountIn(page, 0);
   await saveNewLoop(page, { name: 'Verse', firstBar: 2, lastBar: 3 });
   await focusNothing(page);
   await page.keyboard.press('Space');
@@ -237,16 +241,19 @@ test('with a loop playing, the speed keys, M, D, S and C work it and playback ne
   await page.keyboard.press('ArrowDown');
   await expect(speed(page)).toHaveText('90%');
   await pressMAndSeeMetronomeFlip(page);
+  // The keys act on the player; the drum toggles and the count-in, folded away while playing,
+  // are brought out to read what the keys did.
+  await showControls(page);
   await page.keyboard.press('s');
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('d');
   await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'true');
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');
   await page.keyboard.press('c');
-  await expect(countInSelect(page)).toHaveValue('1');
+  await expect(checkedCountIn(page)).toHaveValue('1');
 
   // Still the loop, at the speed the keys set, and never stopped on the way.
-  await expect(activeLoopLine(page)).toContainText('Looping Verse');
+  await expectLooping(page, 'Verse');
   await expect.poll(() => barNumber(page)).toBeGreaterThanOrEqual(2);
   expect(await barNumber(page)).toBeLessThanOrEqual(3);
   await expect(playButton(page)).toHaveText('Pause');
@@ -280,7 +287,7 @@ test('while the loop form is open, the loop keys do nothing and the others still
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
-  await page.getByRole('button', { name: 'Exit loop' }).click();
+  await exitLoop(page);
   await openLoopPanel(page);
   await newLoopButton(page).click();
   // The form has the focus, not one of its fields.
@@ -303,7 +310,7 @@ test('Mark finished and Reopen keep focus on the loop while the write is on its 
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
   await saveNewLoop(page, { name: 'Chorus', firstBar: 9, lastBar: 12 });
-  await page.getByRole('button', { name: 'Exit loop' }).click();
+  await exitLoop(page);
   await openLoopPanel(page);
 
   // Each status write is held until let go: the loop's new button renders while it is pending.
@@ -368,7 +375,7 @@ test('with single-letter shortcuts off in Settings, M, D, S, C and ? do nothing;
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await focusNothing(page);
   const metronomeWas = await metronomeButton(page).getAttribute('aria-pressed');
-  const countInWas = await countInSelect(page).inputValue();
+  const countInWas = await checkedCountIn(page).inputValue();
 
   for (const key of ['m', 'd', 's', 'c', 'Shift+?']) await page.keyboard.press(key);
   // The keys did reach the page: one that isn't a single character, pressed after them, acts.
@@ -377,7 +384,7 @@ test('with single-letter shortcuts off in Settings, M, D, S, C and ? do nothing;
   await expect(metronomeButton(page)).toHaveAttribute('aria-pressed', metronomeWas ?? '');
   await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'false');
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');
-  await expect(countInSelect(page)).toHaveValue(countInWas);
+  await expect(checkedCountIn(page)).toHaveValue(countInWas);
   await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toHaveCount(0);
 
   await page.keyboard.press('Space');

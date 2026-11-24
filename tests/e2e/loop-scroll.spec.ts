@@ -2,30 +2,32 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './auth';
 import {
-  activeLoopLine,
+  chooseLoopAction,
   closeLoopPanel,
   commit,
   firstBarField,
   highlightBoxes,
   lastBarField,
+  playLoopButton,
   loopBpmField,
   loopForm,
-  loopItem,
   loopPanel,
   loopPanelToggle,
   loopPercentField,
   loopSpeed,
   openLoopPanel,
-  playLoopButton,
   saveLoopButton,
   saveNewLoop,
+  exitLoop,
+  expectLooping,
   expectedLoopPanel,
+  setSpeed,
 } from './loopsPage';
 import {
   barCursorBox,
   contains,
-  countInModeSelect,
-  countInSelect,
+  chooseCountIn,
+  chooseCountInMode,
   expectedLayout,
   openFixture,
   overlaps,
@@ -34,9 +36,9 @@ import {
   recordStatuses,
   scoreBox,
   scrollScoreToStart,
-  speedSlider,
   status,
   viewport,
+  windowScrollSettled,
   type Box,
   type Point,
 } from './playerPage';
@@ -205,7 +207,7 @@ const beatsOf = (bars: number) =>
 /** Play's smooth scroll of the window to the score is over by now; boxes are where they stay. */
 const WINDOW_SETTLED_MS = 1000;
 
-for (const bars of [1, 2]) {
+for (const bars of [1, 2] as const) {
   // 08 QA issue 1, through the whole count-in: every beat, not one moment of it.
   test(`Play loop with a ${bars}-bar count-in: on every beat the number is in the clear and the loop’s first bar is in the score box`, async ({
     user,
@@ -214,12 +216,12 @@ for (const bars of [1, 2]) {
     test.setTimeout(60_000);
     await openFixture(page, user, 'groove-120', 'Groove 120');
     // Half speed: a beat lasts a second, so each one is on show long enough to measure.
-    await speedSlider(page).fill('50');
+    await setSpeed(page, 50);
     await saveNewLoop(page, { name: 'Late fill', firstBar: 13, lastBar: 14 });
-    await countInSelect(page).selectOption(bars === 1 ? '1 bar' : '2 bars');
+    await chooseCountIn(page, bars);
 
     // Back to the top of the song, with the score on bar 1.
-    await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
+    await exitLoop(page);
     await page.getByRole('button', { name: 'Back to start' }).click();
     await expect(status(page)).toHaveText('Bar 1 of 16');
     await scrollScoreToStart(page);
@@ -292,9 +294,9 @@ test('the panel after Play loop: the sheet closed and the column open; reopened 
   test.setTimeout(60_000);
   const isSheet = expectedLoopPanel(page) === 'sheet';
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await speedSlider(page).fill('80');
+  await setSpeed(page, 80);
   await saveNewLoop(page, { name: 'First', firstBar: 1, lastBar: 2 });
-  await speedSlider(page).fill('100');
+  await setSpeed(page, 100);
   await saveNewLoop(page, { name: 'Second', firstBar: 5, lastBar: 6 });
   await openLoopPanel(page);
 
@@ -308,7 +310,7 @@ test('the panel after Play loop: the sheet closed and the column open; reopened 
     await expect(loopSpeed(page)).toBeHidden();
     await expect.poll(async () => (await loopPanel(page).boundingBox())?.height).toBeLessThan(60);
   }
-  await expect(activeLoopLine(page)).toContainText('First · Bars 1 to 2');
+  await expectLooping(page, 'First', 'Bars 1 to 2');
 
   // Opened again while it plays: the playing loop and its speed control, at its saved speed.
   await recordStatuses(page);
@@ -326,7 +328,7 @@ test('the panel after Play loop: the sheet closed and the column open; reopened 
 
   // Another loop, then a restart, while playing: no count-in follows, so the panel stays.
   await playLoopButton(page, 'Second').click();
-  await expect(activeLoopLine(page)).toContainText('Second · Bars 5 to 6');
+  await expectLooping(page, 'Second', 'Bars 5 to 6');
   await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'true');
   await expect(loopPanel(page).getByRole('region', { name: 'Practicing Second' })).toBeVisible();
   await expect(loopPercentField(page)).toHaveValue('100');
@@ -389,10 +391,10 @@ test('with a count-in before every repeat, each repeat’s count-in has the loop
   const lastBar = { phone: 6, tablet: 12, desktop: 12 }[testInfo.project.name];
   if (!lastBar) throw new Error(`No loop for project ${testInfo.project.name}`);
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('1 bar');
-  await countInModeSelect(page).selectOption('Before every loop repeat');
+  await chooseCountIn(page, 1);
+  await chooseCountInMode(page, 'every_repeat');
   // A bar, and the count-in, last a second.
-  await speedSlider(page).fill('200');
+  await setSpeed(page, 200);
   await saveNewLoop(page, { name: 'Round', firstBar: 5, lastBar });
   if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
   await expect(status(page)).toHaveText('Bar 5 of 16');
@@ -459,9 +461,9 @@ test('with a count-in before every repeat, the score box is scrolled back at the
   if (!bars) throw new Error(`No loop for project ${testInfo.project.name}`);
   const { firstBar, lastBar } = bars;
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('2 bars');
-  await countInModeSelect(page).selectOption('Before every loop repeat');
-  await speedSlider(page).fill('200');
+  await chooseCountIn(page, 2);
+  await chooseCountInMode(page, 'every_repeat');
+  await setSpeed(page, 200);
   await saveNewLoop(page, { name: 'Round', firstBar, lastBar });
   if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
   await recordStatuses(page);
@@ -496,9 +498,9 @@ test('Play with a count-in after the score was scrolled away brings the bar it c
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('2 bars');
+  await chooseCountIn(page, 2);
   // Eight seconds of count-in.
-  await speedSlider(page).fill('50');
+  await setSpeed(page, 50);
   await expect(status(page)).toHaveText('Bar 1 of 16');
 
   // The user reads ahead to the end of the song; bar 1, where playback is, is out of the box.
@@ -618,6 +620,8 @@ test('paused: a loop saved from typed bars, another one, and its bars edited eac
     await expect(status(page)).toHaveText(`Bar ${bar} of 16`);
     await expect.poll(() => cursorBarInScoreBox(page)).toBe(true);
     await expect.poll(() => loopStartInScoreBox(page)).toBe(true);
+    // The cursor and the highlight are read one after the other: not while the window moves.
+    await windowScrollSettled(page);
     const [first] = await highlightBoxes(page);
     if (!first) throw new Error('No highlight');
     expect(contains(await barCursorBox(page), startOf(first))).toBe(true);
@@ -639,20 +643,20 @@ test('paused: a loop saved from typed bars, another one, and its bars edited eac
   await expectLoopStartOnShow(1);
 
   // The paused loop's bars, edited: the score goes to its new first bar.
-  await loopItem(page, 'Early').getByRole('button', { name: 'Edit Early' }).click();
+  await chooseLoopAction(page, 'Early', 'Edit');
   await firstBarField(page).fill('9');
   await lastBarField(page).fill('10');
   await saveLoopButton(page).click();
   await expect(loopForm(page)).toHaveCount(0);
-  await expect(activeLoopLine(page)).toContainText('Early · Bars 9 to 10');
+  await expectLooping(page, 'Early', 'Bars 9 to 10');
   await expectLoopStartOnShow(9);
 
   // A bar already on show is left where it is: choosing its neighbour moves nothing.
   const settled = await scoreScroll(page);
-  await loopItem(page, 'Early').getByRole('button', { name: 'Edit Early' }).click();
+  await chooseLoopAction(page, 'Early', 'Edit');
   await lastBarField(page).fill('9');
   await saveLoopButton(page).click();
-  await expect(activeLoopLine(page)).toContainText('Early · Bar 9');
+  await expectLooping(page, 'Early', 'Bar 9');
   await page.waitForTimeout(300);
   expect(await scoreScroll(page)).toEqual(settled);
 });

@@ -7,7 +7,7 @@
  */
 import type { Locator, Page } from '@playwright/test';
 import { expect } from './auth';
-import { viewport, type Box } from './playerPage';
+import { speedSlider, viewport, type Box } from './playerPage';
 
 export const loopPanel = (page: Page) => page.getByTestId('loop-panel');
 export const loopForm = (page: Page) => loopPanel(page).getByRole('form');
@@ -121,4 +121,62 @@ export async function saveLoopSpeed(page: Page, percent: number): Promise<void> 
   await commit(loopPercentField(page), String(percent));
   await saveSpeedButton(page).click();
   await expect(saveSpeedButton(page)).toBeDisabled();
+}
+
+/**
+ * "Exit loop", in the playing loop's item in the panel (12 UX pass: there is
+ * no line above the score any more). Opens the panel first (on a phone or a
+ * tablet in portrait "Play loop" has closed the sheet) and closes it again after.
+ */
+export async function exitLoop(page: Page): Promise<void> {
+  const wasOpen = (await loopPanelToggle(page).getAttribute('aria-expanded')) === 'true';
+  await openLoopPanel(page);
+  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
+  await expect(activeLoopLine(page)).toHaveCount(0);
+  // As it was: a sheet left open would lie over the score the spec goes on to tap.
+  if (!wasOpen) await closeLoopPanel(page);
+}
+
+/** A loop's Edit, Show / Hide history or Delete, which live in its "More" menu. */
+export async function chooseLoopAction(
+  page: Page,
+  name: string,
+  action: 'Edit' | 'History' | 'Delete',
+): Promise<void> {
+  await openLoopPanel(page);
+  await loopItem(page, name)
+    .getByRole('button', { name: `More actions for ${name}` })
+    .click();
+  await loopPanel(page)
+    .getByRole('menuitem', { name: action === 'History' ? /history$/ : action })
+    .click();
+}
+
+/**
+ * Sets the speed playing now, in whole percent: with the controls bar's
+ * slider in jam mode, with the loop's own Speed % while a loop plays (the
+ * slider gives way to it then). Leaves the loop panel as it found it.
+ */
+export async function setSpeed(page: Page, percent: number): Promise<void> {
+  const slider = speedSlider(page);
+  if (await slider.isVisible()) {
+    await slider.fill(String(percent));
+    return;
+  }
+  const toggle = loopPanelToggle(page);
+  const wasOpen = (await toggle.getAttribute('aria-expanded')) === 'true';
+  await openLoopPanel(page);
+  await commit(loopPercentField(page), String(percent));
+  await expect(loopPercentField(page)).toHaveValue(String(percent));
+  if (!wasOpen) await closeLoopPanel(page);
+}
+
+/**
+ * The playing loop is this one (12 UX pass: marked in its own item, where its
+ * name and "Bars 9 to 12 · …" line are). Works with the sheet closed.
+ */
+export async function expectLooping(page: Page, name: string, bars?: string): Promise<void> {
+  // The item's first paragraph is the name (the buttons' hidden " Verse" would match by text).
+  await expect(activeLoopLine(page).locator('p').first()).toHaveText(name);
+  if (bars !== undefined) await expect(activeLoopLine(page)).toContainText(`${bars} ·`);
 }
