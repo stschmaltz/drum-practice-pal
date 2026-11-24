@@ -513,7 +513,7 @@ function LoopListItem({
       {...itemAttributes(loop.id)}
     >
       <div className="flex flex-col gap-1">
-        <p className="flex items-start gap-2 font-semibold break-words">
+        <p className="flex items-start gap-2 font-semibold wrap-anywhere">
           {active && <Icon name="loop" className="mt-0.5 size-4 text-brand" />}
           {loop.name}
         </p>

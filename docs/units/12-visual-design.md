@@ -293,3 +293,31 @@ None about behaviour: every conflict was a class string or an import beside one 
 
 - `npm run check`: 102 files, 4055 tests green.
 - `npm run e2e`: 381 passed, 18 skipped, 0 failed, on a fresh `npm run build -- --mode development`. The `vite preview` on 4173 (PID 56088, not ours) was left running; the bundle it served (`assets/index-zb0pTqMD.js`) was checked equal to the fresh `dist/index.html`.
+
+## Copilot review
+
+Two comments on PR #16, each checked against the code, proved with a test that failed first, then fixed.
+
+### 1. `LoopPanel.tsx:516`: a long unbroken loop name overflows the panel (id 4685776684)
+
+**Verdict: real.** The name's paragraph is `flex` (the "playing" icon beside it), so the name is an anonymous flex item whose `min-width: auto` is its min-content width; `break-words` (`overflow-wrap: break-word`) doesn't lower that, so a 100-character name with no spaces stayed on one line and ran out of the loop item: 53 to 826 px in a 16 to 374 px box on a phone, 586 to 1359 in 549 to 771 in the tablet's narrow panel, 1046 to 1819 in 1009 to 1295 on a laptop. The panel clips it, so the page-level overflow check never saw it.
+
+- Test first: `design.spec.ts` "a long unbroken loop name wraps inside the loop panel and on the home page" saves a loop named `Paradiddle` x 10 (the 100 characters `LOOP_NAME_MAX_LENGTH` allows), opens the panel and checks with the new `textSpillingOutOf` (`designPage.ts`: the text's own line boxes through a `Range`, since the paragraph's box doesn't move when its text overflows) that no text in the item or the panel runs past its edges, that nothing in the panel scrolls sideways, that the page doesn't, and that the name is on more than one line; then the same on the home page's item. It failed on all three profiles with the figures above.
+- Fix: `wrap-anywhere` on that paragraph, as `SongListItem` has. The other loop-name lines were already right: the playing loop's card and the home page's item are block paragraphs, the sheet header truncates (a flex item with `overflow: hidden`, so its minimum is 0), and the song page's "Looping" line is `line-clamp-2 min-w-0`. No other `flex` or `grid` element in `src/` relies on `break-words`.
+- Checklist: no row covered it. New section 6, "What is drawn", row **Wrapping that can't shrink the box**. AGENTS.md (Visual design): a bullet on user text in flex and grid items.
+
+### 2. `designPage.ts:264`: the focus audit measures the hidden file input, not the upload label (id 4685776765)
+
+**Verdict: real.** On the library, Tab lands on the upload's `sr-only` file input; `controlsWithoutFocusRing` read that input's outline, Chromium's `auto`, which the audit accepts, so the label's ring (`has-[:focus-visible]:outline-*` in `UploadPanel.tsx`) could be deleted and the audit would still pass.
+
+- Fix: when the focused element is visually hidden (a box of 1 px or less), the audit measures its label (`labels[0]`, else the enclosing `label`), waits for the label's colour transition, and reads its outline against the label's parents; a hidden control with no label is reported with no ring. It returns `throughLabel`, the controls measured that way, and the library's focus check asserts the upload label is among them, so the case can't silently stop being exercised.
+- Proved: with the label's three focus classes removed and dist rebuilt, the library test failed on every profile with `<label> "Upload a Guitar Pro file": outline none 3px at 1.10:1`; with them restored it passes.
+- Checklist: no row covered it. New row in section 6, **A hidden stand-in measured instead of what shows**, which points to "Accessibility claims" in section 5 as the same miss the other way round. AGENTS.md (e2e for the design): the audit's label rule, `throughLabel` and `textSpillingOutOf`.
+
+Hygiene went to section 7 (renumbered; nothing referred to it by number).
+
+### Results
+
+- The fix was undone and redone in one rebuild alongside the label's ring, so both new checks were seen failing on the same build and passing on the next.
+- `npm run check`: 102 files, 4055 tests green.
+- `npm run e2e`: 384 passed (the new long-name test on three profiles), 18 skipped, 0 failed, on a fresh `npm run build -- --mode development`. The `vite preview` on 4173 (PID 56088, not ours) was left running; the bundle it served (`assets/index-C1u9JK4V.js`) was checked equal to the fresh `dist/index.html`.

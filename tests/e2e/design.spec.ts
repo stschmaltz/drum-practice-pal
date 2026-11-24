@@ -8,6 +8,7 @@ import {
   motionOf,
   NO_FAULTS,
   rowsOf,
+  textSpillingOutOf,
 } from './designPage';
 import { loopItem, loopPanel, openLoopPanel, saveNewLoop } from './loopsPage';
 import { controls, countInSelect, openFixture, playButton, viewport } from './playerPage';
@@ -26,10 +27,11 @@ async function expectWellDrawn(page: Page, screen: string): Promise<void> {
   expect(audit.counted.texts, `${screen}: texts audited`).toBeGreaterThan(0);
 }
 
-async function expectFocusRings(page: Page, screen: string): Promise<void> {
-  const { reached, missing } = await controlsWithoutFocusRing(page);
+async function expectFocusRings(page: Page, screen: string): Promise<string[]> {
+  const { reached, missing, throughLabel } = await controlsWithoutFocusRing(page);
   expect(missing, `${screen}: controls Tab reached with no visible focus ring`).toEqual([]);
   expect(reached, `${screen}: controls Tab reached`).toBeGreaterThan(1);
+  return throughLabel;
 }
 
 const focusNothing = (page: Page) =>
@@ -96,7 +98,10 @@ test('the library, the song page with its loops, and the home page with a loop',
   await navLink(page, 'Library').click();
   await expect(page.getByRole('main').getByRole('link', { name: 'Groove 120' })).toBeVisible();
   await expectWellDrawn(page, 'library');
-  await expectFocusRings(page, 'library');
+  // The upload's file input is sr-only: its ring was judged on the label that shows it.
+  expect(await expectFocusRings(page, 'library'), 'library: rings measured on a label').toContain(
+    '<label> "Upload a Guitar Pro file"',
+  );
 });
 
 test('icons are hidden from screen readers and every control keeps its words', async ({
@@ -246,6 +251,57 @@ test('the shortcut overlay opens with its title on screen on a landscape phone',
   await expect(dialog.getByRole('term').first()).toBeInViewport();
   // The rest is a scroll away inside the dialog, not off the page.
   expect(await dialog.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+});
+
+test('a long unbroken loop name wraps inside the loop panel and on the home page', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  // 100 characters, the longest name the database takes (LOOP_NAME_MAX_LENGTH),
+  // with nowhere to break: wider than any panel.
+  const name = 'Paradiddle'.repeat(10);
+  await saveNewLoop(page, { name, firstBar: 1, lastBar: 2 });
+  await openLoopPanel(page);
+  const item = loopItem(page, name);
+  await expect(item).toBeVisible();
+  expect(await textSpillingOutOf(item), 'loop item').toEqual([]);
+  expect(await textSpillingOutOf(loopPanel(page)), 'loop panel').toEqual([]);
+  const sidewaysScrollers = await loopPanel(page).evaluate((panel) =>
+    [panel, ...Array.from(panel.querySelectorAll('*'))]
+      // Screen-reader-only text is a clipped 1 px box by design.
+      .filter((el) => {
+        if (el.closest('.sr-only')) return false;
+        const { overflowX, textOverflow } = getComputedStyle(el);
+        return (
+          el.scrollWidth > el.clientWidth + 1 &&
+          overflowX !== 'visible' &&
+          textOverflow !== 'ellipsis'
+        );
+      })
+      .map(
+        (el) =>
+          `<${el.tagName.toLowerCase()} class="${el.className}"> ${el.scrollWidth} in ${el.clientWidth}`,
+      ),
+  );
+  expect(sidewaysScrollers, 'nothing in the panel scrolls sideways').toEqual([]);
+  expect((await auditScreen(page)).overflow).toEqual([]);
+  // Not vacuous: the name is on show, on more than one line.
+  const lines = await item
+    .getByRole('paragraph')
+    .filter({ hasText: name })
+    .evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return new Set(Array.from(range.getClientRects()).map((rect) => Math.round(rect.top))).size;
+    });
+  expect(lines, 'the name wraps').toBeGreaterThan(1);
+
+  await navLink(page, 'On the go').click();
+  const home = homeItem(page, name);
+  await expect(home).toBeVisible();
+  expect(await textSpillingOutOf(home), 'home item').toEqual([]);
+  expect((await auditScreen(page)).overflow).toEqual([]);
 });
 
 test('the loop sheet and panel keep 44 px targets with a loop playing', async ({ user, page }) => {

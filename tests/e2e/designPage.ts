@@ -210,6 +210,42 @@ export const NO_FAULTS = {
   overflow: [],
 };
 
+/**
+ * Words inside `container` drawn past its left or right edge, one string per
+ * text. Measured on the text's own line boxes (a Range), not on the element
+ * around it: text that overflows its paragraph leaves the paragraph's box
+ * where it was. Screen-reader-only text (`.sr-only`) is clipped and left out;
+ * text truncated with an ellipsis is measured by the box that clips it.
+ */
+export function textSpillingOutOf(container: Locator): Promise<string[]> {
+  return container.evaluate((root) => {
+    const bounds = root.getBoundingClientRect();
+    const spilled: string[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent?.trim();
+      if (!text || node.parentElement?.closest('.sr-only, svg')) continue;
+      // Text cut short with an ellipsis is meant to run on, hidden: its box is what shows.
+      const parent = node.parentElement;
+      const ellipsis =
+        parent && getComputedStyle(parent).textOverflow === 'ellipsis' ? parent : null;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rects = ellipsis ? [ellipsis.getBoundingClientRect()] : range.getClientRects();
+      for (const rect of Array.from(rects)) {
+        if (rect.width === 0) continue;
+        if (rect.left < bounds.left - 0.5 || rect.right > bounds.right + 0.5) {
+          spilled.push(
+            `"${text.slice(0, 30)}" runs ${Math.round(rect.left)} to ${Math.round(rect.right)} in a box ${Math.round(bounds.left)} to ${Math.round(bounds.right)}`,
+          );
+          break;
+        }
+      }
+    }
+    return spilled;
+  });
+}
+
 /** What focus is on and how its ring is drawn, read the moment it got focus. */
 interface FocusedRing {
   name: string;
@@ -217,6 +253,8 @@ interface FocusedRing {
   ring: { style: string; width: number; contrast: number } | null;
   /** The same element as the first one Tab reached: the loop has wrapped. */
   key: string;
+  /** Focus is on a visually hidden control, so the ring was measured on its label. */
+  throughLabel: boolean;
 }
 
 /**
@@ -224,28 +262,53 @@ interface FocusedRing {
  * that got focus without a ring a user can see: an outline other than
  * `none`, either the browser's own (`auto`, native checkboxes and radios) or
  * at least 2 px at 3:1 against what is behind it (WCAG 2.4.7 and 1.4.11).
+ *
+ * A visually hidden control (an `sr-only` file input) can't show a ring: the
+ * one the user sees is its label's, so the label is measured instead, and a
+ * hidden control with no label is at fault. Otherwise the hidden control's own
+ * invisible `auto` outline would pass. `throughLabel` names those controls, so
+ * a test can prove the label was the thing measured.
  */
 export async function controlsWithoutFocusRing(
   page: Page,
   limit = 60,
-): Promise<{ reached: number; missing: string[] }> {
+): Promise<{ reached: number; missing: string[]; throughLabel: string[] }> {
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
   const missing: string[] = [];
+  const throughLabel: string[] = [];
   const keys = new Set<string>();
   for (let i = 0; i < limit; i += 1) {
     await page.keyboard.press('Tab');
     const focused = await page.evaluate(async (): Promise<FocusedRing> => {
-      const el = document.activeElement;
-      if (!el || el === document.body) return { name: 'body', ring: null, key: 'body' };
+      const focusedEl = document.activeElement;
+      if (!focusedEl || focusedEl === document.body) {
+        return { name: 'body', ring: null, key: 'body', throughLabel: false };
+      }
+      const index = Array.from(document.querySelectorAll('*')).indexOf(focusedEl);
+      // Visually hidden (sr-only's 1 px clipped box): the ring that shows is its label's.
+      const box = focusedEl.getBoundingClientRect();
+      const hidden = box.width <= 1 && box.height <= 1;
+      const label =
+        focusedEl instanceof HTMLInputElement
+          ? (focusedEl.labels?.[0] ?? focusedEl.closest('label'))
+          : focusedEl.closest('label');
+      const el = hidden && label ? label : focusedEl;
+      const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 30);
+      const name = `<${el.tagName.toLowerCase()}> "${el.getAttribute('aria-label') ?? text}"`;
+      if (hidden && !label) {
+        return {
+          name,
+          key: String(index),
+          throughLabel: false,
+          ring: { style: 'none', width: 0, contrast: 1 },
+        };
+      }
       // The ring's colour fades in with the control's colour transition: judge it once drawn.
       await Promise.all(
         el.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
       );
-      const index = Array.from(document.querySelectorAll('*')).indexOf(el);
-      const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 30);
-      const name = `<${el.tagName.toLowerCase()}> "${el.getAttribute('aria-label') ?? text}"`;
       const style = getComputedStyle(el);
 
       const canvas = document.createElement('canvas');
@@ -280,6 +343,7 @@ export async function controlsWithoutFocusRing(
       return {
         name,
         key: String(index),
+        throughLabel: el !== focusedEl,
         ring: {
           style: style.outlineStyle,
           width: parseFloat(style.outlineWidth),
@@ -291,6 +355,7 @@ export async function controlsWithoutFocusRing(
     keys.add(focused.key);
     const { ring } = focused;
     if (!ring) continue;
+    if (focused.throughLabel) throughLabel.push(focused.name);
     const visible =
       ring.style === 'auto' || (ring.style !== 'none' && ring.width >= 2 && ring.contrast >= 3);
     if (!visible) {
@@ -299,7 +364,7 @@ export async function controlsWithoutFocusRing(
       );
     }
   }
-  return { reached: keys.size - (keys.has('body') ? 1 : 0), missing };
+  return { reached: keys.size - (keys.has('body') ? 1 : 0), missing, throughLabel };
 }
 
 /** How an element moves: its animation and transition, as computed now. */
