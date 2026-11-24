@@ -66,6 +66,8 @@ export function usePracticeTracker(
   useEffect(() => {
     accessToken.current = auth.session?.access_token ?? null;
   }, [auth.session]);
+  // A keepalive's answer can arrive after the screen has gone (hidden, back, then another route).
+  const screenGone = useRef(false);
 
   /** Through the mutation, for a page that is staying. */
   const sendNow = useCallback(
@@ -94,7 +96,9 @@ export function usePracticeTracker(
         // Only reached when the page lived on: a hidden tab that came back.
         // `loopGone` needs nothing: the loop's history went with it.
         if (result === 'failed') {
-          sendNow(record);
+          // The hook's own mutation observer went with the screen; see `unobserved`.
+          if (screenGone.current) void logSessionUnobserved(queryClient, userId, record);
+          else sendNow(record);
         } else if (result === 'logged') {
           sessionLogged(queryClient, userId, record);
           setLastLogged(record);
@@ -150,6 +154,9 @@ export function usePracticeTracker(
   useEffect(() => {
     if (!player) return;
     return player.on('loopWrapped', () => {
+      // Like its time, a pass played to a hidden page isn't practice: on a laptop the
+      // loop plays on in a background tab, under a session still too short to have ended.
+      if (document.visibilityState === 'hidden') return;
       tracker.current = countRepeat(tracker.current);
     });
   }, [player]);
@@ -166,6 +173,7 @@ export function usePracticeTracker(
     const onPageHide = () => latestSync.current({ leaving: true, via: 'keepalive' });
     // Back from the back/forward cache, the player still there: carry on as a new session.
     const onPageShow = () => latestSync.current(STAYING);
+    screenGone.current = false;
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
@@ -176,6 +184,7 @@ export function usePracticeTracker(
       // The screen is unmounting (another route, or another song): the app
       // lives on, but this hook's mutation observer is going with the screen.
       latestSync.current({ leaving: true, via: 'unobserved' });
+      screenGone.current = true;
     };
   }, []);
 

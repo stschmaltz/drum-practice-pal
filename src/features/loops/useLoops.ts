@@ -5,8 +5,10 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import type { LoopStatus } from '@/lib/schema';
+import type { Song } from '@/features/library/songForm';
+import { songKeys } from '@/features/library/useSongs';
 import { sessionKeys } from '@/features/practice/sessionKeys';
+import type { LoopStatus } from '@/lib/schema';
 import { useSignedInUser } from '@/lib/auth';
 import { loopKeys } from './loopKeys';
 import { createLoop, deleteLoop, fetchLoops, fetchPracticeLoops, updateLoop } from './loopsApi';
@@ -94,6 +96,9 @@ export function usePracticeLoops() {
  * Not optimistic: the form stays up as "Saving…" until the row exists, so a
  * loop the server refused is never on show (or playing). The caller chooses
  * the id (randomUuid()), so the same variables sent again can't insert twice.
+ * The new loop joins the home page's list too when that is cached, with its
+ * song's name from the song's own cache entry (the song page is where loops
+ * are made, so it is there); without the name the refetch brings the loop.
  */
 export function useCreateLoop(songId: string) {
   const user = useSignedInUser();
@@ -107,6 +112,12 @@ export function useCreateLoop(songId: string) {
     onSuccess: (saved) => {
       queryClient.setQueryData<Loop[]>(queryKey, (loops) =>
         loops ? [...loops.filter((loop) => loop.id !== saved.id), saved] : loops,
+      );
+      const song = queryClient.getQueryData<Song | null>(songKeys.detail(user.id, songId));
+      if (!song) return;
+      const listed: PracticeLoop = { ...saved, song: { title: song.title, artist: song.artist } };
+      queryClient.setQueryData<PracticeLoop[]>(loopKeys.practice(user.id), (loops) =>
+        loops ? [...loops.filter((loop) => loop.id !== saved.id), listed] : loops,
       );
     },
     onSettled: () => invalidateWhenIdle(queryClient, user.id),

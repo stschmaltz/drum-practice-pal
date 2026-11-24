@@ -355,6 +355,26 @@ describe('a page that is hidden or going away', () => {
     expect(logged()[0]).toMatchObject({ duration_seconds: 35 });
   });
 
+  it('counts no passes played to a hidden page under a session still too short to end', async () => {
+    const view = renderTracker();
+    view.loopBars5To8();
+    view.play();
+    view.finishPasses(2);
+    view.seconds(20);
+
+    // A laptop tab in the background: the loop plays on and wraps.
+    setVisibility('hidden');
+    view.finishPasses(5);
+    view.seconds(600);
+    setVisibility('visible');
+    view.finishPasses(1);
+    view.seconds(15);
+    view.pause();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject({ duration_seconds: 35, repeats: 3 });
+  });
+
   it('sends nothing on pagehide after too little play', () => {
     const view = renderTracker();
     view.playOn(29);
@@ -553,6 +573,34 @@ describe('a keepalive log on a page that lives on', () => {
     await waitFor(() => expect(view.tracker().unsaved).toHaveLength(1));
     expect(view.tracker().unsaved[0]!.id).toBe(keptAlive()[0]!.id);
     expect(logged()).toHaveLength(1);
+  });
+});
+
+describe('a keepalive log answered after the screen has gone', () => {
+  it('is sent again without the hook when it failed, and the caches hear of it', async () => {
+    let refuse!: (response: Response) => void;
+    fetchMock.mockReturnValue(new Promise<Response>((resolve) => (refuse = resolve)));
+    const view = renderTracker();
+    // Collected at once when nothing holds it, so a mutation left in the cache is one that is held.
+    view.queryClient.setDefaultOptions({ mutations: { retry: false, gcTime: 10 } });
+    view.cacheEmptyHistory();
+    view.playOn(40);
+    setVisibility('hidden');
+    expect(keptAlive()).toHaveLength(1);
+
+    // Back on show, then off to another route before the answer.
+    setVisibility('visible');
+    view.pause();
+    view.hook.unmount();
+    refuse(new Response('{}', { status: 401 }));
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]!.id).toBe(keptAlive()[0]!.id);
+    await waitFor(() =>
+      expect(view.cachedHistory()).toEqual([expect.objectContaining({ duration_seconds: 40 })]),
+    );
+    // Run from the cache and collected like any mutation, not held for good by the dead screen's observer.
+    await waitFor(() => expect(view.queryClient.getMutationCache().getAll()).toEqual([]));
   });
 });
 

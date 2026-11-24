@@ -126,7 +126,12 @@ function SongPlayer({
   const loops = useLoops(songId);
   const practice = useLoopPractice(player, snapshot, loops.data);
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
-  useRequestedLoop(player !== null && snapshot.barCount !== null, loops.data, practice.openLoop);
+  useRequestedLoop(
+    player !== null && snapshot.barCount !== null,
+    loops,
+    practice.openLoop,
+    practice.activeLoop !== null,
+  );
   const loopPanel = useLoopPanelOpen();
   const { setOpen: setLoopPanelOpen } = loopPanel;
   const pickingBars = practice.editor !== null;

@@ -342,3 +342,81 @@ No behaviour changed: the app's markup, classes, copy, queries, requests and pla
 | `npm run e2e`     | green, 318: 304 passed, 14 skipped | green, 318: 304 passed, 14 skipped |
 
 Nothing was heard, and nothing ran outside Chromium.
+
+## Review
+
+`git diff main...HEAD` was read line by line (app code, migration, db tests, e2e, hook and component tests, helpers, docs; not the screenshots), except `sessionTracker.test.ts`, `sessions.test.ts` and `OnTheGoPage.test.tsx`, where only the test names were skimmed, piece by piece against `docs/review-checklist.md`. Six findings were confirmed and fixed, with tests that fail without each code fix; the two handed-over decisions (the target comparison, "Restart loop") were confirmed as right. Nothing larger was found. 12 tests added.
+
+**Inventory**
+
+| Piece                                                                                                     | Kind                                                                                            |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `sessionTracker.ts` (`observe`, `countRepeat`, `trackerPhase`)                                            | Pure reducer                                                                                    |
+| `usePracticeTracker.ts`                                                                                   | Hook: one feeding effect, a `loopWrapped` listener, three page listeners, three ways of sending |
+| `useSessions.ts` (`useLoopSessions`, `useLogSession`, `logSessionUnobserved`, `sessionLogged`)            | Query, mutation, cache writes                                                                   |
+| `sessionsApi.ts`, `src/lib/keepaliveInsert.ts`, `supabaseRestConfig`                                      | supabase-js calls and the one hand-built request                                                |
+| `useLoops.ts` (`usePracticeLoops`, `useCreateLoop`, `useUpdateLoop`, `useSetLoopStatus`, `useDeleteLoop`) | Queries and mutations over two caches                                                           |
+| `useSongs.ts` (`useUpdateSong`, `useDeleteSong`)                                                          | Mutations that now touch the loops and session caches                                           |
+| `useLoopPractice.ts` (`playLoop`, `openLoop`)                                                             | Page state and player calls                                                                     |
+| `useRequestedLoop.ts`                                                                                     | One-shot effect on the URL and the loops query                                                  |
+| `LoopPanel.tsx` (`FinishPrompt`, the declined answer, the History toggle), `LoopStatusButton.tsx`         | Components with handlers                                                                        |
+| `OnTheGoPage.tsx`, `LoopHistory.tsx`, `SongPage.tsx` (`SessionNotice`)                                    | Components with handlers                                                                        |
+| `debugPractice.ts`                                                                                        | Debug hook, gated by build mode                                                                 |
+| `20261123010000_session_sanity.sql`                                                                       | Migration: check, trigger, column grant                                                         |
+| `tests/db/helpers.ts`, `tests/e2e/practicePage.ts`, `src/test/render.tsx` (`settle`)                      | Test helpers                                                                                    |
+
+**Findings**
+
+1. **`?loop=` was settled against a list cached before the page opened (QA issue 1). Confirmed, fixed.** `src/features/song/useRequestedLoop.ts` marked the id handled before looking, against `loops.data` from whenever. Checklist: interleavings (a new row, "Done once, on cached data"). The hook now takes the loops query and settles only against a read made since mount (`isFetchedAfterMount`): it waits while that read is fetching, asks for one more read when a fresh cached list lacks the loop (once per id), and goes by the cached list when the read fails or is paused (offline). A "Play loop" pressed by the user while the read is out wins: the late answer opens nothing over it (`userChoseLoop`; without it a slow read would have reset the loop and speed the user had just chosen). Seven tests in `SongPage.test.tsx` ("with a list cached from an earlier visit"): QA's repro A and B, a fresh list that lacks the loop, at most one extra read, no extra read when the fresh list has the loop, a failed read, and the user's own choice. Five fail on the old hook; the "user's choice" one fails with its guard removed; "no extra read" is the control.
+2. **Passes played to a hidden page were counted. Confirmed, fixed.** `usePracticeTracker.ts`, the `loopWrapped` listener. A session still under 30 s is kept while the page is hidden; on a laptop the loop plays on in the background tab and every wrap was added, so a 35 s session could carry ten minutes of passes while its duration left that time out. Checklist: interleavings (events during a window). The listener ignores wraps while `document.visibilityState` is `hidden`. One test in `usePracticeTracker.test.tsx`, failing without the line.
+3. **A keepalive that failed after the screen had gone was retried through the dead hook's mutation. Confirmed, fixed.** `usePracticeTracker.ts`, `sendOnExit`. Hidden mid-practice (keepalive out), shown again, then another route before the answer: the `failed` branch called `sendNow`, which is the unmounted component's `mutateAsync`. The log still went out, but the mutation stayed attached to an observer nobody will ever unsubscribe, so it was never collected: the case `logSessionUnobserved` exists for. Checklist: late events after unmount, leaks. A `screenGone` ref picks `logSessionUnobserved` there. One test, which fails without the fix (with `gcTime: 10` the mutation is still in the cache).
+4. **A new loop didn't join the home page's cached list. Confirmed, fixed.** `src/features/loops/useLoops.ts`, `useCreateLoop`. AGENTS.md: a mutation keeps every cache of the item right. The unit added the second cache and moved edit and delete to it, but not create, so On the go opened on the list without the new loop until its refetch landed. `onSuccess` now adds the row with its song's name from `songKeys.detail` when both are cached, and leaves it to the refetch otherwise (never a row without its song, never a list made up). Three tests in `useLoops.test.tsx`.
+5. **Unchecked setup inserts in `tests/db` (from Readability). Confirmed; none was failing; fixed.** Six in `tests/db/constraints.test.ts` and two in `tests/db/schema.test.ts` (`loops-grants.test.ts` already checked each of its own). Two were worse than untidy: "deleting a song removes its loops and their sessions" and "deleting a loop removes only its sessions" assert an empty result, and would pass on a refused insert. All eight use `insertSession`, and one unchecked setup `delete` in `constraints.test.ts` now asserts its `error`. `npm run test:db` is green after, so every one of those inserts was going in. Checklist: hygiene.
+6. **The two Unit 09 rows of Open human checks were cut off from their table. Confirmed, fixed.** `docs/plan.md`: a blank line before them ended the table, so they rendered as loose text. Rejoined; the first row also gained QA's two-device check and a note that the keepalive request needs a CORS preflight that outlives the page.
+
+**Handed over, confirmed as they are**
+
+- **`hasReachedTarget` compares whole percents (Test bug 1).** Right. The rule in AGENTS.md ("compare ratios, never percents") is about whether a speed is _saved_: there the stored value is what matters, and two ratios that show the same percent are different speeds. "Has it reached the target" is a question about what the loop's line shows ("71% · target 71%"), and both sides go through the same `ratioToPercent` that the line, the prompt's copy and the home page use, so the prompt can never disagree with the screen. Nothing is written from the comparison, so no rounded value reaches the database (checklist row 4). AGENTS.md states both rules.
+- **"Restart loop" keeps the speed playing.** Consistent. `playLoop` is the only place a press applies a loop's saved speed, and it skips that only when the loop pressed is the active one; `openLoop` (arrival by link), and playing a loop after leaving it or after another loop, still set the saved speed; `selectLoop` never did. The panel's and the hook's tests, AGENTS.md and Unit 10's Carried forward line all say the same. A session's speed is `snapshot.speedRatio` at its end, so a nudge kept by Restart is the speed logged.
+
+**Checked and found right**
+
+- **Migration.** RLS and the select and insert policies are Unit 02's, unchanged; the insert grant is now per column, and there is still no update or delete grant; `anon` has nothing. The new trigger function runs as the caller with `search_path = ''`, writes only the row being inserted, and has `execute` revoked from `public, anon, authenticated`. The one `security definer` function on the table (`practice_sessions_after_insert`, Unit 08) matches `user_id`. "On conflict do nothing" against another user's id returns no row and no error (tested), so it tells nothing.
+- **`keepaliveInsert`.** The URL carries the table name and `on_conflict=id`, nothing else; the token and the publishable key are headers; the user id is in the body, as in every supabase-js insert. The token comes from `useAuth().session`, which `AuthProvider` replaces on every auth event (a refresh included), and is read through a ref at the moment of sending. An expired one is a 401, read as `failed`, and sent again through supabase-js if the page lives. `response.ok` is checked, the body's `code` is read defensively, and it never throws. `supabaseRestConfig.url` is the resolved URL (the LAN rewrite included).
+- **Errors, pagination, partial failure.** Every supabase-js call in the diff goes through `unwrap` / `throwIfError` or reads `error`; both new lists (`fetchLoopSessions`, `fetchPracticeLoops`) use `fetchAllPages` with a total order. No multi-step write was added.
+- **Optimistic rules.** A status write rolls back only `status`; `onSuccess` is field-scoped while another write is pending; `cancelQueries` covers both loop caches; `sessionLogged` and `invalidateWhenIdle` each skip the refetch while a write is pending.
+- **Gates.** Each status control is disabled on the same mutation-cache read that `setStatus` refuses on.
+- **Leaks.** The three page listeners and the `loopWrapped` subscription are removed on unmount; StrictMode is tested.
+- **Bars.** The unit adds no bar arithmetic; `start_bar` / `end_bar` are shown and passed on as the 1-based numbers they are.
+- **Trust boundaries.** `?loop=` only through `isUuid`, `?tab=` only through `practiceTabFrom`; neither is echoed. No secret in a committed file; `window.__drumPalMinSessionSeconds` is gated on the mode allow-list.
+
+**Open issues** (each has its Carried forward line in `docs/plan.md`)
+
+- On a connection that hangs without failing, `?loop=` opens the loop only when the read gives up; with Unit 11's persisted cache the offline cold start depends on the read showing as paused. Unit 11.
+- A sign-out that reaches the song page mid-practice (another tab, a failed refresh) loses that session's log. Unit 11, with the durable queue.
+- A refused "Mark finished" or "Reopen" keeps its error under the loop, on both pages, until the loop's next status write or until five minutes pass. Unit 12, with QA issue 3.
+- The Build's known gap "before every repeat can't count in" (a session per pass) had no line; it has one now. Unit 13.
+- QA issue 7 (`loopGone` doesn't make the page read its loops again) stays with Unit 13, as QA left it.
+
+Every other open issue of the Build, Test and QA sections was checked against `docs/plan.md` and has its line (Units 10, 11, 12 and 13). Unit 09's own Carried forward list is gone, every line of it dealt with. The Unit 11 line for QA issue 1 was rewritten to what is left of it.
+
+**Docs**
+
+- `docs/review-checklist.md`: a new interleavings row, "Done once, on cached data", and test setup named under hygiene.
+- `AGENTS.md`: the `?loop=` rule and the general one behind it; no hook `mutate` after its component has gone; hidden passes; a new loop in the home page's list; no bare setup writes in `tests/db`.
+
+**Human checks** (the two Unit 09 rows of Open human checks)
+
+- Phone at the kit: a minute of loop practice, pause, "Practice logged" and the loop's History.
+- iPhone, Safari and installed: lock, switch apps, close the tab mid-practice; one session each, no pocket time. The keepalive request and its preflight ran on Chromium only.
+- "Before every repeat" on: one session for the sitting, play time without the count-ins.
+- Home page on the phone: the order after two loops, "Practice" then Play, Mark finished and Reopen.
+- Laptop: switch tabs while a loop plays; two sessions are expected, and now no passes from the hidden time.
+- Two devices: save a loop on the laptop, press its "Practice" on a phone that had the song open a minute before; it should now open on the loop.
+
+**Results**
+
+- `npm run check`: green. 84 test files, 3363 tests (3351 before; 12 added).
+- `npm run test:db`: green. 6 files, 205 tests.
+- `npm run e2e`: green. 318 tests: 304 passed, 14 skipped (the size-specific skips of earlier units), 3.1 minutes.
+- Nothing was heard, and nothing ran outside Chromium.

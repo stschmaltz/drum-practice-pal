@@ -16,6 +16,7 @@ For every async window (a pending mutation, a load, a count-in, a hand-over betw
 - **Two writes to one item.** A response from an older write must not overwrite a newer optimistic value. _08: a "Save speed" response put the old bars back over a pending range edit._ While another write to the item is pending, a response applies only the fields its own request sent.
 - **Late events after a user's halt.** Events already on their way (from a worker, a timer, the network) arrive after pause, stop, unmount or a seek. _07: `pause()` then a late `finished` restarted the count-in._ A user's halt is latched until the next explicit start, and every event handler that starts or moves something checks it.
 - **Hand-overs.** Between "told the engine to do X" and "the engine reports X", every cancel path must undo X too. _07: `setRange()` in that gap left playback running under a `ready` snapshot._
+- **Done once, on cached data.** Something a page does once (open the item a link names, pick a default) that reads a query's `data` runs against whatever was cached before the page opened, and its "handled" latch then ignores the fresh list. _09: `?loop=<id>` was settled against a loops list cached from an earlier visit, so a loop saved on another device never opened and an edited one opened at its old speed._ Latch only on a read made since mount (`isFetchedAfterMount`), or on one that failed or is paused; and say what a late answer does if the user has acted meanwhile.
 - **Effects run twice.** StrictMode mounts, cleans up and mounts again; lazy factories can both resolve. _05: two alphaTab APIs on one element; destroying the first cleared the second._ Anything an effect creates is owned by that run and is checked as current after every `await`.
 
 ## 2. Gates: does the control agree with the action?
@@ -41,7 +42,7 @@ For every async window (a pending mutation, a load, a count-in, a hand-over betw
 
 ## 6. Hygiene (Review already catches these; keep checking)
 
-Unchecked `{ data, error }`, one-page list reads, multi-step work that continues after a failed step, test teardown that swallows failures, listeners, timers and DOM left after `destroy()`, 1-based vs 0-based bars, anything that breaks AGENTS.md.
+Unchecked `{ data, error }` (test setup included: _09: cascade tests whose unchecked setup insert could have been refused would pass on the empty table_), one-page list reads, multi-step work that continues after a failed step, test teardown that swallows failures, listeners, timers and DOM left after `destroy()`, 1-based vs 0-based bars, anything that breaks AGENTS.md.
 
 ## Design rules that prevent these
 

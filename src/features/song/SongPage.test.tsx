@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { QueryClient } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
 import { Link, Outlet, Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
 import type { Loop } from '@/features/loops/loopForm';
@@ -1349,6 +1349,120 @@ describe('SongPage opened on a loop (?loop=)', () => {
 
     expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
     expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+  });
+
+  describe('with a list cached from an earlier visit', () => {
+    const loopsKey = loopKeys.forSong(USER, SONG_A);
+    const selects = () =>
+      queryResult.mock.calls.filter(
+        ([call]) => call.table === 'loops' && opArgs(call, 'select') && !opArgs(call, 'update'),
+      ).length;
+    /** The page with `cached` as the list this device already holds, and the player loaded. */
+    async function openWithCache(cached: Loop[], queryClient = testQueryClient()) {
+      queryClient.setQueryData(loopsKey, cached);
+      const user = renderSong(`${SONG_A}?loop=${LOOP_ID}`, queryClient);
+      const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+      return { user, engine };
+    }
+
+    it('opens a loop another device saved since: the cached list lacks it, the read brings it', async () => {
+      serve({ loops: [chorus, other] });
+      const release = loops.holdNext('select');
+      await openWithCache([other]);
+      // The player and a list are both in, and the loop isn't in that list: not settled yet.
+      await within(screen.getByTestId('loop-panel')).findByRole('button', {
+        name: 'Play loop Other',
+      });
+      expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+
+      release();
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+    });
+
+    it('opens at the speed and bars another device saved since, not the cached ones', async () => {
+      serve({ loops: [chorus, other] });
+      const release = loops.holdNext('select');
+      await openWithCache([{ ...chorus, speed_ratio: 1, start_bar: 5, end_bar: 6 }, other]);
+      await within(screen.getByTestId('loop-panel')).findByRole('button', {
+        name: 'Play loop Chorus fill',
+      });
+      expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+
+      release();
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent(
+        'Looping Chorus fill · Bars 9 to 12',
+      );
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+      expect(status()).toHaveTextContent('Bar 9 of 16');
+    });
+
+    it('reads a list too fresh to be read on arrival once more when it lacks the loop', async () => {
+      serve({ loops: [chorus, other] });
+      const fresh = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
+      });
+      await openWithCache([other], fresh);
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(selects()).toBe(1);
+    });
+
+    it('reads once more at most: an id no list has opens nothing and asks no further', async () => {
+      serve({ loops: [other] });
+      const fresh = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
+      });
+      await openWithCache([other], fresh);
+
+      await waitFor(() => expect(selects()).toBe(1));
+      await settle();
+      expect(selects()).toBe(1);
+      expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+    });
+
+    it('opens from a fresh list that has the loop without reading again', async () => {
+      serve({ loops: [chorus, other] });
+      const fresh = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
+      });
+      await openWithCache([chorus, other], fresh);
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(selects()).toBe(0);
+    });
+
+    it('goes by the cached list when the read fails', async () => {
+      serve({ loops: [chorus, other] });
+      const release = loops.holdNext('select');
+      loops.failNext('select', 'offline');
+      await openWithCache([{ ...chorus, speed_ratio: 0.9 }, other]);
+      expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+
+      release();
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('90%');
+    });
+
+    it('does not open the loop over one the user played while the read was out', async () => {
+      serve({ loops: [chorus, other] });
+      const release = loops.holdNext('select');
+      const { user } = await openWithCache([{ ...chorus, speed_ratio: 1 }, other]);
+      const panel = within(screen.getByTestId('loop-panel'));
+      await user.click(await panel.findByRole('button', { name: 'Play loop Other' }));
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Other');
+
+      release();
+      // The read has landed (the list shows the server's speed) before saying what it did not do.
+      await panel.findByText(/71% \(/);
+      await settle();
+
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Other');
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('100%');
+    });
   });
 });
 

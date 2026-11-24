@@ -2,9 +2,10 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
 import { LOOP_SONG_ID, loopRow } from '@/test/loopTable';
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
+import { songKeys } from '@/features/library/useSongs';
+import { sessionKeys } from '@/features/practice/sessionKeys';
 import type { Loop } from './loopForm';
 import { loopKeys } from './loopKeys';
-import { sessionKeys } from '@/features/practice/sessionKeys';
 import type { PracticeLoop } from './practiceList';
 import {
   isStatusWriteOf,
@@ -546,6 +547,62 @@ describe('the home page list (usePracticeLoops)', () => {
     ).toEqual(['b']);
     expect(view.queryClient.getQueryData(sessionKeys.forLoop('user-1', 'a'))).toBeUndefined();
     expect(view.queryClient.getQueryData(sessionKeys.forLoop('user-1', 'b'))).toEqual([]);
+  });
+});
+
+describe('a new loop and the home page list', () => {
+  const practiceKey = loopKeys.practice('user-1');
+  const saved = loopRow('new', { name: 'Chorus fill', start_bar: 9, end_bar: 12 });
+
+  async function createWith({ songCached }: { songCached: boolean }) {
+    const view = await renderLoaded([loopRow('a')]);
+    view.queryClient.setQueryData<PracticeLoop[]>(practiceKey, [withSong(loopRow('a'))]);
+    if (songCached) {
+      view.queryClient.setQueryData(songKeys.detail('user-1', SONG), {
+        id: SONG,
+        title: 'Groove 120',
+        artist: 'Fixture Band',
+      });
+    }
+    // The refetch after the insert never lands: what the cache holds is the mutation's doing.
+    queryResult.mockResolvedValueOnce(ok(saved));
+    queryResult.mockReturnValue(new Promise<FakeResult>(() => {}));
+    act(() => view.result.current.create.mutate(newLoop));
+    await waitFor(() => expect(view.cached()?.map((loop) => loop.id)).toEqual(['a', 'new']));
+    return view;
+  }
+
+  it("joins it with its song's name, so the home page doesn't open on a list without it", async () => {
+    const view = await createWith({ songCached: true });
+
+    expect(view.queryClient.getQueryData<PracticeLoop[]>(practiceKey)).toEqual([
+      withSong(loopRow('a')),
+      withSong(saved),
+    ]);
+  });
+
+  it('is left to the refetch when the song is not cached: never a row without its song', async () => {
+    const view = await createWith({ songCached: false });
+
+    expect(view.queryClient.getQueryData<PracticeLoop[]>(practiceKey)).toEqual([
+      withSong(loopRow('a')),
+    ]);
+  });
+
+  it('makes no home page list when none is cached', async () => {
+    const view = await renderLoaded([]);
+    view.queryClient.setQueryData(songKeys.detail('user-1', SONG), {
+      id: SONG,
+      title: 'Groove 120',
+      artist: 'Fixture Band',
+    });
+    queryResult.mockResolvedValueOnce(ok(saved));
+    queryResult.mockResolvedValue(ok([saved]));
+
+    act(() => view.result.current.create.mutate(newLoop));
+    await waitFor(() => expect(view.result.current.create.isSuccess).toBe(true));
+
+    expect(view.queryClient.getQueryData(practiceKey)).toBeUndefined();
   });
 });
 
