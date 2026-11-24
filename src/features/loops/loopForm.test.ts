@@ -8,6 +8,7 @@ import {
   changedLoopFields,
   EMPTY_LOOP_FORM,
   formBarRange,
+  hasReachedTarget,
   LOOP_EDIT_FIELDS,
   LOOP_FIELDS,
   LOOP_SELECT,
@@ -31,6 +32,7 @@ const loop = (overrides: Partial<Loop> = {}): Loop => ({
   speed_ratio: 0.8,
   target_ratio: 1,
   status: 'active',
+  finished_at: null,
   last_practiced_at: null,
   created_at: '2026-11-20T10:00:00Z',
   ...overrides,
@@ -61,10 +63,13 @@ describe('columns', () => {
         ?.split(',')
         .map((column) => column.trim()) ?? [];
 
-    expect(granted('update')).toEqual(expect.arrayContaining([...LOOP_EDIT_FIELDS]));
+    // Exactly the grant, status included: finish and reopen are edits of it.
+    expect([...LOOP_EDIT_FIELDS].sort()).toEqual([...granted('update')].sort());
+    expect(LOOP_EDIT_FIELDS).toContain('status');
     expect(granted('insert')).toEqual(
       expect.arrayContaining(['id', 'user_id', 'song_id', ...LOOP_EDIT_FIELDS]),
     );
+    expect(LOOP_FIELDS).toContain('finished_at');
     for (const serverOwned of ['finished_at', 'last_practiced_at', 'created_at', 'updated_at']) {
       expect(granted('insert')).not.toContain(serverOwned);
       expect(granted('update')).not.toContain(serverOwned);
@@ -369,5 +374,45 @@ describe('barsLabel', () => {
   it('names one bar or a range', () => {
     expect(barsLabel(5, 5)).toBe('Bar 5');
     expect(barsLabel(5, 8)).toBe('Bars 5 to 8');
+  });
+});
+
+describe('hasReachedTarget', () => {
+  it.each([
+    ['under the target', { speed_ratio: 0.95, target_ratio: 1 }, false],
+    ['at the target', { speed_ratio: 1, target_ratio: 1 }, true],
+    ['past the target', { speed_ratio: 1.05, target_ratio: 1 }, true],
+    [
+      'at a target that is not a whole percent',
+      { speed_ratio: 0.855556, target_ratio: 0.855556 },
+      true,
+    ],
+    // What the loop's line shows is what counts: "71% (85 BPM) · target 71% (85 BPM)"
+    // with no question would look broken. 85 BPM typed at a tempo of 120 is 0.708333.
+    [
+      'showing the target’s percent from under it',
+      { speed_ratio: 0.708333, target_ratio: 0.71 },
+      true,
+    ],
+    ['a hair under a finer target', { speed_ratio: 0.855555, target_ratio: 0.855556 }, true],
+    ['showing one percent less', { speed_ratio: 0.704999, target_ratio: 0.71 }, false],
+    ['rounding up to the target', { speed_ratio: 0.845, target_ratio: 0.85 }, true],
+    ['rounding down from it', { speed_ratio: 0.844, target_ratio: 0.85 }, false],
+    ['with no target', { speed_ratio: 2, target_ratio: null }, false],
+  ])('%s: %j is %s', (_what, speeds, reached) => {
+    expect(hasReachedTarget(loop(speeds))).toBe(reached);
+  });
+
+  it('never asks about a loop that is already finished', () => {
+    expect(
+      hasReachedTarget(
+        loop({
+          speed_ratio: 1,
+          target_ratio: 1,
+          status: 'finished',
+          finished_at: '2026-11-22T10:00:00Z',
+        }),
+      ),
+    ).toBe(false);
   });
 });

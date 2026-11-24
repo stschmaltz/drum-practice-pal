@@ -25,6 +25,9 @@ export const SONG_TEXT_MAX_LENGTH = 300;
 export const SONG_TEMPO_MAX = 1000;
 export const LOOP_NAME_MAX_LENGTH = 100;
 
+/** practice_sessions.duration_seconds can't be longer: no sitting lasts a day. */
+export const SESSION_MAX_DURATION_SECONDS = 24 * 60 * 60;
+
 /** Object path inside the gp-files bucket. Storage policies only accept this shape. */
 export function songFilePath(userId: string, songId: string): string {
   return `${userId}/${songId}.gp`;

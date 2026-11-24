@@ -137,3 +137,12 @@ export function sessionRow(
     ...overrides,
   };
 }
+
+/** Inserts a session as the user, for a test's setup: a refusal fails the test there. */
+export async function insertSession(
+  user: TestUser,
+  row: TablesInsert<'practice_sessions'>,
+): Promise<void> {
+  const { error } = await user.client.from('practice_sessions').insert(row);
+  if (error) throw error;
+}

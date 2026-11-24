@@ -105,7 +105,7 @@ describe('playing a loop', () => {
     });
   });
 
-  it('playing the active loop again goes back to its first bar and its saved speed', async () => {
+  it('playing the active loop again goes back to its first bar and keeps the speed playing now', async () => {
     const { engine, practice, player } = await renderPractice();
     act(() => practice().playLoop(verse));
     act(() => {
@@ -119,7 +119,34 @@ describe('playing a loop', () => {
     act(() => practice().playLoop(verse));
 
     expect(engine.seek).toHaveBeenLastCalledWith(startOfBar(5));
-    expect(player.getSnapshot()).toMatchObject({ barNumber: 5, speedRatio: 0.8, looping: true });
+    expect(player.getSnapshot()).toMatchObject({ barNumber: 5, speedRatio: 0.5, looping: true });
+  });
+
+  it('playing a loop after leaving it starts from its saved speed again', async () => {
+    const { practice, player } = await renderPractice();
+    act(() => practice().playLoop(verse));
+    act(() => player.setSpeed(0.5));
+    act(() => practice().exitLoop());
+
+    act(() => practice().playLoop(verse));
+
+    expect(player.getSnapshot().speedRatio).toBe(0.8);
+  });
+
+  it('opening a loop from a link sets it up at its saved speed without starting playback', async () => {
+    const { engine, practice, player } = await renderPractice();
+
+    act(() => practice().openLoop(outro));
+
+    expect(practice().activeLoop).toEqual(outro);
+    expect(player.getSnapshot()).toMatchObject({
+      status: 'ready',
+      range: { startBar: 13, endBar: 16 },
+      looping: true,
+      barNumber: 13,
+      speedRatio: 1.1,
+    });
+    expect(engine.play).not.toHaveBeenCalled();
   });
 
   it.each([

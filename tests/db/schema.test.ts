@@ -4,6 +4,7 @@ import {
   createTestUser,
   deleteTestUser,
   insertLoop,
+  insertSession,
   insertSong,
   PG,
   sessionRow,
@@ -212,7 +213,7 @@ describe('practice_sessions', () => {
     const songId = await insertSong(user);
     const loopId = await insertLoop(user, songId);
     const row = sessionRow(user.id, loopId);
-    await user.client.from('practice_sessions').insert(row);
+    await insertSession(user, row);
     const { error } = await user.client
       .from('practice_sessions')
       .update({ repeats: 99 })
@@ -242,7 +243,7 @@ describe('cascades', () => {
   it('deleting a song removes its loops and their sessions', async () => {
     const songId = await insertSong(user);
     const loopId = await insertLoop(user, songId);
-    await user.client.from('practice_sessions').insert(sessionRow(user.id, loopId));
+    await insertSession(user, sessionRow(user.id, loopId));
 
     const { error } = await user.client.from('songs').delete().eq('id', songId);
     expect(error).toBeNull();

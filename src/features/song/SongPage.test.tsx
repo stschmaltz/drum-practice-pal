@@ -1,13 +1,16 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient } from '@tanstack/react-query';
 import { Link, Outlet, Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
 import type { Loop } from '@/features/loops/loopForm';
+import { loopKeys } from '@/features/loops/loopKeys';
 import type { EngineMount } from '@/features/player/playerEngine';
 import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
 import type { Settings } from '@/features/settings/settingsForm';
 import { songFilePath } from '@/lib/schema';
 import {
+  opArgs,
   queryResult,
   resetFakeSupabase,
   storageResult,
@@ -21,7 +24,7 @@ import {
   TICKS_PER_BAR,
 } from '@/test/fakePlayerEngine';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
-import { renderRoutes, RouteMarker } from '@/test/render';
+import { renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
 import { SongPage } from './SongPage';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -97,7 +100,7 @@ function serve({
 }
 
 /** The song page inside a layout with nav links, so tests can leave it the way the app does. */
-function renderSong(id: string) {
+function renderSong(id: string, queryClient?: QueryClient) {
   renderRoutes(
     <Route
       element={
@@ -114,7 +117,7 @@ function renderSong(id: string) {
       <Route path="/songs/:id" element={<SongPage />} />
       <Route path="/library" element={<RouteMarker name="library" />} />
     </Route>,
-    { path: `/songs/${id}` },
+    { path: `/songs/${id}`, queryClient },
   );
   return userEvent.setup();
 }
@@ -1209,5 +1212,515 @@ describe('SongPage scrolling the score to a bar', () => {
       within(screen.getByTestId('active-loop')).getByRole('button', { name: 'Exit loop' }),
     );
     expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+});
+
+describe('SongPage opened on a loop (?loop=)', () => {
+  const LOOP_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const chorus = loopOfSongA(LOOP_ID, {
+    name: 'Chorus fill',
+    start_bar: 9,
+    end_bar: 12,
+    speed_ratio: 0.708333,
+  });
+  const other = loopOfSongA('other', { name: 'Other', start_bar: 1, end_bar: 2 });
+
+  async function openSongAt(query: string, loops: Loop[] = [chorus, other]) {
+    serve({ loops });
+    const user = renderSong(`${SONG_A}${query}`);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    return { user, engine };
+  }
+
+  it('sets the loop up at its saved speed, ready for Play, without starting playback', async () => {
+    const { user, engine } = await openSongAt(`?loop=${LOOP_ID}`);
+
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent(
+      'Looping Chorus fill · Bars 9 to 12',
+    );
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+    // 90 BPM from bar 9, times the saved speed.
+    expect(screen.getByTestId('jam-bpm')).toHaveTextContent('64');
+    expect(status()).toHaveTextContent('Bar 9 of 16');
+    expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+      startTick: startOfBar(9),
+      endTick: startOfBar(13),
+    });
+    expect(engine.setLooping).toHaveBeenLastCalledWith(true);
+    // Playback has to start inside a tap.
+    expect(engine.play).not.toHaveBeenCalled();
+
+    await user.click(playButton());
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(engine.setSpeed).toHaveBeenLastCalledWith(0.708333);
+  });
+
+  it.each([
+    ['an id that is none of this song’s loops', '?loop=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'],
+    ['something that is not an id', '?loop=%3Cb%3Eother%3C%2Fb%3E'],
+    ['an empty value', '?loop='],
+  ])('opens the whole song for %s', async (_what, query) => {
+    const { engine } = await openSongAt(query);
+    await within(screen.getByTestId('loop-panel')).findByRole('button', {
+      name: 'Play loop Other',
+    });
+
+    expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('100%');
+    expect(engine.setLooping).not.toHaveBeenCalledWith(true);
+  });
+
+  it('opens the loop once: leaving it, and a refetched list, do not bring it back', async () => {
+    const { user } = await openSongAt(`?loop=${LOOP_ID}`);
+    await user.click(
+      within(await screen.findByTestId('active-loop')).getByRole('button', { name: 'Exit loop' }),
+    );
+    expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+
+    // Another device renames it: a new list arrives while the address still names the loop.
+    loops.setRows([{ ...chorus, name: 'Renamed' }, other]);
+    await user.click(
+      within(screen.getByTestId('loop-panel')).getByRole('button', { name: 'Mark finished Other' }),
+    );
+    await within(screen.getByTestId('loop-panel')).findByText('Renamed', { selector: 'p' });
+
+    expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+  });
+
+  it('waits for the loops when the score is in first, and still starts nothing', async () => {
+    serve({ loops: [chorus, other] });
+    const release = loops.holdNext('select');
+    renderSong(`${SONG_A}?loop=${LOOP_ID}`);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('100%');
+
+    release();
+
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+    expect(status()).toHaveTextContent('Bar 9 of 16');
+    expect(engine.play).not.toHaveBeenCalled();
+  });
+
+  it('waits for the player when the loops are in first (cached from an earlier visit)', async () => {
+    serve({ loops: [chorus, other] });
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(loopKeys.forSong(USER, SONG_A), [chorus, other]);
+    renderSong(`${SONG_A}?loop=${LOOP_ID}`, queryClient);
+
+    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    // Opened once there was a player to give the saved speed to, not before.
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+    expect(status()).toHaveTextContent('Bar 9 of 16');
+  });
+
+  it('opens the loop under a song already playing, without stopping it', async () => {
+    serve({ loops: [chorus, other] });
+    const release = loops.holdNext('select');
+    const user = renderSong(`${SONG_A}?loop=${LOOP_ID}`);
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    // Play before the loops are in: the whole song starts.
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: true }));
+    expect(playButton()).toHaveTextContent('Pause');
+
+    release();
+
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+    expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+      startTick: startOfBar(9),
+      endTick: startOfBar(13),
+    });
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(engine.play).toHaveBeenCalledTimes(1);
+    expect(engine.pause).not.toHaveBeenCalled();
+    expect(engine.stop).not.toHaveBeenCalled();
+  });
+
+  it('opens a finished loop too: it is still a loop', async () => {
+    await openSongAt(`?loop=${LOOP_ID}`, [
+      { ...chorus, status: 'finished', finished_at: '2026-11-22T10:00:00Z' },
+      other,
+    ]);
+
+    expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+  });
+
+  describe('with a list cached from an earlier visit', () => {
+    const loopsKey = loopKeys.forSong(USER, SONG_A);
+    const selects = () =>
+      queryResult.mock.calls.filter(
+        ([call]) => call.table === 'loops' && opArgs(call, 'select') && !opArgs(call, 'update'),
+      ).length;
+    /** The page with `cached` as the list this device already holds, and the player loaded. */
+    async function openWithCache(cached: Loop[], queryClient = testQueryClient()) {
+      queryClient.setQueryData(loopsKey, cached);
+      const user = renderSong(`${SONG_A}?loop=${LOOP_ID}`, queryClient);
+      const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+      return { user, engine };
+    }
+
+    it('opens a loop another device saved since: the cached list lacks it, the read brings it', async () => {
+      serve({ loops: [chorus, other] });
+      const release = loops.holdNext('select');
+      await openWithCache([other]);
+      // The player and a list are both in, and the loop isn't in that list: not settled yet.
+      await within(screen.getByTestId('loop-panel')).findByRole('button', {
+        name: 'Play loop Other',
+      });
+      expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+
+      release();
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+    });
+
+    it('opens at the speed and bars another device saved since, not the cached ones', async () => {
+      serve({ loops: [chorus, other] });
+      const release = loops.holdNext('select');
+      await openWithCache([{ ...chorus, speed_ratio: 1, start_bar: 5, end_bar: 6 }, other]);
+      await within(screen.getByTestId('loop-panel')).findByRole('button', {
+        name: 'Play loop Chorus fill',
+      });
+      expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+
+      release();
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent(
+        'Looping Chorus fill · Bars 9 to 12',
+      );
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('71%');
+      expect(status()).toHaveTextContent('Bar 9 of 16');
+    });
+
+    it('reads a list too fresh to be read on arrival once more when it lacks the loop', async () => {
+      serve({ loops: [chorus, other] });
+      const fresh = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
+      });
+      await openWithCache([other], fresh);
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(selects()).toBe(1);
+    });
+
+    it('reads once more at most: an id no list has opens nothing and asks no further', async () => {
+      serve({ loops: [other] });
+      const fresh = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
+      });
+      await openWithCache([other], fresh);
+
+      await waitFor(() => expect(selects()).toBe(1));
+      await settle();
+      expect(selects()).toBe(1);
+      expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+    });
+
+    it('opens from a fresh list that has the loop without reading again', async () => {
+      serve({ loops: [chorus, other] });
+      const fresh = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
+      });
+      await openWithCache([chorus, other], fresh);
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(selects()).toBe(0);
+    });
+
+    it('goes by the cached list when the read fails', async () => {
+      serve({ loops: [chorus, other] });
+      const release = loops.holdNext('select');
+      loops.failNext('select', 'offline');
+      await openWithCache([{ ...chorus, speed_ratio: 0.9 }, other]);
+      expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+
+      release();
+
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Looping Chorus fill');
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('90%');
+    });
+
+    it('does not open the loop over one the user played while the read was out', async () => {
+      serve({ loops: [chorus, other] });
+      const release = loops.holdNext('select');
+      const { user } = await openWithCache([{ ...chorus, speed_ratio: 1 }, other]);
+      const panel = within(screen.getByTestId('loop-panel'));
+      await user.click(await panel.findByRole('button', { name: 'Play loop Other' }));
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Other');
+
+      release();
+      // The read has landed (the list shows the server's speed) before saying what it did not do.
+      await panel.findByText(/71% \(/);
+      await settle();
+
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Looping Other');
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('100%');
+    });
+  });
+});
+
+describe('SongPage practice sessions', () => {
+  const verse = loopOfSongA('verse', {
+    name: 'Verse',
+    start_bar: 5,
+    end_bar: 8,
+    speed_ratio: 0.8,
+  });
+  const chorus = loopOfSongA('chorus', {
+    name: 'Chorus',
+    start_bar: 9,
+    end_bar: 12,
+    speed_ratio: 0.6,
+  });
+  const sessionsSent = () =>
+    queryResult.mock.calls
+      .map(([call]) => call)
+      .filter((call) => call.table === 'practice_sessions')
+      .map((call) => opArgs(call, 'upsert')?.[0] as Record<string, unknown>);
+
+  beforeEach(() => {
+    // Only the clock: the queries and Testing Library keep their real timers.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-23T18:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Moves the clock; nothing else is on a timer. */
+  const later = (seconds: number) => vi.setSystemTime(Date.now() + seconds * 1000);
+
+  /**
+   * Renders the page and starts the Verse loop from the panel, with the
+   * engine's report of it. After serve(), so a test can first change how
+   * session logs are answered.
+   */
+  async function startVerse() {
+    const user = renderSong(SONG_A);
+    const engine = await loadPlayer();
+    const panel = within(screen.getByTestId('loop-panel'));
+    await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
+    act(() => engine.fire('stateChanged', { playing: true }));
+    /** Play or Pause in the sticky bar, with the engine's report of it. */
+    const press = async (playing: boolean) => {
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing }));
+    };
+    return { user, engine, panel, pause: () => press(false), resume: () => press(true) };
+  }
+
+  async function playVerseFor(seconds: number) {
+    serve({ loops: [verse] });
+    const view = await startVerse();
+    later(seconds);
+    await view.pause();
+    return view;
+  }
+
+  /** Refuses every session log, leaving the other tables as served, until `recover()`. After serve(). */
+  function failSessionLogs() {
+    const answer = queryResult.getMockImplementation()!;
+    let failing = true;
+    queryResult.mockImplementation(async (call) =>
+      call.table === 'practice_sessions' && failing ? fail('offline') : answer(call),
+    );
+    return {
+      recover: () => {
+        failing = false;
+      },
+    };
+  }
+
+  it('logs a minute of loop practice as one session and says so', async () => {
+    await playVerseFor(60);
+
+    expect(await screen.findByTestId('session-logged')).toHaveTextContent(
+      'Practice logged: 1 min of Verse at 80%.',
+    );
+    expect(sessionsSent()).toEqual([
+      expect.objectContaining({
+        loop_id: 'verse',
+        started_at: '2026-11-23T18:00:00.000Z',
+        duration_seconds: 60,
+        speed_ratio: 0.8,
+        repeats: 0,
+      }),
+    ]);
+  });
+
+  it('logs nothing for a short go, and nothing for jam mode', async () => {
+    const { user, pause, resume } = await playVerseFor(20);
+    await user.click(
+      within(screen.getByTestId('active-loop')).getByRole('button', { name: 'Exit loop' }),
+    );
+    await resume();
+    later(300);
+    await pause();
+
+    expect(sessionsSent()).toEqual([]);
+    expect(screen.queryByTestId('session-logged')).not.toBeInTheDocument();
+  });
+
+  it('says when a session could not be saved, and sends the same one again on request', async () => {
+    serve({ loops: [verse] });
+    const sessionLogs = failSessionLogs();
+    const { user, pause } = await startVerse();
+    later(45);
+    await pause();
+
+    const alert = await screen.findByText("Couldn't save your last practice session.");
+    expect(alert.closest('[role="alert"]')).not.toHaveTextContent('offline');
+
+    sessionLogs.recover();
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByTestId('session-logged')).toHaveTextContent(
+      'Practice logged: 45 s of Verse at 80%.',
+    );
+    expect(sessionsSent()).toHaveLength(2);
+    expect(sessionsSent()[1]).toEqual(sessionsSent()[0]);
+  });
+
+  it('logs the session when the page is left mid-practice', async () => {
+    serve({ loops: [verse] });
+    const { user } = await startVerse();
+    later(90);
+
+    await user.click(screen.getByRole('link', { name: 'Library' }));
+
+    expect(await screen.findByText('At library')).toBeInTheDocument();
+    await waitFor(() => expect(sessionsSent()).toHaveLength(1));
+    expect(sessionsSent()[0]).toMatchObject({ loop_id: 'verse', duration_seconds: 90 });
+  });
+
+  it('"Play loop" on another loop logs the first at the speed it was played at, not the next one’s', async () => {
+    serve({ loops: [verse, chorus] });
+    const { user, panel, pause } = await startVerse();
+    later(45);
+
+    await user.click(panel.getByRole('button', { name: 'Play loop Chorus' }));
+
+    await waitFor(() => expect(sessionsSent()).toHaveLength(1));
+    expect(sessionsSent()[0]).toMatchObject({
+      loop_id: 'verse',
+      duration_seconds: 45,
+      speed_ratio: 0.8,
+    });
+    expect(screen.getByTestId('jam-speed')).toHaveTextContent('60%');
+
+    later(31);
+    await pause();
+
+    await waitFor(() => expect(sessionsSent()).toHaveLength(2));
+    expect(sessionsSent()[1]).toMatchObject({
+      loop_id: 'chorus',
+      started_at: '2026-11-23T18:00:45.000Z',
+      duration_seconds: 31,
+      speed_ratio: 0.6,
+    });
+    expect(sessionsSent()[1]!.id).not.toBe(sessionsSent()[0]!.id);
+  });
+
+  it('finishing the loop that is playing does not end its session', async () => {
+    serve({ loops: [verse] });
+    const { user, panel, pause } = await startVerse();
+    later(20);
+
+    await user.click(panel.getByRole('button', { name: 'Mark finished Verse' }));
+    await panel.findByRole('button', { name: 'Reopen Verse' });
+    expect(loops.sent('update')).toEqual([{ status: 'finished' }]);
+    expect(playButton()).toHaveTextContent('Pause');
+    expect(sessionsSent()).toEqual([]);
+
+    later(20);
+    await pause();
+
+    await waitFor(() => expect(sessionsSent()).toHaveLength(1));
+    expect(sessionsSent()[0]).toMatchObject({ loop_id: 'verse', duration_seconds: 40 });
+  });
+
+  it('changing the bars of the loop that is playing does not end its session either', async () => {
+    serve({ loops: [verse] });
+    const { user, panel, pause } = await startVerse();
+    later(20);
+
+    await user.click(panel.getByRole('button', { name: 'Edit Verse' }));
+    const lastBar = panel.getByLabelText('Last bar');
+    await user.clear(lastBar);
+    await user.type(lastBar, '6');
+    await user.click(panel.getByRole('button', { name: 'Save loop' }));
+    await waitFor(() => expect(screen.getByTestId('active-loop')).toHaveTextContent('Bars 5 to 6'));
+    expect(sessionsSent()).toEqual([]);
+
+    later(20);
+    await pause();
+
+    await waitFor(() => expect(sessionsSent()).toHaveLength(1));
+    expect(sessionsSent()[0]).toMatchObject({ loop_id: 'verse', duration_seconds: 40 });
+  });
+
+  it('deleting the loop mid-practice drops its session without a word: its history went with it', async () => {
+    serve({ loops: [verse] });
+    const answer = queryResult.getMockImplementation()!;
+    const sessionAnswers: Promise<FakeResult>[] = [];
+    queryResult.mockImplementation((call) => {
+      if (call.table !== 'practice_sessions') return answer(call);
+      // What the database says of a session for a loop that is gone.
+      const refused = Promise.resolve<FakeResult>({
+        data: null,
+        error: { message: 'violates foreign key constraint', code: '23503' },
+      });
+      sessionAnswers.push(refused);
+      return refused;
+    });
+    const { user, panel } = await startVerse();
+    later(45);
+
+    await user.click(panel.getByRole('button', { name: 'Delete Verse' }));
+    await user.click(panel.getByRole('button', { name: 'Delete loop' }));
+
+    // The session was sent and refused; only then is it worth saying nothing was shown.
+    await waitFor(() => expect(sessionsSent()).toHaveLength(1));
+    expect(sessionsSent()[0]).toMatchObject({ loop_id: 'verse', duration_seconds: 45 });
+    await act(() => Promise.all(sessionAnswers));
+    await settle();
+    expect(screen.queryByText(/Couldn't save your last/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('session-logged')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+    // The whole song plays on.
+    expect(playButton()).toHaveTextContent('Pause');
+  });
+
+  it('counts the sessions it could not save, and Try again sends each of them', async () => {
+    serve({ loops: [verse] });
+    const sessionLogs = failSessionLogs();
+    const { user, pause, resume } = await startVerse();
+    later(40);
+    await pause();
+    await screen.findByText("Couldn't save your last practice session.");
+    await resume();
+    later(50);
+    await pause();
+
+    expect(
+      await screen.findByText("Couldn't save your last 2 practice sessions."),
+    ).toBeInTheDocument();
+
+    sessionLogs.recover();
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByTestId('session-logged')).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't save/)).not.toBeInTheDocument();
+    expect(sessionsSent().map((row) => row.duration_seconds)).toEqual([40, 50, 40, 50]);
+    expect(sessionsSent()[2]!.id).toBe(sessionsSent()[0]!.id);
+    expect(sessionsSent()[3]!.id).toBe(sessionsSent()[1]!.id);
   });
 });

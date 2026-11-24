@@ -12,6 +12,7 @@ import {
   createTestUser,
   deleteTestUser,
   insertLoop,
+  insertSession,
   insertSong,
   PG,
   sessionRow,
@@ -220,8 +221,8 @@ describe('loops edges', () => {
 
   it('finish and reopen keep the session history', async () => {
     const id = await insertLoop(user, songId);
-    await user.client.from('practice_sessions').insert(sessionRow(user.id, id));
-    await user.client.from('practice_sessions').insert(sessionRow(user.id, id));
+    await insertSession(user, sessionRow(user.id, id));
+    await insertSession(user, sessionRow(user.id, id));
     for (const status of ['finished', 'active'] as const) {
       const { error } = await user.client.from('loops').update({ status }).eq('id', id);
       expect(error).toBeNull();
@@ -257,7 +258,7 @@ describe('practice_sessions edges', () => {
   it("can't be deleted directly", async () => {
     const loopId = await insertLoop(user, songId);
     const row = sessionRow(user.id, loopId);
-    await user.client.from('practice_sessions').insert(row);
+    await insertSession(user, row);
     const { error } = await user.client.from('practice_sessions').delete().eq('id', row.id);
     expect(error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
     const { data } = await user.client.from('practice_sessions').select('id').eq('id', row.id);
@@ -267,7 +268,7 @@ describe('practice_sessions edges', () => {
   it('a retry with the same id but different values keeps the first write', async () => {
     const loopId = await insertLoop(user, songId);
     const row = sessionRow(user.id, loopId, { repeats: 3 });
-    await user.client.from('practice_sessions').insert(row);
+    await insertSession(user, row);
     const retry = await user.client
       .from('practice_sessions')
       .upsert({ ...row, repeats: 7 }, { onConflict: 'id', ignoreDuplicates: true });
@@ -337,8 +338,8 @@ describe('cascades', () => {
   it('deleting a loop removes only its sessions', async () => {
     const keep = await insertLoop(user, songId);
     const drop = await insertLoop(user, songId);
-    await user.client.from('practice_sessions').insert(sessionRow(user.id, keep));
-    await user.client.from('practice_sessions').insert(sessionRow(user.id, drop));
+    await insertSession(user, sessionRow(user.id, keep));
+    await insertSession(user, sessionRow(user.id, drop));
 
     const { error } = await user.client.from('loops').delete().eq('id', drop);
     expect(error).toBeNull();
@@ -354,7 +355,8 @@ describe('cascades', () => {
     const other = await insertSong(user);
     await insertLoop(user, doomed);
     const otherLoop = await insertLoop(user, other);
-    await user.client.from('songs').delete().eq('id', doomed);
+    const { error } = await user.client.from('songs').delete().eq('id', doomed);
+    expect(error).toBeNull();
     expect((await user.client.from('loops').select('id').eq('song_id', doomed)).data).toEqual([]);
     expect((await user.client.from('loops').select('id').eq('id', otherLoop)).data).toHaveLength(1);
   });

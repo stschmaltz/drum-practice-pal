@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
+import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { buttonClass, primaryButtonClass } from '@/components/styles';
 import { SignOutButton } from '@/features/auth/SignOutButton';
@@ -26,12 +27,9 @@ export function SettingsPage() {
       ) : // Only a failed first load blocks the form. A failed background refetch
       // keeps the cached row, and unmounting the form would drop unsaved edits.
       settings.isLoadingError ? (
-        <div role="alert" className="flex flex-col items-start gap-3">
-          <p className="text-red-300">Couldn't load your settings: {settings.error.message}</p>
-          <button type="button" className={buttonClass} onClick={() => void settings.refetch()}>
-            Try again
-          </button>
-        </div>
+        <LoadErrorAlert onRetry={() => void settings.refetch()}>
+          Couldn't load your settings: {settings.error.message}
+        </LoadErrorAlert>
       ) : (
         <SettingsForm saved={settings.data} />
       )}

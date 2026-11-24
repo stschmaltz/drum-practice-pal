@@ -17,6 +17,7 @@ export function loopRow(id: string, overrides: Partial<Loop> = {}): Loop {
     speed_ratio: 1,
     target_ratio: null,
     status: 'active',
+    finished_at: null,
     last_practiced_at: null,
     created_at: '2026-11-21T12:00:00Z',
     ...overrides,

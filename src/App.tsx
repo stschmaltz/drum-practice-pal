@@ -4,9 +4,10 @@ import { FullPageMessage } from '@/components/FullPageMessage';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { RequireAuth } from '@/features/auth/RequireAuth';
 import { LibraryPage } from '@/features/library/LibraryPage';
+import { OnTheGoPage } from '@/features/practice/OnTheGoPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { AppShell } from '@/features/shell/AppShell';
-import { NotFoundPage, OnTheGoPage } from '@/features/shell/PlaceholderPages';
+import { NotFoundPage } from '@/features/shell/NotFoundPage';
 import { supabaseConfigError } from '@/lib/supabase';
 
 // Lazy so alphaTab stays out of the main bundle until a player screen opens.

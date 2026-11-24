@@ -105,3 +105,11 @@ export async function commit(field: Locator, text: string): Promise<void> {
   await field.fill(text);
   await field.press('Enter');
 }
+
+/** Sets the playing loop's speed to a whole percent and saves it as the loop's speed, opening the panel first. */
+export async function saveLoopSpeed(page: Page, percent: number): Promise<void> {
+  await openLoopPanel(page);
+  await commit(loopPercentField(page), String(percent));
+  await saveSpeedButton(page).click();
+  await expect(saveSpeedButton(page)).toBeDisabled();
+}

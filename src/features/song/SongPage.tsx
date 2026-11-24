@@ -26,9 +26,12 @@ import {
 import { ratioToPercent } from '@/features/player/speed';
 import { bpmAtSpeed } from '@/features/player/tempo';
 import { usePlayer } from '@/features/player/usePlayer';
+import { durationLabel } from '@/features/practice/sessions';
+import { usePracticeTracker, type PracticeTracker } from '@/features/practice/usePracticeTracker';
 import { useSettings } from '@/features/settings/useSettings';
 import { isUuid } from '@/lib/randomUuid';
 import { useJamMode } from './useJamMode';
+import { useRequestedLoop } from './useRequestedLoop';
 
 /**
  * /songs/:id. Lazy-loaded from App.tsx with the player. Opens in jam mode
@@ -36,7 +39,9 @@ import { useJamMode } from './useJamMode';
  * and the speed and BPM at the current bar, with the count-in (Unit 07)
  * counted over the score. Loops (Unit 08) sit beside it: a saved bar range
  * plays on repeat at its saved speed, and while the loop form is open a tap
- * on the score picks a bar instead of seeking.
+ * on the score picks a bar instead of seeking. Time spent playing a loop is
+ * logged as practice sessions (Unit 09), and `?loop=<id>` opens the page on
+ * that loop, which is how the home page's lists link here.
  */
 export function SongPage() {
   const { id = '' } = useParams();
@@ -120,6 +125,13 @@ function SongPlayer({
   const stickyBarRef = useRef<HTMLDivElement>(null);
   const loops = useLoops(songId);
   const practice = useLoopPractice(player, snapshot, loops.data);
+  const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
+  useRequestedLoop(
+    player !== null && snapshot.barCount !== null,
+    loops,
+    practice.openLoop,
+    practice.activeLoop !== null,
+  );
   const loopPanel = useLoopPanelOpen();
   const { setOpen: setLoopPanelOpen } = loopPanel;
   const pickingBars = practice.editor !== null;
@@ -163,6 +175,7 @@ function SongPlayer({
           {practice.activeLoop && (
             <ActiveLoopLine loop={practice.activeLoop} onExit={practice.exitLoop} />
           )}
+          <SessionNotice tracker={tracker} loops={loops.data} />
           <ScoreBox
             scrollRef={scrollRef}
             scoreRef={scoreRef}
@@ -263,6 +276,43 @@ function ActiveLoopLine({ loop, onExit }: { loop: Loop; onExit: () => void }) {
         Exit loop
       </button>
     </div>
+  );
+}
+
+/**
+ * What became of the last practice session: logged, or not saved with a way
+ * to send it again. Above the score, because on a phone the loop panel is a
+ * closed sheet while practising.
+ */
+function SessionNotice({
+  tracker,
+  loops,
+}: {
+  tracker: PracticeTracker;
+  loops: readonly Loop[] | undefined;
+}) {
+  const { lastLogged, unsaved, retryUnsaved } = tracker;
+  if (unsaved.length > 0) {
+    return (
+      <div role="alert" className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <p className="text-sm text-red-300">
+          {unsaved.length === 1
+            ? "Couldn't save your last practice session."
+            : `Couldn't save your last ${unsaved.length} practice sessions.`}
+        </p>
+        <button type="button" className={buttonClass} onClick={retryUnsaved}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (!lastLogged) return null;
+  const loopName = loops?.find((loop) => loop.id === lastLogged.loopId)?.name;
+  return (
+    <p role="status" className="text-sm text-neutral-400" data-testid="session-logged">
+      Practice logged: {durationLabel(lastLogged.durationSeconds)}
+      {loopName !== undefined && <> of {loopName}</>} at {ratioToPercent(lastLogged.speedRatio)}%.
+    </p>
   );
 }
 

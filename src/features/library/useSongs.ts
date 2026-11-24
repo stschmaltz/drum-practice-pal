@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { loopKeys } from '@/features/loops/loopKeys';
+import type { PracticeLoop } from '@/features/loops/practiceList';
+import { sessionKeys } from '@/features/practice/sessionKeys';
 import { useSignedInUser } from '@/lib/auth';
 import {
   deleteSong,
@@ -138,6 +140,14 @@ export function useUpdateSong() {
       queryClient.setQueryData<Song | null>(songKeys.detail(user.id, saved.id), (song) =>
         song ? { ...song, ...saved } : song,
       );
+      // The home page names each loop's song.
+      queryClient.setQueryData<PracticeLoop[]>(loopKeys.practice(user.id), (loops) =>
+        loops?.map((loop) =>
+          loop.song_id === saved.id
+            ? { ...loop, song: { title: saved.title, artist: saved.artist } }
+            : loop,
+        ),
+      );
     },
     onSettled: () => invalidateWhenIdle(queryClient, user.id),
   });
@@ -165,6 +175,12 @@ export function useDeleteSong() {
       queryClient.removeQueries({ queryKey: songFileKeys.forSong(user.id, songId) });
       // Its loops went with it (cascade); a cached list would outlive them.
       queryClient.removeQueries({ queryKey: loopKeys.forSong(user.id, songId) });
+      queryClient.setQueryData<PracticeLoop[]>(loopKeys.practice(user.id), (loops) =>
+        loops?.filter((loop) => loop.song_id !== songId),
+      );
+      // And their practice history with them. Every loop's, rather than finding
+      // which were this song's: a history is cheap to fetch again.
+      queryClient.removeQueries({ queryKey: sessionKeys.forUser(user.id) });
     },
     onSettled: () => invalidateWhenIdle(queryClient, user.id),
   });
