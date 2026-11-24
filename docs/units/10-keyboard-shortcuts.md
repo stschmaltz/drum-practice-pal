@@ -271,3 +271,32 @@ None.
 **Human check items for Shane** (unchanged): a real page-turner pedal on a laptop and an iPad; Safari, where Space on a focused button (a locked status button included) must play/pause and not press it; VoiceOver reading a locked status button as dimmed/unavailable.
 
 **Totals.** `npm run check`: 89 files, 3501 tests passed. `npm run e2e`: 334 passed, 14 skipped (the existing skips), 0 failed, built afresh (`dist` deleted, nothing on 4173).
+
+## Readability
+
+### Summary
+
+No behaviour change. The unit's code was already in the right places (pure rules in `shortcuts.ts`, gates in `controlGates.ts`, focus finders in `loopFocus.ts`), so the work went into splitting one function, naming, one dead export, and the tests, which had grown stage by stage.
+
+### Changes
+
+- `src/features/song/useSongShortcuts.ts`: the bar step for a song with no loops is its own function, `stepBar`, out of `stepLoopOrBar`. `stepLoopOrBar` takes the snapshot `runShortcut` already read at the press, rather than reading it a second time (the same moment, nothing runs between). The unused `SongShortcuts` type export is gone.
+- `src/features/player/PlayerControls.tsx`: `noPlayer` / `noDrumToggles` are `optionsDisabled` / `drumTogglesDisabled`, after the gates they negate.
+- `src/features/loops/loopForm.ts`: the column picks `sortLoops`, `loopsByStatus` and `loopsInPanelOrder` constrain on are named once (`SortableLoop`, `ListedLoop`) instead of written out three times.
+- `src/features/practice/OnTheGoPage.tsx`: a comment on why the focus finder returns null while the loop is still listed.
+- `src/test/locked.ts` (new): `expectLocked` / `expectUnlocked` for a control locked with `aria-disabled`. The 21 assertions in `LoopPanel.test.tsx`, `OnTheGoPage.test.tsx` and `SongPage.test.tsx` use them, which also says in one place why `toBeDisabled` isn't used.
+- `src/features/song/useSongShortcuts.test.tsx`: the "Unit 10 Test: interleavings, gates and round trips" describe is gone; each of its cases is in the describe of its subject (Space, speed, drums, switching loops, the overlay), per AGENTS.md's rule for a later stage's cases. The two harnesses written out by hand (loops still being read, StrictMode) are `renderShortcuts` options (`loopsPending`, `strict`). The view has `keyDown` / `keyUp` beside `key` and `helpOpen()`, replacing a local `keyUp` and the bare `act(() => fireEvent.keyDown(...))` calls; `focused(tag)` replaces three hand-built focused elements. The two-presses-in-one-`act` speed test and the StrictMode test keep their single `act`, since that is what they test.
+- `src/features/song/SongPage.test.tsx`: "keyboard shortcuts" `openSong(loops, { song })` covers the no-drum-track test too; its view has `playLoop(name)` (click and alphaTab's "playing"), and `toggle` / `pressed(name)` read the controls bar's toggles, replacing eight multi-line `aria-pressed` assertions.
+- Test names lose their "(Unit 10)" / "(Unit 10 Test)" tags; no earlier unit's tests carry one.
+- `tests/e2e/playerPage.ts`: `metronomeButton` joins the other toggles' locators. `tests/e2e/shortcuts.spec.ts`: `pressMAndSeeMetronomeFlip(page)` replaces the three-line read, press and compare written out three times.
+- `AGENTS.md`: the Unit 10 tests bullet names the new view helpers, `expectLocked` / `expectUnlocked`, and `metronomeButton`.
+
+### Left as is
+
+- `findTabButton` stays in `OnTheGoPage.tsx`: only the home page has tabs to focus, and `loopFocus.ts` is about loops' controls.
+- The `speed` locator (`jam-speed`) is defined in four specs; it predates this unit and moving it is outside its scope.
+- Specs press "Exit loop" two ways (`activeLoopLine(page)…` in older specs, `page.getByRole` here); both find the one button.
+
+### Totals
+
+`npm run check`: 89 files, 3501 tests passed, before and after. `npm run e2e`: 334 passed, 14 skipped (the existing skips), 0 failed, before and after, each built afresh (`dist` deleted, nothing on 4173).

@@ -60,8 +60,8 @@ export function PlayPauseButton({ player, snapshot }: PlayerViewProps) {
  */
 export function PlayerControls({ player, snapshot, showPlayButton = true }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist.
-  const noPlayer = !canChangeOptions(player);
-  const noDrumToggles = !canUseDrumToggles(player, snapshot);
+  const optionsDisabled = !canChangeOptions(player);
+  const drumTogglesDisabled = !canUseDrumToggles(player, snapshot);
   const noDrumsReason = snapshot.hasDrumTrack ? undefined : 'This song has no drum track';
 
   return (
@@ -83,21 +83,21 @@ export function PlayerControls({ player, snapshot, showPlayButton = true }: Play
 
       <SpeedSlider
         speedRatio={snapshot.speedRatio}
-        disabled={noPlayer}
+        disabled={optionsDisabled}
         onChange={(ratio) => player?.setSpeed(ratio)}
       />
 
       <div className="flex flex-wrap items-center gap-2">
         <ToggleButton
           pressed={snapshot.metronomeOn}
-          disabled={noPlayer}
+          disabled={optionsDisabled}
           onChange={(on) => player?.setMetronomeOn(on)}
         >
           Metronome
         </ToggleButton>
         <VolumeSlider
           volume={snapshot.metronomeVolume}
-          disabled={noPlayer}
+          disabled={optionsDisabled}
           onChange={(volume) => player?.setMetronomeVolume(volume)}
         />
       </div>
@@ -105,7 +105,7 @@ export function PlayerControls({ player, snapshot, showPlayButton = true }: Play
       <CountInControls
         bars={snapshot.countInBars}
         mode={snapshot.countInMode}
-        disabled={noPlayer}
+        disabled={optionsDisabled}
         onBarsChange={(bars) => player?.setCountInBars(bars)}
         onModeChange={(mode) => player?.setCountInMode(mode)}
       />
@@ -114,7 +114,7 @@ export function PlayerControls({ player, snapshot, showPlayButton = true }: Play
       <div className="flex gap-2">
         <ToggleButton
           pressed={snapshot.drumsMuted}
-          disabled={noDrumToggles}
+          disabled={drumTogglesDisabled}
           onChange={(muted) => player?.setDrumsMuted(muted)}
           title={noDrumsReason}
         >
@@ -122,7 +122,7 @@ export function PlayerControls({ player, snapshot, showPlayButton = true }: Play
         </ToggleButton>
         <ToggleButton
           pressed={snapshot.drumsOnly}
-          disabled={noDrumToggles}
+          disabled={drumTogglesDisabled}
           onChange={(drumsOnly) => player?.setDrumsOnly(drumsOnly)}
           title={noDrumsReason}
         >

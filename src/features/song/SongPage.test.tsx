@@ -23,6 +23,7 @@ import {
   TEMPO_CHANGE_BAR_TEMPOS,
   TICKS_PER_BAR,
 } from '@/test/fakePlayerEngine';
+import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
 import { SongPage } from './SongPage';
@@ -1556,7 +1557,7 @@ describe('SongPage practice sessions', () => {
     ]);
   });
 
-  it('a pedal switching loops while playing logs the loop it left, at that loop’s speed (Unit 10)', async () => {
+  it('a pedal switching loops while playing logs the loop it left, at that loop’s speed', async () => {
     serve({ loops: [verse, chorus] });
     const { user, engine } = await startVerse();
     later(40);
@@ -1749,13 +1750,25 @@ describe('SongPage keyboard shortcuts', () => {
   const verse = loopOfSongA('verse', { name: 'Verse', start_bar: 5, end_bar: 8, speed_ratio: 0.8 });
   const late = loopOfSongA('late', { name: 'Late', start_bar: 9, end_bar: 12, speed_ratio: 0.5 });
 
-  async function openSong(savedLoops: Loop[] = [verse, late]) {
-    serve({ loops: savedLoops });
+  async function openSong(savedLoops: Loop[] = [verse, late], { song = songRow(SONG_A) } = {}) {
+    serve({ songs: { [SONG_A]: song, [SONG_B]: songRow(SONG_B) }, loops: savedLoops });
     const user = renderSong(SONG_A);
     const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
     await panel().findAllByRole('button', { name: /^Play loop / });
-    return { user, engine };
+    return {
+      user,
+      engine,
+      /** Presses "Play loop <name>" with the mouse, and alphaTab reports playing. */
+      playLoop: async (name: string) => {
+        await user.click(panel().getByRole('button', { name: `Play loop ${name}` }));
+        act(() => engine.fire('stateChanged', { playing: true }));
+      },
+    };
   }
+
+  /** A toggle in the controls bar, and whether it shows pressed. */
+  const toggle = (name: string) => screen.getByRole('button', { name });
+  const pressed = (name: string) => toggle(name).getAttribute('aria-pressed');
 
   it('Shortcuts and ? open the list of keys; Escape closes it and focus goes back', async () => {
     const { user } = await openSong();
@@ -1796,9 +1809,8 @@ describe('SongPage keyboard shortcuts', () => {
   });
 
   it('Space after a mouse press of Play loop pauses, rather than pressing Restart loop', async () => {
-    const { user, engine } = await openSong();
-    await user.click(panel().getByRole('button', { name: 'Play loop Verse' }));
-    act(() => engine.fire('stateChanged', { playing: true }));
+    const { user, engine, playLoop } = await openSong();
+    await playLoop('Verse');
     const restart = panel().getByRole('button', { name: 'Restart loop Verse' });
     expect(restart).toHaveFocus();
     const seeks = engine.seek.mock.calls.length;
@@ -1812,9 +1824,8 @@ describe('SongPage keyboard shortcuts', () => {
 
   it('Space on a focused Mark finished in the prompt pauses and finishes nothing', async () => {
     const atTarget = loopOfSongA('late', { ...late, speed_ratio: 1, target_ratio: 1 });
-    const { user, engine } = await openSong([atTarget]);
-    await user.click(panel().getByRole('button', { name: 'Play loop Late' }));
-    act(() => engine.fire('stateChanged', { playing: true }));
+    const { user, engine, playLoop } = await openSong([atTarget]);
+    await playLoop('Late');
     const prompt = within(panel().getByRole('group', { name: 'Mark finished?' }));
     prompt.getByRole('button', { name: 'Mark finished' }).focus();
 
@@ -1827,15 +1838,14 @@ describe('SongPage keyboard shortcuts', () => {
   });
 
   it('Space on a loop’s Reopen, focused while its write is on its way, pauses and sends nothing', async () => {
-    const { user, engine } = await openSong();
-    await user.click(panel().getByRole('button', { name: 'Play loop Verse' }));
-    act(() => engine.fire('stateChanged', { playing: true }));
+    const { user, engine, playLoop } = await openSong();
+    await playLoop('Verse');
     const release = loops.holdNext('update');
     panel().getByRole('button', { name: 'Mark finished Late' }).focus();
     await user.keyboard('{Enter}');
     const reopen = await panel().findByRole('button', { name: 'Reopen Late' });
     await waitFor(() => expect(reopen).toHaveFocus());
-    expect(reopen).toHaveAttribute('aria-disabled', 'true');
+    expectLocked(reopen);
 
     await user.keyboard(' ');
     await user.keyboard('{Enter}');
@@ -1844,7 +1854,7 @@ describe('SongPage keyboard shortcuts', () => {
     expect(engine.pause).toHaveBeenCalledTimes(1);
     expect(loops.sent('update')).toEqual([{ status: 'finished' }]);
     release();
-    await waitFor(() => expect(reopen).not.toHaveAttribute('aria-disabled'));
+    await waitFor(() => expectUnlocked(reopen));
     expect(reopen).toHaveFocus();
     expect(loops.sent('update')).toEqual([{ status: 'finished' }]);
   });
@@ -1857,60 +1867,41 @@ describe('SongPage keyboard shortcuts', () => {
 
     expect(panel().getByLabelText('Name')).toHaveValue('Dms c? ');
     expect(engine.play).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Mute drums' })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
-    expect(screen.getByRole('button', { name: 'Drums only' })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
+    expect(pressed('Mute drums')).toBe('false');
+    expect(pressed('Drums only')).toBe('false');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('M, D, S and C show on the controls they stand for', async () => {
     const { user } = await openSong();
     document.body.focus();
-    const metronome = screen.getByRole('button', { name: 'Metronome' });
-    const metronomeWas = metronome.getAttribute('aria-pressed');
+    const metronomeWas = pressed('Metronome');
 
     await user.keyboard('mdc');
 
-    expect(metronome.getAttribute('aria-pressed')).not.toBe(metronomeWas);
-    expect(screen.getByRole('button', { name: 'Mute drums' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(pressed('Metronome')).not.toBe(metronomeWas);
+    expect(pressed('Mute drums')).toBe('true');
     expect(screen.getByLabelText('Count-in')).toHaveValue('1');
     await user.keyboard('s');
-    expect(screen.getByRole('button', { name: 'Drums only' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-    expect(screen.getByRole('button', { name: 'Mute drums' })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
+    expect(pressed('Drums only')).toBe('true');
+    expect(pressed('Mute drums')).toBe('false');
   });
 
-  it('in a song with no drum track, D and S leave the disabled toggles off (Unit 10 Test)', async () => {
-    serve({ songs: { [SONG_A]: songRow(SONG_A, { drum_track_index: null }) }, loops: [verse] });
-    const user = renderSong(SONG_A);
-    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+  it('in a song with no drum track, D and S leave the disabled toggles off', async () => {
+    const { user } = await openSong([verse], {
+      song: songRow(SONG_A, { drum_track_index: null }),
+    });
     document.body.focus();
-    const muteDrums = screen.getByRole('button', { name: 'Mute drums' });
-    const drumsOnly = screen.getByRole('button', { name: 'Drums only' });
-    expect(muteDrums).toBeDisabled();
-    expect(drumsOnly).toBeDisabled();
+    expect(toggle('Mute drums')).toBeDisabled();
+    expect(toggle('Drums only')).toBeDisabled();
 
     await user.keyboard('ds');
     // The keys did arrive: M, pressed the same way, works.
-    const metronome = screen.getByRole('button', { name: 'Metronome' });
-    const metronomeWas = metronome.getAttribute('aria-pressed');
+    const metronomeWas = pressed('Metronome');
     await user.keyboard('m');
 
-    expect(metronome.getAttribute('aria-pressed')).not.toBe(metronomeWas);
-    expect(muteDrums).toHaveAttribute('aria-pressed', 'false');
-    expect(drumsOnly).toHaveAttribute('aria-pressed', 'false');
+    expect(pressed('Metronome')).not.toBe(metronomeWas);
+    expect(pressed('Mute drums')).toBe('false');
+    expect(pressed('Drums only')).toBe('false');
   });
 });

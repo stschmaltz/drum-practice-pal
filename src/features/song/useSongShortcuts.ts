@@ -2,7 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { loopsInPanelOrder, type Loop } from '@/features/loops/loopForm';
 import type { LoopPractice } from '@/features/loops/useLoopPractice';
 import { canChangeOptions, canPlay, canUseDrumToggles } from '@/features/player/controlGates';
-import { isRunning, type PlayerService } from '@/features/player/PlayerService';
+import {
+  isRunning,
+  type PlayerService,
+  type PlayerSnapshot,
+} from '@/features/player/PlayerService';
 import { nudgeSpeedRatio, SPEED_STEP_PERCENT } from '@/features/player/speed';
 import {
   focusKindOf,
@@ -81,8 +85,6 @@ export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs
   return { helpOpen, openHelp, closeHelp };
 }
 
-export type SongShortcuts = ReturnType<typeof useSongShortcuts>;
-
 function runShortcut(
   action: Exclude<ShortcutAction, 'help'>,
   { player, practice, loops }: SongShortcutInputs,
@@ -105,7 +107,12 @@ function runShortcut(
       return;
     case 'previousLoop':
     case 'nextLoop':
-      stepLoopOrBar(player, practice, loops, action === 'nextLoop' ? 'next' : 'previous');
+      stepLoopOrBar(
+        player,
+        snapshot,
+        { practice, loops },
+        action === 'nextLoop' ? 'next' : 'previous',
+      );
       return;
     case 'metronome':
       if (canChangeOptions(player)) player.setMetronomeOn(!snapshot.metronomeOn);
@@ -133,27 +140,30 @@ function runShortcut(
  */
 function stepLoopOrBar(
   player: PlayerService,
-  practice: LoopPractice,
-  loops: readonly Loop[] | undefined,
+  snapshot: PlayerSnapshot,
+  { practice, loops }: Pick<SongShortcutInputs, 'practice' | 'loops'>,
   direction: Direction,
 ): void {
-  const snapshot = player.getSnapshot();
   if (!canPlay(player, snapshot) || practice.editor !== null) return;
   // Not read yet (or the read failed): whether these keys mean loops or bars isn't known.
   if (!loops) return;
 
   const order = loopsInPanelOrder(loops);
   if (order.length === 0) {
-    if (snapshot.barCount === null) return;
-    const bar = steppedBar(snapshot.barNumber ?? 1, snapshot.barCount, direction);
-    if (bar === null || !player.seekToBar(bar)) return;
-    // A key isn't a tap on the score: the bar may be off screen (a no-op while playing).
-    player.showBar(bar);
+    stepBar(player, snapshot, direction);
     return;
   }
-
   const loop = neighbourLoop(order, practice.activeLoop?.id ?? null, direction);
   if (!loop) return;
   if (isRunning(snapshot.status)) practice.playLoop(loop);
   else practice.openLoop(loop);
+}
+
+/** A bar back or on, in a song with no loops. */
+function stepBar(player: PlayerService, snapshot: PlayerSnapshot, direction: Direction): void {
+  if (snapshot.barCount === null) return;
+  const bar = steppedBar(snapshot.barNumber ?? 1, snapshot.barCount, direction);
+  if (bar === null || !player.seekToBar(bar)) return;
+  // A key isn't a tap on the score: the bar may be off screen (a no-op while playing).
+  player.showBar(bar);
 }

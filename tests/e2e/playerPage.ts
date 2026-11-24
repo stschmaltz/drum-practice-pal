@@ -29,6 +29,8 @@ export const muteDrumsButton = (page: Page) =>
   controls(page).getByRole('button', { name: 'Mute drums' });
 export const drumsOnlyButton = (page: Page) =>
   controls(page).getByRole('button', { name: 'Drums only' });
+export const metronomeButton = (page: Page) =>
+  controls(page).getByRole('button', { name: 'Metronome' });
 export const speedSlider = (page: Page) => controls(page).getByRole('slider', { name: 'Speed' });
 export const status = (page: Page) => page.getByTestId('player-status');
 export const viewport = (page: Page) => page.getByTestId('score-viewport');

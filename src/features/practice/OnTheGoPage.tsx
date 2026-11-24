@@ -50,6 +50,7 @@ export function OnTheGoPage() {
     );
     const wentTo: PracticeTab = status === 'finished' ? 'finished' : 'active';
     focusWhenReady(() => {
+      // Still listed: the optimistic move hasn't rendered yet.
       if (findStatusButton(loop.id)) return null;
       return (nextId === null ? null : findStatusButton(nextId)) ?? findTabButton(wentTo);
     });

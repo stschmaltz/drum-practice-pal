@@ -5,6 +5,7 @@ import type { Loop } from '@/features/loops/loopForm';
 import { loopKeys } from '@/features/loops/loopKeys';
 import { PRACTICE_LOOP_SELECT, type PracticeLoop } from '@/features/loops/practiceList';
 import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
+import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow } from '@/test/loopTable';
 import { renderRoutes, RouteMarker, settle } from '@/test/render';
 import { OnTheGoPage } from './OnTheGoPage';
@@ -243,7 +244,7 @@ describe('finishing and reopening from the home page', () => {
     await waitFor(() => expect(tab(/^Finished/)).toHaveTextContent('Finished (1)'));
     await user.click(tab(/^Finished/));
     const reopen = screen.getByRole('button', { name: 'Reopen Chorus fill' });
-    expect(reopen).toHaveAttribute('aria-disabled', 'true');
+    expectLocked(reopen);
     await user.click(reopen);
     reopen.focus();
     await user.keyboard('{Enter}');
@@ -252,11 +253,7 @@ describe('finishing and reopening from the home page', () => {
     expect(table.writes()).toEqual([{ status: 'finished' }]);
 
     release();
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Reopen Chorus fill' })).not.toHaveAttribute(
-        'aria-disabled',
-      ),
-    );
+    await waitFor(() => expectUnlocked(screen.getByRole('button', { name: 'Reopen Chorus fill' })));
   });
 
   it('a refused change puts the loop back and says so, though its button left the tab meanwhile', async () => {
@@ -396,7 +393,7 @@ describe('the tab in the address', () => {
   });
 });
 
-describe('focus after a loop leaves the tab (Unit 10)', () => {
+describe('focus after a loop leaves the tab', () => {
   it('Mark finished hands focus to the next loop’s button', async () => {
     serve([fill, intro, outro]);
     const user = renderHome();

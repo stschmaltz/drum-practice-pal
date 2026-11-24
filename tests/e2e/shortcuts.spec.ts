@@ -16,6 +16,7 @@ import {
   countInSelect,
   drumsOnlyButton,
   expectedLayout,
+  metronomeButton,
   muteDrumsButton,
   openFixture,
   playButton,
@@ -30,14 +31,19 @@ import { loopsOf } from './practicePage';
 // arrow keys), which is what these press.
 
 const speed = (page: Page) => page.getByTestId('jam-speed');
-const metronomeButton = (page: Page) =>
-  page.getByRole('region', { name: 'Player controls' }).getByRole('button', { name: 'Metronome' });
 
 /** Takes focus off whatever was last clicked, as a drummer's hands leave the screen for the kit. */
 const focusNothing = (page: Page) =>
   page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
+
+/** Presses M and waits for the Metronome toggle to flip, whichever way it started. */
+async function pressMAndSeeMetronomeFlip(page: Page): Promise<void> {
+  const was = await metronomeButton(page).getAttribute('aria-pressed');
+  await page.keyboard.press('m');
+  await expect(metronomeButton(page)).not.toHaveAttribute('aria-pressed', was ?? '');
+}
 
 test('Space plays and pauses; the arrows, M, D, S and C work the controls', async ({
   user,
@@ -57,9 +63,7 @@ test('Space plays and pauses; the arrows, M, D, S and C work the controls', asyn
   await page.keyboard.press('ArrowDown');
   await expect(speed(page)).toHaveText('105%');
 
-  const metronomeWas = await metronomeButton(page).getAttribute('aria-pressed');
-  await page.keyboard.press('m');
-  await expect(metronomeButton(page)).not.toHaveAttribute('aria-pressed', metronomeWas ?? '');
+  await pressMAndSeeMetronomeFlip(page);
 
   await page.keyboard.press('d');
   await expect(muteDrumsButton(page)).toHaveAttribute('aria-pressed', 'true');
@@ -198,9 +202,7 @@ test('with a loop playing, the speed keys, M, D, S and C work it and playback ne
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await expect(speed(page)).toHaveText('90%');
-  const metronomeWas = await metronomeButton(page).getAttribute('aria-pressed');
-  await page.keyboard.press('m');
-  await expect(metronomeButton(page)).not.toHaveAttribute('aria-pressed', metronomeWas ?? '');
+  await pressMAndSeeMetronomeFlip(page);
   await page.keyboard.press('s');
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('d');
@@ -254,9 +256,7 @@ test('while the loop form is open, the loop keys do nothing and the others still
   await page.keyboard.press('PageDown');
   await page.keyboard.press('ArrowRight');
   // The keys arrived: M, pressed the same way, works.
-  const metronomeWas = await metronomeButton(page).getAttribute('aria-pressed');
-  await page.keyboard.press('m');
-  await expect(metronomeButton(page)).not.toHaveAttribute('aria-pressed', metronomeWas ?? '');
+  await pressMAndSeeMetronomeFlip(page);
 
   await expect(activeLoopLine(page)).toHaveCount(0);
   await expect(status(page)).toHaveText(barBefore ?? '');
