@@ -183,6 +183,7 @@ export function PlayerControls({
         ) : (
           <SpeedSlider
             speedRatio={snapshot.speedRatio}
+            folded={folded}
             disabled={optionsDisabled}
             onChange={(ratio) => player?.setSpeed(ratio)}
           />
@@ -255,14 +256,15 @@ function FoldToggle({
   return (
     <button
       type="button"
-      className={`${ghostButtonClass} shrink-0 px-3 text-sm ${folded ? '' : 'self-end lg:ml-auto lg:self-auto'}`}
+      className={`${ghostButtonClass} min-w-touch shrink-0 px-3 text-sm ${folded ? '' : 'self-end lg:ml-auto lg:self-auto'}`}
       aria-expanded={!folded}
       data-fold-toggle=""
       onClick={() => onFoldedChange(!folded)}
     >
       <Icon name={folded ? 'chevronDown' : 'chevronUp'} className="size-4" />
-      {/* "Controls" on a phone, where the strip has little room; the name keeps the verb. */}
-      <span className="max-sm:capitalize">
+      {/* "Controls" on a phone, where the strip has little room, and the chevron alone below
+          360 px, where the word ran into the speed's readout; the name keeps the verb. */}
+      <span className={`max-sm:capitalize ${folded ? 'max-[359px]:sr-only' : ''}`}>
         <span className="max-sm:sr-only">{folded ? 'Show ' : 'Hide '}</span>controls
       </span>
     </button>
@@ -294,16 +296,20 @@ function LoopSpeedButton({
 
 function SpeedSlider({
   speedRatio,
+  folded,
   disabled,
   onChange,
 }: {
   speedRatio: number;
+  /** In the folded strip below 360 px the word "Speed" is left to screen readers, for room. */
+  folded: boolean;
   disabled: boolean;
   onChange: (ratio: number) => void;
 }) {
   return (
     <PercentSlider
       label="Speed"
+      labelWordsClassName={folded ? 'max-[359px]:sr-only' : undefined}
       className="flex-[3_1_12rem]"
       sliderClassName="min-w-20"
       value={ratioToPercent(speedRatio)}
@@ -409,6 +415,7 @@ function PercentSlider({
   label,
   icon,
   compact = false,
+  labelWordsClassName,
   className,
   sliderClassName,
   value,
@@ -423,6 +430,8 @@ function PercentSlider({
   icon?: IconName;
   /** The label's words and the readout are left to screen readers below 768 px (`aria-valuetext` says the value). */
   compact?: boolean;
+  /** Where else the label's words are left to screen readers. */
+  labelWordsClassName?: string;
   /** The slider's share of its row. */
   className: string;
   /** The narrowest the slider itself gets before the row wraps. */
@@ -439,7 +448,7 @@ function PercentSlider({
     <div className={`flex min-h-touch items-center gap-2 text-sm ${className}`}>
       <label htmlFor={id} className={controlLabelClass}>
         {icon && <LabelIcon name={icon} />}
-        <span className={compact ? 'max-md:sr-only' : undefined}>{label}</span>
+        <span className={compact ? 'max-md:sr-only' : labelWordsClassName}>{label}</span>
       </label>
       <input
         id={id}
