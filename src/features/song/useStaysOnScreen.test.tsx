@@ -11,7 +11,9 @@ import { useStaysOnScreen } from './useStaysOnScreen';
  * `anchoring` on, a fold or unfold is first made up for by the browser where it
  * can, before the layout effect (a browser whose scroll anchoring ignored the
  * hook's `overflow-anchor: none`); off, nothing is. `rotate` resizes the
- * window to a new width, as a phone turned sideways does.
+ * window to a new width, as a phone turned sideways does. `page.notice` is the
+ * session notice between the controls and the score ("Practice logged"),
+ * which comes and goes for reasons of its own.
  */
 function layOut({
   scrollY = 0,
@@ -20,20 +22,20 @@ function layOut({
   strip = 60,
   anchoring = false,
 }: { scrollY?: number; below?: number; full?: number; strip?: number; anchoring?: boolean } = {}) {
-  const page = { header: 100, full, strip, below, viewport: 800, folded: false };
+  const page = { header: 100, full, strip, notice: 0, below, viewport: 800, folded: false };
   vi.stubGlobal('innerWidth', 390);
   let stored = scrollY;
   let room: HTMLElement | null = null;
   const margin = () => Number.parseFloat(room?.style.marginBottom || '0');
   const controls = () => (page.folded ? page.strip : page.full);
   const maxScroll = () =>
-    Math.max(0, page.header + controls() + margin() + page.below - page.viewport);
+    Math.max(0, page.header + controls() + margin() + page.notice + page.below - page.viewport);
   const clamp = (y: number) => Math.min(Math.max(0, y), maxScroll());
   vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => (stored = clamp(stored)));
   const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(((options: ScrollToOptions) => {
     stored = clamp(stored + (options.top ?? 0));
   }) as typeof window.scrollBy);
-  const scoreTop = () => page.header + controls() + margin() - clamp(stored);
+  const scoreTop = () => page.header + controls() + margin() + page.notice - clamp(stored);
   const measured = vi.fn(
     () => ({ top: scoreTop(), bottom: scoreTop() + 400, height: 400 }) as DOMRect,
   );
@@ -59,6 +61,11 @@ function layOut({
         />
       </>
     );
+  }
+
+  function layOutAt({ width, full: next }: { width: number; full?: number }) {
+    vi.stubGlobal('innerWidth', width);
+    if (next !== undefined) page.full = next;
   }
 
   return {
@@ -89,10 +96,16 @@ function layOut({
     },
     /** The window resized: to a new width (a rotation), the full controls now `full` high. */
     resize({ width, full: next }: { width: number; full?: number }) {
-      vi.stubGlobal('innerWidth', width);
-      if (next !== undefined) page.full = next;
+      layOutAt({ width, full: next });
       fireEvent(window, new Event('resize'));
     },
+    /**
+     * The page laid out at a new size, before the browser's `resize` event has
+     * reached the page (a render in the same frame can come first).
+     */
+    layOutAt,
+    /** The `resize` event for the size the page is now laid out at. */
+    resized: () => fireEvent(window, new Event('resize')),
     userScrolls(by: number) {
       stored = clamp(stored + by);
       fireEvent.scroll(window);
@@ -333,5 +346,265 @@ describe('useStaysOnScreen', () => {
       expect(document.body.style.overflowAnchor, `strict ${strict}: after`).toBe('auto');
       document.body.style.overflowAnchor = '';
     }
+  });
+});
+
+/** A song page that only holds the hook: enough for what it does to the document. */
+function SongPageStandIn({ folded = false }: { folded?: boolean }) {
+  const scoreRef = useRef<HTMLDivElement>(null);
+  const roomRef = useRef<HTMLDivElement>(null);
+  useStaysOnScreen(scoreRef, roomRef, folded);
+  return (
+    <>
+      <div ref={roomRef} />
+      <div ref={scoreRef} />
+    </>
+  );
+}
+
+const anchoring = () => [
+  document.documentElement.style.overflowAnchor,
+  document.body.style.overflowAnchor,
+];
+
+function setAnchoring(root: string, body: string) {
+  document.documentElement.style.overflowAnchor = root;
+  document.body.style.overflowAnchor = body;
+}
+
+// 12 Test after QA fix round 2: the checklist's interleavings over the round's changes
+// (anchoring off while mounted, the room worked out from measured positions, the resize rule).
+describe('useStaysOnScreen, interleavings', () => {
+  afterEach(() => setAnchoring('', ''));
+
+  describe('two song pages in a row', () => {
+    it('one song page replaced by another (a new song id) keeps anchoring off, and the last to go puts back what was there', () => {
+      for (const strict of [false, true]) {
+        // Values a page has no reason to carry, so a restore to '' can't pass by luck.
+        setAnchoring('auto', 'inherit');
+        const Song = ({ id }: { id: string }) => <SongPageStandIn key={id} />;
+        const view = render(<Song id="a" />, { reactStrictMode: strict });
+        expect(anchoring(), `strict ${strict}: song a`).toEqual(['none', 'none']);
+        view.rerender(<Song id="b" />);
+        expect(anchoring(), `strict ${strict}: song b`).toEqual(['none', 'none']);
+        view.rerender(<Song id="c" />);
+        expect(anchoring(), `strict ${strict}: song c`).toEqual(['none', 'none']);
+        view.unmount();
+        expect(anchoring(), `strict ${strict}: gone`).toEqual(['auto', 'inherit']);
+      }
+    });
+
+    it('a song page, another page, then a song page again: each time back to exactly what was there', () => {
+      const pages: Array<[string, string]> = [
+        ['', ''],
+        ['auto', ''],
+        ['', 'auto'],
+        ['none', 'auto'],
+      ];
+      for (const [root, body] of pages) {
+        setAnchoring(root, body);
+        const first = render(<SongPageStandIn />);
+        expect(anchoring()).toEqual(['none', 'none']);
+        first.unmount();
+        expect(anchoring(), `first song page gone over ${root}/${body}`).toEqual([root, body]);
+        const second = render(<SongPageStandIn />);
+        expect(anchoring()).toEqual(['none', 'none']);
+        second.unmount();
+        expect(anchoring(), `second song page gone over ${root}/${body}`).toEqual([root, body]);
+      }
+    });
+
+    it('leaves nothing else on html or body', () => {
+      setAnchoring('auto', '');
+      document.body.style.marginTop = '3px';
+      const rootStyle = document.documentElement.getAttribute('style');
+      const bodyStyle = document.body.getAttribute('style');
+      const view = render(<SongPageStandIn />);
+      view.rerender(<SongPageStandIn folded />);
+      view.unmount();
+      expect(document.documentElement.getAttribute('style')).toBe(rootStyle);
+      expect(document.body.getAttribute('style')).toBe(bodyStyle);
+      document.body.style.marginTop = '';
+    });
+  });
+
+  describe('resizes around a fold', () => {
+    it('a rotation while paused, then Play before anything else re-renders: the score stays where the rotation put it', () => {
+      const layout = layOut();
+      const { fold, unfold } = layout.mount();
+      layout.resize({ width: 844, full: 200 });
+      const rotated = layout.scoreTop();
+      fold();
+      expect(layout.scoreTop()).toBe(rotated);
+      // The page can't scroll: what the fold took away is all held as room.
+      expect(layout.room()).toBe(140);
+      unfold();
+      expect([layout.scoreTop(), layout.room()]).toEqual([rotated, 0]);
+    });
+
+    it('Play rendered before the rotation’s resize event: the late event drops the room, and the Pause leaves none', () => {
+      const layout = layOut();
+      const { fold, unfold } = layout.mount();
+      // Laid out at the new width, but the page hears of it only after Play's render.
+      layout.layOutAt({ width: 844, full: 200 });
+      fold();
+      layout.resized();
+      expect(layout.room()).toBe(0);
+      unfold();
+      expect(layout.room()).toBe(0);
+      const paused = layout.scoreTop();
+      for (let run = 0; run < 3; run += 1) {
+        fold();
+        expect(layout.scoreTop(), `run ${run}: Play`).toBe(paused);
+        unfold();
+        expect([layout.scoreTop(), layout.room()], `run ${run}: Pause`).toEqual([paused, 0]);
+      }
+    });
+
+    it('a rotation and a Pause in one frame, either order: no room is left and the next Play and Pause keep the score still', () => {
+      for (const order of ['resize first', 'Pause first'] as const) {
+        const layout = layOut();
+        const { fold, unfold } = layout.mount();
+        fold();
+        expect(layout.room(), order).toBe(240);
+        if (order === 'resize first') {
+          layout.resize({ width: 844, full: 200 });
+          unfold();
+        } else {
+          layout.layOutAt({ width: 844, full: 200 });
+          unfold();
+          layout.resized();
+        }
+        expect(layout.room(), `${order}: paused`).toBe(0);
+        const paused = layout.scoreTop();
+        fold();
+        expect(layout.scoreTop(), `${order}: Play`).toBe(paused);
+        unfold();
+        expect([layout.scoreTop(), layout.room()], `${order}: Pause`).toEqual([paused, 0]);
+      }
+    });
+
+    it('rotated there and back across two runs: each rotation drops the room held at its Play', () => {
+      const layout = layOut();
+      const { fold, unfold } = layout.mount();
+      for (const [width, full] of [
+        [844, 200],
+        [390, 300],
+        [844, 200],
+      ] as const) {
+        fold();
+        expect(layout.room(), `before the turn to ${width}`).toBeGreaterThan(0);
+        layout.resize({ width, full });
+        expect(layout.room(), `turned to ${width}`).toBe(0);
+        unfold();
+        expect(layout.room(), `paused at ${width}`).toBe(0);
+      }
+    });
+
+    it('a rotation during a count-in (folded from Play) drops the room, and the count-in turning to playing moves nothing', () => {
+      const layout = layOut();
+      const { fold, unfold, redraw } = layout.mount();
+      fold(); // Play with a count-in on: running, so folded.
+      expect(layout.room()).toBe(240);
+      layout.resize({ width: 844, full: 200 });
+      redraw(); // The new layout's own render.
+      expect(layout.room()).toBe(0);
+      const where = layout.scoreTop();
+      const scrolls = layout.scrollBy.mock.calls.length;
+      // Each beat, then the downbeat: the status changes, the fold doesn't.
+      for (let beat = 0; beat < 5; beat += 1) redraw();
+      expect(layout.scoreTop()).toBe(where);
+      expect(layout.scrollBy.mock.calls).toHaveLength(scrolls);
+      fold();
+      unfold();
+      expect(layout.room()).toBe(0);
+    });
+  });
+
+  describe('leaving the page while folded, room held', () => {
+    it('puts anchoring back, and a resize or scroll after it touches nothing', () => {
+      setAnchoring('auto', '');
+      const layout = layOut();
+      const { fold, unmount } = layout.mount();
+      fold();
+      expect(layout.room()).toBe(240);
+      const scrolls = layout.scrollBy.mock.calls.length;
+      unmount();
+      expect(anchoring()).toEqual(['auto', '']);
+      expect(() => {
+        layout.resize({ width: 844, full: 200 });
+        layout.userScrolls(50);
+      }).not.toThrow();
+      expect(layout.scrollBy.mock.calls).toHaveLength(scrolls);
+    });
+
+    it('coming back to the song starts with no room, and Play and Pause keep the score still again', () => {
+      const layout = layOut();
+      const first = layout.mount();
+      first.fold();
+      expect(layout.room()).toBe(240);
+      first.unmount();
+      layout.page.folded = false;
+      const again = layout.mount();
+      expect(layout.room()).toBe(0);
+      const start = layout.scoreTop();
+      again.fold();
+      expect([layout.scoreTop(), layout.room()]).toEqual([start, 240]);
+      again.unfold();
+      expect([layout.scoreTop(), layout.room()]).toEqual([start, 0]);
+    });
+  });
+
+  describe('the session notice above the score', () => {
+    const notice = 32;
+
+    it('appearing in the same render as the Pause: the score stays where it was while playing', () => {
+      const layout = layOut({ below: 3000, scrollY: 400 });
+      const { fold, unfold } = layout.mount();
+      fold();
+      const playing = layout.scoreTop();
+      layout.page.notice = notice;
+      unfold();
+      expect([layout.scoreTop(), layout.room()]).toEqual([playing, 0]);
+    });
+
+    it('appearing while folded: the room is left alone, nothing scrolls, and the Pause keeps the score where it is then', () => {
+      const layout = layOut();
+      const { fold, unfold, redraw } = layout.mount();
+      fold();
+      const scrolls = layout.scrollBy.mock.calls.length;
+      // "Practice saved on this device", as the connection drops while playing.
+      layout.page.notice = notice;
+      redraw();
+      expect(layout.room()).toBe(240);
+      expect(layout.scrollBy.mock.calls).toHaveLength(scrolls);
+      const where = layout.scoreTop();
+      unfold();
+      expect([layout.scoreTop(), layout.room()]).toEqual([where, 0]);
+    });
+
+    it('appearing after the Pause (the log answered): nothing is scrolled or held for it, and the next Play and Pause keep the score where it is then', () => {
+      for (const start of [{}, { below: 3000, scrollY: 400 }]) {
+        const layout = layOut(start);
+        const { fold, unfold, redraw } = layout.mount();
+        fold();
+        unfold();
+        const scrolls = layout.scrollBy.mock.calls.length;
+        const paused = layout.scoreTop();
+        layout.page.notice = notice;
+        redraw();
+        expect(layout.room()).toBe(0);
+        expect(layout.scrollBy.mock.calls).toHaveLength(scrolls);
+        // Anchoring is off on the song page: the notice pushes the score down (Bugs found).
+        expect(layout.scoreTop()).toBe(paused + notice);
+        const where = layout.scoreTop();
+        for (let run = 0; run < 2; run += 1) {
+          fold();
+          expect(layout.scoreTop(), `run ${run}: Play`).toBe(where);
+          unfold();
+          expect([layout.scoreTop(), layout.room()], `run ${run}: Pause`).toEqual([where, 0]);
+        }
+      }
+    });
   });
 });

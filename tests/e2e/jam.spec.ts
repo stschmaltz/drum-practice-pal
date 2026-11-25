@@ -5,6 +5,7 @@ import {
   barCursorBox,
   barNumber,
   boxOf,
+  chooseCountIn,
   expectedLayout,
   nextBarPoint,
   openFixture,
@@ -374,6 +375,47 @@ test('rotating a phone while playing keeps the beat cursor on screen, portrait t
     await expect(playButton(page), at).toHaveText('Pause');
   }
 
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  await expect(page.getByTestId('controls-slot')).toHaveCSS('margin-bottom', '0px');
+});
+
+// 12 Test after QA fix round 2: the rotation lands during the count-in, when the controls have
+// folded (counting in is running) but nothing plays yet. The room goes at the rotation, the
+// count-in carries on into playback with the beat cursor on screen, and the Pause leaves no
+// room. Not asserted: the count-in number on screen after the turn, which it isn't (it ends
+// below a landscape window: the handoff note's Test (after QA fix round 2), Bugs found 1).
+test('rotating a phone during a count-in drops the room and plays on with the beat cursor on screen', async ({
+  user,
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'phone', 'phone project only');
+  const portrait = { width: 390, height: 844 };
+  await page.setViewportSize(portrait);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await scrollWindowToTop(page);
+  // At 50% two bars of count-in last 8 s: long enough to rotate in.
+  await speedSlider(page).fill('50');
+  await chooseCountIn(page, 2);
+
+  await playButton(page).click();
+  await expect(status(page)).toContainText('Counting in');
+  const counter = page.getByTestId('count-in');
+  await expect(counter).toBeVisible();
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await windowScrollSettled(page);
+  await expect(status(page), 'still counting in after the rotation').toContainText('Counting in');
+  await expect(counter).toBeVisible();
+  await expect(page.getByTestId('controls-slot')).toHaveCSS('margin-bottom', '0px');
+
+  await expect(status(page)).not.toContainText('Counting in', { timeout: 10_000 });
+  await windowScrollSettled(page);
+  await expect.poll(() => beatCursorOnScreen(page), { message: 'beat cursor' }).toBe(true);
+
+  await page.setViewportSize(portrait);
+  await windowScrollSettled(page);
+  await expect.poll(() => beatCursorOnScreen(page), { message: 'back in portrait' }).toBe(true);
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Play');
   await expect(page.getByTestId('controls-slot')).toHaveCSS('margin-bottom', '0px');

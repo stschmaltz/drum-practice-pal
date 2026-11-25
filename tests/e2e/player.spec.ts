@@ -2,7 +2,7 @@
 import type { Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
 import { expect, signIn, test } from './auth';
-import { closeLoopPanel, openLoopPanel } from './loopsPage';
+import { closeLoopPanel, openLoopPanel, playLoopButton, saveNewLoop } from './loopsPage';
 import {
   barNumber,
   boxOf,
@@ -22,6 +22,7 @@ import {
   viewport,
   windowScrollSettled,
 } from './playerPage';
+import { navLink, playFor, sessionLogged, shortSessions } from './practicePage';
 
 // Unit 05: the song page's player. Nothing here listens to audio; sound is a Human check.
 
@@ -513,4 +514,87 @@ test('Pause and Play leave the score where it is on screen, with no scroll ancho
     'false',
   );
   await expect(muteDrumsButton(page)).toHaveCount(0);
+});
+
+/** The browser's scroll anchoring on html and body, as computed. */
+const anchoringOf = (page: Page) =>
+  page.evaluate(() => [
+    getComputedStyle(document.documentElement).overflowAnchor,
+    getComputedStyle(document.body).overflowAnchor,
+  ]);
+
+// 12 Test after QA fix round 2: the song page turns scroll anchoring off while it is up. Left
+// while playing, with room held under the folded controls, the next page has its anchoring
+// back; a second visit turns it off again, and Play and Pause there still hold no room after.
+test('scroll anchoring is off only on the song page, left while playing and opened again', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await closeLoopPanel(page);
+  expect(await anchoringOf(page)).toEqual(['none', 'none']);
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await windowScrollSettled(page);
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect(controls(page).getByRole('button', { name: 'Show controls' })).toBeVisible();
+
+  for (let visit = 0; visit < 2; visit++) {
+    await navLink(page, 'Library').click();
+    const song = page.getByRole('list').getByRole('link', { name: 'Groove 120' });
+    await expect(song).toBeVisible();
+    expect(await anchoringOf(page), `visit ${visit}: library`).toEqual(['auto', 'auto']);
+
+    await song.click();
+    await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+    expect(await anchoringOf(page), `visit ${visit}: song again`).toEqual(['none', 'none']);
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Pause');
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Play');
+    await expect(page.getByTestId('controls-slot'), `visit ${visit}`).toHaveCSS(
+      'margin-bottom',
+      '0px',
+    );
+    // Playing again as it is left, for the next visit.
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Pause');
+  }
+});
+
+// 12 Test after QA fix round 2: "Practice logged" appears above the score once the log is
+// answered, after the Pause. Nothing scrolls or holds room for it, and the next Play and
+// Pause keep the score where it is with the notice there.
+test('after the session notice appears, Play and Pause still leave the score where it is', async ({
+  user,
+  page,
+}) => {
+  await shortSessions(page, 2);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 1, lastBar: 4 });
+  const scoreTop = () => viewport(page).evaluate((box) => box.getBoundingClientRect().top);
+
+  await playLoopButton(page, 'Verse').click();
+  await playFor(page, 3_000);
+  await expect(sessionLogged(page)).toContainText('of Verse');
+  await windowScrollSettled(page);
+  await expect(page.getByTestId('controls-slot')).toHaveCSS('margin-bottom', '0px');
+
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await windowScrollSettled(page);
+  await closeLoopPanel(page);
+  for (let run = 0; run < 2; run++) {
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Pause');
+    await expect(controls(page).getByRole('button', { name: 'Show controls' })).toBeVisible();
+    await windowScrollSettled(page);
+    const playing = await scoreTop();
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Play');
+    await expect(muteDrumsButton(page)).toBeVisible();
+    await windowScrollSettled(page);
+    expect(Math.abs((await scoreTop()) - playing), `run ${run}: Pause`).toBeLessThanOrEqual(1);
+    await expect(page.getByTestId('controls-slot'), `run ${run}`).toHaveCSS('margin-bottom', '0px');
+    await expect(sessionLogged(page)).toBeVisible();
+  }
 });
