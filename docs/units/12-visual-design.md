@@ -607,3 +607,30 @@ Build fixes for QA (after UX pass) issues 1, 2 and 4, each with a test seen to f
 
 - `npm run check`: 109 files, 4240 tests green (was 108 / 4225).
 - `npm run e2e`: 413 passed, 22 skipped, 0 failed (435 listed, was 429), on a fresh `npm run build -- --mode development` from bash; the `vite preview` on 4173 was reused and left running. The new e2e failed against the build QA left in `dist` before the fix: the menu check on phone (menu -67..109 against 0..390) and desktop (926 against the panel's 992), the short-page check at all three sizes (Play moved the score 163, 171 and 131 px). The first full run after the fix failed `jam.spec.ts` landscape phone and `loop-scroll.spec.ts` desktop (the room kept in state, see Decisions); both pass since.
+
+## Test (after QA fix round)
+
+Tests for the three fixes of 8a6205f, walking the checklist's interleavings over the one new stateful piece, `useStaysOnScreen` (the room it holds across folds), and proving `keepInPlace`'s rules over every kind of input. No app code changed.
+
+### Added
+
+- `src/features/song/keepInPlace.test.ts`, "keepInPlace, every case": a grid of 1,200 inputs (moves up and down by less than, as much as and more than the window or the room can take; the top, part way, far down; no room, a little, a lot; fractional pixels; an overscrolled, negative `scrollY`), each checked for: the element back where it was (move + change of room - scroll = 0); room never negative and held only with the window at its top; no scroll above the top; a scroll down never more than the move; settled (asked again with nothing moved, nothing to do). Also: the room never exceeds what was held plus what the window lacked; and many runs of fold and unfold with user scrolls and the full height changing between a fold and its unfold, which never pile room up.
+- `src/features/song/useStaysOnScreen.test.tsx` (new): the hook in a page model (`layOut`: header, controls full or folded, the room as the slot's margin, a window that scrolls only between the top and the page's end and is pulled back when the page shrinks, Chrome's scroll anchoring on or off). Cases: five Plays and Pauses on a page that can't scroll (still, 240 px room while playing, none while paused, no scroll); a long page scrolled down (scroll only, no room); a long page at its top (room, no scroll); anchoring having kept the score still (nothing left behind, over three runs); anchoring part way down (held, then given back); a user scroll into the room while playing; re-renders that fold nothing, and the score moving for other reasons while folded (the panel, a wrapping line: no scroll, room kept, the Pause keeps the score where it is now); a resize while playing on a long page (the score still at every Pause and Play, no room at the end); a resize at the top of a short page (Bugs found 1); StrictMode (room held once, one scroll each way); no scroll listener left on the window after unmount, with and without StrictMode.
+- `SongPage.test.tsx`, "the score stays where it is…": a long page scrolled down holds no room while playing; Show controls mid-run gives the room back and the next Play holds it again; a playing song left for another song, then for the library, leaves no margin anywhere and doesn't scroll the window.
+- e2e `loops.spec.ts` "Exit loop goes back to the whole song…": Exit loop is now pressed from the keyboard (focus, Enter) and focus must land on that loop's Play loop.
+- e2e `design.spec.ts`: the menu measurement is a helper (`menuOutside`), and "at 320 px a loop's More menu opens inside the sheet, active and finished" (phone project) covers the narrowest width the build note names.
+
+### Each new test seen to fail
+
+- `keepInPlace` with the stand-in give-back removed: the grid, the worked example and the hook's "anchoring part way down" fail. Returning `{ scrollBy: shift, reserve: 0 }` (the old behaviour): 19 fail across the three files, the new SongPage cases among them.
+- `useStaysOnScreen` with the key check removed: "re-renders … that fold nothing" fails. With the scroll listener doing nothing: "a scroll by the user into the room" fails. With the cleanup removed: the listener test fails (a first version that counted `getBoundingClientRect` reads after unmount passed without the cleanup, since React nulls the ref; it now counts the window's scroll listeners).
+- A build without `ml-auto` and without Exit loop's hand-over: the 320 px menu test (Fill's menu outside) and the Exit loop test (phone and desktop) fail.
+
+### Bugs found
+
+1. **Room left after a resize while playing, at the top of a page that can't scroll (minor, logged).** Play on a phone's short page holds the fold as room; if the full controls come back shorter (a rotation while playing), the Pause gives back only what they now take and the difference stays as blank room under the controls while paused, until they are that tall again. It never piles up, and the score doesn't move. Fixing it means choosing to let the score move at that Pause (drop the room at an unfold) or keeping it; pinned by `useStaysOnScreen.test.tsx` and carried forward to Unit 13 in `docs/plan.md`.
+
+### Results
+
+- `npm run check`: 110 files, 4258 tests green (was 109 / 4240).
+- `npm run e2e`: 414 passed, 24 skipped, 0 failed (438 listed, was 435; the 320 px menu test is skipped off the phone project), on a fresh `npm run build -- --mode development` from bash; the `vite preview` on 4173 was reused and left running.

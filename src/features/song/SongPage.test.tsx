@@ -2285,5 +2285,57 @@ describe('SongPage controls while playing (12 UX pass)', () => {
       expect(onScreen()).toBe(before);
       expect(window.scrollY).toBe(100);
     });
+
+    // 12 Test after the QA fix round.
+    it('on a long page scrolled down, the window does it all: no room while playing', async () => {
+      const { play, pause } = await openSong();
+      const { onScreen, userScrolls } = layOut({ scrolledTo: 400 });
+      userScrolls(0);
+      const before = onScreen();
+
+      await play();
+      expect(onScreen()).toBe(before);
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('');
+      await pause();
+      expect(onScreen()).toBe(before);
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('');
+    });
+
+    it('Show controls mid-run gives the room back, and the next Play holds it again', async () => {
+      const { user, play, pause } = await openSong();
+      const { onScreen, userScrolls } = layOut({ scrolledTo: 0 });
+      userScrolls(0);
+      const before = onScreen();
+
+      await play();
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('300px');
+      await showControls(user);
+      expect(onScreen()).toBe(before);
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('');
+      await pause();
+      await play();
+      expect(onScreen()).toBe(before);
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('300px');
+    });
+
+    it('a playing song left for another, or for the library, leaves no room behind', async () => {
+      const { user, play } = await openSong();
+      const { userScrolls } = layOut({ scrolledTo: 0 });
+      userScrolls(0);
+      await play();
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('300px');
+
+      await user.click(screen.getByRole('link', { name: 'Song B' }));
+      expect(await screen.findByRole('heading', { level: 1, name: 'Tempo Change' })).toBeVisible();
+      await waitFor(() => expect(engines).toHaveLength(2));
+      await loadPlayer(1, { barCount: 12 });
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('');
+      expect(window.scrollY).toBe(0);
+
+      await user.click(screen.getByRole('link', { name: 'Library' }));
+      expect(await screen.findByText('At library')).toBeInTheDocument();
+      expect(screen.queryByTestId('controls-slot')).not.toBeInTheDocument();
+      expect(document.querySelector('[style*="margin-bottom"]')).toBeNull();
+    });
   });
 });

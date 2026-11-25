@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
 import {
   auditScreen,
@@ -324,6 +324,48 @@ test('the loop sheet and panel keep 44 px targets with a loop playing', async ({
   await playButton(page).click();
 });
 
+/**
+ * Where a loop's open "More" menu lies outside the window, the loop panel or
+ * any ancestor that clips it, as text for the failure; empty when all of it shows.
+ */
+function menuOutside(menu: Locator): Promise<string[]> {
+  return menu.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const panel = el.closest('[data-testid="loop-panel"]');
+    const boxes: {
+      box: DOMRect | { left: number; top: number; right: number; bottom: number };
+      what: string;
+    }[] = [
+      {
+        box: { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight },
+        what: 'window',
+      },
+    ];
+    if (panel) boxes.push({ box: panel.getBoundingClientRect(), what: 'loop panel' });
+    for (let up = el.parentElement; up; up = up.parentElement) {
+      const { overflowX, overflowY } = getComputedStyle(up);
+      if (overflowX !== 'visible' || overflowY !== 'visible') {
+        boxes.push({
+          box: up.getBoundingClientRect(),
+          what: `<${up.tagName.toLowerCase()}>`,
+        });
+      }
+    }
+    return boxes
+      .filter(
+        ({ box }) =>
+          rect.left < box.left - 0.5 ||
+          rect.top < box.top - 0.5 ||
+          rect.right > box.right + 0.5 ||
+          rect.bottom > box.bottom + 0.5,
+      )
+      .map(
+        ({ box, what }) =>
+          `${what}: menu ${Math.round(rect.left)}..${Math.round(rect.right)} x ${Math.round(rect.top)}..${Math.round(rect.bottom)} in ${Math.round(box.left)}..${Math.round(box.right)} x ${Math.round(box.top)}..${Math.round(box.bottom)}`,
+      );
+  });
+}
+
 // 12 QA after the UX pass, issue 1: a loop's "More" menu hung off the panel's left edge
 // wherever More started its row (a phone's active loops, the column's finished ones).
 test('a loop’s More menu opens inside the loop panel, for active and finished loops', async ({
@@ -353,48 +395,39 @@ test('a loop’s More menu opens inside the loop panel, for active and finished 
     await expect(menu).toBeVisible();
     // Inside the panel's box and every box that clips it, the window included: all of it shows.
     await expect
-      .poll(
-        () =>
-          menu.evaluate((el) => {
-            const rect = el.getBoundingClientRect();
-            const panel = el.closest('[data-testid="loop-panel"]');
-            const boxes: {
-              box: DOMRect | { left: number; top: number; right: number; bottom: number };
-              what: string;
-            }[] = [
-              {
-                box: { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight },
-                what: 'window',
-              },
-            ];
-            if (panel) boxes.push({ box: panel.getBoundingClientRect(), what: 'loop panel' });
-            for (let up = el.parentElement; up; up = up.parentElement) {
-              const { overflowX, overflowY } = getComputedStyle(up);
-              if (overflowX !== 'visible' || overflowY !== 'visible') {
-                boxes.push({
-                  box: up.getBoundingClientRect(),
-                  what: `<${up.tagName.toLowerCase()}>`,
-                });
-              }
-            }
-            return boxes
-              .filter(
-                ({ box }) =>
-                  rect.left < box.left - 0.5 ||
-                  rect.top < box.top - 0.5 ||
-                  rect.right > box.right + 0.5 ||
-                  rect.bottom > box.bottom + 0.5,
-              )
-              .map(
-                ({ box, what }) =>
-                  `${what}: menu ${Math.round(rect.left)}..${Math.round(rect.right)} x ${Math.round(rect.top)}..${Math.round(rect.bottom)} in ${Math.round(box.left)}..${Math.round(box.right)} x ${Math.round(box.top)}..${Math.round(box.bottom)}`,
-              );
-          }),
-        { message: `${name}'s menu lies outside` },
-      )
+      .poll(() => menuOutside(menu), { message: `${name}'s menu lies outside` })
       .toEqual([]);
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
     await expect(more).toBeFocused();
+  }
+});
+
+// 12 Test after the QA fix round: the narrowest phone, where finished loops' buttons wrap too.
+test('at 320 px a loop’s More menu opens inside the sheet, active and finished', async ({
+  user,
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'phone', 'about phone widths');
+  await page.setViewportSize({ width: 320, height: 640 });
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Fill', firstBar: 3, lastBar: 4 });
+  await loopItem(page, 'Fill')
+    .getByRole('button', { name: /^Mark finished/ })
+    .click();
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+
+  for (const name of ['Verse', 'Fill']) {
+    await openLoopPanel(page);
+    await loopItem(page, name)
+      .getByRole('button', { name: `More actions for ${name}` })
+      .click();
+    const menu = loopPanel(page).getByRole('menu', { name: `Actions for ${name}` });
+    await expect(menu).toBeVisible();
+    await expect
+      .poll(() => menuOutside(menu), { message: `${name}'s menu lies outside` })
+      .toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
   }
 });

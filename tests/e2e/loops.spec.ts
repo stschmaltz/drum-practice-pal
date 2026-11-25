@@ -418,8 +418,14 @@ test('Exit loop goes back to the whole song without stopping playback', async ({
   await expect(playButton(page)).toHaveText('Pause');
   expect([...(await barsPlayedFor(page, 3000))]).toEqual([5]);
 
-  await exitLoop(page);
+  // From the keyboard (12 Test after the QA fix round): Exit loop goes with the loop's playing
+  // state, and focus lands on that loop's Play loop, not on the page.
+  await openLoopPanel(page);
+  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).focus();
+  await page.keyboard.press('Enter');
   await expect(activeLoopLine(page)).toHaveCount(0);
+  await expect(loopItem(page, 'One bar').getByRole('button', { name: /^Play loop/ })).toBeFocused();
+  await closeLoopPanel(page);
   await expect(playButton(page)).toHaveText('Pause');
   // Free of the range, the song plays on past bar 5.
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(6);
