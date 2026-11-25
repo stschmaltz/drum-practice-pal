@@ -43,16 +43,32 @@ export async function fetchPracticeLoops(userId: string): Promise<PracticeLoop[]
   );
 }
 
-/** Returns the saved row, so the cache holds what the DB actually stored. */
+/** Postgres unique_violation: for a loops insert, an id already taken. */
+const UNIQUE_VIOLATION = '23505';
+
+/**
+ * Returns the saved row, so the cache holds what the DB actually stored. The
+ * id is the form's, the same at every press: a press after a lost answer
+ * finds its loop already saved (23505) and takes that row rather than failing
+ * or inserting a second loop.
+ */
 export async function createLoop(userId: string, loop: NewLoop): Promise<Loop> {
-  return unwrap(
-    await supabase
+  const inserted = await supabase
+    .from('loops')
+    .insert({ ...loop, user_id: userId })
+    .select(LOOP_SELECT)
+    .single();
+  if (inserted.error?.code === UNIQUE_VIOLATION) {
+    const saved = await supabase
       .from('loops')
-      .insert({ ...loop, user_id: userId })
       .select(LOOP_SELECT)
-      .single(),
-    'loop',
-  );
+      .eq('id', loop.id)
+      .eq('user_id', userId)
+      .maybeSingle();
+    throwIfError(saved);
+    if (saved.data) return saved.data;
+  }
+  return unwrap(inserted, 'loop');
 }
 
 export async function updateLoop(

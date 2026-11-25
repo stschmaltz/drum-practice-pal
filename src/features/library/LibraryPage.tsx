@@ -11,7 +11,9 @@ import type { LibrarySong } from './songForm';
 import { isLibrarySort, searchSongs, sortSongs, type LibrarySort } from './songList';
 import { SongListItem } from './SongListItem';
 import { UploadPanel } from './UploadPanel';
+import { findUploadPicker } from './uploadPicker';
 import { useSongs } from './useSongs';
+import { failureCopy } from '@/lib/errorCopy';
 
 const SORT_LABELS: Record<LibrarySort, string> = {
   practiced: 'Recently practiced',
@@ -25,6 +27,9 @@ export function LibraryPage() {
   const songs = useSongs();
   // Once there are songs the upload is a button, and the list takes a dropped file.
   const hasSongs = songs.data !== undefined && songs.data.length > 0;
+  // Here, not in the list: deleting the last song takes the list away, and its
+  // focus hand-over with it.
+  const focusWhenReady = useFocusWhenReady();
 
   return (
     <div className="flex flex-col gap-6">
@@ -39,14 +44,14 @@ export function LibraryPage() {
           <LoadingLine>Loading your songs…</LoadingLine>
         ) : songs.isLoadingError ? (
           <LoadErrorAlert onRetry={() => void songs.refetch()}>
-            Couldn't load your songs: {songs.error.message}
+            Couldn't load your songs. {failureCopy(songs.error)}
           </LoadErrorAlert>
         ) : songs.data.length === 0 ? (
           <EmptyState icon="library">
             No songs yet. Upload a Guitar Pro file to start your library.
           </EmptyState>
         ) : (
-          <SongList songs={songs.data} />
+          <SongList songs={songs.data} focusWhenReady={focusWhenReady} />
         )}
       </UploadPanel>
     </div>
@@ -98,13 +103,18 @@ function useEditingIds() {
   return [ids, onEditingChange] as const;
 }
 
-function SongList({ songs }: { songs: LibrarySong[] }) {
+function SongList({
+  songs,
+  focusWhenReady,
+}: {
+  songs: LibrarySong[];
+  focusWhenReady: ReturnType<typeof useFocusWhenReady>;
+}) {
   const { query, sort, setQuery, setSort } = useLibraryView();
   const searchId = useId();
   const sortId = useId();
   const [editingIds, onEditingChange] = useEditingIds();
   const shown = sortSongs(searchSongs(songs, query, editingIds), sort);
-  const focusWhenReady = useFocusWhenReady();
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Closing the edit form brings back the song's Edit, unless a saved rename no
@@ -124,7 +134,8 @@ function SongList({ songs }: { songs: LibrarySong[] }) {
   };
 
   // A deleted song takes its buttons with it: focus goes to the next song's Delete
-  // (the one before, for the last), once the song has left the list.
+  // (the one before, for the last), once the song has left the list; with none
+  // left on show, to the search, or to the upload when the library is empty.
   const followDelete = (songId: string) => {
     const nextId = neighbourAfterLeaving(
       shown.map((song) => song.id),
@@ -132,7 +143,8 @@ function SongList({ songs }: { songs: LibrarySong[] }) {
     );
     focusWhenReady(() => {
       if (isItemListed(songId)) return null;
-      return nextId === null ? null : findItemControl(nextId, 'delete');
+      if (nextId !== null) return findItemControl(nextId, 'delete');
+      return searchRef.current ?? findUploadPicker();
     });
   };
 

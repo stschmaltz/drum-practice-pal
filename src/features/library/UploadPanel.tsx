@@ -15,6 +15,8 @@ import { GUITAR_PRO_EXTENSIONS } from './songFile';
 import { NO_DRUM_TRACK_NOTE } from './songMetadata';
 import { SongFileError, type UploadResult, type UploadStep } from './songsApi';
 import { useUploadSong } from './useSongs';
+import { failureCopy } from '@/lib/errorCopy';
+import { UPLOAD_PICKER_ATTRIBUTES } from './uploadPicker';
 
 const STEP_LABELS: Record<UploadStep, string> = {
   reading: 'Reading',
@@ -184,6 +186,7 @@ function FilePicker({
       )}
       <input
         type="file"
+        {...UPLOAD_PICKER_ATTRIBUTES}
         className="sr-only"
         disabled={disabled}
         onChange={(event) => {
@@ -275,7 +278,7 @@ function UploadFailure({ error, fileName }: { error: Error; fileName: string | u
     <ErrorAlert>
       {error instanceof SongFileError
         ? `Couldn't add ${name}. ${error.message}`
-        : `Couldn't upload ${name}: ${error.message}`}
+        : `Couldn't upload ${name}. ${failureCopy(error)}`}
     </ErrorAlert>
   );
 }

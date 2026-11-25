@@ -73,7 +73,7 @@ describe('SettingsPage', () => {
     queryResult.mockResolvedValueOnce({ data: null, error: { message: 'Failed to fetch' } });
     const { user } = renderSettings();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't load your settings: Failed to fetch",
+      "Couldn't load your settings. Something went wrong. Try again.",
     );
 
     serveSettings(saved);
@@ -152,7 +152,7 @@ describe('SettingsPage', () => {
     await user.click(saveButton());
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't save your settings: Failed to fetch",
+      "Couldn't save your settings. Something went wrong. Try again.",
     );
     expect(screen.getByRole('radio', { name: '1 bar' })).toBeChecked();
     expect(saveButton()).toBeEnabled();
@@ -184,7 +184,7 @@ describe('SettingsPage', () => {
 
     await act(async () => finishSave({ data: null, error: { message: 'Failed to fetch' } }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't save your settings: Failed to fetch",
+      "Couldn't save your settings. Something went wrong. Try again.",
     );
     // Unlocked again, with the edit still there to retry or change.
     expect(screen.getByRole('radio', { name: '1 bar' })).toBeChecked();

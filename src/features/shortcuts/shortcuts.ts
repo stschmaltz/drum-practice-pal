@@ -4,6 +4,8 @@
  * it, and the small sums the actions need. No React or DOM: the song page's
  * hook (`useSongShortcuts`) feeds it each `keydown` and does what it says.
  */
+import { COUNT_IN_BARS_LABELS } from '@/features/player/countInLabels';
+import { ratioToPercent } from '@/features/player/speed';
 import { COUNT_IN_BAR_OPTIONS, type CountInBars } from '@/lib/schema';
 
 export const SHORTCUT_ACTIONS = [
@@ -278,4 +280,40 @@ export function steppedBar(
 ): number | null {
   const next = direction === 'next' ? barNumber + 1 : barNumber - 1;
   return next >= 1 && next <= barCount ? next : null;
+}
+
+/** What a shortcut can change that its control shows but a screen reader wouldn't hear. */
+export interface AnnouncedOptions {
+  speedRatio: number;
+  metronomeOn: boolean;
+  drumsMuted: boolean;
+  drumsOnly: boolean;
+  countInBars: CountInBars;
+}
+
+const onOff = (on: boolean) => (on ? 'on' : 'off');
+
+/**
+ * What to say after a key changed an option, read out by a polite live
+ * region (focus is usually nowhere near the control it changed): the options
+ * that changed, in the controls bar's words. Null when nothing changed (a
+ * gate refused, the speed at its bound).
+ */
+export function shortcutAnnouncement(
+  before: AnnouncedOptions,
+  after: AnnouncedOptions,
+): string | null {
+  const said: string[] = [];
+  if (ratioToPercent(after.speedRatio) !== ratioToPercent(before.speedRatio)) {
+    said.push(`Speed ${ratioToPercent(after.speedRatio)}%`);
+  }
+  if (after.metronomeOn !== before.metronomeOn) said.push(`Metronome ${onOff(after.metronomeOn)}`);
+  if (after.drumsMuted !== before.drumsMuted) {
+    said.push(after.drumsMuted ? 'Drums muted' : 'Drums unmuted');
+  }
+  if (after.drumsOnly !== before.drumsOnly) said.push(`Drums only ${onOff(after.drumsOnly)}`);
+  if (after.countInBars !== before.countInBars) {
+    said.push(`Count-in ${COUNT_IN_BARS_LABELS[after.countInBars].toLowerCase()}`);
+  }
+  return said.length > 0 ? said.join(', ') : null;
 }

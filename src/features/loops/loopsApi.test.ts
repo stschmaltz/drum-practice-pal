@@ -121,6 +121,35 @@ describe('createLoop', () => {
     queryResult.mockResolvedValueOnce(ok(null));
     await expect(createLoop(USER, newLoop)).rejects.toThrow('No loop returned');
   });
+
+  it('sent again after a lost answer, takes the loop already saved under its id', async () => {
+    const saved = loopRow('new-id', { name: 'Chorus fill' });
+    queryResult
+      .mockResolvedValueOnce(fail('duplicate key value violates unique constraint', '23505'))
+      .mockResolvedValueOnce(ok(saved));
+
+    expect(await createLoop(USER, newLoop)).toEqual(saved);
+    const lookup = calls()[1]!;
+    expect(opArgs(lookup, 'select')).toEqual([LOOP_SELECT]);
+    expect(eqs(lookup)).toEqual([
+      ['id', 'new-id'],
+      ['user_id', USER],
+    ]);
+  });
+
+  it('a 23505 with no loop of its id for this user is still an error', async () => {
+    queryResult
+      .mockResolvedValueOnce(fail('duplicate key', '23505'))
+      .mockResolvedValueOnce(ok(null));
+    await expect(createLoop(USER, newLoop)).rejects.toMatchObject({ code: '23505' });
+  });
+
+  it('throws when the look-up fails', async () => {
+    queryResult
+      .mockResolvedValueOnce(fail('duplicate key', '23505'))
+      .mockResolvedValueOnce(fail('TypeError: Failed to fetch', ''));
+    await expect(createLoop(USER, newLoop)).rejects.toThrow('Failed to fetch');
+  });
 });
 
 describe('updateLoop', () => {

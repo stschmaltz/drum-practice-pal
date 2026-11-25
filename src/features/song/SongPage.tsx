@@ -292,6 +292,10 @@ function SongPlayer({
         />
       </div>
       <ShortcutOverlay open={shortcuts.helpOpen} onClose={shortcuts.closeHelp} />
+      {/* On the page from the start: a live region added with its text is often not read. */}
+      <p role="status" className="sr-only" data-testid="shortcut-announcement">
+        {shortcuts.announcement}
+      </p>
     </div>
   );
 }
@@ -445,6 +449,8 @@ function SessionNotice({
   }
   if (!lastLogged) return null;
   const loopName = loops?.find((loop) => loop.id === lastLogged.loopId)?.name;
+  // Deleted since (here or on another device): the notice would be about nothing on show.
+  if (loops !== undefined && loopName === undefined) return null;
   return (
     <p role="status" className="text-sm text-ink-muted" data-testid="session-logged">
       <Icon name="check" className={`${inlineIconClass} size-4 text-success`} />

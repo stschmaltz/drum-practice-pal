@@ -21,6 +21,7 @@ import { speedLabel } from './loopLabels';
 import { selectionHint } from './rangeSelection';
 import { useCreateLoop, useUpdateLoop } from './useLoops';
 import { editorBarFields, type LoopEditor } from './useLoopPractice';
+import { failureCopy } from '@/lib/errorCopy';
 
 type DetailFields = Pick<LoopFormValues, 'name' | 'targetPercent'>;
 
@@ -61,6 +62,10 @@ export function LoopEditorForm({
   // Only touched fields, so the others keep showing the latest saved values.
   const [draft, setDraft] = useState<Partial<DetailFields>>({});
   const [errors, setErrors] = useState<LoopFormErrors>({});
+  const barsErrorId = useId();
+  // One id for the form's lifetime: a press after a lost answer sends the same
+  // loop again, which the server already has, rather than a second loop.
+  const [newLoopId] = useState(randomUuid);
   const saved = loop ? loopFormValues(loop) : EMPTY_LOOP_FORM;
   const values: LoopFormValues = { ...saved, ...draft, ...editorBarFields(editor, loop) };
   // Locked while saving: an edit would reset() the mutation, so the form would
@@ -113,7 +118,7 @@ export function LoopEditorForm({
 
     if (!loop) {
       create.mutate(
-        { id: randomUuid(), ...parsed.details, speed_ratio: snapshot.speedRatio },
+        { id: newLoopId, ...parsed.details, speed_ratio: snapshot.speedRatio },
         { onSuccess: onSaved },
       );
       return;
@@ -144,6 +149,7 @@ export function LoopEditorForm({
             label="First bar"
             value={values.startBar}
             invalid={errors.bars !== undefined}
+            describedBy={errors.bars !== undefined ? barsErrorId : undefined}
             readOnly={saving}
             inputMode="numeric"
             className="w-24"
@@ -153,13 +159,18 @@ export function LoopEditorForm({
             label="Last bar"
             value={values.endBar}
             invalid={errors.bars !== undefined}
+            describedBy={errors.bars !== undefined ? barsErrorId : undefined}
             readOnly={saving}
             inputMode="numeric"
             className="w-24"
             onChange={(endBar) => editBars({ endBar })}
           />
         </div>
-        {errors.bars && <span className="text-sm text-danger">{errors.bars}</span>}
+        {errors.bars && (
+          <span id={barsErrorId} className="text-sm text-danger">
+            {errors.bars}
+          </span>
+        )}
       </div>
       <Field
         label="Name"
@@ -196,7 +207,7 @@ export function LoopEditorForm({
         <OfflineNote>You're offline. Loops can be saved once you're back online.</OfflineNote>
       )}
       {mutation.isError && (
-        <ErrorAlert>Couldn't save the loop: {mutation.error.message}</ErrorAlert>
+        <ErrorAlert>Couldn't save the loop. {failureCopy(mutation.error)}</ErrorAlert>
       )}
     </form>
   );
@@ -219,6 +230,7 @@ function Field({
   value,
   error,
   invalid = error !== undefined,
+  describedBy,
   readOnly,
   inputMode,
   placeholder,
@@ -231,6 +243,8 @@ function Field({
   error?: string;
   /** For a field whose error is shown elsewhere (the two bar fields share one). */
   invalid?: boolean;
+  /** The id of that error, read out with the field. */
+  describedBy?: string;
   /** Read-only rather than disabled, so focus stays put while saving. */
   readOnly: boolean;
   inputMode?: 'numeric';
@@ -241,6 +255,9 @@ function Field({
   onChange: (value: string) => void;
 }) {
   const id = useId();
+  const errorId = `${id}-error`;
+  const noteId = `${id}-note`;
+  const descriptions = [error ? errorId : describedBy, note ? noteId : undefined].filter(Boolean);
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className={labelClass}>
@@ -256,11 +273,20 @@ function Field({
           placeholder={placeholder}
           autoComplete="off"
           aria-invalid={invalid ? true : undefined}
+          aria-describedby={descriptions.length > 0 ? descriptions.join(' ') : undefined}
           onChange={(event) => onChange(event.target.value)}
         />
-        {note && <span className="text-sm text-ink-muted">{note}</span>}
+        {note && (
+          <span id={noteId} className="text-sm text-ink-muted">
+            {note}
+          </span>
+        )}
       </div>
-      {error && <span className="text-sm text-danger">{error}</span>}
+      {error && (
+        <span id={errorId} className="text-sm text-danger">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

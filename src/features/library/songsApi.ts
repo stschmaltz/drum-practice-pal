@@ -2,6 +2,7 @@
  * Supabase calls for songs and their files. Plain async functions that throw
  * on error; the hooks in useSongs.ts are the only callers.
  */
+import { failureCopy, failureKind, UserFacingError } from '@/lib/errorCopy';
 import { fetchAllPages } from '@/lib/fetchAllPages';
 import { randomUuid } from '@/lib/randomUuid';
 import { GP_FILE_MAX_BYTES, GP_FILES_BUCKET, songFilePath } from '@/lib/schema';
@@ -79,7 +80,7 @@ export async function downloadSongFile(userId: string, songId: string): Promise<
 }
 
 /** A file the app refuses, with copy fit to show as is. */
-export class SongFileError extends Error {
+export class SongFileError extends UserFacingError {
   override name = 'SongFileError';
 }
 
@@ -116,11 +117,16 @@ export async function uploadSong(
   onStep?.('uploading');
   const songId = randomUuid();
   const filePath = songFilePath(userId, songId);
-  throwIfError(
-    await supabase.storage
-      .from(GP_FILES_BUCKET)
-      .upload(filePath, bytes, { contentType: 'application/octet-stream', upsert: false }),
-  );
+  const uploaded = await supabase.storage
+    .from(GP_FILES_BUCKET)
+    .upload(filePath, bytes, { contentType: 'application/octet-stream', upsert: false });
+  if (uploaded.error) {
+    // A lost answer can hide a file that was stored: remove it, as nothing will name it.
+    if (failureKind(uploaded.error) === 'network') {
+      await removeUploadedFile(filePath, uploaded.error);
+    }
+    throw uploaded.error;
+  }
   // The upload can't be aborted mid-request, so a cancel during it lands here.
   if (signal?.aborted) await removeUploadedFile(filePath, signal.reason);
   signal?.throwIfAborted();
@@ -145,6 +151,12 @@ export async function uploadSong(
     .single();
 
   if (inserted.error) {
+    if (failureKind(inserted.error) === 'network') {
+      // The row may have committed with only its answer lost; removing the
+      // file then would leave a listed song with nothing to play.
+      const landed = await findSavedSong(userId, songId, inserted.error);
+      if (landed) return { kind: 'uploaded', song: { ...landed, last_practiced_at: null } };
+    }
     await removeUploadedFile(filePath, inserted.error);
     // Another tab or device added the same file since the check above.
     if (inserted.error.code === UNIQUE_VIOLATION) {
@@ -172,22 +184,37 @@ async function readSongFile(file: File): Promise<{ bytes: Uint8Array; metadata: 
   return { bytes, metadata: parsed.metadata };
 }
 
+/**
+ * After an insert whose answer never came: the row, if it was saved. When
+ * even that can't be read the file stays, since the row may name it.
+ */
+async function findSavedSong(userId: string, songId: string, cause: unknown): Promise<Song | null> {
+  const landed = await supabase
+    .from('songs')
+    .select(SONG_SELECT)
+    .eq('id', songId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (landed.error) {
+    throw new UserFacingError(
+      `${failureCopy(cause)} The song may have been added anyway: reload the library to see.`,
+      { cause },
+    );
+  }
+  return landed.data;
+}
+
 /** Rollback for a file whose row won't exist. Throws if the file stays behind. */
 async function removeUploadedFile(filePath: string, cause: unknown): Promise<void> {
   const removed = await supabase.storage.from(GP_FILES_BUCKET).remove([filePath]);
   if (removed.error) {
-    throw new Error(
-      `${messageOf(cause)} The uploaded file couldn't be removed either: ${removed.error.message}`,
-      { cause },
+    throw new UserFacingError(
+      `${failureCopy(cause)} A copy of the file may be left on the server.`,
+      {
+        cause,
+      },
     );
   }
-}
-
-/** supabase-js errors aren't always Error instances, but all carry a message. */
-function messageOf(cause: unknown): string {
-  return typeof cause === 'object' && cause !== null && 'message' in cause
-    ? String(cause.message)
-    : String(cause);
 }
 
 /** Returns the saved row, so the cache holds what the DB actually stored. */

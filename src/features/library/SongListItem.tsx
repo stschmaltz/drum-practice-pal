@@ -33,6 +33,7 @@ import {
 } from './songForm';
 import { NO_DRUM_TRACK_NOTE } from './songMetadata';
 import { useDeleteSong, useUpdateSong } from './useSongs';
+import { failureCopy } from '@/lib/errorCopy';
 
 type Mode = 'view' | 'edit' | 'confirm-delete';
 
@@ -237,7 +238,9 @@ function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void 
       {!online && (
         <OfflineNote>You're offline. Changes can be saved once you're back online.</OfflineNote>
       )}
-      {update.isError && <ErrorAlert>Couldn't save the song: {update.error.message}</ErrorAlert>}
+      {update.isError && (
+        <ErrorAlert>Couldn't save the song. {failureCopy(update.error)}</ErrorAlert>
+      )}
     </form>
   );
 }
@@ -257,6 +260,7 @@ function TextField({
   onChange: (value: string) => void;
 }) {
   const id = useId();
+  const errorId = `${id}-error`;
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className={labelClass}>
@@ -268,9 +272,14 @@ function TextField({
         value={value}
         readOnly={readOnly}
         aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
         onChange={(event) => onChange(event.target.value)}
       />
-      {error && <span className="text-sm text-danger">{error}</span>}
+      {error && (
+        <span id={errorId} className="text-sm text-danger">
+          {error}
+        </span>
+      )}
     </div>
   );
 }
@@ -327,7 +336,9 @@ function ConfirmDelete({
       {!online && (
         <OfflineNote>You're offline. Songs can be deleted once you're back online.</OfflineNote>
       )}
-      {remove.isError && <ErrorAlert>Couldn't delete the song: {remove.error.message}</ErrorAlert>}
+      {remove.isError && (
+        <ErrorAlert>Couldn't delete the song. {failureCopy(remove.error)}</ErrorAlert>
+      )}
     </div>
   );
 }

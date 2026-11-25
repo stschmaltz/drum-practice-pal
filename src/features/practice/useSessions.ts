@@ -34,13 +34,26 @@ export function sessionLogged(queryClient: QueryClient, userId: string, record: 
       : sessions,
   );
   void queryClient.invalidateQueries({ queryKey: historyKey });
-  // A refetch while a write is pending would put the old row over its optimistic
-  // value; that write refetches when it settles (invalidateWhenIdle), so leave it to it.
-  if (queryClient.isMutating({ mutationKey: loopKeys.writes(userId) }) === 0) {
-    void queryClient.invalidateQueries({ queryKey: loopKeys.forUser(userId) });
-  }
+  refetchLoopsWhenIdle(queryClient, userId);
   if (queryClient.isMutating({ mutationKey: songKeys.writes(userId) }) === 0) {
     void queryClient.invalidateQueries({ queryKey: songKeys.forUser(userId) });
+  }
+}
+
+/**
+ * A session refused because its loop is gone (deleted on another device):
+ * nothing to log, but the lists still show the loop, and the song page would
+ * go on looping it. Read them again.
+ */
+export function sessionLoopGone(queryClient: QueryClient, userId: string) {
+  refetchLoopsWhenIdle(queryClient, userId);
+}
+
+// A refetch while a write is pending would put the old row over its optimistic
+// value; that write refetches when it settles (invalidateWhenIdle), so leave it to it.
+function refetchLoopsWhenIdle(queryClient: QueryClient, userId: string) {
+  if (queryClient.isMutating({ mutationKey: loopKeys.writes(userId) }) === 0) {
+    void queryClient.invalidateQueries({ queryKey: loopKeys.forUser(userId) });
   }
 }
 
@@ -68,6 +81,7 @@ function logSessionOptions(queryClient: QueryClient, userId: string) {
     ...queuedWriteRetry,
     onSuccess: (result: LogSessionResult, record: SessionRecord) => {
       if (result === 'logged') sessionLogged(queryClient, userId, record);
+      else sessionLoopGone(queryClient, userId);
     },
     // Answered either way: logged, its loop gone, or refused (it would be refused again).
     onSettled: (

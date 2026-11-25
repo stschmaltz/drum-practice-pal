@@ -1,6 +1,7 @@
 import { useId, useState, type KeyboardEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
+import { canChangeOptions } from '@/features/player/controlGates';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import {
   nudgeSpeedRatio,
@@ -14,6 +15,7 @@ import type { Loop } from './loopForm';
 import { LOOP_SPEED_ATTRIBUTES } from './loopFocus';
 import { speedLabel } from './loopLabels';
 import { useUpdateLoop } from './useLoops';
+import { failureCopy } from '@/lib/errorCopy';
 
 /** The nudge buttons, in percent. */
 const NUDGES = [-5, -1, 1, 5] as const;
@@ -37,6 +39,7 @@ export function LoopSpeedControl({
 }) {
   const update = useUpdateLoop(songId);
   const online = useOnline();
+  const canSetSpeed = canChangeOptions(player, snapshot);
   // Offline a save waits for the connection; another may be saved behind it (loop edits
   // go in order). One that is being sent locks the button, so two never race.
   const sending = update.isPending && !update.isPaused;
@@ -46,11 +49,11 @@ export function LoopSpeedControl({
   const unsaved = ratio !== loop.speed_ratio;
 
   const setSpeed = (next: number | null) => {
-    if (next === null) return;
+    if (next === null || !canChangeOptions(player, snapshot)) return;
     // A failed save's message is about the old speed. Not while one is in flight:
     // reset() would forget it, and Save speed would be offered again alongside it.
     if (update.isError) update.reset();
-    player?.setSpeed(next);
+    player.setSpeed(next);
   };
 
   return (
@@ -66,13 +69,13 @@ export function LoopSpeedControl({
         <CommitField
           label="Speed %"
           value={String(ratioToPercent(ratio))}
-          disabled={player === null}
+          disabled={!canSetSpeed}
           onCommit={(text) => setSpeed(parseSpeedPercent(text))}
         />
         <CommitField
           label="BPM"
           value={tempo === null ? '' : String(bpmAtSpeed(tempo, ratio))}
-          disabled={player === null || tempo === null}
+          disabled={!canSetSpeed || tempo === null}
           onCommit={(text) => setSpeed(tempo === null ? null : parseSpeedBpm(text, tempo))}
         />
       </div>
@@ -83,7 +86,7 @@ export function LoopSpeedControl({
             key={delta}
             type="button"
             className={`${buttonClass} px-2 tabular-nums`}
-            disabled={player === null}
+            disabled={!canSetSpeed}
             aria-label={`${delta < 0 ? 'Slower' : 'Faster'} by ${Math.abs(delta)}%`}
             onClick={() => setSpeed(nudgeSpeedRatio(ratio, delta))}
           >
@@ -110,7 +113,9 @@ export function LoopSpeedControl({
           Saved on this device. It's sent when you're back online.
         </p>
       )}
-      {update.isError && <ErrorAlert>Couldn't save the speed: {update.error.message}</ErrorAlert>}
+      {update.isError && (
+        <ErrorAlert>Couldn't save the speed. {failureCopy(update.error)}</ErrorAlert>
+      )}
     </div>
   );
 }

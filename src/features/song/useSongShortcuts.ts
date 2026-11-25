@@ -14,6 +14,7 @@ import {
   neighbourLoop,
   nextCountInBars,
   resolveShortcut,
+  shortcutAnnouncement,
   steppedBar,
   type Direction,
   type ShortcutAction,
@@ -35,6 +36,9 @@ interface SongShortcutInputs {
  */
 export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs) {
   const [helpOpen, setHelpOpen] = useState(false);
+  // What the last key changed, for a live region: the control it changed may be folded
+  // away or out of sight, and focus is elsewhere.
+  const [announcement, setAnnouncement] = useState('');
   const openHelp = useCallback(() => setHelpOpen(true), []);
   const closeHelp = useCallback(() => setHelpOpen(false), []);
 
@@ -79,7 +83,11 @@ export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs
         setHelpOpen((open) => !open);
         return;
       }
+      const { player: pressed } = latest.current;
+      const before = pressed?.getSnapshot();
       runShortcut(resolved.action, latest.current);
+      const said = before && pressed && shortcutAnnouncement(before, pressed.getSnapshot());
+      if (said) setAnnouncement(said);
     };
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.key !== ' ' || !swallowSpaceKeyup) return;
@@ -95,7 +103,7 @@ export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs
     };
   }, []);
 
-  return { helpOpen, openHelp, closeHelp };
+  return { helpOpen, openHelp, closeHelp, announcement };
 }
 
 function runShortcut(
@@ -110,7 +118,7 @@ function runShortcut(
       return;
     case 'speedUp':
     case 'speedDown':
-      if (!canChangeOptions(player)) return;
+      if (!canChangeOptions(player, snapshot)) return;
       player.setSpeed(
         nudgeSpeedRatio(
           snapshot.speedRatio,
@@ -128,7 +136,7 @@ function runShortcut(
       );
       return;
     case 'metronome':
-      if (canChangeOptions(player)) player.setMetronomeOn(!snapshot.metronomeOn);
+      if (canChangeOptions(player, snapshot)) player.setMetronomeOn(!snapshot.metronomeOn);
       return;
     case 'drumsMuted':
       if (canUseDrumToggles(player, snapshot)) player.setDrumsMuted(!snapshot.drumsMuted);
@@ -137,7 +145,8 @@ function runShortcut(
       if (canUseDrumToggles(player, snapshot)) player.setDrumsOnly(!snapshot.drumsOnly);
       return;
     case 'countIn':
-      if (canChangeOptions(player)) player.setCountInBars(nextCountInBars(snapshot.countInBars));
+      if (canChangeOptions(player, snapshot))
+        player.setCountInBars(nextCountInBars(snapshot.countInBars));
       return;
   }
 }

@@ -109,11 +109,14 @@ describe('PlayerControls transport', () => {
     expect(engine.stop).toHaveBeenCalledTimes(1);
   });
 
-  it('disables playback when the player is in error', () => {
+  it('disables playback and every option when the player is in error', () => {
     const { engine } = setup();
     act(() => engine.fire('error', { error: new Error('render') }));
-    expect(playButton()).toBeDisabled();
-    expect(backToStart()).toBeDisabled();
+    for (const control of [playButton(), backToStart(), speed(), metronome(), volume()]) {
+      expect(control).toBeDisabled();
+    }
+    expect(muteDrums()).toBeDisabled();
+    expect(drumsOnly()).toBeDisabled();
   });
 });
 

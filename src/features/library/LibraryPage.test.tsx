@@ -100,7 +100,7 @@ describe('LibraryPage', () => {
     queryResult.mockResolvedValueOnce({ data: null, error: { message: 'network down' } });
     const { user } = renderLibrary();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't load your songs: network down",
+      "Couldn't load your songs. Something went wrong. Try again.",
     );
     serveLibrary(library);
     await user.click(screen.getByRole('button', { name: 'Try again' }));
@@ -205,7 +205,9 @@ describe('LibraryPage', () => {
     expect(screen.queryByText('No songs match your search.')).not.toBeInTheDocument();
 
     failSave();
-    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save the song: offline");
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't save the song. Something went wrong. Try again.",
+    );
     expect(screen.getByLabelText('Title')).toHaveValue('Intro Groove');
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -237,6 +239,26 @@ describe('LibraryPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: `Delete ${next}` })).toHaveFocus(),
     );
+  });
+
+  it('hands focus to the upload once the last song is deleted', async () => {
+    serveLibrary([library[0]!]);
+    const { user } = renderLibrary();
+    await screen.findByRole('list');
+    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await user.click(screen.getByRole('button', { name: 'Delete song' }));
+    expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Upload a Guitar Pro file')).toHaveFocus());
+  });
+
+  it('hands focus to the search when the deleted song was the only one it showed', async () => {
+    serveLibrary(library);
+    const { user } = renderLibrary('/library?q=halo');
+    await screen.findByRole('list');
+    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await user.click(screen.getByRole('button', { name: 'Delete song' }));
+    expect(await screen.findByText('No songs match your search.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Search title or artist')).toHaveFocus());
   });
 
   describe('focus after a rename that leaves the search (Copilot review)', () => {

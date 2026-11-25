@@ -175,7 +175,7 @@ describe('UploadPanel', () => {
     await user.upload(picker(), gpFile());
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't upload groove.gp: insert failed",
+      "Couldn't upload groove.gp. Something went wrong. Try again.",
     );
     expect(storageMethods()).toEqual(['upload', 'remove']);
   });

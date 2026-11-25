@@ -22,6 +22,7 @@ import {
   SIGN_IN_CODE_LENGTH,
   SIGN_IN_CODE_PATTERN,
 } from './signInInput';
+import { signInFailureCopy } from '@/lib/errorCopy';
 
 /** Step one asks for an email; once it's sent, step two takes the code from it. */
 export function LoginPage() {
@@ -49,7 +50,7 @@ export function LoginPage() {
   };
 
   const sendError = sendEmail.error && (
-    <ErrorAlert>Couldn't send the email: {sendEmail.error.message}</ErrorAlert>
+    <ErrorAlert>Couldn't send the email. {signInFailureCopy(sendEmail.error)}</ErrorAlert>
   );
 
   return (
@@ -203,7 +204,7 @@ function CodeStep({
           {verifyCode.isPending ? 'Checking…' : 'Sign in with code'}
         </button>
         {verifyCode.error && (
-          <ErrorAlert>That code didn't work: {verifyCode.error.message}</ErrorAlert>
+          <ErrorAlert>That code didn't work. {signInFailureCopy(verifyCode.error)}</ErrorAlert>
         )}
       </form>
       <div className="flex flex-wrap gap-2 text-sm">

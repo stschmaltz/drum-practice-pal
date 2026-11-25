@@ -32,11 +32,13 @@ const LOOP_WRITES = ['insert', 'update', 'delete'] as const;
  * update, delete). Pass a loops query to `answer`; a test whose client serves
  * only loops uses `serveLoopTable` instead. Tests read `rows()` to see what
  * was saved and `sent(method)` for the payloads. `failNext(method, message)`
- * makes the next such query fail; `holdNext(method)` keeps it pending.
+ * makes the next such query fail; `holdNext(method)` keeps it pending;
+ * `loseNext(method)` carries it out and then answers as a dropped connection.
  */
 export function loopTable(initial: Loop[] = []) {
   let rows = initial;
   const failures = new Map<LoopQueryMethod, string>();
+  const lost = new Set<LoopQueryMethod>();
   const gates = new Map<LoopQueryMethod, Promise<void>>();
   const eq = (call: QueryCall, column: string) =>
     call.ops.find((op) => op.method === 'eq' && op.args[0] === column)?.args[1];
@@ -56,9 +58,20 @@ export function loopTable(initial: Loop[] = []) {
     }
     const failed = failure(method);
     if (failed) return failed;
+    const result = carryOut(call, method);
+    if (!lost.delete(method)) return result;
+    return { data: null, error: { message: 'TypeError: Failed to fetch', code: '' } };
+  }
 
+  function carryOut(call: QueryCall, method: LoopQueryMethod): FakeResult {
     if (method === 'insert') {
       const inserted = opArgs(call, 'insert')?.[0] as Partial<Loop>;
+      if (rows.some((row) => row.id === inserted.id)) {
+        return {
+          data: null,
+          error: { message: 'duplicate key value violates unique constraint', code: '23505' },
+        };
+      }
       const row = loopRow(inserted.id ?? 'new', inserted);
       rows = [...rows, row];
       return { data: row, error: null };
@@ -72,6 +85,8 @@ export function loopTable(initial: Loop[] = []) {
       rows = rows.filter((row) => row.id !== eq(call, 'id'));
       return { data: null, error: null };
     }
+    const id = eq(call, 'id');
+    if (id !== undefined) return { data: rows.find((row) => row.id === id) ?? null, error: null };
     return { data: rows.filter((row) => row.song_id === eq(call, 'song_id')), error: null };
   }
 
@@ -84,6 +99,10 @@ export function loopTable(initial: Loop[] = []) {
     },
     failNext: (method: LoopQueryMethod, message: string) => {
       failures.set(method, message);
+    },
+    /** Carries out the next such query, then answers it as a connection that dropped. */
+    loseNext: (method: LoopQueryMethod) => {
+      lost.add(method);
     },
     /** Holds the next such query until the returned function is called, to see the pending state. */
     holdNext: (method: LoopQueryMethod) => {

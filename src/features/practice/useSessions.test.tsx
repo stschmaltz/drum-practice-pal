@@ -6,7 +6,13 @@ import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import { sessionKeys } from './sessionKeys';
 import type { PracticeSession } from './sessions';
 import type { SessionRecord } from './sessionTracker';
-import { logSessionUnobserved, sessionLogged, useLogSession, useLoopSessions } from './useSessions';
+import {
+  logSessionUnobserved,
+  sessionLogged,
+  sessionLoopGone,
+  useLogSession,
+  useLoopSessions,
+} from './useSessions';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -146,6 +152,31 @@ describe('sessionLogged', () => {
   });
 });
 
+describe('sessionLoopGone', () => {
+  it('reads every loop list again, and nothing else', () => {
+    const queryClient = cachedClient();
+    const forSong = loopKeys.forSong(USER, 'song-1');
+    queryClient.setQueryData(forSong, []);
+
+    sessionLoopGone(queryClient, USER);
+
+    expect(isInvalidated(queryClient, practiceKey)).toBe(true);
+    expect(isInvalidated(queryClient, forSong)).toBe(true);
+    expect(isInvalidated(queryClient, historyKey)).toBe(false);
+    expect(isInvalidated(queryClient, songsKey)).toBe(false);
+  });
+
+  it('leaves the loops alone while a loop write is pending: its own settle reads them', () => {
+    const queryClient = cachedClient();
+    pendingWrite(queryClient, loopKeys.writes(USER));
+    expect(queryClient.isMutating({ mutationKey: loopKeys.writes(USER) })).toBe(1);
+
+    sessionLoopGone(queryClient, USER);
+
+    expect(isInvalidated(queryClient, practiceKey)).toBe(false);
+  });
+});
+
 describe('useLogSession', () => {
   const renderLog = (queryClient = cachedClient()) => ({
     queryClient,
@@ -162,14 +193,16 @@ describe('useLogSession', () => {
     expect(isInvalidated(queryClient, practiceKey)).toBe(true);
   });
 
-  it('touches no cache for a loop that has been deleted', async () => {
+  it('for a loop deleted on another device, adds no history but reads the loops again', async () => {
     queryResult.mockResolvedValue(fail('violates foreign key constraint', '23503'));
     const { queryClient, result } = renderLog();
 
     await expect(result.current.mutateAsync(record)).resolves.toBe('loopGone');
 
     expect(queryClient.getQueryData<PracticeSession[]>(historyKey)).toEqual([earlier]);
-    expect(isInvalidated(queryClient, practiceKey)).toBe(false);
+    // The lists, and the song page looping it, still show the loop until they are read again.
+    expect(isInvalidated(queryClient, practiceKey)).toBe(true);
+    expect(isInvalidated(queryClient, songsKey)).toBe(false);
   });
 
   it('touches no cache when the log fails, and rejects so the caller can keep the session', async () => {

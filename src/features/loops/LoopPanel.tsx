@@ -53,6 +53,7 @@ import { LoopStatusButton } from './LoopStatusButton';
 import { loopPanelIsSheet, playLoopClosesPanel } from './useLoopPanelOpen';
 import { useDeleteLoop, useLoops, useSetLoopStatus } from './useLoops';
 import type { LoopPractice } from './useLoopPractice';
+import { failureCopy } from '@/lib/errorCopy';
 
 interface LoopPanelProps {
   songId: string;
@@ -340,7 +341,7 @@ function FinishPrompt({
         </button>
       </div>
       {status.error && (
-        <ErrorAlert>Couldn't mark the loop finished: {status.error.message}</ErrorAlert>
+        <ErrorAlert>Couldn't mark the loop finished. {failureCopy(status.error)}</ErrorAlert>
       )}
     </div>
   );
@@ -568,7 +569,8 @@ function LoopListItem({
             {active ? 'Restart loop' : 'Play loop'}
             {named}
           </button>
-          <LoopStatusButton loop={loop} onSet={onStatusSet} />
+          {/* The prompt says why its own refused "Mark finished" failed: once is enough. */}
+          <LoopStatusButton loop={loop} onSet={onStatusSet} showError={!active?.askToFinish} />
           <OverflowMenu
             name={loop.name}
             // The button stands for what its menu holds: closing the edit form and "Keep it"
@@ -659,7 +661,9 @@ function ConfirmDelete({
       {!online && (
         <OfflineNote>You're offline. Loops can be deleted once you're back online.</OfflineNote>
       )}
-      {remove.isError && <ErrorAlert>Couldn't delete the loop: {remove.error.message}</ErrorAlert>}
+      {remove.isError && (
+        <ErrorAlert>Couldn't delete the loop. {failureCopy(remove.error)}</ErrorAlert>
+      )}
     </div>
   );
 }

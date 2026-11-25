@@ -824,7 +824,7 @@ describe('LoopPanel deleting a loop', () => {
     await view.user.click(confirmFor(view, 'Late').getByRole('button', { name: 'Delete loop' }));
 
     expect(await confirmFor(view, 'Late').findByRole('alert')).toHaveTextContent(
-      "Couldn't delete the loop: network",
+      "Couldn't delete the loop. Something went wrong. Try again.",
     );
     expect(view.names()).toEqual(['Intro', 'Late']);
 
@@ -1012,7 +1012,7 @@ describe('LoopPanel finishing a loop', () => {
 
     await waitFor(() => expect(finishedNames(view)).toEqual(['Intro']));
     expect(await view.item('Intro').findByRole('alert')).toHaveTextContent(
-      "Couldn't change the loop: nope",
+      "Couldn't change the loop. Something went wrong. Try again.",
     );
   });
 
@@ -1029,9 +1029,11 @@ describe('LoopPanel finishing a loop', () => {
     refuse();
 
     expect(await view.panel.findByTestId('finish-prompt')).toHaveTextContent(
-      "Couldn't mark the loop finished: nope",
+      "Couldn't mark the loop finished. Something went wrong. Try again.",
     );
     expect(savedLate(view)?.status).toBe('active');
+    // Said once, in the prompt, not again under the loop's buttons (09 QA issue 3).
+    expect(view.panel.getAllByRole('alert')).toHaveLength(1);
   });
 
   it('asks when the speed shows as the target’s percent, though its ratio is a hair under', async () => {
@@ -1445,7 +1447,7 @@ describe('LoopPanel keeping focus', () => {
       expect(view.panel.queryByRole('region', { name: 'Finished loops' })).not.toBeInTheDocument(),
     );
     expect(await view.item('Intro').findByRole('alert')).toHaveTextContent(
-      "Couldn't change the loop: nope",
+      "Couldn't change the loop. Something went wrong. Try again.",
     );
     const finish = view.panel.getByRole('button', { name: 'Mark finished Intro' });
     expectUnlocked(finish);

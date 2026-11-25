@@ -96,7 +96,7 @@ export function PlayerControls({
   onShowLoopSpeed = null,
 }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist.
-  const optionsDisabled = !canChangeOptions(player);
+  const optionsDisabled = !canChangeOptions(player, snapshot);
   const drumTogglesDisabled = !canUseDrumToggles(player, snapshot);
   const noDrumsReason = snapshot.hasDrumTrack ? undefined : 'This song has no drum track';
   const folded = fold?.folded ?? false;

@@ -11,6 +11,7 @@ import {
 import { useSignedInUser } from '@/lib/auth';
 import { isOnline, useOnline } from '@/lib/network';
 import { useSignOut } from './useAuthActions';
+import { failureCopy } from '@/lib/errorCopy';
 
 /**
  * RequireAuth redirects to /login once the SIGNED_OUT event lands. Signing
@@ -53,7 +54,7 @@ export function SignOutButton({ className = buttonClass }: { className?: string 
           </OfflineNote>
         )
       )}
-      {signOut.error && <ErrorAlert>Couldn't sign out: {signOut.error.message}</ErrorAlert>}
+      {signOut.error && <ErrorAlert>Couldn't sign out. {failureCopy(signOut.error)}</ErrorAlert>}
     </div>
   );
 }

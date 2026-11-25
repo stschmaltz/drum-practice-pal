@@ -268,6 +268,39 @@ describe('metronome, drums and count-in', () => {
     expect(view.engine.soundingTracks()).toEqual(sounding);
   });
 
+  it('after the player has failed, the speed, M, D, S and C change nothing, as their controls are off', async () => {
+    const view = await renderShortcuts();
+    act(() => view.engine.fire('error', { error: new Error('render') }));
+    const before = view.player.getSnapshot();
+
+    for (const k of ['ArrowUp', 'ArrowDown', 'm', 'd', 's', 'c']) view.key(k);
+    const after = view.player.getSnapshot();
+    expect(after.status).toBe('error');
+    expect(after).toMatchObject({
+      speedRatio: before.speedRatio,
+      metronomeOn: before.metronomeOn,
+      drumsMuted: before.drumsMuted,
+      drumsOnly: before.drumsOnly,
+      countInBars: before.countInBars,
+    });
+  });
+
+  it('says what each key changed, for a screen reader, and nothing for a key that changed nothing', async () => {
+    const view = await renderShortcuts(undefined, { drumTrackIndex: null });
+    const said = () => view.hook.result.current.shortcuts.announcement;
+    expect(said()).toBe('');
+
+    view.key('ArrowUp');
+    expect(said()).toBe('Speed 105%');
+    view.key('m');
+    expect(said()).toMatch(/^Metronome (on|off)$/);
+    view.key('c');
+    expect(said()).toBe('Count-in 1 bar');
+    // No drum track: D changes nothing, so the last thing said stands.
+    view.key('d');
+    expect(said()).toBe('Count-in 1 bar');
+  });
+
   it('C cycles the count-in: off, 1 bar, 2 bars, off', async () => {
     const view = await renderShortcuts();
     expect(view.player.getSnapshot().countInBars).toBe(0);

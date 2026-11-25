@@ -1866,6 +1866,17 @@ describe('SongPage practice sessions', () => {
     expect(playButton()).toHaveTextContent('Pause');
   });
 
+  it('drops "Practice logged" once its loop is deleted (09 QA issue 4)', async () => {
+    const { user, panel } = await playVerseFor(45);
+    expect(await screen.findByTestId('session-logged')).toHaveTextContent('of Verse at 80%.');
+
+    await chooseFromMenu(user, panel, 'Verse', 'Delete');
+    await user.click(panel.getByRole('button', { name: 'Delete loop' }));
+
+    await waitFor(() => expect(panel.queryByText('Verse')).not.toBeInTheDocument());
+    expect(screen.queryByTestId('session-logged')).not.toBeInTheDocument();
+  });
+
   it('counts the sessions it could not save, and Try again sends each of them', async () => {
     serve({ loops: [verse] });
     const sessionLogs = failSessionLogs();

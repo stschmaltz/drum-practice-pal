@@ -307,7 +307,7 @@ describe('LoopSpeedControl Save speed', () => {
     await view.user.click(view.save());
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't save the speed: permission denied",
+      "Couldn't save the speed. Something went wrong. Try again.",
     );
     await waitFor(() => expect(view.saved()).toHaveTextContent('Saved: 80% (96 BPM)'));
     expect(view.percent()).toHaveValue('85');

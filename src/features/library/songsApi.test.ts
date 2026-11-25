@@ -1,3 +1,4 @@
+import { FAILURE_COPY, UserFacingError } from '@/lib/errorCopy';
 import { GP_FILE_MAX_BYTES, songFilePath } from '@/lib/schema';
 import {
   opArgs,
@@ -157,12 +158,55 @@ describe('uploadSong', () => {
     expect(remove).toMatchObject({ method: 'remove', args: [[upload!.args[0]]] });
   });
 
-  it('says so when the rollback fails too', async () => {
-    answerQueries(ok(null), fail('insert failed'));
+  it('says so when the rollback fails too, in fixed copy', async () => {
+    answerQueries(ok(null), fail('insert failed', '42501'));
     storageResult.mockResolvedValueOnce(ok({})).mockResolvedValueOnce(fail('remove failed'));
-    await expect(uploadSong(USER, gpFile())).rejects.toThrow(
-      "insert failed The uploaded file couldn't be removed either: remove failed",
+    const upload = uploadSong(USER, gpFile());
+    await expect(upload).rejects.toBeInstanceOf(UserFacingError);
+    await expect(upload).rejects.toThrow(
+      `${FAILURE_COPY.refused} A copy of the file may be left on the server.`,
     );
+  });
+
+  describe('a lost answer', () => {
+    const dropped = () => fail('TypeError: Failed to fetch', '');
+
+    it('to the insert, with the row saved: the song was added, and its file stays', async () => {
+      answerQueries(ok(null), dropped(), ok(savedRow));
+      expect(await uploadSong(USER, gpFile())).toEqual({
+        kind: 'uploaded',
+        song: { ...savedRow, last_practiced_at: null },
+      });
+      expect(storageCalls().map((call) => call.method)).toEqual(['upload']);
+      const [row] = opArgs(insertCall()!, 'insert') as [{ id: string }];
+      const lookup = queries()[2]!;
+      expect(lookup.ops.filter((op) => op.method === 'eq').map((op) => op.args)).toEqual([
+        ['id', row.id],
+        ['user_id', USER],
+      ]);
+    });
+
+    it('to the insert, with no row saved: removes the file and says why', async () => {
+      answerQueries(ok(null), dropped(), ok(null));
+      await expect(uploadSong(USER, gpFile())).rejects.toThrow('Failed to fetch');
+      expect(storageCalls().map((call) => call.method)).toEqual(['upload', 'remove']);
+    });
+
+    it('to the insert, and the look-up fails too: keeps the file, which the row may name', async () => {
+      answerQueries(ok(null), dropped(), dropped());
+      await expect(uploadSong(USER, gpFile())).rejects.toThrow(
+        `${FAILURE_COPY.network} The song may have been added anyway: reload the library to see.`,
+      );
+      expect(storageCalls().map((call) => call.method)).toEqual(['upload']);
+    });
+
+    it('to the upload: removes whatever was stored, and inserts nothing', async () => {
+      answerQueries(ok(null));
+      storageResult.mockResolvedValueOnce(dropped());
+      await expect(uploadSong(USER, gpFile())).rejects.toThrow('Failed to fetch');
+      expect(storageCalls().map((call) => call.method)).toEqual(['upload', 'remove']);
+      expect(insertCall()).toBeUndefined();
+    });
   });
 
   it('treats a unique violation as a duplicate added meanwhile, after removing its file', async () => {
