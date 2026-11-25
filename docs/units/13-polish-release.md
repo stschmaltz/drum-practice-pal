@@ -33,7 +33,7 @@ Changed:
 - `songsApi.ts` (+ test), `loopsApi.ts` (+ test), `src/test/loopTable.ts` (`loseNext`, 23505 on a taken id, select by id).
 - `controlGates.ts`, `PlayerControls.tsx` (+ test), `useSongShortcuts.ts` (+ test), `shortcuts.ts` (+ test), `SongPage.tsx` (+ test).
 - `useSessions.ts` (+ test), `usePracticeTracker.ts`.
-- `src/App.tsx`, `vite.config.ts`, `.gitignore`, `tests/e2e/player.spec.ts`.
+- `src/App.tsx`, `vite.config.ts`, `.gitignore`. (`tests/e2e/player.spec.ts` was changed here before the rebase onto unit-12; its count-in Pause case went with the rebase, see item 11.)
 - `README.md`, `AGENTS.md` (spike mentions gone; new "Polish and release (from Unit 13)" section; the "never render" convention covers error messages), `docs/plan.md` (Carried forward lines dealt with deleted or trimmed; the two pre-push SQL lines replaced by one line pointing at `docs/release.md`).
 
 ### Decisions
@@ -238,3 +238,42 @@ Looked at and left: `UploadFailure`'s two wordings (an app-written `SongFileErro
 
 - Before: `npm run check` 111 files, 4312 tests green; `npm run e2e` (`E2E_PORT=4180`, fresh development build) 394 passed, 24 skipped, 2 failed (`offline.spec.ts:339` on phone and tablet, the known race QA diagnosed).
 - After: `npm run check` 111 files, 4313 tests green (one more case from a test that walks `src/` files, which now has `postgresCodes.ts`); `npm run e2e` (same setup, rebuilt) 396 passed, 24 skipped, 0 failed.
+
+## Review
+
+Against `git diff unit-12...HEAD` (the branch is stacked on unit-12), scripts, tests and docs included, walked through `docs/review-checklist.md`.
+
+### Inventory
+
+- `uploadSong` (`songsApi.ts`): the lost-upload removal, the lost-insert look-up (`findSavedSong`), `removeUploadedFile`'s copy.
+- `createLoop` (`loopsApi.ts`) and `LoopEditorForm`'s one `newLoopId` per form; `useCreateLoop`'s `onSuccess` (dedupes by id).
+- `errorCopy.ts` (`failureKind`, `failureCopy`, `signInFailureCopy`, `UserFacingError`), `postgresCodes.ts`, and every screen that now renders `failureCopy`.
+- `controlGates.ts` (`canChangeOptions` off under `error`) and its callers: `PlayerControls`, `LoopSpeedControl` (fields, nudges, `setSpeed`), `useSongShortcuts`.
+- `useSongShortcuts`' announcement and `SongPage`'s live region.
+- `LibraryPage`'s focus hand-overs (delete moved up to the page; edit close in the list).
+- `sessionLoopGone` (`useSessions.ts`) on the mutation path and the keepalive path (`usePracticeTracker.ts`).
+- `SessionNotice` (dropped once its loop is gone), `LoopStatusButton`'s `showError`.
+- `aria-describedby` on `SongListItem`'s `TextField`, `LoopEditorForm`'s `Field` and the metronome volume.
+- `loopTable` (`loseNext`, 23505 on a taken id, select by id); e2e `journey.spec.ts`, `release-fixes.spec.ts`, `libraryPage.ts`; the spike's removal (`App.tsx`, `vite.config.ts`).
+
+### Findings
+
+1. **Fixed: Cancel on a song's edit form left focus on `<body>`** (checklist 5, focus when a control replaces itself). 13 Build moved the library's `useFocusWhenReady` from `SongList` up to `LibraryPage` so the last song's delete could use it, but the hook looks again only on its owner's renders, and a Cancel re-renders the list (its editing ids), not the page. The press asked for focus and nothing ever gave it. `LibraryPage.tsx:32` keeps the page's hook for the delete hand-over only (`focusAfterDelete`), and `SongList` has its own again (`:120`) for the edit form's. New test, "Cancel hands focus back to the song's Edit, with nothing saved", `LibraryPage.test.tsx`; it failed before the fix. Added a sentence to that checklist row: the owner of the wait must be a component the change re-renders.
+2. **Fixed: the same announcement twice wasn't read again** (13 QA issue 1). `useSongShortcuts` now keeps `{ text, count }` and `SongPage` renders `announcementText(announcement)` (`useSongShortcuts.ts:122`), which ends every other saying in a no-break space, so M, a click on Metronome, M is a DOM change each time; Testing Library and Playwright normalise the space, so text assertions are unchanged. Test "the same change said twice is still a change to the live region" (fails with the alternation removed). New checklist row in section 6, and the AGENTS.md Unit 13 bullet says how a repeatable live region works.
+3. **Fixed, in scope: switching loops (or bars) by key said nothing** (13 QA note). Loop keys are the pedal's whole job and the change is out of sight, which is what the live region was for. `stepLoopOrBar` returns where it moved (`Loop Verse`, `Bar 5`) and `shortcutAnnouncement` puts it first (`Loop Verse, Speed 80%`). Tests in `useSongShortcuts.test.tsx` (by loop, by bar) and `shortcuts.test.ts`.
+4. **Fixed: `offline.spec.ts` "a loop opens from the home page…" was flaky** (13 Test, 13 QA). QA's diagnosis holds: Chromium's offline emulation can fire `online` in the document `page.goto` is leaving, and that document sends the queued "Mark finished" unseen. After the finish is queued the spec now moves to Settings and the Library by the nav links (`navLink` takes `'Settings'` now), so no document is left with a write queued; the cold start's `page.goto('/')` comes before anything is queued. The pattern is in AGENTS.md (Unit 11 e2e patterns). Proven: `--repeat-each=30` on phone, 4 workers, 30 of 30; again with 8 workers after a fresh build, 30 of 30. The race itself couldn't be forced on demand (QA saw it 1 in 10 to 1 in 20), so the old form wasn't re-run to show a failure.
+5. **Logged: postgrest-js retries every failed GET itself** (13 QA issue 2). `.retry(false)` exists in 2.119, but turning it off for the upload's look-up makes "may have been added" commoner on flaky Wi-Fi; a product call, not a defect. Unit 13 Carried forward in `docs/plan.md`.
+6. **Logged: a stale persisted list can show "No songs yet"** (13 QA issue 3, older, seen once). Unit 13 Carried forward.
+7. **Rebase seam: clean.** No `overflow-anchor` left in Unit 13's code; unit-12's `useStaysOnScreen` owns it, and `player.spec.ts` has no Unit 13 change. `docs/plan.md`'s "Pause with a count-in" line is gone (unit-12 removed it); nothing in Carried forward is duplicated. The Build note's Files touched still listed `tests/e2e/player.spec.ts`; corrected.
+
+Checked and left alone: `uploadSong`'s look-up checks its `error` and keeps the file when it can't tell; a network-failed upload removes what reached Storage and says so if that fails too; the cancel paths are unchanged. `createLoop`'s 23505 look-up checks its error, and a 23505 with no row by that id falls through to the original error. `useCreateLoop` dedupes by id, so a refetch between the two presses can't list the loop twice. `failureKind` matches storage-js 2.x (`StorageUnknownError.originalError` is the `TypeError`, checked in `node_modules`). No `.message` of a foreign error is rendered anywhere in `src` (`tests/unit/errorMessages.test.ts` plus a grep of `.ts` files too). Every `canChangeOptions` caller passes the snapshot; nothing else sets speed or options round the gate. No listeners, timers or engine DOM were added. No bar maths changed. No secrets in `docs/release.md` or the README. Teardown: the new e2e specs use the `user` fixture.
+
+### Environment note
+
+`npm run test:db` has 1 failure, `session-sanity.test.ts` "at most two days ahead", with "ended_at … is more than a day ahead". That message is not in this branch's migrations: the shared local database carries `20261123020000_session_ended_at.sql` from the `unit-09-copilot` worktree. Neither `supabase/` nor `tests/db/` changes on this branch, and the database wasn't reset (shared stack). It is environmental. Re-run after `db:reset` on this branch's migrations to confirm, and settle the unit-09-copilot migration before merge.
+
+### Results
+
+- `npm run check`: 111 files, 4337 tests green.
+- `npm run test:db`: 204 passed, 1 failed (the environment note above).
+- `npm run e2e` (`E2E_PORT=4180`, fresh `npm run build -- --mode development`): 407 passed, 28 skipped, 0 failed (435 listed). The rewritten `offline.spec.ts` case passed at all three sizes.

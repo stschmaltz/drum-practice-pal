@@ -28,8 +28,8 @@ export function LibraryPage() {
   // Once there are songs the upload is a button, and the list takes a dropped file.
   const hasSongs = songs.data !== undefined && songs.data.length > 0;
   // Here, not in the list: deleting the last song takes the list away, and its
-  // focus hand-over with it.
-  const focusWhenReady = useFocusWhenReady();
+  // focus hand-over with it. The page re-renders when a song leaves the cache.
+  const focusAfterDelete = useFocusWhenReady();
 
   return (
     <div className="flex flex-col gap-6">
@@ -51,7 +51,7 @@ export function LibraryPage() {
             No songs yet. Upload a Guitar Pro file to start your library.
           </EmptyState>
         ) : (
-          <SongList songs={songs.data} focusWhenReady={focusWhenReady} />
+          <SongList songs={songs.data} focusAfterDelete={focusAfterDelete} />
         )}
       </UploadPanel>
     </div>
@@ -105,10 +105,10 @@ function useEditingIds() {
 
 function SongList({
   songs,
-  focusWhenReady,
+  focusAfterDelete,
 }: {
   songs: LibrarySong[];
-  focusWhenReady: FocusWhenReady;
+  focusAfterDelete: FocusWhenReady;
 }) {
   const { query, sort, setQuery, setSort } = useLibraryView();
   const searchId = useId();
@@ -116,6 +116,8 @@ function SongList({
   const [editingIds, onEditingChange] = useEditingIds();
   const shown = sortSongs(searchSongs(songs, query, editingIds), sort);
   const searchRef = useRef<HTMLInputElement>(null);
+  // The list's own: a Cancel re-renders the list (its editing ids), not the page.
+  const focusWhenReady = useFocusWhenReady();
 
   // Closing the edit form brings back the song's Edit, unless a saved rename no
   // longer matches the search: the song leaves the list once the form has closed,
@@ -141,7 +143,7 @@ function SongList({
       shown.map((song) => song.id),
       songId,
     );
-    focusWhenReady(() => {
+    focusAfterDelete(() => {
       if (isItemListed(songId)) return null;
       if (nextId !== null) return findItemControl(nextId, 'delete');
       return searchRef.current ?? findUploadPicker();

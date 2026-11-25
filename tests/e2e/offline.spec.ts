@@ -19,6 +19,7 @@ import { openFixture, playButton } from './playerPage';
 import {
   homeItem,
   loopsOf,
+  navLink,
   playFor,
   sessionCount,
   sessionsOf,
@@ -386,8 +387,12 @@ test('offline, a loop opens from the home page and every control that needs the 
   const reopen = loopItem(page, 'Verse').getByRole('button', { name: /^Reopen/ });
   await expect(reopen).toHaveAttribute('aria-disabled', 'true');
 
+  // From here on, screens change by the nav links, not page.goto: Chromium's offline
+  // emulation can fire `online` in a document being left (navigator.onLine still false),
+  // which sends the queued finish from it, unseen by Playwright (13 QA). A real browser
+  // fires `online` only once the connection is back.
   // Settings: a change can be made but not saved; sign-out waits for the connection.
-  await page.goto('/settings');
+  await navLink(page, 'Settings').click();
   await page.getByRole('radio', { name: '2 bars' }).check();
   await expect(page.getByRole('button', { name: 'Save settings' })).toBeDisabled();
   await expect(settingsSignOut(page)).toBeDisabled();
@@ -396,7 +401,7 @@ test('offline, a loop opens from the home page and every control that needs the 
   ).toBeVisible();
 
   // The library: no edits or deletes.
-  await page.goto('/library');
+  await navLink(page, 'Library').click();
   await page.getByRole('button', { name: 'Edit Groove 120' }).click();
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Cancel' }).click();

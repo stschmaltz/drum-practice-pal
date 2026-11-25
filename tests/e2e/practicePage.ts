@@ -41,7 +41,7 @@ export async function loopsOf(user: E2eUser) {
 export const sessionLogged = (page: Page) => page.getByTestId('session-logged');
 
 /** The bottom tabs on a phone, the sidebar from 768 px; only one is on show. */
-export const navLink = (page: Page, name: 'On the go' | 'Library') =>
+export const navLink = (page: Page, name: 'On the go' | 'Library' | 'Settings') =>
   page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name });
 
 export const homeTab = (page: Page, name: 'On the go' | 'Finished') =>

@@ -373,6 +373,13 @@ describe('shortcutAnnouncement', () => {
     expect(shortcutAnnouncement(on, options)).toBe('Metronome off, Drums only off, Count-in off');
   });
 
+  it('says where a loop key moved first, alone or with what came with it', () => {
+    expect(shortcutAnnouncement(options, options, 'Bar 5')).toBe('Bar 5');
+    expect(shortcutAnnouncement(options, { ...options, speedRatio: 0.8 }, 'Loop Verse')).toBe(
+      'Loop Verse, Speed 80%',
+    );
+  });
+
   it('says nothing when nothing changed, or only below what the percent shows', () => {
     expect(shortcutAnnouncement(options, options)).toBeNull();
     expect(shortcutAnnouncement(options, { ...options, speedRatio: 1.001 })).toBeNull();

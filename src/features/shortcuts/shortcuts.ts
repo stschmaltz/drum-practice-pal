@@ -295,15 +295,17 @@ const onOff = (on: boolean) => (on ? 'on' : 'off');
 
 /**
  * What to say after a key changed an option, read out by a polite live
- * region (focus is usually nowhere near the control it changed): the options
- * that changed, in the controls bar's words. Null when nothing changed (a
- * gate refused, the speed at its bound).
+ * region (focus is usually nowhere near the control it changed): where a loop
+ * key moved to (`moved`: "Loop Verse", "Bar 5"), then the options that
+ * changed, in the controls bar's words. Null when nothing changed (a gate
+ * refused, the speed at its bound).
  */
 export function shortcutAnnouncement(
   before: AnnouncedOptions,
   after: AnnouncedOptions,
+  moved: string | null = null,
 ): string | null {
-  const said: string[] = [];
+  const said: string[] = moved === null ? [] : [moved];
   if (ratioToPercent(after.speedRatio) !== ratioToPercent(before.speedRatio)) {
     said.push(`Speed ${ratioToPercent(after.speedRatio)}%`);
   }

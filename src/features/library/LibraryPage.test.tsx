@@ -300,6 +300,16 @@ describe('LibraryPage', () => {
       return user;
     };
 
+    // 13 Review: the hand-over lives in LibraryPage, which a Cancel alone doesn't re-render.
+    it('Cancel hands focus back to the song’s Edit, with nothing saved', async () => {
+      serveLibrary(library);
+      const { user } = renderLibrary();
+      await screen.findByRole('list');
+      await user.click(screen.getByRole('button', { name: 'Edit Halo' }));
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Edit Halo' })).toHaveFocus());
+    });
+
     it('goes to the search field when no song is left on show', async () => {
       await rename('/library?q=fill', 'Chorus Fill', 'Intro Groove');
       expect(await screen.findByText('No songs match your search.')).toBeInTheDocument();

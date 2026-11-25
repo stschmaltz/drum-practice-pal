@@ -56,7 +56,7 @@ import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import { useControlsFold } from './useControlsFold';
 import { useJamMode } from './useJamMode';
 import { useRequestedLoop } from './useRequestedLoop';
-import { useSongShortcuts } from './useSongShortcuts';
+import { announcementText, useSongShortcuts } from './useSongShortcuts';
 import { useStaysOnScreen } from './useStaysOnScreen';
 
 /**
@@ -294,7 +294,7 @@ function SongPlayer({
       <ShortcutOverlay open={shortcuts.helpOpen} onClose={shortcuts.closeHelp} />
       {/* On the page from the start: a live region added with its text is often not read. */}
       <p role="status" className="sr-only" data-testid="shortcut-announcement">
-        {shortcuts.announcement}
+        {announcementText(shortcuts.announcement)}
       </p>
     </div>
   );
