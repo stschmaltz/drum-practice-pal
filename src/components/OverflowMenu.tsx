@@ -34,7 +34,9 @@ export interface OverflowMenuItem {
  * Not modal, so nothing is made `inert` (unlike `ShortcutOverlay`), and drawn
  * in place rather than in a portal: it hangs under its button inside the
  * item, so it scrolls with the loop panel's sheet and column, which would clip
- * nothing but would leave a portal behind.
+ * nothing but would leave a portal behind. It hangs from the button's right
+ * edge, and the button sits at the end of its row, so the menu lies over the
+ * item, inside whatever clips it, at every width.
  *
  * `buttonAttributes` are data attributes for focus hand-overs that land on
  * the button (`itemMenuAttributes`, `editButtonAttributes`).
@@ -106,7 +108,10 @@ export function OverflowMenu({
   };
 
   return (
-    <div className="relative">
+    // At the end of its row (ml-auto), the end its menu hangs from: where the item's buttons
+    // wrap and More starts a row of its own, a menu anchored to its right edge would otherwise
+    // run off the item's left (12 QA after the UX pass, issue 1).
+    <div className="relative ml-auto">
       <button
         ref={buttonRef}
         type="button"

@@ -8,8 +8,11 @@
  * that appears in place of a button focuses itself on mount (`tabIndex={-1}`).
  */
 
-/** The item's controls that stand in for one another. */
-export type ItemControl = 'edit' | 'delete';
+/**
+ * The item's controls that stand in for one another, and its main action
+ * (`play`: a loop's Play loop, which takes focus from its Exit loop as that goes).
+ */
+export type ItemControl = 'edit' | 'delete' | 'play';
 
 export function itemControlAttributes(itemId: string, control: ItemControl) {
   return { 'data-item-control': `${control}:${itemId}` };

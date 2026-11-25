@@ -323,3 +323,78 @@ test('the loop sheet and panel keep 44 px targets with a loop playing', async ({
   await expectWellDrawn(page, 'song, loop playing');
   await playButton(page).click();
 });
+
+// 12 QA after the UX pass, issue 1: a loop's "More" menu hung off the panel's left edge
+// wherever More started its row (a phone's active loops, the column's finished ones).
+test('a loop’s More menu opens inside the loop panel, for active and finished loops', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Fill', firstBar: 3, lastBar: 4 });
+  await loopItem(page, 'Fill')
+    .getByRole('button', { name: /^Mark finished/ })
+    .click();
+  await expect(
+    loopPanel(page)
+      .getByRole('region', { name: 'Finished loops' })
+      .getByRole('listitem')
+      .filter({ hasText: 'Fill' }),
+  ).toBeVisible();
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await saveNewLoop(page, { name: 'Chorus', firstBar: 9, lastBar: 12 });
+
+  // Chorus is the loop set up (Now looping), Verse an active loop beside it, Fill finished.
+  for (const name of ['Chorus', 'Verse', 'Fill']) {
+    await openLoopPanel(page);
+    const more = loopItem(page, name).getByRole('button', { name: `More actions for ${name}` });
+    await more.click();
+    const menu = loopPanel(page).getByRole('menu', { name: `Actions for ${name}` });
+    await expect(menu).toBeVisible();
+    // Inside the panel's box and every box that clips it, the window included: all of it shows.
+    await expect
+      .poll(
+        () =>
+          menu.evaluate((el) => {
+            const rect = el.getBoundingClientRect();
+            const panel = el.closest('[data-testid="loop-panel"]');
+            const boxes: {
+              box: DOMRect | { left: number; top: number; right: number; bottom: number };
+              what: string;
+            }[] = [
+              {
+                box: { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight },
+                what: 'window',
+              },
+            ];
+            if (panel) boxes.push({ box: panel.getBoundingClientRect(), what: 'loop panel' });
+            for (let up = el.parentElement; up; up = up.parentElement) {
+              const { overflowX, overflowY } = getComputedStyle(up);
+              if (overflowX !== 'visible' || overflowY !== 'visible') {
+                boxes.push({
+                  box: up.getBoundingClientRect(),
+                  what: `<${up.tagName.toLowerCase()}>`,
+                });
+              }
+            }
+            return boxes
+              .filter(
+                ({ box }) =>
+                  rect.left < box.left - 0.5 ||
+                  rect.top < box.top - 0.5 ||
+                  rect.right > box.right + 0.5 ||
+                  rect.bottom > box.bottom + 0.5,
+              )
+              .map(
+                ({ box, what }) =>
+                  `${what}: menu ${Math.round(rect.left)}..${Math.round(rect.right)} x ${Math.round(rect.top)}..${Math.round(rect.bottom)} in ${Math.round(box.left)}..${Math.round(box.right)} x ${Math.round(box.top)}..${Math.round(box.bottom)}`,
+              );
+          }),
+        { message: `${name}'s menu lies outside` },
+      )
+      .toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(more).toBeFocused();
+  }
+});

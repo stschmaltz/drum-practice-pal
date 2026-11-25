@@ -25,6 +25,7 @@ import {
   findItemControl,
   isItemListed,
   itemAttributes,
+  itemControlAttributes,
   itemMenuAttributes,
   neighbourAfterLeaving,
 } from '@/lib/itemFocus';
@@ -497,6 +498,12 @@ function LoopListItem({
     setConfirmingDelete(false);
     focusWhenReady(() => findItemControl(loop.id, 'delete'));
   };
+  // Exit loop goes with the loop's playing state; its Play loop, which stays, takes focus.
+  const exitLoop = () => {
+    if (!active) return;
+    active.onExit();
+    focusWhenReady(() => findItemControl(loop.id, 'play'));
+  };
   const [showingHistory, setShowingHistory] = useState(false);
   const named = <span className="sr-only"> {loop.name}</span>;
 
@@ -553,6 +560,7 @@ function LoopListItem({
             // Restart is a second action on a loop already playing: the brand stays with Play.
             className={`${active ? buttonClass : primaryButtonClass} mr-1`}
             disabled={!canPlay}
+            {...itemControlAttributes(loop.id, 'play')}
             // No await before the player is told to play: iOS only starts audio inside the tap.
             onClick={onPlay}
           >
@@ -586,7 +594,7 @@ function LoopListItem({
         </div>
       )}
       {active && (
-        <button type="button" className={`${ghostButtonClass} self-start`} onClick={active.onExit}>
+        <button type="button" className={`${ghostButtonClass} self-start`} onClick={exitLoop}>
           <Icon name="close" className="size-4" />
           Exit loop
         </button>

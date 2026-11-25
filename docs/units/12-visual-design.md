@@ -559,3 +559,51 @@ From the plan's Unit 12 row and the UX pass note:
 
 - `npm run check`: 108 files, 4225 tests green.
 - `npm run e2e`: 407 passed, 22 skipped, 0 failed (429 listed), on a fresh `npm run build -- --mode development` from bash, with the fix in. The `vite preview` on 4173 was reused and left running.
+
+## QA fix round (after UX pass)
+
+Build fixes for QA (after UX pass) issues 1, 2 and 4, each with a test seen to fail first (the e2e ones against the build QA left in `dist`, the unit ones before the code).
+
+### Summary
+
+1. **The More menu lies inside its panel (issue 1, major).** `OverflowMenu`'s root takes `ml-auto`, so More is always at the end of its row, the end its right-anchored menu hangs from. Where the item's buttons wrap and More starts a row of its own (a phone's active loops, 320 px's finished loops, the column's finished loops), it now sits at the item's right edge and the 176 px menu lies over the item. Measuring on open was not needed: the narrowest item (320 px, about 264 px inside) is wider than the menu. On wider rows More moves to the right end of the row beside Play loop and the status button, which is where an overflow button usually is.
+2. **The score doesn't move at Play or Pause (issue 2, Test's bug 2).** The window can't scroll above the top of the page, so on a short page (a phone's song page with the sheet closed doesn't scroll at all) `useStaysOnScreen` couldn't make up for the fold. It now holds the part it couldn't scroll as room, a bottom margin it writes on the controls' slot (`data-testid="controls-slot"`, `useStaysOnScreen(scrollRef, controlsRef, fold.folded)`) while folded; the unfold gives the room back first and scrolls only the rest. The rules are pure, in `keepInPlace.ts` (`{ shift, scrollY, reserve }` to `{ scrollBy, reserve }`): moved up, scroll up as far as the window goes and hold the rest; moved down, give back the room, then scroll; then give back any room the window could stand in for, with a scroll up by the same amount (so Chrome's scroll anchoring, which may already have kept the score still at an unfold, can't leave room behind that piles up at every fold). The hook moved to its own module, `src/features/song/useStaysOnScreen.ts`. The Unit 13 line for it in `docs/plan.md` is deleted.
+3. **Exit loop hands focus to the item's Play loop (issue 4).** Play loop carries `itemControlAttributes(loop.id, 'play')` (`ItemControl` has a `play` kind now), and Exit loop schedules `focusWhenReady(() => findItemControl(loop.id, 'play'))` after `onExit`.
+
+### Files
+
+- New: `src/features/song/keepInPlace.ts` (+ test), `src/features/song/useStaysOnScreen.ts` (moved out of `SongPage.tsx`, now also takes the element that holds the room).
+- Changed: `src/components/OverflowMenu.tsx` (`ml-auto`), `src/features/song/SongPage.tsx` (the slot's margin and test id), `src/features/loops/LoopPanel.tsx` (Exit loop's hand-over), `src/lib/itemFocus.ts` (`play`).
+- Tests: `keepInPlace.test.ts`; `SongPage.test.tsx` (the jsdom layout model now has a real `window.scrollY` that stops at 0 and counts the slot's margin; two new cases, from the top and part way down); `LoopPanel.test.tsx` ("Exit loop hands focus to that loop's Play loop"); e2e `player.spec.ts` "on a short page Play and Pause leave the score where it is, from the top, panel open or closed" (scroll anchoring on and off, at all three sizes) and `design.spec.ts` "a loop's More menu opens inside the loop panel, for active and finished loops" (the menu against the window, the panel and every ancestor that clips it).
+- `AGENTS.md`: the `OverflowMenu` bullet (`ml-auto`, the check), the fold bullet (`useStaysOnScreen`, `keepInPlace`, the room), the Loops UI bullet (Exit loop's hand-over). `docs/plan.md`: the Unit 13 line for bug 2 deleted.
+
+### Decisions
+
+- **Room, not a bottom padding.** The suggested padding at the foot of the page gives the window room to scroll down, which is what a Pause needs, but at the top of the page Play needs to scroll up, and nothing below the score can give that. The only way to keep the score still there is to keep the height above it, so the room is a margin under the folded strip (a margin, not padding: the strip sticks, the room scrolls with the page). It holds only what the window couldn't scroll, so on a page that can scroll (a long song, scrolled down) there is none, as before.
+- **The room is below the strip, not above it.** The strip stays right under the jam bar, where it sticks once the page scrolls, so it never moves itself; the room is blank canvas between the strip and the status line.
+- **The margin is written in the layout effect, not through state.** A first version kept the room in state; the layout effect's update rendered again before paint, but React runs the first commit's passive effects before that render, so Play's `scrollIntoView` of the score (`useJamMode`) measured the page without the room and stopped short (the full e2e run caught it: `jam.spec.ts` landscape phone, `loop-scroll.spec.ts` desktop). The slot has no `style` prop, so React never overwrites it.
+- **Play still brings the score on screen.** Where the score box isn't all on show (a tablet's or laptop's 60dvh box under the full controls), Play scrolls the window to it as before (Unit 06); that move is Play's, and the e2e checks the score is then clear of the strip. Where nothing scrolls (a phone), the score doesn't move at all. Pause never moves it.
+- **More moves to the row's end everywhere**, rather than only where it wraps: one place for it, and a menu that never needs measuring.
+
+### Async windows and inputs
+
+- **The room while folded.** A scroll by the user counts as where the score is (the scroll listener, as before) and leaves the room as it is; a Show controls mid-run is an unfold (the room goes first); a stop, the end of the song and a load unfold the same way. A resize while folded can change the strip's height; the unfold then moves the score by a different amount than the room held, and the difference is scrolled (or, at the top, held as room while unfolded until the next fold or unfold settles it). Chrome's scroll anchoring scrolling at an unfold reads as "nothing moved", and the room it scrolled over is given back with a scroll up.
+- **Exit loop's hand-over** waits through `useFocusWhenReady` (up to `FOCUS_WAIT_MS`, only while focus is still on Exit loop or `<body>`). Play loop is the same element before and after, so it is there on the next render.
+- **The menu**: nothing new; the placement is CSS.
+
+### Known gaps
+
+- At the top of a short page, while playing, the room is a band of blank canvas between the folded strip and the score: 163 px on a phone, about 120 to 170 px on a tablet, up to 131 px on a laptop. It is the height the controls had; the score is where it was before Play.
+- If Play loop is disabled when Exit loop is pressed (a player error), `focus()` does nothing and focus stays on `<body>`.
+- Chromium only, as before; Safari's lack of scroll anchoring is stood in for by `overflow-anchor: none`.
+
+### Manual verify
+
+1. Phone, `groove-120`, sheet closed: Play and Pause; the score doesn't move, and while playing there is blank space under the strip. The same with the sheet open, and on a tablet and a laptop.
+2. Phone at 390: a loop's More, active and finished; the whole menu shows. Laptop: a finished loop's More in the column.
+3. Play a loop, Tab to Exit loop, Enter: focus is on that loop's Play loop.
+
+### Results
+
+- `npm run check`: 109 files, 4240 tests green (was 108 / 4225).
+- `npm run e2e`: 413 passed, 22 skipped, 0 failed (435 listed, was 429), on a fresh `npm run build -- --mode development` from bash; the `vite preview` on 4173 was reused and left running. The new e2e failed against the build QA left in `dist` before the fix: the menu check on phone (menu -67..109 against 0..390) and desktop (926 against the panel's 992), the short-page check at all three sizes (Play moved the score 163, 171 and 131 px). The first full run after the fix failed `jam.spec.ts` landscape phone and `loop-scroll.spec.ts` desktop (the room kept in state, see Decisions); both pass since.

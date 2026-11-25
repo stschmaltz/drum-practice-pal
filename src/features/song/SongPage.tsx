@@ -57,6 +57,7 @@ import { useControlsFold } from './useControlsFold';
 import { useJamMode } from './useJamMode';
 import { useRequestedLoop } from './useRequestedLoop';
 import { useSongShortcuts } from './useSongShortcuts';
+import { useStaysOnScreen } from './useStaysOnScreen';
 
 /**
  * /songs/:id. Lazy-loaded from App.tsx with the player. Opens in jam mode
@@ -181,7 +182,8 @@ function SongPlayer({
   const focusWhenReady = useFocusWhenReady();
   // The controls fold and unfold above the score at Play and Pause: the score stays where it
   // is on screen, so a bar tapped just after a Pause is the bar that was under the finger.
-  useStaysOnScreen(scrollRef, fold.folded);
+  // What the window can't scroll back is held as room under the controls.
+  useStaysOnScreen(scrollRef, controlsRef, fold.folded);
   const loops = useLoops(songId);
   const practice = useLoopPractice(player, snapshot, loops.data);
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
@@ -241,6 +243,8 @@ function SongPlayer({
           while playing, it is a strip that sticks under the sticky bar. */}
       <div
         ref={controlsRef}
+        // No style prop: useStaysOnScreen writes the room it holds as this element's bottom margin.
+        data-testid="controls-slot"
         className={
           fold.folded
             ? 'sticky top-(--jam-bar-height) z-10 -mx-4 -mt-3 border-b border-line bg-canvas px-4 md:-mx-gutter md:px-gutter'
@@ -290,39 +294,6 @@ function SongPlayer({
       <ShortcutOverlay open={shortcuts.helpOpen} onClose={shortcuts.closeHelp} />
     </div>
   );
-}
-
-/**
- * Keeps an element where it is in the window when `key` changes something
- * above it (the controls folding): the window is scrolled by however far the
- * element moved on screen. Where it was is kept from the last render and the
- * last scroll, so a scroll the user made since counts as where it was, and
- * Chrome's own scroll anchoring, when it has already kept the element still,
- * leaves nothing to do (Safari has none). At the top of the page a fold can't
- * be made up for (there is nothing above to scroll back), so the score comes
- * up with the press of Play, which never lands on the score.
- */
-function useStaysOnScreen(ref: RefObject<HTMLElement | null>, key: unknown): void {
-  const lastTop = useRef<number | null>(null);
-  const lastKey = useRef(key);
-  useEffect(() => {
-    const onScroll = () => {
-      if (ref.current) lastTop.current = ref.current.getBoundingClientRect().top;
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, [ref]);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const top = element.getBoundingClientRect().top;
-    const before = lastTop.current;
-    if (lastKey.current !== key && before !== null && top !== before) {
-      window.scrollBy({ top: top - before, behavior: 'instant' });
-    }
-    lastKey.current = key;
-    lastTop.current = element.getBoundingClientRect().top;
-  });
 }
 
 /**

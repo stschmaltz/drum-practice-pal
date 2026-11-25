@@ -401,6 +401,15 @@ describe('LoopPanel playing a loop', () => {
     expect(view.player.getSnapshot()).toMatchObject({ range: null, looping: false });
     expect(view.play('Intro')).toBeInTheDocument();
   });
+
+  // 12 QA after the UX pass, issue 4: Exit loop goes with the loop's playing state.
+  it('Exit loop hands focus to that loop’s Play loop, not to the page', async () => {
+    const view = renderPanel();
+    await view.press('Play loop Intro');
+    await view.press('Exit loop');
+
+    await waitFor(() => expect(view.play('Intro')).toHaveFocus());
+  });
 });
 
 // 08 QA issue 1: the sheet lies over the score and the count-in number.

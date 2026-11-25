@@ -2184,17 +2184,23 @@ describe('SongPage controls while playing (12 UX pass)', () => {
     /**
      * jsdom lays nothing out: the score box sits 300 px lower while the bar is
      * full than while it is the strip, less however far the window has
-     * scrolled, which `scrollBy` moves as a browser would.
+     * scrolled, which `scrollBy` moves as a browser would (never above the
+     * top), plus the room the page reserves under the controls for what the
+     * window couldn't scroll back.
      */
-    function layOut() {
-      let scrollY = 0;
+    function layOut({ scrolledTo = 400 }: { scrolledTo?: number } = {}) {
+      let scrollY = scrolledTo;
+      vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY);
       const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(((
         options: ScrollToOptions,
       ) => {
-        scrollY += options.top ?? 0;
+        scrollY = Math.max(0, scrollY + (options.top ?? 0));
       }) as typeof window.scrollBy);
       const box = screen.getByTestId('score-viewport');
-      const top = () => (document.querySelector('[data-folded]') ? 200 : 500) - scrollY;
+      const reserved = () =>
+        Number.parseFloat(screen.getByTestId('controls-slot').style.marginBottom || '0');
+      const top = () =>
+        (document.querySelector('[data-folded]') ? 200 : 500) + reserved() - scrollY;
       vi.spyOn(box, 'getBoundingClientRect').mockImplementation(
         () =>
           ({
@@ -2243,6 +2249,41 @@ describe('SongPage controls while playing (12 UX pass)', () => {
       const before = onScreen();
       await pause();
       expect(onScreen()).toBe(before);
+    });
+
+    // 12 QA after the UX pass, issue 2: on a phone the page can't scroll at all.
+    it('at the top of the page the fold leaves room in its place, so nothing moves and nothing scrolls', async () => {
+      const { play, pause } = await openSong();
+      const { scrollBy, onScreen, userScrolls } = layOut({ scrolledTo: 0 });
+      userScrolls(0);
+      const before = onScreen();
+
+      await play();
+      expect(onScreen()).toBe(before);
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('300px');
+
+      await pause();
+      expect(onScreen()).toBe(before);
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('');
+      expect(scrollBy.mock.calls.every(([options]) => (options as ScrollToOptions).top === 0)).toBe(
+        true,
+      );
+    });
+
+    it('part way down, the window scrolls what it can and the rest is kept as room', async () => {
+      const { play, pause } = await openSong();
+      const { onScreen, userScrolls } = layOut({ scrolledTo: 100 });
+      userScrolls(0);
+      const before = onScreen();
+
+      await play();
+      expect(onScreen()).toBe(before);
+      expect(window.scrollY).toBe(0);
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('200px');
+
+      await pause();
+      expect(onScreen()).toBe(before);
+      expect(window.scrollY).toBe(100);
     });
   });
 });

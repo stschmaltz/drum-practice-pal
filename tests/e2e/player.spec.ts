@@ -2,6 +2,7 @@
 import type { Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
 import { expect, signIn, test } from './auth';
+import { closeLoopPanel, openLoopPanel } from './loopsPage';
 import {
   barNumber,
   boxOf,
@@ -335,6 +336,60 @@ test('the controls fold to a strip under the sticky bar while playing, without t
   await expect(muteDrumsButton(page)).toBeVisible();
   // Playing then paused, nothing in between: folding never stopped or reloaded anything.
   expect(await recordedStatuses(page)).toEqual(['ready', 'playing', 'ready']);
+});
+
+// 12 QA after the UX pass, issue 2: on the short groove-120 page there is no room to scroll
+// back what the fold takes away (on a phone with the sheet closed the page doesn't scroll at
+// all), so the page holds that room under the controls while folded. From the top of the page,
+// with the loop panel closed and open, with Chromium's scroll anchoring and without it (as
+// Safari), neither Play nor Pause moves the score.
+test('on a short page Play and Pause leave the score where it is, from the top, panel open or closed', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  const scoreTop = () => viewport(page).evaluate((box) => box.getBoundingClientRect().top);
+  const anchoringOff = 'html, body, main { overflow-anchor: none !important; }';
+
+  for (const anchoring of ['on', 'off'] as const) {
+    if (anchoring === 'off') await page.addStyleTag({ content: anchoringOff });
+    for (const panel of ['closed', 'open'] as const) {
+      const what = `${panel} panel, scroll anchoring ${anchoring}`;
+      if (panel === 'open') await openLoopPanel(page);
+      else await closeLoopPanel(page);
+      await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+      await windowScrollSettled(page);
+      const paused = await scoreTop();
+
+      await playButton(page).click();
+      await expect(playButton(page)).toHaveText('Pause');
+      await expect(controls(page).getByRole('button', { name: 'Show controls' })).toBeVisible();
+      await windowScrollSettled(page);
+      const playing = await scoreTop();
+      if ((await page.evaluate(() => window.scrollY)) === 0) {
+        // Nothing scrolled (on a phone the page can't): the fold alone mustn't move the score.
+        expect(Math.abs(playing - paused), `${what}: Play`).toBeLessThanOrEqual(1);
+      } else {
+        // Play brought a score that wasn't all on show into the window (Unit 06), clear of the
+        // sticky bar and the strip: that move is Play's, not the fold's.
+        const strip = await boxOf(controls(page), 'folded controls');
+        expect(playing, `${what}: Play shows the score`).toBeGreaterThanOrEqual(
+          strip.y + strip.height - 1,
+        );
+      }
+
+      await playButton(page).click();
+      await expect(playButton(page)).toHaveText('Play');
+      await expect(muteDrumsButton(page)).toBeVisible();
+      await windowScrollSettled(page);
+      expect(Math.abs((await scoreTop()) - playing), `${what}: Pause`).toBeLessThanOrEqual(1);
+      // Nothing held once unfolded: the page is its own height again.
+      await expect(
+        page.getByTestId('controls-slot'),
+        `${what}: no room kept while paused`,
+      ).toHaveCSS('margin-bottom', '0px');
+    }
+  }
 });
 
 // 12 UX pass, Test: the fold changes the bar's height above the score; the score itself must
