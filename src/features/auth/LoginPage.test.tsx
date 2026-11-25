@@ -110,6 +110,26 @@ describe('LoginPage', () => {
     expect(fakeSupabase.auth.verifyOtp).not.toHaveBeenCalled();
   });
 
+  // Unit 13 Test: without a connection Auth's client says "Failed to fetch"; the page never does.
+  it('says the server could not be reached when the email request never got there', async () => {
+    fakeSupabase.auth.signInWithOtp.mockResolvedValue({
+      data: null,
+      // As supabase-js's auth client builds it.
+      error: Object.assign(new Error('Failed to fetch'), {
+        name: 'AuthRetryableFetchError',
+        status: 0,
+      }),
+    });
+    const user = renderLogin();
+    await sendEmail(user, 'drummer@drumpal.test');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      "Couldn't send the email. The server couldn't be reached. Check the connection and try again.",
+    );
+    expect(alert).not.toHaveTextContent('Failed to fetch');
+  });
+
   it('says when a code is rejected', async () => {
     fakeSupabase.auth.verifyOtp.mockResolvedValue({
       data: null,

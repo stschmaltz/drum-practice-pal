@@ -445,6 +445,21 @@ describe('a log that fails', () => {
     expect(view.tracker().unsaved).toEqual([]);
     expect(view.tracker().lastLogged).toBeNull();
   });
+
+  it('reads the loops again when the loop has gone (Unit 13), and no other list', async () => {
+    queryResult.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'violates foreign key constraint', code: '23503' },
+    });
+    const view = renderTracker();
+    view.queryClient.setQueryData(loopKeys.practice(USER), []);
+    view.queryClient.setQueryData(songKeys.forUser(USER), []);
+    view.playFor(40);
+
+    await waitFor(() => expect(view.isInvalidated(loopKeys.practice(USER))).toBe(true));
+    expect(view.isInvalidated(songKeys.forUser(USER))).toBe(false);
+    expect(view.tracker().lastLogged).toBeNull();
+  });
 });
 
 /** An answer the test gives when it chooses, to see what happens while a log is on its way. */
@@ -563,6 +578,29 @@ describe('a keepalive log on a page that lives on', () => {
     expect(view.tracker().lastLogged).toBeNull();
     expect(view.tracker().unsaved).toEqual([]);
     expect(view.cachedHistory()).toEqual([]);
+  });
+
+  // Unit 13 Test (09 QA issue 7): the keepalive path reads the loops again too, as the mutation does.
+  it('reads the loops again when the loop has gone, so the page stops showing it', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ code: '23503', message: 'violates foreign key constraint' }), {
+        status: 409,
+      }),
+    );
+    const view = renderTracker();
+    const forSong = loopKeys.forSong(USER, 'song-1');
+    view.queryClient.setQueryData(loopKeys.practice(USER), []);
+    view.queryClient.setQueryData(forSong, []);
+    view.queryClient.setQueryData(songKeys.forUser(USER), []);
+    view.playOn(40);
+
+    setVisibility('hidden');
+
+    await waitFor(() => expect(view.isInvalidated(loopKeys.practice(USER))).toBe(true));
+    expect(view.isInvalidated(forSong)).toBe(true);
+    expect(view.isInvalidated(songKeys.forUser(USER))).toBe(false);
+    expect(keptAlive()).toHaveLength(1);
+    expect(logged()).toEqual([]);
   });
 
   it('any other refusal is sent again through the app, and a second failure is kept for Try again', async () => {

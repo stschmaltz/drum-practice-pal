@@ -1034,6 +1034,13 @@ describe('LoopPanel finishing a loop', () => {
     expect(savedLate(view)?.status).toBe('active');
     // Said once, in the prompt, not again under the loop's buttons (09 QA issue 3).
     expect(view.panel.getAllByRole('alert')).toHaveLength(1);
+
+    // Unit 13 Test: "Not yet" takes the prompt away, and the reason stays said once,
+    // under the loop's own Mark finished, rather than going unsaid.
+    await view.user.click(prompt(view).getByRole('button', { name: 'Not yet' }));
+    await waitFor(() => expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument());
+    expect(view.panel.getAllByRole('alert')).toHaveLength(1);
+    expect(view.item('Late').getByRole('alert')).toHaveTextContent("Couldn't change the loop.");
   });
 
   it('asks when the speed shows as the target’s percent, though its ratio is a hair under', async () => {

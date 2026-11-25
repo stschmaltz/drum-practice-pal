@@ -178,6 +178,8 @@ describe('LoopEditorForm for a new loop', () => {
     await fill(view, { first: '9', last: '12' });
     await view.user.type(view.target(), '120');
     expect(view.form.getByText('120% (108 BPM)')).toBeInTheDocument();
+    // Read out with the field, not only drawn beside it (Unit 13).
+    expect(view.target()).toHaveAccessibleDescription('120% (108 BPM)');
     // Not a whole percent: no BPM is made up for it.
     await view.user.type(view.target(), '.5');
     expect(view.form.queryByText(/BPM\)$/, { selector: 'span' })).not.toBeInTheDocument();
@@ -381,6 +383,35 @@ describe('LoopEditorForm for a new loop', () => {
     expect(ids).toHaveLength(2);
     expect(new Set(ids).size).toBe(1);
     expect(view.table.rows().map((row) => row.name)).toEqual(['Second half']);
+  });
+
+  // Unit 13 Test: what the server has wins over what was typed between the two presses
+  // (Build's decision), and the second press is locked like the first.
+  it('pressed again after a lost answer and an edit, keeps the loop the server has, locked meanwhile', async () => {
+    const view = await renderForm();
+    view.table.loseNext('insert');
+    await fill(view, { first: '9', last: '12', name: 'Second half' });
+    await view.user.click(view.save());
+    expect(await view.form.findByRole('alert')).toBeInTheDocument();
+
+    await view.user.type(view.name(), ' again');
+    const release = view.table.holdNext('insert');
+    await view.user.click(view.save());
+    await waitFor(() => expect(view.save()).toHaveTextContent('Saving…'));
+    expect(view.save()).toBeDisabled();
+    await view.user.type(view.name(), '!');
+    expect(view.name()).toHaveValue('Second half again');
+
+    release();
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(onSaved.mock.calls[0]?.[0]).toMatchObject({ name: 'Second half', end_bar: 12 });
+    expect(view.table.rows().map((row) => row.name)).toEqual(['Second half']);
+    expect(
+      view.queryClient
+        .getQueryData<Loop[]>(loopKeys.forSong('user-1', LOOP_SONG_ID))
+        ?.map((loop) => loop.name),
+    ).toEqual(['Second half']);
+    expect(view.form.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('an edit after a failed save takes the failure message away', async () => {

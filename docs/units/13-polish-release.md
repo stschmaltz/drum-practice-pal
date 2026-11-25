@@ -95,3 +95,52 @@ These Carried forward items are product questions; each is still in `docs/plan.m
 - `npm run check`: 109 files, 4278 tests green.
 - `npm run e2e` (`E2E_PORT=4180`, fresh `npm run build -- --mode development`): 384 passed, 24 skipped, 0 failed (408 listed; the spike's tests are gone, the journey and the count-in Pause case are new). The new count-in Pause case failed at 117 px on tablet and desktop before the anchoring fix.
 - The unit-12 branch has moved on since this worktree was cut; rebase before review.
+
+## Test
+
+### Summary
+
+Build had tested each fix at the level it was made (`errorCopy`, `songsApi`, `loopsApi`, the hooks). This stage adds the tests a user's path through each fix needs, the gates and interleavings the checklist asks for, and e2e for the fixes that only show on a real connection. Every new test was run once against the code it covers broken (a scripted break per fix, then restored), and failed.
+
+### Tests added
+
+Unit and component (Vitest, 34 new tests):
+
+- `tests/unit/errorMessages.test.ts` (new): no component file renders an error's own `.message` unless it is the app's own (`SongFileError` / `UserFacingError` on the line or the one above); proves the rule bites on the pre-Unit-13 pattern. Fails if `LoginPage` shows `sendEmail.error.message` again.
+- `src/features/player/controlGates.test.ts` (new): `canChangeOptions`, `canUseDrumToggles` and `canPlay` per status, `error` included.
+- `PlayerControls.test.tsx`: a failure while the song is still loading (the soundfont case) turns every option off, the count-in radios included, and a press on Metronome or "2 bars" changes nothing.
+- `LoopSpeedControl.test.tsx`: Speed %, BPM and the nudges are off after a player error; a speed being typed when the player fails is not set when the field blurs (the `setSpeed` guard, reached round the disabled field).
+- `UploadPanel.test.tsx`, "when the save's answer is lost": the look-up finds the row, so the panel says "Added", keeps the file and links to the song, and while the look-up is pending it still says "Saving" with no Cancel and the picker off; a failed look-up shows the network sentence plus "The song may have been added anyway…" and removes nothing; no row removes the file.
+- `LoopEditorForm.test.tsx`: a second press after a lost answer and an edit of the name keeps the loop the server has (Build's decision), is locked like the first, and leaves one loop in the cache; the target's BPM note is the field's accessible description.
+- `LibraryPage.test.tsx`: a failed delete of the last song leaves focus on "Delete song", and its retry hands focus to the upload.
+- `SettingsPage.test.tsx`: the metronome volume's error is the slider's accessible description (reached through a stored row out of range, since the slider clamps), and nothing is sent.
+- `usePracticeTracker.test.tsx`: `loopGone` through the keepalive path reads the loops again (the Build note's known gap) and not the songs; the same through the mutation path.
+- `SongPage.test.tsx`: a loop deleted on another device: its next session is refused (23503), the loops are read again, "Now looping" goes and the earlier "Practice logged" notice goes with it, with no "Couldn't save" message; the shortcut status is on the page empty from the start, says "Drums muted", "Drums unmuted, Drums only on", "Speed 95%" after D, S, ArrowDown, and a mouse click on a toggle leaves it alone.
+- `LoopPanel.test.tsx`: after a refused "Mark finished" in the prompt, "Not yet" moves the reason under the loop's own button, still said once.
+- `LoginPage.test.tsx`: Auth's `AuthRetryableFetchError` shows the network sentence, never "Failed to fetch"; `errorCopy.test.ts`: the rest of the login codes (`over_request_rate_limit`, `signup_disabled`, `email_address_invalid`) and PostgREST's dropped connection.
+
+e2e (Playwright, `tests/e2e/release-fixes.spec.ts`, new, 4 tests x phone, tablet, desktop):
+
+- An upload whose insert answer is lost (`route.fetch()` then `abort`) is still "Added", with one row and its file in Storage, and the song plays.
+- "Save loop" after a lost answer shows "Couldn't save the loop. The server couldn't be reached…", and a second press saves one loop (one row, one item).
+- A settings save that never reaches the server shows the fixed network sentence, not "Failed to fetch".
+- M and ArrowUp on the song page fill the `role="status"` with "Metronome on/off" and "Speed 105%".
+
+Both lost-answer specs failed with the fix broken (the look-up skipped; a new loop id per press).
+
+### Async windows checked
+
+- The upload's look-up after a lost insert: "Saving", no Cancel, picker off, Sign out covered by the pending upload (unchanged).
+- A loop create sent again: locked during the second send; edits typed meanwhile don't reach the saved loop.
+- The last song's delete: a refusal keeps focus where it was; the hand-over runs only once the song has left.
+- A player failure mid-typing in the loop speed: the commit on blur is refused.
+- `loopGone` while the page plays the loop: the list is read again and the page lets the loop go.
+
+### Bugs found
+
+None.
+
+### Results
+
+- `npm run check`: 111 files, 4312 tests green (34 new).
+- `npm run e2e` (`E2E_PORT=4180`, fresh `npm run build -- --mode development`): 395 passed, 24 skipped, 1 failed (420 listed; 12 new). The failure was `offline.spec.ts:339` on phone only: the database already had the loop `finished` while the page was still offline (`writes.sent` empty). No app code changed in this stage; that test then passed 15 of 15 on its own (`--repeat-each=5`, all three sizes). Logged as a flaky test for QA to watch, not as a bug: the write probably left in the moment the context was going offline, under the full run's load, so the recorder never saw it.

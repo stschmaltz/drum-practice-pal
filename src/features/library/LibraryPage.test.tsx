@@ -3,7 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { onlineManager } from '@tanstack/react-query';
 import { restoredCacheIsStale } from '@/features/offline/queryPersister';
 import { Route } from 'react-router';
-import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
+import {
+  opArgs,
+  queryResult,
+  resetFakeSupabase,
+  storageResult,
+  type FakeResult,
+} from '@/test/fakeSupabase';
 import { renderRoutes, settle, testQueryClient } from '@/test/render';
 import { LibraryPage } from './LibraryPage';
 import type { LibrarySong } from './songForm';
@@ -247,6 +253,26 @@ describe('LibraryPage', () => {
     await screen.findByRole('list');
     await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
+    expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Upload a Guitar Pro file')).toHaveFocus());
+  });
+
+  // Unit 13 Test: the hand-over waits for the song to leave; a refused delete keeps it, and focus.
+  it('a failed delete of the last song leaves focus on Delete song, and its retry hands it to the upload', async () => {
+    serveLibrary([library[0]!]);
+    storageResult.mockResolvedValueOnce({ data: null, error: { message: 'storage down' } });
+    const { user } = renderLibrary();
+    await screen.findByRole('list');
+    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    const confirm = screen.getByRole('button', { name: 'Delete song' });
+    await user.click(confirm);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't delete the song.");
+    await settle();
+    expect(shownTitles()).toEqual(['Halo']);
+    expect(confirm).toHaveFocus();
+
+    await user.click(confirm);
     expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText('Upload a Guitar Pro file')).toHaveFocus());
   });

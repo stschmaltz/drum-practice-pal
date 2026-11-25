@@ -73,6 +73,20 @@ describe('signInFailureCopy', () => {
     [{ status: 429, message: 'Too Many Requests' }, /Too many tries/],
     [{ name: 'AuthRetryableFetchError', message: 'Failed to fetch' }, /couldn't be reached/],
     [{ code: 'something_new', status: 400, message: 'raw server text' }, /refused/],
+    // Unit 13 Test: the rest of the codes the login page knows.
+    [
+      { code: 'over_request_rate_limit', status: 429, message: 'raw server text' },
+      /^Too many tries/,
+    ],
+    [
+      { code: 'signup_disabled', status: 422, message: 'Signups not allowed' },
+      /^New accounts are closed\.$/,
+    ],
+    [
+      { code: 'email_address_invalid', status: 400, message: 'Email address is invalid' },
+      /isn't one the server takes/,
+    ],
+    [{ message: 'TypeError: Failed to fetch', code: '' }, /couldn't be reached/],
   ])('maps %o to fixed copy', (error, copy) => {
     expect(signInFailureCopy(error)).toMatch(copy);
     expect(signInFailureCopy(error)).not.toContain(error.message);

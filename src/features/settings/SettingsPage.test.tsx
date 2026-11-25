@@ -331,6 +331,28 @@ describe('SettingsPage', () => {
   });
 });
 
+// Unit 13 Test (04 QA issue 6): an inline error is read out with its field.
+describe('SettingsPage field errors', () => {
+  it('the volume error describes the volume slider, and nothing is sent', async () => {
+    // Out of range only if the stored row is (another client, an older build): the slider clamps.
+    serveSettings({ ...saved, metronome_volume: 1.5 });
+    const { user } = renderSettings();
+    const metronomeOn = await screen.findByRole('checkbox', {
+      name: 'Metronome on when playback starts',
+    });
+    expect(volume()).not.toHaveAccessibleDescription();
+
+    await user.click(metronomeOn);
+    await user.click(saveButton());
+
+    const message = await screen.findByText(/^Volume must be between/);
+    expect(volume()).toHaveAttribute('aria-invalid', 'true');
+    expect(volume()).toHaveAccessibleDescription(message.textContent ?? '');
+    await settle();
+    expect(writes()).toEqual([]);
+  });
+});
+
 describe('SettingsPage offline', () => {
   it('keeps your edit but turns Save off with a reason, and saves it once back online', async () => {
     serveSettings(saved);

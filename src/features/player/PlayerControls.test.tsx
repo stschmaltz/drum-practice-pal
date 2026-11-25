@@ -118,6 +118,30 @@ describe('PlayerControls transport', () => {
     expect(muteDrums()).toBeDisabled();
     expect(drumsOnly()).toBeDisabled();
   });
+
+  // Unit 13 Test: a failure while the song still loads (the soundfont refused) is the common one.
+  it('turns the options off for a failure before the song was ever ready, and a press changes nothing', async () => {
+    const { engine, player, user } = setup({ loaded: false });
+    expect(speed()).toBeEnabled();
+    act(() => engine.fire('error', { error: new Error('soundfont') }));
+    const before = player.getSnapshot();
+    expect(before.status).toBe('error');
+
+    for (const control of [speed(), metronome(), volume(), muteDrums(), drumsOnly()]) {
+      expect(control).toBeDisabled();
+    }
+    for (const radio of within(screen.getByRole('radiogroup', { name: 'Count-in' })).getAllByRole(
+      'radio',
+    )) {
+      expect(radio).toBeDisabled();
+    }
+    await user.click(screen.getByText('2 bars'));
+    await user.click(metronome());
+    expect(player.getSnapshot()).toMatchObject({
+      countInBars: before.countInBars,
+      metronomeOn: before.metronomeOn,
+    });
+  });
 });
 
 describe('PlayerControls live changes', () => {
