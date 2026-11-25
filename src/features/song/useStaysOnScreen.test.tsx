@@ -9,7 +9,9 @@ import { useStaysOnScreen } from './useStaysOnScreen';
  * between the top and the page's height less the viewport, as a browser's
  * does, and a page that gets shorter pulls the scroll back with it. With
  * `anchoring` on, a fold or unfold is first made up for by the browser where it
- * can (Chrome's scroll anchoring); off, nothing is (Safari).
+ * can, before the layout effect (a browser whose scroll anchoring ignored the
+ * hook's `overflow-anchor: none`); off, nothing is. `rotate` resizes the
+ * window to a new width, as a phone turned sideways does.
  */
 function layOut({
   scrollY = 0,
@@ -19,6 +21,7 @@ function layOut({
   anchoring = false,
 }: { scrollY?: number; below?: number; full?: number; strip?: number; anchoring?: boolean } = {}) {
   const page = { header: 100, full, strip, below, viewport: 800, folded: false };
+  vi.stubGlobal('innerWidth', 390);
   let stored = scrollY;
   let room: HTMLElement | null = null;
   const margin = () => Number.parseFloat(room?.style.marginBottom || '0');
@@ -84,6 +87,12 @@ function layOut({
         redraw: () => view.rerender(<Page folded={page.folded} />),
       };
     },
+    /** The window resized: to a new width (a rotation), the full controls now `full` high. */
+    resize({ width, full: next }: { width: number; full?: number }) {
+      vi.stubGlobal('innerWidth', width);
+      if (next !== undefined) page.full = next;
+      fireEvent(window, new Event('resize'));
+    },
     userScrolls(by: number) {
       stored = clamp(stored + by);
       fireEvent.scroll(window);
@@ -91,7 +100,10 @@ function layOut({
   };
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('useStaysOnScreen', () => {
   it('on a page that can’t scroll, repeated Plays and Pauses never move the score, and the room never piles up', () => {
@@ -187,44 +199,88 @@ describe('useStaysOnScreen', () => {
     expect(layout.room()).toBe(0);
   });
 
-  it('a resize while playing on a long page: the Pause keeps the score still and holds nothing', () => {
+  it('a rotation while playing on a long page: the room goes at the rotation, and the Pause and the next Play keep the score still', () => {
     const layout = layOut({ below: 3000 });
     const { fold, unfold, redraw } = layout.mount();
     fold();
     expect(layout.room()).toBe(240);
-    // Turned sideways while playing: the full controls are a row shorter, or a row taller.
-    for (const full of [200, 400, 300]) {
-      layout.page.full = full;
+    // Turned sideways while playing: the full controls are a row shorter, then a row taller.
+    for (const [width, full] of [
+      [844, 200],
+      [390, 400],
+      [844, 300],
+    ] as const) {
+      layout.resize({ width, full });
       redraw();
+      expect(layout.room(), `${width}: room after the rotation`).toBe(0);
       const where = layout.scoreTop();
       unfold();
-      expect(layout.scoreTop(), `full ${full}: Pause`).toBe(where);
+      expect(layout.scoreTop(), `${width}: Pause`).toBe(where);
+      expect(layout.room(), `${width}: room while paused`).toBe(0);
       fold();
-      expect(layout.scoreTop(), `full ${full}: Play`).toBe(where);
+      expect(layout.scoreTop(), `${width}: Play`).toBe(where);
     }
     unfold();
     expect(layout.room()).toBe(0);
   });
 
-  // Bugs found (12 Test after the QA fix round, bug 1): at the top of a page that can't scroll,
-  // a resize that makes the full controls shorter while playing leaves the difference held as
-  // room after the Pause, and it stays while the heights stay as they are. It never piles up.
-  it('a resize while playing at the top of a short page keeps the score still, and holds only the difference', () => {
+  // 12 QA after the QA fix round, issue 1 (and Test's bug 1): at the top of a page that can't
+  // scroll, the room held in portrait pushed the score off a phone turned to landscape. The
+  // rotation drops it; the score goes where the new layout puts it, and no room is left.
+  it('a rotation while playing at the top of a short page drops the room, and the Pause leaves none', () => {
     const layout = layOut();
     const { fold, unfold, redraw } = layout.mount();
+    const start = layout.scoreTop();
     fold();
-    layout.page.full = 200;
+    expect(layout.room()).toBe(240);
+    layout.resize({ width: 844, full: 200 });
     redraw();
-    const where = layout.scoreTop();
+    expect(layout.room()).toBe(0);
+    // Right under the strip, as with no room at all.
+    expect(layout.scoreTop()).toBe(start - 240);
     unfold();
-    expect(layout.scoreTop()).toBe(where);
-    expect(layout.room()).toBe(100);
+    expect(layout.room()).toBe(0);
+    const paused = layout.scoreTop();
     for (let run = 0; run < 3; run += 1) {
       fold();
-      expect(layout.scoreTop()).toBe(where);
+      expect(layout.scoreTop(), `run ${run}: Play`).toBe(paused);
       unfold();
-      expect(layout.scoreTop()).toBe(where);
-      expect(layout.room(), `run ${run}`).toBe(100);
+      expect(layout.scoreTop(), `run ${run}: Pause`).toBe(paused);
+      expect(layout.room(), `run ${run}`).toBe(0);
+    }
+    // The page is too short to scroll: what the hook asked for, the window couldn't do.
+    expect(layout.scrollY()).toBe(0);
+  });
+
+  it('a change of height alone while playing (a toolbar) keeps the room, and the Pause still leaves the score still', () => {
+    const layout = layOut();
+    const { fold, unfold } = layout.mount();
+    const start = layout.scoreTop();
+    fold();
+    layout.resize({ width: 390 });
+    expect(layout.room()).toBe(240);
+    unfold();
+    expect([layout.scoreTop(), layout.room()]).toEqual([start, 0]);
+  });
+
+  // 12 QA after the QA fix round, issue 3: Show controls while playing unfolds a bar taller
+  // than the paused one (its Hide controls row); Hide controls holds that height as room, and
+  // the Pause then left the difference under the paused controls.
+  it('Show controls, Hide controls and Pause leave no room, and the score ends where it started', () => {
+    const layout = layOut();
+    const { fold, unfold } = layout.mount();
+    const start = layout.scoreTop();
+    for (let run = 0; run < 3; run += 1) {
+      fold();
+      layout.page.full = 356;
+      unfold(); // Show controls: the page can't scroll, so the score moves down 56 px.
+      expect(layout.room(), `run ${run}: shown`).toBe(0);
+      fold(); // Hide controls.
+      expect(layout.room(), `run ${run}: hidden`).toBe(296);
+      layout.page.full = 300;
+      unfold(); // Pause.
+      expect(layout.room(), `run ${run}: paused`).toBe(0);
+      expect(layout.scoreTop(), `run ${run}: paused`).toBe(start);
     }
   });
 
@@ -241,23 +297,41 @@ describe('useStaysOnScreen', () => {
     );
   });
 
-  it('leaves no scroll listener on the window once the page has gone, StrictMode or not', () => {
+  it('leaves no scroll or resize listener on the window once the page has gone, StrictMode or not', () => {
     for (const strict of [false, true]) {
       const live = new Set<unknown>();
+      const watched = (type: string) => type === 'scroll' || type === 'resize';
       vi.spyOn(window, 'addEventListener').mockImplementation(function (this: Window, type, fn) {
-        if (type === 'scroll') live.add(fn);
+        if (watched(type)) live.add(fn);
       });
       vi.spyOn(window, 'removeEventListener').mockImplementation(function (this: Window, type, fn) {
-        if (type === 'scroll') live.delete(fn);
+        if (watched(type)) live.delete(fn);
       });
       const layout = layOut();
       const { fold, unfold, unmount } = layout.mount({ strict });
       fold();
       unfold();
-      expect(live.size, `strict ${strict}: while mounted`).toBe(1);
+      expect(live.size, `strict ${strict}: while mounted`).toBe(2);
       unmount();
       expect(live.size, `strict ${strict}: after`).toBe(0);
       vi.restoreAllMocks();
+    }
+  });
+
+  // 12 QA after the QA fix round, issue 2: Chrome's anchoring acts after the layout effect, so
+  // it and the hook both made up for the room at a Pause. Off while the page is up, as before
+  // once it has gone, StrictMode or not.
+  it('turns the browser’s scroll anchoring off while mounted, and puts back what was there', () => {
+    for (const strict of [false, true]) {
+      document.documentElement.style.overflowAnchor = '';
+      document.body.style.overflowAnchor = 'auto';
+      const { unmount } = layOut().mount({ strict });
+      expect(document.documentElement.style.overflowAnchor, `strict ${strict}`).toBe('none');
+      expect(document.body.style.overflowAnchor, `strict ${strict}`).toBe('none');
+      unmount();
+      expect(document.documentElement.style.overflowAnchor, `strict ${strict}: after`).toBe('');
+      expect(document.body.style.overflowAnchor, `strict ${strict}: after`).toBe('auto');
+      document.body.style.overflowAnchor = '';
     }
   });
 });

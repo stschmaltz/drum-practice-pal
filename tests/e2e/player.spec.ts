@@ -6,6 +6,7 @@ import { closeLoopPanel, openLoopPanel } from './loopsPage';
 import {
   barNumber,
   boxOf,
+  chooseCountIn,
   controls,
   drumsOnlyButton,
   expectedLayout,
@@ -341,8 +342,9 @@ test('the controls fold to a strip under the sticky bar while playing, without t
 // 12 QA after the UX pass, issue 2: on the short groove-120 page there is no room to scroll
 // back what the fold takes away (on a phone with the sheet closed the page doesn't scroll at
 // all), so the page holds that room under the controls while folded. From the top of the page,
-// with the loop panel closed and open, with Chromium's scroll anchoring and without it (as
-// Safari), neither Play nor Pause moves the score.
+// with the loop panel closed and open, with the page as it is (which turns Chromium's scroll
+// anchoring off since 12 QA fix round 2) and with anchoring forced off by a stylesheet as
+// well, neither Play nor Pause moves the score.
 test('on a short page Play and Pause leave the score where it is, from the top, panel open or closed', async ({
   user,
   page,
@@ -389,6 +391,75 @@ test('on a short page Play and Pause leave the score where it is, from the top, 
         `${what}: no room kept while paused`,
       ).toHaveCSS('margin-bottom', '0px');
     }
+  }
+});
+
+/** The player's status, read through `window.__drumPalPlayer` (dev and e2e builds only). */
+const playerStatus = (page: Page) =>
+  page.evaluate(() => {
+    const player = (
+      window as unknown as { __drumPalPlayer?: { getSnapshot(): { status: string } } }
+    ).__drumPalPlayer;
+    if (!player) throw new Error('No player on window.__drumPalPlayer');
+    return player.getSnapshot().status;
+  });
+
+// 12 QA after the QA fix round, issue 2: with a count-in on, Chromium's scroll anchoring
+// scrolled the window up at Pause as the room went, and the page then scrolled up by the same
+// again, so the score moved 109 px (tablet) and 117 px (desktop). A Pause in the count-in and
+// a Pause once playing, from the top of the short page, with the browser's anchoring as it is.
+test('on a short page with a count-in on, Pause leaves the score where it is, counting in or playing', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await closeLoopPanel(page);
+  await chooseCountIn(page, 2);
+  const scoreTop = () => viewport(page).evaluate((box) => box.getBoundingClientRect().top);
+
+  for (const pauseWhile of ['countingIn', 'playing'] as const) {
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    await windowScrollSettled(page);
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Pause');
+    await expect.poll(() => playerStatus(page), { timeout: 10_000 }).toBe(pauseWhile);
+    await windowScrollSettled(page);
+    const playing = await scoreTop();
+
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Play');
+    await expect(muteDrumsButton(page)).toBeVisible();
+    await windowScrollSettled(page);
+    expect(Math.abs((await scoreTop()) - playing), `Pause while ${pauseWhile}`).toBeLessThanOrEqual(
+      1,
+    );
+    await expect(page.getByTestId('controls-slot')).toHaveCSS('margin-bottom', '0px');
+  }
+});
+
+// 12 QA after the QA fix round, issue 3: the bar unfolded while playing (Show controls) is
+// taller than when paused, so on a phone the room held at Hide controls was more than the
+// paused bar took back, and the difference stayed under the paused controls.
+test('Show controls, Hide controls and Pause leave no room under the controls', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await closeLoopPanel(page);
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await windowScrollSettled(page);
+  const slot = page.getByTestId('controls-slot');
+
+  for (let run = 0; run < 2; run++) {
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Pause');
+    await showControls(page);
+    await controls(page).getByRole('button', { name: 'Hide controls' }).click();
+    await expect(controls(page).getByRole('button', { name: 'Show controls' })).toBeVisible();
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Play');
+    await expect(muteDrumsButton(page)).toBeVisible();
+    await expect(slot, `run ${run}`).toHaveCSS('margin-bottom', '0px');
   }
 });
 

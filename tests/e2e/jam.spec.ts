@@ -345,6 +345,40 @@ for (const size of [
   });
 }
 
+// 12 QA after the QA fix round, issue 1: Play at the top of a phone's short page holds the
+// fold as room above the score; rotating to landscape kept that room, which put the score box
+// and the beat cursor below the 390 px window. Unit 06: the cursor stays in view through a
+// rotation, portrait to landscape and back, and nothing is left over at the Pause.
+test('rotating a phone while playing keeps the beat cursor on screen, portrait to landscape and back', async ({
+  user,
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'phone', 'phone project only');
+  const portrait = { width: 390, height: 844 };
+  await page.setViewportSize(portrait);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await scrollWindowToTop(page);
+  // At 50% the song lasts 64 s: still playing through both rotations.
+  await speedSlider(page).fill('50');
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await windowScrollSettled(page);
+  expect(await beatCursorOnScreen(page)).toBe(true);
+
+  for (const size of [{ width: 844, height: 390 }, portrait]) {
+    const at = `${size.width} x ${size.height}`;
+    await page.setViewportSize(size);
+    await windowScrollSettled(page);
+    await expect.poll(() => beatCursorOnScreen(page), { message: at }).toBe(true);
+    await expect(playButton(page), at).toHaveText('Pause');
+  }
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  await expect(page.getByTestId('controls-slot')).toHaveCSS('margin-bottom', '0px');
+});
+
 // Fix round 1: the sticky bar must never sit over the score, swallow a tap
 // meant for a bar, or pass its own taps through to the score.
 for (const size of [null, { name: 'landscape phone', width: 844, height: 390 }]) {

@@ -1,40 +1,62 @@
 /**
  * How to put an element back where it was on screen after something above it
  * changed height (the controls folding at Play, unfolding at Pause): scroll
- * the window, and where the window can't scroll far enough (at the top of the
- * page there is nothing above to scroll back to), hold room in the place of
- * what went (`reserve`, in px). Room is only ever held for what scrolling
- * can't do, so any room the window could now stand in for is given back with
- * a scroll that leaves the element where it is (a browser's own scroll
- * anchoring may already have kept it still, and room kept then would pile up
- * at every fold). Pure: `useStaysOnScreen` measures and applies.
+ * the window, and while `folded`, where the window can't scroll far enough (at
+ * the top of the page there is nothing above to scroll back to), hold room in
+ * the place of what went (`reserve`, in px).
  *
- * `shift` is how far the element moved down on screen (negative: up).
- * `scrollY` is the window's scroll now. `reserve` is the room held so far.
+ * The room is worked out afresh each time from where the element is, not
+ * added to: the move to make up for is where the element would be with no
+ * room at all (`shift - reserve`), the window scrolls as much of it as it can,
+ * and the room is what is left. So room is held only for what scrolling can't
+ * do, room the window could stand in for is given back with a scroll that
+ * leaves the element where it is, and nothing piles up. Unfolded, no room is
+ * held at all: what the window can't scroll then (the bar came back shorter
+ * than the room at the top of the page: Show controls and Hide controls while
+ * playing, a rotation) moves the element instead, once, back towards where it
+ * sits with no room. Pure: `useStaysOnScreen` measures and applies.
+ *
+ * `shift` is how far the element moved down on screen, room as it is
+ * (negative: up). `scrollY` is the window's scroll now. `reserve` is the room
+ * held so far. `folded`: whether room may be held now.
  */
 export function keepInPlace({
   shift,
   scrollY,
   reserve,
+  folded,
 }: {
   shift: number;
   scrollY: number;
   reserve: number;
+  folded: boolean;
 }): { scrollBy: number; reserve: number } {
-  let scrollBy: number;
-  let held: number;
-  if (shift < 0) {
-    // Moved up: scroll the window up as far as it goes, and hold the rest as room above it.
-    scrollBy = 0 - Math.min(-shift, Math.max(0, scrollY));
-    held = reserve + (-shift + scrollBy);
-  } else {
-    // Moved down: give back the room first, then scroll the rest. The page has that much
-    // below it: the room held is what it lacked before.
-    const given = Math.min(reserve, shift);
-    scrollBy = shift - given;
-    held = reserve - given;
-  }
-  // Room the window can stand in for: drop it and scroll up by as much, which cancels out.
-  const standIn = Math.min(held, Math.max(0, scrollY + scrollBy));
-  return { scrollBy: scrollBy - standIn, reserve: held - standIn };
+  // Where the element would be with no room held, against where it was.
+  const move = shift - reserve;
+  // Scroll by the move, but never above the top of the page (an overscrolled, negative
+  // scrollY is as good as the top).
+  const scrollBy = Math.max(move, 0 - Math.max(0, scrollY));
+  // What the window couldn't scroll: only ever an upward move at the top.
+  return { scrollBy, reserve: folded ? scrollBy - move : 0 };
+}
+
+/**
+ * The room after the window was resized while folded. The room is the height
+ * the full controls had above the element, and that height follows the width
+ * (their rows wrap, and at 768 px the layout changes): after a rotation it is
+ * not the height they will come back at, and keeping it can push the element
+ * off a now shorter window (a phone turned to landscape while playing). So a
+ * new width drops it, and the element goes where the new layout puts it. A
+ * change of height alone (a phone's toolbar showing or hiding) keeps it.
+ */
+export function roomAfterResize({
+  reserve,
+  widthBefore,
+  widthAfter,
+}: {
+  reserve: number;
+  widthBefore: number;
+  widthAfter: number;
+}): number {
+  return widthAfter === widthBefore ? reserve : 0;
 }

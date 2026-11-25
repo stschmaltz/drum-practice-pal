@@ -681,3 +681,51 @@ From the plan's Unit 12 row and this round:
 
 - `npm run check`: 110 files, 4258 tests green (unchanged; QA changed no app code).
 - `npm run e2e`: 414 passed, 24 skipped, 0 failed (438 listed), on a fresh `npm run build -- --mode development` from bash; the `vite preview` on 4173 was reused and left running.
+
+## QA fix round 2 (after UX pass)
+
+Build fixes for QA (after QA fix round) issues 1, 2 and 3, each with a test seen to fail first: the e2e ones against the build QA left in `dist` (c6ffb6c), the unit ones before the code.
+
+### Summary
+
+1. **A rotation while playing no longer pushes the score off a phone (issue 1, major).** The room is the height the full controls had above the score, and that height follows the width (rows wrap; 768 px changes the layout). `useStaysOnScreen` now listens for `resize`, and a new width while folded drops the room (`roomAfterResize` in `keepInPlace.ts`, pure): the score goes where the new layout puts it, right under the strip at the top of a phone's short page, with the beat cursor on screen. A change of height alone (a phone's toolbar) keeps it. Every resize also re-measures where the score is, so the next fold or unfold starts from the new layout.
+2. **Pause with a count-in on no longer moves the score in Chrome (issue 2).** Chrome's scroll anchoring acts after the layout effect, as the frame is drawn, so it and the hook both made up for the same change at a Pause (with the count-in on it picked an anchor that the room's removal moved). The hook now turns anchoring off (`overflow-anchor: none` on `html` and `body`) while the song page is up, and puts back what was there on unmount: the hook is the window scroll's one owner at a fold, in Chrome as in Safari (which has none). Measuring after anchoring was not an option: nothing in a layout effect runs after it.
+3. **No room is left over after the controls come back another height (issue 3, Test's bug 1).** `keepInPlace` now works the room out afresh from measured positions instead of adding deltas: the move to make up for is where the score would be with no room (`shift - reserve`), the window scrolls as much of it as it can, and only while folded is what is left held as room. Unfolded no room is held at all, so every Pause clears it. Show controls, Hide controls, Pause on a phone ends with no room and the score where it was before the first Play (it moves up 56 px at that Pause, back to there). The two Unit 13 lines for issues 2 and 3 (and Test's bug 1) are deleted from `docs/plan.md`.
+
+### Files
+
+- `src/features/song/keepInPlace.ts`: `keepInPlace({ shift, scrollY, reserve, folded })` (the new rule), `roomAfterResize`.
+- `src/features/song/useStaysOnScreen.ts`: the `resize` listener, `overflow-anchor`, `holdRoom`; the third argument is now `folded` (it was a generic key).
+- Tests: `keepInPlace.test.ts` (rewritten for `folded`: worked cases, the unfold shorter than the room, `roomAfterResize`, the 1,200-case grid folded and unfolded, repeated folds with height changes never leaving room); `useStaysOnScreen.test.tsx` (the model gains `resize`; a rotation on a long page and at the top of a short page, a height-only resize, Show/Hide/Pause, the listener test counts resize listeners too, anchoring off while mounted and restored, StrictMode); e2e `jam.spec.ts` "rotating a phone while playing keeps the beat cursor on screen, portrait to landscape and back" (phone project), `player.spec.ts` "on a short page with a count-in on, Pause leaves the score where it is, counting in or playing" and "Show controls, Hide controls and Pause leave no room under the controls" (all three sizes).
+- `AGENTS.md` (the fold bullet), `docs/plan.md` (two Unit 13 lines deleted).
+
+### Decisions
+
+- **Drop the room at a rotation rather than recompute it.** While folded the full controls can't be measured, so the height they will unfold at in the new layout isn't known; the room from the old layout is the one value known to be wrong. Dropping it is what the page did before the first fix round, which QA found kept the cursor in view.
+- **Clear the room at every unfold.** Keeping the score exactly still when the bar comes back shorter would mean holding room while paused, which is the leftover band QA logged. The score moves instead, once, by the difference, and only at the top of a page that can't scroll up for it.
+- **Anchoring off for the song page's lifetime, not around each fold.** Anchoring picks its anchor before the change and adjusts after the layout effect, so turning it off only for the fold would have to outlast a frame the hook doesn't see. The rest of the song page loses nothing it relied on: Safari already behaves this way, and every e2e passes with it.
+
+### Async windows and inputs
+
+- **A resize while folded** (rotation, window resize): a new width drops the room and re-measures; the next Pause makes up for what it can by scrolling and moves the score for the rest. A height-only resize re-measures and keeps the room. Both can come before or after React's own re-render for the 768 px layout change; either order ends with the room dropped and the position measured from the new layout.
+- **A user scroll while folded**: re-measures, as before; the room stays until the unfold.
+- **Show controls / Hide controls mid-run**: an unfold then a fold; the unfold clears the room, the fold holds what the window can't scroll for the taller bar.
+- **Unmount** (leaving the page, another song): listeners removed, anchoring put back; the slot that carried the room goes with the page. StrictMode's second mount saves and sets again.
+
+### Known gaps
+
+- At the top of a phone's short page, a Pause after a rotation while playing moves the score down by what unfolding adds (nothing above can scroll); a Pause after Show controls and Hide controls moves it up 56 px. Both put it where the paused layout has it.
+- Any width change while folded drops the room, a one-pixel desktop resize too; at the top of a short page that moves the score up under the strip.
+- The window's scroll anchoring is off on the song page, so content that changes height above the score while scrolled (the session notice) moves it, as in Safari.
+- Chromium only; Safari not run.
+
+### Manual verify
+
+1. Phone 390 x 844, `groove-120`, sheet closed, at the top: Play, rotate to 844 x 390: the score and the beat cursor are on screen. Rotate back: still. Pause: no blank band under the controls.
+2. Tablet and laptop, count-in 1 or 2 bars, at the top: Play, Pause during the count-in, and again once playing: the score stays put.
+3. Phone: Play, Show controls, Hide controls, Pause: no blank band; the score is where it was before Play.
+
+### Results
+
+- `npm run check`: 110 files, 4264 tests green (was 110 / 4258). One run before it failed a `usePlayer` soundfont-retry `findByText` under load, unrelated to this change; it passed on the rerun and in the run counted here.
+- `npm run e2e`: 421 passed, 26 skipped, 0 failed (447 listed, was 438), on a fresh `npm run build -- --mode development` from bash; the `vite preview` on 4173 was reused and left running. Against the build QA left in `dist`, the four new e2e failed: the rotation (beat cursor off screen at 844 x 390), Show/Hide/Pause on the phone (56 px room), and the count-in Pause on tablet and desktop. After the fix the three new tests and the earlier short-page and anchoring-off ones passed at every size before the full run.
