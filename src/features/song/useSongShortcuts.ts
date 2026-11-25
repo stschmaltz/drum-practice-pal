@@ -83,11 +83,13 @@ export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs
         setHelpOpen((open) => !open);
         return;
       }
-      const { player: pressed } = latest.current;
-      const before = pressed?.getSnapshot();
+      const { player } = latest.current;
+      const before = player?.getSnapshot();
       runShortcut(resolved.action, latest.current);
-      const said = before && pressed && shortcutAnnouncement(before, pressed.getSnapshot());
-      if (said) setAnnouncement(said);
+      if (player && before) {
+        const said = shortcutAnnouncement(before, player.getSnapshot());
+        if (said !== null) setAnnouncement(said);
+      }
     };
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.key !== ' ' || !swallowSpaceKeyup) return;
@@ -145,8 +147,9 @@ function runShortcut(
       if (canUseDrumToggles(player, snapshot)) player.setDrumsOnly(!snapshot.drumsOnly);
       return;
     case 'countIn':
-      if (canChangeOptions(player, snapshot))
+      if (canChangeOptions(player, snapshot)) {
         player.setCountInBars(nextCountInBars(snapshot.countInBars));
+      }
       return;
   }
 }

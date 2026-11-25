@@ -4,6 +4,7 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { percentToRatio } from '@/features/player/speed';
+import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { randomUuid } from '@/lib/randomUuid';
 import {
@@ -21,7 +22,6 @@ import { speedLabel } from './loopLabels';
 import { selectionHint } from './rangeSelection';
 import { useCreateLoop, useUpdateLoop } from './useLoops';
 import { editorBarFields, type LoopEditor } from './useLoopPractice';
-import { failureCopy } from '@/lib/errorCopy';
 
 type DetailFields = Pick<LoopFormValues, 'name' | 'targetPercent'>;
 

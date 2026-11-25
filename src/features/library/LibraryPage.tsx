@@ -4,16 +4,16 @@ import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
 import { cardGridClass, inputClass, labelClass, sectionHeadingClass } from '@/components/styles';
+import { failureCopy } from '@/lib/errorCopy';
 import { findItemControl, isItemListed, neighbourAfterLeaving } from '@/lib/itemFocus';
 import { waitsForNetwork } from '@/lib/network';
-import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
+import { useFocusWhenReady, type FocusWhenReady } from '@/lib/useFocusWhenReady';
 import type { LibrarySong } from './songForm';
 import { isLibrarySort, searchSongs, sortSongs, type LibrarySort } from './songList';
 import { SongListItem } from './SongListItem';
 import { UploadPanel } from './UploadPanel';
 import { findUploadPicker } from './uploadPicker';
 import { useSongs } from './useSongs';
-import { failureCopy } from '@/lib/errorCopy';
 
 const SORT_LABELS: Record<LibrarySort, string> = {
   practiced: 'Recently practiced',
@@ -108,7 +108,7 @@ function SongList({
   focusWhenReady,
 }: {
   songs: LibrarySong[];
-  focusWhenReady: ReturnType<typeof useFocusWhenReady>;
+  focusWhenReady: FocusWhenReady;
 }) {
   const { query, sort, setQuery, setSort } = useLibraryView();
   const searchId = useId();

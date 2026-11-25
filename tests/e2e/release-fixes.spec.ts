@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import type { Page } from '@playwright/test';
-import { createAdminClient } from '../../scripts/supabase-admin.ts';
-import { expect, signIn, test, type E2eUser } from './auth';
+import { expect, signIn, test } from './auth';
+import { songRows, userFiles } from './libraryPage';
 import {
   firstBarField,
   lastBarField,
@@ -20,20 +20,7 @@ import { loopsOf } from './practicePage';
 // end to end against the local stack. A lost answer is `route.fetch()` then
 // `route.abort()`: the server has done the write and the page sees a failure.
 
-const admin = createAdminClient();
 const NETWORK_COPY = "The server couldn't be reached. Check the connection and try again.";
-
-async function songsOf(user: E2eUser) {
-  const { data, error } = await admin.from('songs').select('id, title').eq('user_id', user.id);
-  if (error) throw error;
-  return data;
-}
-
-async function filesOf(user: E2eUser) {
-  const { data, error } = await admin.storage.from('gp-files').list(user.id);
-  if (error) throw error;
-  return data.map((file) => file.name);
-}
 
 /** Lets the first `method` request to `table` reach the database, then drops its answer. */
 async function loseFirstAnswer(page: Page, table: string, method: string) {
@@ -59,9 +46,9 @@ test('an upload whose save answer is lost is still added, with its file', async 
   await expect(page.getByRole('status').filter({ hasText: 'Added “Groove 120”.' })).toBeVisible();
   expect(lost.count).toBe(1);
   await expect(page.getByRole('alert')).toHaveCount(0);
-  const songs = await songsOf(user);
+  const songs = await songRows(user);
   expect(songs).toHaveLength(1);
-  expect(await filesOf(user)).toEqual([`${songs[0]!.id}.gp`]);
+  expect(await userFiles(user)).toEqual([`${songs[0]!.id}.gp`]);
 
   // The song plays: its file is the one kept, not one removed by a rollback.
   await page.getByRole('list').getByRole('link', { name: 'Groove 120' }).click();

@@ -4,6 +4,7 @@
  */
 import { failureCopy, failureKind, UserFacingError } from '@/lib/errorCopy';
 import { fetchAllPages } from '@/lib/fetchAllPages';
+import { PG } from '@/lib/postgresCodes';
 import { randomUuid } from '@/lib/randomUuid';
 import { GP_FILE_MAX_BYTES, GP_FILES_BUCKET, songFilePath } from '@/lib/schema';
 import { sha256Hex } from '@/lib/sha256';
@@ -19,9 +20,6 @@ import {
   type SongEdit,
 } from './songForm';
 import type { SongMetadata } from './songMetadata';
-
-/** Postgres unique_violation: here, songs_user_file_hash_key. */
-const UNIQUE_VIOLATION = '23505';
 
 export async function fetchSongs(userId: string): Promise<LibrarySong[]> {
   const rows = await fetchAllPages(async (from, to) =>
@@ -155,17 +153,22 @@ export async function uploadSong(
       // The row may have committed with only its answer lost; removing the
       // file then would leave a listed song with nothing to play.
       const landed = await findSavedSong(userId, songId, inserted.error);
-      if (landed) return { kind: 'uploaded', song: { ...landed, last_practiced_at: null } };
+      if (landed) return uploadedSong(landed);
     }
     await removeUploadedFile(filePath, inserted.error);
-    // Another tab or device added the same file since the check above.
-    if (inserted.error.code === UNIQUE_VIOLATION) {
+    // Another tab or device added the same file since the check above
+    // (songs_user_file_hash_key).
+    if (inserted.error.code === PG.UNIQUE_VIOLATION) {
       const winner = await findSongByHash(userId, fileHash);
       if (winner) return { kind: 'duplicate', song: winner };
     }
     throw inserted.error;
   }
-  const song = unwrap(inserted, 'song');
+  return uploadedSong(unwrap(inserted, 'song'));
+}
+
+/** A song just added has never been practiced. */
+function uploadedSong(song: Song): UploadResult {
   return { kind: 'uploaded', song: { ...song, last_practiced_at: null } };
 }
 

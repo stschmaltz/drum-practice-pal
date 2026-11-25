@@ -1,11 +1,11 @@
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { Icon } from '@/components/icons';
 import { quietButtonClass } from '@/components/styles';
+import { failureCopy } from '@/lib/errorCopy';
 import type { LoopStatus } from '@/lib/schema';
 import { statusButtonAttributes } from './loopFocus';
 import type { Loop } from './loopForm';
 import { useSetLoopStatus } from './useLoops';
-import { failureCopy } from '@/lib/errorCopy';
 
 /**
  * "Mark finished" on an active loop, "Reopen" on a finished one, for a row of

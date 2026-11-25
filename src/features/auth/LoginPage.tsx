@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useLocation, useSearchParams } from 'react-router';
 import { useAuth } from '@/lib/auth';
+import { signInFailureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { FullPageMessage } from '@/components/FullPageMessage';
@@ -22,7 +23,6 @@ import {
   SIGN_IN_CODE_LENGTH,
   SIGN_IN_CODE_PATTERN,
 } from './signInInput';
-import { signInFailureCopy } from '@/lib/errorCopy';
 
 /** Step one asks for an email; once it's sent, step two takes the code from it. */
 export function LoginPage() {

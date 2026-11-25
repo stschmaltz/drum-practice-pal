@@ -10,12 +10,12 @@ import {
   ratioToPercent,
 } from '@/features/player/speed';
 import { bpmAtSpeed } from '@/features/player/tempo';
+import { failureCopy } from '@/lib/errorCopy';
 import { useOnline } from '@/lib/network';
 import type { Loop } from './loopForm';
 import { LOOP_SPEED_ATTRIBUTES } from './loopFocus';
 import { speedLabel } from './loopLabels';
 import { useUpdateLoop } from './useLoops';
-import { failureCopy } from '@/lib/errorCopy';
 
 /** The nudge buttons, in percent. */
 const NUDGES = [-5, -1, 1, 5] as const;

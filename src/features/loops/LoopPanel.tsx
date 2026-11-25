@@ -21,6 +21,7 @@ import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerServ
 import { ratioToPercent } from '@/features/player/speed';
 import { LoopHistory } from '@/features/practice/LoopHistory';
 import { lastPracticedLabel } from '@/features/practice/sessions';
+import { failureCopy } from '@/lib/errorCopy';
 import {
   findItemControl,
   isItemListed,
@@ -53,7 +54,6 @@ import { LoopStatusButton } from './LoopStatusButton';
 import { loopPanelIsSheet, playLoopClosesPanel } from './useLoopPanelOpen';
 import { useDeleteLoop, useLoops, useSetLoopStatus } from './useLoops';
 import type { LoopPractice } from './useLoopPractice';
-import { failureCopy } from '@/lib/errorCopy';
 
 interface LoopPanelProps {
   songId: string;

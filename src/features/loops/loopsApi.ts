@@ -3,6 +3,7 @@
  * hooks in useLoops.ts are the only callers.
  */
 import { fetchAllPages } from '@/lib/fetchAllPages';
+import { PG } from '@/lib/postgresCodes';
 import { supabase } from '@/lib/supabase';
 import { throwIfError, unwrap } from '@/lib/supabaseResult';
 import { LOOP_SELECT, type Loop, type LoopEdit, type NewLoop } from './loopForm';
@@ -43,9 +44,6 @@ export async function fetchPracticeLoops(userId: string): Promise<PracticeLoop[]
   );
 }
 
-/** Postgres unique_violation: for a loops insert, an id already taken. */
-const UNIQUE_VIOLATION = '23505';
-
 /**
  * Returns the saved row, so the cache holds what the DB actually stored. The
  * id is the form's, the same at every press: a press after a lost answer
@@ -58,7 +56,7 @@ export async function createLoop(userId: string, loop: NewLoop): Promise<Loop> {
     .insert({ ...loop, user_id: userId })
     .select(LOOP_SELECT)
     .single();
-  if (inserted.error?.code === UNIQUE_VIOLATION) {
+  if (inserted.error?.code === PG.UNIQUE_VIOLATION) {
     const saved = await supabase
       .from('loops')
       .select(LOOP_SELECT)

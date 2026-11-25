@@ -7,6 +7,7 @@
  * (`UserFacingError`) are shown as they are.
  */
 import { isNetworkFailure, isTokenRefusal } from './network';
+import { PG } from './postgresCodes';
 
 /** An error whose message the app wrote to be shown as is. */
 export class UserFacingError extends Error {
@@ -24,7 +25,7 @@ export const FAILURE_COPY = {
 export type FailureKind = keyof typeof FAILURE_COPY;
 
 /** Postgres and PostgREST codes that mean the row the write was about isn't there any more. */
-const GONE_CODES = new Set(['23503', 'PGRST116']);
+const GONE_CODES = new Set<string>([PG.FOREIGN_KEY_VIOLATION, PG.NO_ROWS]);
 
 function fieldOf(error: unknown, field: 'code' | 'name' | 'status' | 'originalError'): unknown {
   return typeof error === 'object' && error !== null
@@ -44,6 +45,7 @@ export function failureKind(error: unknown): FailureKind {
     return 'network';
   }
   const code = fieldOf(error, 'code');
+  // 'token_refused' is TokenRefusedError's (tokenRefresh.ts, which this pure module can't import).
   if (isTokenRefusal(error) || code === 'token_refused') return 'signIn';
   if (typeof code === 'string' && GONE_CODES.has(code)) return 'gone';
   if (typeof code === 'string' && code !== '') return 'refused';

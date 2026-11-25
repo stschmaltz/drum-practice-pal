@@ -9,9 +9,9 @@ import {
   useHasUnsentWrites,
 } from '@/features/offline/unsentWrites';
 import { useSignedInUser } from '@/lib/auth';
+import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { useSignOut } from './useAuthActions';
-import { failureCopy } from '@/lib/errorCopy';
 
 /**
  * RequireAuth redirects to /login once the SIGNED_OUT event lands. Signing

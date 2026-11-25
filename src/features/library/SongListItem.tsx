@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
+import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { Icon } from '@/components/icons';
 import {
@@ -33,7 +34,6 @@ import {
 } from './songForm';
 import { NO_DRUM_TRACK_NOTE } from './songMetadata';
 import { useDeleteSong, useUpdateSong } from './useSongs';
-import { failureCopy } from '@/lib/errorCopy';
 
 type Mode = 'view' | 'edit' | 'confirm-delete';
 

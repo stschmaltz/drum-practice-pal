@@ -11,6 +11,7 @@ import {
   primaryButtonClass,
   sectionHeadingClass,
 } from '@/components/styles';
+import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
 import { SignOutButton } from '@/features/auth/SignOutButton';
 import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
@@ -27,7 +28,6 @@ import {
   type SettingsErrors,
 } from './settingsForm';
 import { useSettings, useUpdateSettings } from './useSettings';
-import { failureCopy } from '@/lib/errorCopy';
 
 export function SettingsPage() {
   const settings = useSettings();

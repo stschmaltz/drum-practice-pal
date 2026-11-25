@@ -3,6 +3,9 @@ import { useCallback, useEffect, useRef } from 'react';
 /** How long a press waits for the control it should hand focus to; a change that never shows is let go. */
 export const FOCUS_WAIT_MS = 5000;
 
+/** Asks for focus to go to what `find` returns, once it is on the page. */
+export type FocusWhenReady = (find: () => HTMLElement | null) => void;
+
 interface PendingFocus {
   /** The element to focus once it is on the page, or null while the change hasn't rendered yet. */
   find: () => HTMLElement | null;
@@ -19,7 +22,7 @@ interface PendingFocus {
  * each render looks again. Focus is only moved if it is still on what was
  * pressed or has fallen to `<body>`: a user who has moved on keeps their place.
  */
-export function useFocusWhenReady(): (find: () => HTMLElement | null) => void {
+export function useFocusWhenReady(): FocusWhenReady {
   const pending = useRef<PendingFocus | null>(null);
 
   // Every render: the change the press waits for is what re-renders the owner.

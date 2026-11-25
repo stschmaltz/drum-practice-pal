@@ -9,14 +9,14 @@ import {
   primaryButtonClass,
   primaryLabelOffClass,
 } from '@/components/styles';
+import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { songPath } from '@/lib/routes';
 import { GUITAR_PRO_EXTENSIONS } from './songFile';
 import { NO_DRUM_TRACK_NOTE } from './songMetadata';
 import { SongFileError, type UploadResult, type UploadStep } from './songsApi';
-import { useUploadSong } from './useSongs';
-import { failureCopy } from '@/lib/errorCopy';
 import { UPLOAD_PICKER_ATTRIBUTES } from './uploadPicker';
+import { useUploadSong } from './useSongs';
 
 const STEP_LABELS: Record<UploadStep, string> = {
   reading: 'Reading',

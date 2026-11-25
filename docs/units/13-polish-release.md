@@ -212,3 +212,29 @@ Slow network and offline: loading lines show on every screen. Offline, the banne
 
 - `npm run check`: 111 files, 4312 tests green.
 - e2e (`E2E_PORT=4181`, this build): the `journey`, `release-fixes`, `design`, `offline`, `player`, `library` and `auth` specs at three sizes: 167 passed, 6 skipped, 1 failed (`offline.spec.ts:339` on desktop, the race above).
+
+## Readability
+
+### Summary
+
+Small, behaviour-neutral tidying of this unit's code; no copy, gate or flow changed.
+
+- **One home for the error codes the app branches on.** `src/lib/postgresCodes.ts` (`PG.UNIQUE_VIOLATION`, `PG.FOREIGN_KEY_VIOLATION`, `PG.NO_ROWS`) replaces the local `UNIQUE_VIOLATION` in `songsApi.ts` and `loopsApi.ts` (both now 13's), `FOREIGN_KEY_VIOLATION` in `sessionsApi.ts`, and the raw `'23503'` / `'PGRST116'` in `errorCopy.ts`'s `GONE_CODES`. Pure, so `errorCopy` can import it. Named like `tests/db/helpers.ts`'s `PG`, which keeps its own list of what the database tests assert.
+- **`songsApi.ts`**: `uploadedSong(song)` is the one place a new upload's result is built (`last_practiced_at: null`), used by the normal insert and by the lost-answer look-up; `removeUploadedFile`'s throw reflowed to one call.
+- **`useSongShortcuts.ts`**: the announcement after a key reads as a plain `if (player && before)` block instead of a chained `&&` value; the count-in case takes braces like its neighbours.
+- **Imports**: the `@/lib/errorCopy` import added in ten components sat after the relative imports; moved into the `@/` group, and `UploadPanel`'s `./uploadPicker` into order.
+- **`useFocusWhenReady`** exports its callback type `FocusWhenReady`, which `LibraryPage`'s `SongList` now takes instead of `ReturnType<typeof useFocusWhenReady>`.
+- **Comments**: `PlayerControls`' note on when options are off now says "and off once it has failed" (13 Build changed the gate); `errorCopy`'s `'token_refused'` literal says whose code it is and why it isn't imported (`tokenRefresh.ts` imports the client).
+- **e2e**: `release-fixes.spec.ts` had its own copies of `library.spec.ts`'s song-row and Storage-file reads. Both now import `songRows` / `userFiles` from a new `tests/e2e/libraryPage.ts`, like `practicePage.ts` for sessions and loops.
+- **Spike**: no code was left. `src` cites the Unit 01 note only in comments that are still true; `public/sf-candidates/`, the route, the Workbox ignore and the e2e spec are gone (Build).
+
+Looked at and left: `UploadFailure`'s two wordings (an app-written `SongFileError` reads "Couldn't add …", a failure "Couldn't upload …"; merging them would change copy); the inline `{ message: 'TypeError: Failed to fetch', code: '' }` in test files (the pattern since Unit 11); `LoopSpeedControl.setSpeed` asking `canChangeOptions` again beside `canSetSpeed` (it narrows `player` for the call).
+
+### AGENTS.md
+
+"Polish and release": one sentence on `PG` from `src/lib/postgresCodes.ts`.
+
+### Results
+
+- Before: `npm run check` 111 files, 4312 tests green; `npm run e2e` (`E2E_PORT=4180`, fresh development build) 394 passed, 24 skipped, 2 failed (`offline.spec.ts:339` on phone and tablet, the known race QA diagnosed).
+- After: `npm run check` 111 files, 4313 tests green (one more case from a test that walks `src/` files, which now has `postgresCodes.ts`); `npm run e2e` (same setup, rebuilt) 396 passed, 24 skipped, 0 failed.
