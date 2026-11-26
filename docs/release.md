@@ -10,6 +10,12 @@ How Drum Practice Pal goes from `main` to the hosted Supabase project and the pr
 - [ ] Locally: `npm run check`, `npm run e2e`, `npm run test:db` against a fresh `npm run db:reset`.
 - [ ] The Open human checks in `docs/plan.md` that block a release are done (at least the Unit 01, 05 and 11 iPhone rows: sound on the first tap, the ringer switch, an installed PWA offline).
 
+## Where things are (Nov 2026)
+
+- Supabase project `pdvrzgeoijerdzioxtse` ("stschmaltz's Project", us-west-2, Free plan), linked with `npx supabase link --project-ref pdvrzgeoijerdzioxtse`. Migrations up to `20261123010000_session_sanity.sql` are pushed.
+- Production Worker: `https://drum-practice-pal.stschmaltz.workers.dev`.
+- Auth settings were pushed with `supabase config push` from a copy of `supabase/` whose `config.toml` holds the production column of section 3 (site URL, redirect URLs, confirm email on, minimum password 12, `max_frequency` 60 s, hosted email rate limit). Not pushed: the email templates. The Free plan refuses template changes while the built-in sender is used, so the email carries Supabase's default magic link and no 6-digit code until a custom SMTP sender is set; then push the two `[auth.email.template.*]` sections. Sign-in by link works meanwhile, but an installed iPhone PWA needs the code.
+
 ## 2. Hosted database
 
 Migrations live in `supabase/migrations/` and reach the hosted project with `supabase db push` (by hand; nothing in CI pushes). Link once:
@@ -76,10 +82,8 @@ Authentication settings in the Supabase dashboard. The middle column is what the
 
 Workers Builds runs `npm run build`, then `npx wrangler deploy` on `main` (`wrangler.jsonc`); other branches get preview URLs.
 
-- [ ] Workers Builds, Settings, Build variables (build time, not runtime secrets: Vite inlines them):
-  - `VITE_SUPABASE_URL`: the project's API URL (`https://<project-ref>.supabase.co`).
-  - `VITE_SUPABASE_PUBLISHABLE_KEY`: the project's publishable key (`sb_publishable_...`). Never the secret key.
-- [ ] Decide whether preview builds get the same variables (they then sign in against production data) or none (they show "This build isn't connected to Supabase").
+- [x] `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` come from the committed `.env.production` (Vite inlines both; the publishable key is public, never the secret key), so Workers Builds needs no build variables. A build variable of the same name would override it.
+- [x] Previews use the same project (they sign in against production data); the redirect list allows `https://*-drum-practice-pal.stschmaltz.workers.dev/**`.
 - [ ] Node version for the build is 22 (`.nvmrc`).
 - [ ] After the deploy: the production URL opens, `/library` deep-links (SPA fallback from `not_found_handling`), and `/sw.js` and `/manifest.webmanifest` are served.
 

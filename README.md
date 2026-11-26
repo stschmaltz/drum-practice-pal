@@ -64,7 +64,7 @@ Speeds are stored as a ratio of the file's own tempo. BPM is always worked out f
 
 ## Production
 
-A production build needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (see `.env.example`). Without them it shows a "not connected" message. The steps to release, including the hosted auth settings that `supabase/config.toml` doesn't carry, are in [`docs/release.md`](docs/release.md).
+A production build reads `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` from the committed `.env.production` (the hosted project; both values are public). Without them it shows a "not connected" message. The steps to release, including the hosted auth settings that `supabase/config.toml` doesn't carry, are in [`docs/release.md`](docs/release.md).
 
 ## Working on it
 
