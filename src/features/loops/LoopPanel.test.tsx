@@ -1386,6 +1386,22 @@ describe('LoopPanel keeping focus', () => {
     );
   });
 
+  // 12 Review (after UX pass): the prompt goes with its "Not yet", which took focus to <body>.
+  it('the prompt’s Not yet hands focus to the loop’s speed, just above where the prompt was', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+
+    const prompt = within(view.panel.getByRole('group', { name: 'Mark finished?' }));
+    await view.user.click(prompt.getByRole('button', { name: 'Not yet' }));
+
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(view.panel.getByRole('group', { name: 'Loop speed' })).toHaveFocus(),
+    );
+    expect(view.player.getSnapshot().status).toBe('playing');
+  });
+
   // Held: the loop's new button is rendered while its write is still pending, as on a real network.
   it('with the write on its way, focus is on the loop’s Reopen at once, and Enter there sends nothing', async () => {
     const view = renderPanel();

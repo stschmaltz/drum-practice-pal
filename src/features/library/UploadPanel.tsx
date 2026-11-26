@@ -79,7 +79,8 @@ export function UploadPanel({
   const onDragOver = (event: DragEvent) => {
     // Without preventDefault the browser opens the dropped file instead.
     event.preventDefault();
-    if (!blocked) setDragging(true);
+    // Only for a file: a song card's link or selected text dragged across the list is no upload.
+    if (!blocked && carriesFiles(event)) setDragging(true);
   };
 
   const fileName = upload.variables?.file.name;
@@ -201,6 +202,11 @@ function FilePicker({
  * A file dropped just outside the zone would otherwise replace the app with
  * the browser's view of that file.
  */
+/** Whether a drag holds files. The files themselves can only be read on the drop. */
+function carriesFiles(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
 function useIgnoreStrayFileDrops() {
   useEffect(() => {
     const ignore = (event: Event) => event.preventDefault();

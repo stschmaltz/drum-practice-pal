@@ -35,6 +35,7 @@ import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
   editButtonAttributes,
   findFormOpener,
+  findLoopSpeed,
   findStatusButton,
   NEW_LOOP_BUTTON_ATTRIBUTES,
   type LoopFormOpener,
@@ -504,6 +505,12 @@ function LoopListItem({
     active.onExit();
     focusWhenReady(() => findItemControl(loop.id, 'play'));
   };
+  // "Not yet" goes with its prompt; the loop's speed control, just above it, takes focus.
+  const declineFinish = () => {
+    if (!active) return;
+    active.onDeclineFinish();
+    focusWhenReady(findLoopSpeed);
+  };
   const [showingHistory, setShowingHistory] = useState(false);
   const named = <span className="sr-only"> {loop.name}</span>;
 
@@ -540,7 +547,7 @@ function LoopListItem({
             <FinishPrompt
               songId={songId}
               loop={loop}
-              onDecline={active.onDeclineFinish}
+              onDecline={declineFinish}
               onFinished={active.onFinished}
             />
           )}
