@@ -856,3 +856,41 @@ No new async window. The scroll into view at Hide controls is the same smooth sc
 
 - `npm run check`: 110 files, 4280 tests green (was 110 / 4277).
 - `npm run e2e`: 429 passed, 30 skipped, 0 failed (459 listed, was 456), on a fresh `npm run build -- --mode development` from bash. No `vite preview` was left on 4173 this time (the first run found the port free and Playwright started its own).
+
+## Test (after QA fix round 3)
+
+Tests for d2b8564: the fold's position read during render (`useStaysOnScreen`) and `scoreOnScreen` keyed on `fold.folded`. No app code changed. One bug found, older than the fix (Bugs found).
+
+### What the render-time read had to survive
+
+The checklist's interleavings for a value read during render rather than in an effect or a listener, each with the window moved silently (a scroll whose event the page hasn't had) before the fold, since that is what the old scroll listener missed:
+
+- **StrictMode's double render**: both renders read the same page; each Play and Pause keeps the score still and scrolls once.
+- **Renders React throws away**: the song page's fold comes from `useControlsFold`, which updates its own state during render, so React already discards the first render of every Play and Pause and runs the component again. The test model now hosts `useControlsFold` in the same component as the hook (`layout.Shell` with `useFolded`), as `SongPlayer` does. A transition that suspends is a render thrown away before it commits, with the window moved while it waits, with and without another render committed meanwhile. The fold is never a transition on the song page, but these pin that no read from a render that never reached the page is used: they fail with the read taken only once per fold change (`before.current === null` guard), which the other cases miss.
+- **Re-renders with no fold change** between silent scrolls: the fold keeps the score where it is at the fold, not at the last render.
+- **The fold during Play's smooth scroll**: unit (frames of the scroll, the last one's event unsent): the Pause keeps the score where the scroll had got to. The e2e (100vh put above the song so Play has far to scroll; Pause pressed in the page once the window has moved 20 px; the score's top read as Pause is pressed and on each of the next 60 frames) finds bug 1 below, so it is `test.fixme` until that is fixed.
+- **Keyboard**: Enter on Show controls and on Hide controls, focus having scrolled the toggle into view first. Component: Enter does what the click does, focus stays on the toggle as it renames, Hide brings the score into view, and playback carries on. With the layout model: the score stays where it is at each Enter. e2e at each project's size and at 844 x 390: the beat cursor is on screen after Hide, no room after Pause. The e2e passes on the build before the fix too: focus's scroll event has reached the page long before Enter, and at those sizes the score sits right under the toggle once focus has scrolled to it. It is kept as a pin on the keyboard path; the component tests carry the interleaving.
+- **Hide controls during a count-in**: component: the score is brought on screen a second time, the counter stays, the engine isn't restarted, and the downbeat (still folded) scrolls nothing more. e2e at each size and 844 x 390: Show controls, scroll to the page's end, Hide controls; read in one `evaluate` the status (`countingIn`) and that the count-in number is inside the visible window; the statuses are exactly ready, countingIn, playing. The landscape case fails on the build before the fix (the number off the window).
+- **The folded strip's Loop speed**: component: it leaves the bar folded, scrolls the score nowhere, and focuses the loop's speed; with the layout model, the Pause after it (the window moved as focus went to the speed) keeps the score still. e2e at each size and 844 x 390: Loop speed, then Pause, leaves the score within 1 px and no room. Breaking `showLoopSpeed` to unfold the bar fails both component tests; the e2e passes on the build before the fix (no scroll in the same frame there).
+- **The song's end**: a component case walks Play, Show controls, Hide controls and the end of the song (alphaTab's `finished`, then its stop), each just after a silent scroll.
+
+### Seen to fail
+
+- Unit (`useStaysOnScreen.test.tsx`, "the read at the fold's render"): all six fail on d2b8564^'s hook; the two transition cases also fail with the read guarded to once per fold change.
+- Component (`SongPage.test.tsx`): the three layout-model cases fail on d2b8564^'s hook; "by Enter" and "during a count-in" fail with `scoreOnScreen` keyed on `isRunning` again; the two Loop speed cases fail with `showLoopSpeed` unfolding the bar.
+- e2e: against a build of d2b8564^'s `useStaysOnScreen.ts` and `SongPage.tsx`, the count-in Hide in landscape failed; the keyboard and Loop speed cases passed, as noted above. The smooth-scroll Pause failed there and fails on d2b8564 too (bug 1).
+
+### Files
+
+- `src/features/song/useStaysOnScreen.test.tsx`: the page model's `Draw` takes the fold as a prop, and `Shell` (with `useFolded`, a hook of the same component) and `mountShell` let a test drive the fold from `useControlsFold` or a transition; `foldedOnScreen()` says whether the fold has committed, so a held transition can't pass by never folding. New describe "useStaysOnScreen, the read at the fold's render" (6 tests).
+- `src/features/song/SongPage.test.tsx`: "bringing the score on screen" gains Enter on the toggle, Hide during a count-in, and Loop speed in the strip; "the score stays where it is…" gains `scrollsSilently` in its layout model and three cases (every fold source after a silent scroll, keyboard, Loop speed then Pause).
+- `tests/e2e/player.spec.ts`: three tests at each project's size and at 844 x 390 on the phone project (keyboard Show / Hide, Hide during a count-in, Loop speed then Pause), and "a Pause while Play is still bringing the score on screen…" on all three, as `test.fixme` (bug 1).
+
+### Results
+
+- `npm run check`: 110 files, 4292 tests green (was 4280).
+- `npm run e2e`, on a fresh `npm run build -- --mode development` from bash (no `vite preview` was on 4173; Playwright started its own): 441 passed, 36 skipped, 3 failed (480 listed, was 459); the 3 were the smooth-scroll Pause, bug 1. Marked `test.fixme`, `player.spec.ts` then ran 67 passed, 11 skipped; the full run is 441 passed, 39 skipped, 0 failed.
+
+### Bugs found
+
+1. **A Pause while Play's smooth scroll is still bringing the score on screen moves the score** (minor; before this fix as after it). From the top of a page where the score box isn't all on show, Play folds the bar and `useScoreOnScreen` scrolls the box into view with `behavior: 'smooth'`. Pause part way: the unfold's layout effect reads the score and scrolls the window by what the controls grew (instant), and the score is still for that frame; but the instant scroll doesn't end Chromium's smooth scroll, which covers its remaining distance in the next frame. Desktop: the window at 626 of a scroll from 593 (to about 690), Pause, then 821 a frame later, the score 570 to 506: 64 px up. Tablet 66 px, phone 3 px. A bar tapped just after such a Pause can be the bar below the finger. The fix is to end the smooth scroll at a fold (for example `scrollTo` the current position with `behavior: 'instant'` before compensating, also when no compensation is needed), which changes what the hook's unit tests assert about `scrollBy`; not a few lines, so left to Unit 13 (Carried forward line added). The e2e is in `player.spec.ts` as `test.fixme`.

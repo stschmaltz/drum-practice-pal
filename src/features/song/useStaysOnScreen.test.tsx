@@ -1,5 +1,15 @@
-import { useLayoutEffect, useRef } from 'react';
-import { fireEvent, render } from '@testing-library/react';
+import {
+  startTransition,
+  Suspense,
+  use,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
+import { act, fireEvent, render } from '@testing-library/react';
+import { useControlsFold } from './useControlsFold';
 import { useStaysOnScreen } from './useStaysOnScreen';
 
 /**
@@ -46,10 +56,10 @@ function layOut({
   );
 
   /** React's commit reaching the page: a child's layout effect runs before its parent's. */
-  function Draw() {
+  function Draw({ folded }: { folded: boolean }) {
     useLayoutEffect(() => {
       const was = controls();
-      drawn.folded = page.folded;
+      drawn.folded = folded;
       drawn.notice = page.notice;
       // The browser's own anchoring runs as the page lays out, before the layout effect.
       if (anchoring) stored = clamp(stored + (controls() - was));
@@ -58,12 +68,28 @@ function layOut({
   }
 
   function Page({ folded }: { folded: boolean }) {
+    return <Shell useFolded={() => folded} />;
+  }
+
+  /**
+   * The page with `folded` from a hook of the same component, as on the song
+   * page (`useControlsFold` beside the hook), and anything else it draws.
+   */
+  function Shell({
+    useFolded,
+    children,
+  }: {
+    useFolded: () => boolean;
+    children?: (folded: boolean) => ReactNode;
+  }) {
+    const folded = useFolded();
     const scoreRef = useRef<HTMLDivElement>(null);
     const roomRef = useRef<HTMLDivElement>(null);
     useStaysOnScreen(scoreRef, roomRef, folded);
     return (
       <>
-        <Draw />
+        {children?.(folded)}
+        <Draw folded={folded} />
         <div
           ref={(element) => {
             roomRef.current = element;
@@ -88,9 +114,15 @@ function layOut({
 
   return {
     page,
+    Shell,
+    /** Renders a page built on `Shell` (a fold from somewhere other than a prop). */
+    mountShell: (element: ReactElement, options: { strict?: boolean } = {}) =>
+      render(element, { reactStrictMode: options.strict ?? false }),
     scrollBy,
     measured,
     scoreTop,
+    /** Whether the page on screen has the folded strip (React committed the fold). */
+    foldedOnScreen: () => drawn.folded,
     room: margin,
     scrollY: () => clamp(stored),
     mount(options: { strict?: boolean } = {}) {
@@ -674,5 +706,197 @@ describe('useStaysOnScreen, interleavings', () => {
         }
       }
     });
+  });
+});
+
+// 12 Test after QA fix round 3: where the score was is read during the render that changes the
+// fold. The checklist's interleavings for a read made in render: renders run twice, renders that
+// are thrown away, renders that fold nothing, and the window moving between any of them.
+describe('useStaysOnScreen, the read at the fold’s render', () => {
+  it('StrictMode’s second render reads the same page: with the window moved silently before each fold, every Play and Pause keeps the score still and scrolls once', () => {
+    const layout = layOut({ below: 3000, scrollY: 600 });
+    const { fold, unfold } = layout.mount({ strict: true });
+    for (let run = 0; run < 3; run += 1) {
+      layout.scrollsSilently(-40);
+      let where = layout.scoreTop();
+      const scrolls = layout.scrollBy.mock.calls.length;
+      fold();
+      expect(layout.scoreTop(), `run ${run}: Play`).toBe(where);
+      expect(layout.scrollBy.mock.calls.length - scrolls, `run ${run}: Play scrolls`).toBe(1);
+      layout.scrollsSilently(25);
+      where = layout.scoreTop();
+      unfold();
+      expect(layout.scoreTop(), `run ${run}: Pause`).toBe(where);
+      expect(layout.scrollBy.mock.calls.length - scrolls, `run ${run}: Pause scrolls`).toBe(2);
+      expect(layout.room(), `run ${run}`).toBe(0);
+    }
+  });
+
+  it('re-renders that fold nothing, each with the window moved silently after it, then a fold: the score stays where it is at the fold', () => {
+    for (const strict of [false, true]) {
+      const layout = layOut({ below: 3000, scrollY: 300 });
+      const { fold, unfold, redraw } = layout.mount({ strict });
+      for (const by of [50, -20, 70]) {
+        redraw();
+        layout.scrollsSilently(by);
+      }
+      let where = layout.scoreTop();
+      fold();
+      expect(layout.scoreTop(), `strict ${strict}: Play`).toBe(where);
+      for (const by of [-30, 15]) {
+        redraw(); // positions while playing
+        layout.scrollsSilently(by);
+      }
+      where = layout.scoreTop();
+      unfold();
+      expect([layout.scoreTop(), layout.room()], `strict ${strict}: Pause`).toEqual([where, 0]);
+    }
+  });
+
+  // The song page's fold comes from `useControlsFold`, whose state from the previous render
+  // updates during render: React throws that render away and runs the component again at once.
+  it('with the fold from useControlsFold (a render React throws away and runs again), Play, Show controls, Hide controls and Pause keep the score still, the window moved silently before each', () => {
+    for (const strict of [false, true]) {
+      const layout = layOut({ below: 3000, scrollY: 500 });
+      let showControls: (shown: boolean) => void = () => {};
+      let playing = false;
+      function useSongPageFold() {
+        const fold = useControlsFold(playing);
+        showControls = (shown) => fold.onFoldedChange(!shown);
+        return fold.folded;
+      }
+      function SongPage({ running }: { running: boolean }) {
+        playing = running;
+        return <layout.Shell useFolded={useSongPageFold} />;
+      }
+      const view = layout.mountShell(<SongPage running={false} />, { strict });
+      const steps: Array<[string, () => void]> = [
+        ['Play', () => view.rerender(<SongPage running />)],
+        ['Show controls', () => act(() => showControls(true))],
+        ['Hide controls', () => act(() => showControls(false))],
+        ['Pause', () => view.rerender(<SongPage running={false} />)],
+      ];
+      for (const [step, press] of steps) {
+        layout.scrollsSilently(-35);
+        const where = layout.scoreTop();
+        press();
+        expect(layout.scoreTop(), `strict ${strict}: ${step}`).toBe(where);
+      }
+      expect(layout.room(), `strict ${strict}: paused`).toBe(0);
+      view.unmount();
+    }
+  });
+
+  // React can render a fold and throw it away before it commits: a transition that suspends.
+  // The fold isn't one on the song page, but nothing must keep the read from a render that
+  // never reached the page.
+  describe('a fold rendered, thrown away, then rendered again before it commits', () => {
+    function suspendedFold(layout: ReturnType<typeof layOut>, strict: boolean) {
+      let resolve: () => void = () => {};
+      const ready = new Promise<void>((done) => (resolve = done));
+      let settled = false;
+      void ready.then(() => (settled = true));
+      let setFolded: (folded: boolean) => void = () => {};
+      let redraw: () => void = () => {};
+      function useFoldState() {
+        const [folded, set] = useState(false);
+        setFolded = set;
+        return folded;
+      }
+      function Waits({ folded }: { folded: boolean }) {
+        if (folded && !settled) use(ready);
+        return null;
+      }
+      function SongPage() {
+        const [, setTick] = useState(0);
+        redraw = () => setTick((tick) => tick + 1);
+        return (
+          <layout.Shell useFolded={useFoldState}>
+            {(folded) => (
+              <Suspense fallback={null}>
+                <Waits folded={folded} />
+              </Suspense>
+            )}
+          </layout.Shell>
+        );
+      }
+      const view = layout.mountShell(<SongPage />, { strict });
+      return {
+        view,
+        /** Play in a transition that suspends: rendered, not committed. */
+        foldInTransition: async () => {
+          await act(async () => startTransition(() => setFolded(true)));
+        },
+        redraw: async () => {
+          await act(async () => redraw());
+        },
+        /** What it waited for comes in: the fold renders again and commits. */
+        finish: async () => {
+          await act(async () => {
+            resolve();
+            await ready;
+          });
+        },
+      };
+    }
+
+    it('with the window moved silently while it waits, the fold that commits keeps the score where it is then', async () => {
+      for (const strict of [false, true]) {
+        const layout = layOut({ below: 3000, scrollY: 500 });
+        const page = suspendedFold(layout, strict);
+        const atFirstRender = layout.scoreTop();
+        await page.foldInTransition();
+        // Not committed: the full controls are still drawn.
+        expect(layout.foldedOnScreen(), `strict ${strict}: held`).toBe(false);
+        expect(layout.scoreTop(), `strict ${strict}: held`).toBe(atFirstRender);
+        layout.scrollsSilently(120);
+        const where = layout.scoreTop();
+        await page.finish();
+        expect(layout.foldedOnScreen(), `strict ${strict}: committed`).toBe(true);
+        expect(layout.scoreTop(), `strict ${strict}: committed`).toBe(where);
+        expect(layout.scrollBy, `strict ${strict}`).toHaveBeenCalledTimes(1);
+        page.view.unmount();
+        vi.restoreAllMocks();
+      }
+    });
+
+    it('with another render committed and the window moved while it waits, the fold keeps the score where it is when it commits', async () => {
+      for (const strict of [false, true]) {
+        const layout = layOut({ below: 3000, scrollY: 500 });
+        const page = suspendedFold(layout, strict);
+        await page.foldInTransition();
+        layout.scrollsSilently(-60);
+        await page.redraw(); // a position, still unfolded: the transition's fold is left out of it
+        layout.scrollsSilently(90);
+        const where = layout.scoreTop();
+        await page.finish();
+        expect(layout.foldedOnScreen(), `strict ${strict}: committed`).toBe(true);
+        expect(layout.scoreTop(), `strict ${strict}`).toBe(where);
+        page.view.unmount();
+        vi.restoreAllMocks();
+      }
+    });
+  });
+
+  // Play brings the score on screen with a smooth scroll (useJamMode), which moves the window a
+  // frame at a time; its scroll events come a frame behind each step.
+  it('a Pause while Play’s smooth scroll is part way: the score stays where the scroll had got to', () => {
+    for (const strict of [false, true]) {
+      for (const start of [{ scrollY: 0 }, { scrollY: 200 }]) {
+        const layout = layOut({ below: 3000, ...start });
+        const { fold, unfold } = layout.mount({ strict });
+        fold();
+        // Three frames of the smooth scroll, the last one's event not yet sent.
+        layout.userScrolls(40);
+        layout.userScrolls(40);
+        layout.scrollsSilently(40);
+        const where = layout.scoreTop();
+        unfold();
+        expect(
+          [layout.scoreTop(), layout.room()],
+          `strict ${strict}, from ${start.scrollY}`,
+        ).toEqual([where, 0]);
+      }
+    }
   });
 });

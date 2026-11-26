@@ -791,6 +791,81 @@ describe('SongPage jam mode', () => {
         expect.objectContaining({ block: 'nearest' }),
       );
     });
+
+    // 12 Test after QA fix round 3: the toggle pressed from the keyboard, where focus (not the
+    // click) has scrolled it into view. Enter presses it; Space stays play/pause.
+    it('Show controls and Hide controls by Enter do what the click does, and focus stays on the toggle', async () => {
+      serve();
+      const user = renderSong(SONG_A);
+      const engine = await loadPlayer();
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+
+      screen.getByRole('button', { name: 'Show controls' }).focus();
+      await user.keyboard('{Enter}');
+      const hide = await screen.findByRole('button', { name: 'Hide controls' });
+      expect(hide).toHaveFocus();
+      await settle();
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+      await user.keyboard('{Enter}');
+      expect(await screen.findByRole('button', { name: 'Show controls' })).toHaveFocus();
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
+      expect(scrollIntoView.mock.contexts[1]).toBe(screen.getByTestId('score-viewport'));
+      expect(playButton()).toHaveTextContent('Pause');
+    });
+
+    // 12 Test after QA fix round 3: the fold, not the status, brings the score back, so Hide
+    // controls during a count-in shows the score (and the count-in number over it) too, and
+    // touches nothing of the count-in.
+    it('Hide controls during a count-in brings the score on screen, and the count-in carries on; the downbeat scrolls nothing more', async () => {
+      serve({ settings: ok({ ...settingsRow, count_in_bars: 2 }) });
+      const user = renderSong(SONG_A);
+      const engine = await loadPlayer();
+      await user.click(playButton());
+      expect(await screen.findByTestId('count-in')).toBeInTheDocument();
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+      const restarts = engine.restartCalls();
+
+      await showControls(user);
+      await settle();
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByRole('button', { name: 'Hide controls' }));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
+      expect(scrollIntoView.mock.contexts[1]).toBe(screen.getByTestId('score-viewport'));
+      expect(screen.getByTestId('count-in')).toBeInTheDocument();
+      expect(engine.restartCalls()).toBe(restarts);
+
+      // The downbeat: still folded, so the score isn't brought on screen again.
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await settle();
+      expect(scrollIntoView).toHaveBeenCalledTimes(2);
+      await user.click(playButton());
+    });
+
+    // 12 Test after QA fix round 3: the folded strip's Loop speed opens the loop's own speed. It
+    // neither unfolds the bar nor brings the score back, which would scroll the speed it focuses
+    // off a phone's window.
+    it('Loop speed in the folded strip leaves the bar folded and the window alone', async () => {
+      const verse = loopOfSongA('verse', { name: 'Verse', start_bar: 5, end_bar: 8 });
+      serve({ loops: [verse] });
+      const user = renderSong(SONG_A);
+      const engine = await loadPlayer();
+      const panel = within(screen.getByTestId('loop-panel'));
+      await user.click(await panel.findByRole('button', { name: 'Play loop Verse' }));
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+
+      await user.click(screen.getByRole('button', { name: /^Loop speed \d+%$/ }));
+      await waitFor(() => expect(panel.getByRole('group', { name: 'Loop speed' })).toHaveFocus());
+      await settle();
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: 'Show controls' })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+    });
   });
 });
 
@@ -2239,7 +2314,11 @@ describe('SongPage controls while playing (12 UX pass)', () => {
         scrollY += by;
         fireEvent.scroll(window);
       };
-      return { scrollBy, onScreen: top, userScrolls };
+      /** A scroll whose event the page hasn't had yet (a browser sends it with the next frame). */
+      const scrollsSilently = (by: number) => {
+        scrollY = Math.max(0, scrollY + by);
+      };
+      return { scrollBy, onScreen: top, userScrolls, scrollsSilently };
     }
     afterEach(() => vi.restoreAllMocks());
 
@@ -2339,6 +2418,70 @@ describe('SongPage controls while playing (12 UX pass)', () => {
       await play();
       expect(onScreen()).toBe(before);
       expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('300px');
+    });
+
+    // 12 Test after QA fix round 3: every way the fold changes on the real page, each pressed in
+    // the same frame as a scroll whose event hasn't reached the page.
+    it('a fold just after a scroll with no event yet keeps the score where it is after that scroll: Play, Show and Hide controls, the song’s end', async () => {
+      const { user, play, engine } = await openSong();
+      const { onScreen, scrollsSilently } = layOut({ scrolledTo: 600 });
+      const steps: Array<[string, () => Promise<void>]> = [
+        ['Play', play],
+        ['Show controls', () => showControls(user)],
+        ['Hide controls', () => user.click(screen.getByRole('button', { name: 'Hide controls' }))],
+        [
+          'the song’s end',
+          async () => {
+            // alphaTab reports the end, then its stop.
+            act(() => {
+              engine.fire('finished', undefined);
+              engine.fire('stateChanged', { playing: false });
+            });
+            await screen.findByRole('button', { name: 'Mute drums' });
+          },
+        ],
+      ];
+      for (const [step, press] of steps) {
+        scrollsSilently(-45);
+        const before = onScreen();
+        await press();
+        expect(onScreen(), step).toBe(before);
+      }
+      expect(playButton()).toHaveTextContent('Play');
+      expect(screen.getByTestId('controls-slot').style.marginBottom).toBe('');
+    });
+
+    it('Show controls and Hide controls by keyboard, the window moved by focus first, keep the score where it is', async () => {
+      const { user, play } = await openSong();
+      const { onScreen, userScrolls, scrollsSilently } = layOut({ scrolledTo: 600 });
+      await play();
+      // Focus scrolls the strip's toggle into view: its event has long been sent by Enter.
+      screen.getByRole('button', { name: 'Show controls' }).focus();
+      userScrolls(-80);
+      let before = onScreen();
+      await user.keyboard('{Enter}');
+      expect(onScreen(), 'Show controls').toBe(before);
+      scrollsSilently(-50);
+      before = onScreen();
+      await user.keyboard('{Enter}');
+      expect(screen.getByRole('button', { name: 'Show controls' })).toHaveFocus();
+      expect(onScreen(), 'Hide controls').toBe(before);
+    });
+
+    it('Loop speed in the folded strip, the window moved as focus goes to the loop’s speed: the Pause after it keeps the score where it is', async () => {
+      const { user, engine } = await openSong();
+      const { onScreen, scrollsSilently } = layOut({ scrolledTo: 600 });
+      await user.click(panel().getByRole('button', { name: 'Play loop Verse' }));
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await user.click(controls().getByRole('button', { name: 'Loop speed 80%' }));
+      await waitFor(() => expect(panel().getByRole('group', { name: 'Loop speed' })).toHaveFocus());
+      expect(controls().getByRole('button', { name: 'Show controls' })).toBeInTheDocument();
+      scrollsSilently(120);
+      const before = onScreen();
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: false }));
+      expect(await controls().findByRole('button', { name: 'Mute drums' })).toBeInTheDocument();
+      expect(onScreen()).toBe(before);
     });
 
     it('a playing song left for another, or for the library, leaves no room behind', async () => {
