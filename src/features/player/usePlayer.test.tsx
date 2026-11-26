@@ -245,8 +245,13 @@ describe('usePlayer and the connection (Unit 11)', () => {
     expect(await screen.findByText('error soundFont')).toBeInTheDocument();
 
     engine.soundFont = Promise.resolve();
-    act(() => {
-      window.dispatchEvent(new Event('online'));
+    // The error can be drawn before React has run the effect that listens for `online`, so the
+    // event is sent until the retry is seen; a second one is a no-op once the error has cleared.
+    await waitFor(() => {
+      act(() => {
+        window.dispatchEvent(new Event('online'));
+      });
+      expect(engine.loadSoundFont).toHaveBeenCalledTimes(2);
     });
     expect(await screen.findByText('error none')).toBeInTheDocument();
     expect(engine.loadSoundFont).toHaveBeenCalledTimes(2);
