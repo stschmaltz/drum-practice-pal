@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
 import {
   auditScreen,
@@ -11,7 +11,7 @@ import {
   textSpillingOutOf,
 } from './designPage';
 import { loopItem, loopPanel, openLoopPanel, saveNewLoop } from './loopsPage';
-import { controls, countInSelect, openFixture, playButton, viewport } from './playerPage';
+import { controls, chooseCountIn, openFixture, playButton, viewport } from './playerPage';
 import { homeItem, navLink, openLoopHistory } from './practicePage';
 
 // Unit 12: what the visual design promises, measured on every screen at the
@@ -123,8 +123,12 @@ test('icons are hidden from screen readers and every control keeps its words', a
   await expect(bar.getByRole('slider', { name: 'Speed', exact: true })).toBeVisible();
   // Its words are screen-reader only on a phone; the name is the same at every size.
   await expect(bar.getByRole('slider', { name: 'Metronome volume', exact: true })).toBeVisible();
-  await expect(bar.getByRole('combobox', { name: 'Count-in', exact: true })).toBeVisible();
-  await expect(bar.getByRole('combobox', { name: 'When to count in', exact: true })).toBeVisible();
+  // Segmented controls since the 12 UX pass; the mode shows only with a count-in to play.
+  await expect(bar.getByRole('radiogroup', { name: 'Count-in', exact: true })).toBeVisible();
+  for (const name of ['Off', '1 bar', '2 bars']) {
+    await expect(bar.getByRole('radio', { name, exact: true })).toBeAttached();
+  }
+  await expect(bar.getByRole('radiogroup', { name: 'When to count in' })).toHaveCount(0);
   await expect(playButton(page)).toHaveAccessibleName('Play');
   for (const name of ['On the go', 'Library', 'Settings']) {
     await expect(
@@ -133,10 +137,13 @@ test('icons are hidden from screen readers and every control keeps its words', a
   }
 });
 
-/** The boxes of the controls bar's controls on show. */
+/**
+ * The boxes of the controls bar's controls on show: a segmented control's
+ * option by its label, which is what draws it (the radio is visually hidden).
+ */
 const controlBoxes = (page: Page) =>
   controls(page)
-    .locator('button, input, select')
+    .locator('button, input:not([type="radio"]), select, label:has(> input[type="radio"])')
     .evaluateAll((els) =>
       els
         .filter((el) => el.checkVisibility())
@@ -160,8 +167,9 @@ test('the controls bar fits a phone in three rows, and spills nowhere at 320 px'
     const region = await controls(page).boundingBox();
     if (!region) throw new Error('No controls bar');
     const boxes = await controlBoxes(page);
-    // Back to start, Metronome, Mute drums, Drums only, Speed, volume, Count-in, mode.
-    expect(boxes, `${width} px: controls on show`).toHaveLength(8);
+    // Back to start, Metronome, Mute drums, Drums only, Speed, volume, and the count-in's
+    // Off / 1 bar / 2 bars (its mode shows only once a count-in is chosen).
+    expect(boxes, `${width} px: controls on show`).toHaveLength(9);
     if (width >= 360) {
       expect(rowsOf(boxes), `${width} px: rows of ${JSON.stringify(boxes)}`).toBeLessThanOrEqual(3);
     }
@@ -206,7 +214,7 @@ test.describe('reduced motion', () => {
         await expect(shortcutDialog(page)).toHaveCount(0);
 
         // Two bars at 120 BPM: four seconds of count-in to read the number's motion in.
-        await countInSelect(page).selectOption({ label: '2 bars' });
+        await chooseCountIn(page, 2);
         await playButton(page).click();
         const beat = page.getByTestId('count-in-beat');
         await expect(beat).toHaveText(/\d/);
@@ -314,4 +322,112 @@ test('the loop sheet and panel keep 44 px targets with a loop playing', async ({
   await expect(loopPanel(page).getByRole('group', { name: 'Loop speed' })).toBeVisible();
   await expectWellDrawn(page, 'song, loop playing');
   await playButton(page).click();
+});
+
+/**
+ * Where a loop's open "More" menu lies outside the window, the loop panel or
+ * any ancestor that clips it, as text for the failure; empty when all of it shows.
+ */
+function menuOutside(menu: Locator): Promise<string[]> {
+  return menu.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const panel = el.closest('[data-testid="loop-panel"]');
+    const boxes: {
+      box: DOMRect | { left: number; top: number; right: number; bottom: number };
+      what: string;
+    }[] = [
+      {
+        box: { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight },
+        what: 'window',
+      },
+    ];
+    if (panel) boxes.push({ box: panel.getBoundingClientRect(), what: 'loop panel' });
+    for (let up = el.parentElement; up; up = up.parentElement) {
+      const { overflowX, overflowY } = getComputedStyle(up);
+      if (overflowX !== 'visible' || overflowY !== 'visible') {
+        boxes.push({
+          box: up.getBoundingClientRect(),
+          what: `<${up.tagName.toLowerCase()}>`,
+        });
+      }
+    }
+    return boxes
+      .filter(
+        ({ box }) =>
+          rect.left < box.left - 0.5 ||
+          rect.top < box.top - 0.5 ||
+          rect.right > box.right + 0.5 ||
+          rect.bottom > box.bottom + 0.5,
+      )
+      .map(
+        ({ box, what }) =>
+          `${what}: menu ${Math.round(rect.left)}..${Math.round(rect.right)} x ${Math.round(rect.top)}..${Math.round(rect.bottom)} in ${Math.round(box.left)}..${Math.round(box.right)} x ${Math.round(box.top)}..${Math.round(box.bottom)}`,
+      );
+  });
+}
+
+// 12 QA after the UX pass, issue 1: a loop's "More" menu hung off the panel's left edge
+// wherever More started its row (a phone's active loops, the column's finished ones).
+test('a loop’s More menu opens inside the loop panel, for active and finished loops', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Fill', firstBar: 3, lastBar: 4 });
+  await loopItem(page, 'Fill')
+    .getByRole('button', { name: /^Mark finished/ })
+    .click();
+  await expect(
+    loopPanel(page)
+      .getByRole('region', { name: 'Finished loops' })
+      .getByRole('listitem')
+      .filter({ hasText: 'Fill' }),
+  ).toBeVisible();
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await saveNewLoop(page, { name: 'Chorus', firstBar: 9, lastBar: 12 });
+
+  // Chorus is the loop set up (Now looping), Verse an active loop beside it, Fill finished.
+  for (const name of ['Chorus', 'Verse', 'Fill']) {
+    await openLoopPanel(page);
+    const more = loopItem(page, name).getByRole('button', { name: `More actions for ${name}` });
+    await more.click();
+    const menu = loopPanel(page).getByRole('menu', { name: `Actions for ${name}` });
+    await expect(menu).toBeVisible();
+    // Inside the panel's box and every box that clips it, the window included: all of it shows.
+    await expect
+      .poll(() => menuOutside(menu), { message: `${name}'s menu lies outside` })
+      .toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(more).toBeFocused();
+  }
+});
+
+// 12 Test after the QA fix round: the narrowest phone, where finished loops' buttons wrap too.
+test('at 320 px a loop’s More menu opens inside the sheet, active and finished', async ({
+  user,
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'phone', 'about phone widths');
+  await page.setViewportSize({ width: 320, height: 640 });
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Fill', firstBar: 3, lastBar: 4 });
+  await loopItem(page, 'Fill')
+    .getByRole('button', { name: /^Mark finished/ })
+    .click();
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+
+  for (const name of ['Verse', 'Fill']) {
+    await openLoopPanel(page);
+    await loopItem(page, name)
+      .getByRole('button', { name: `More actions for ${name}` })
+      .click();
+    const menu = loopPanel(page).getByRole('menu', { name: `Actions for ${name}` });
+    await expect(menu).toBeVisible();
+    await expect
+      .poll(() => menuOutside(menu), { message: `${name}'s menu lies outside` })
+      .toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+  }
 });

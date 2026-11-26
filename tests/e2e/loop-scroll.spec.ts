@@ -2,29 +2,36 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './auth';
 import {
-  activeLoopLine,
+  chooseLoopAction,
   closeLoopPanel,
   commit,
   firstBarField,
   highlightBoxes,
   lastBarField,
+  playLoopButton,
   loopBpmField,
   loopForm,
-  loopItem,
   loopPanel,
+  loopItem,
+  loopNameField,
   loopPanelToggle,
   loopPercentField,
+  loopSheetHeader,
+  newLoopButton,
   loopSpeed,
   openLoopPanel,
-  playLoopButton,
   saveLoopButton,
   saveNewLoop,
+  exitLoop,
+  expectLooping,
+  expectedLoopPanel,
+  setSpeed,
 } from './loopsPage';
 import {
   barCursorBox,
   contains,
-  countInModeSelect,
-  countInSelect,
+  chooseCountIn,
+  chooseCountInMode,
   expectedLayout,
   openFixture,
   overlaps,
@@ -33,9 +40,9 @@ import {
   recordStatuses,
   scoreBox,
   scrollScoreToStart,
-  speedSlider,
   status,
   viewport,
+  windowScrollSettled,
   type Box,
   type Point,
 } from './playerPage';
@@ -95,7 +102,7 @@ interface Sample {
   /** The same for the start of the loop's first bar. */
   loopStartCovered: boolean;
   panel: Box | null;
-  /** The phone sheet header's `aria-expanded`. */
+  /** The sheet header's `aria-expanded` (below 1024 px). */
   sheetExpanded: string | null;
   /** The window, down to the top of the phone's fixed tab bar. */
   visible: Box;
@@ -204,7 +211,7 @@ const beatsOf = (bars: number) =>
 /** Play's smooth scroll of the window to the score is over by now; boxes are where they stay. */
 const WINDOW_SETTLED_MS = 1000;
 
-for (const bars of [1, 2]) {
+for (const bars of [1, 2] as const) {
   // 08 QA issue 1, through the whole count-in: every beat, not one moment of it.
   test(`Play loop with a ${bars}-bar count-in: on every beat the number is in the clear and the loop’s first bar is in the score box`, async ({
     user,
@@ -213,12 +220,12 @@ for (const bars of [1, 2]) {
     test.setTimeout(60_000);
     await openFixture(page, user, 'groove-120', 'Groove 120');
     // Half speed: a beat lasts a second, so each one is on show long enough to measure.
-    await speedSlider(page).fill('50');
+    await setSpeed(page, 50);
     await saveNewLoop(page, { name: 'Late fill', firstBar: 13, lastBar: 14 });
-    await countInSelect(page).selectOption(bars === 1 ? '1 bar' : '2 bars');
+    await chooseCountIn(page, bars);
 
     // Back to the top of the song, with the score on bar 1.
-    await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
+    await exitLoop(page);
     await page.getByRole('button', { name: 'Back to start' }).click();
     await expect(status(page)).toHaveText('Bar 1 of 16');
     await scrollScoreToStart(page);
@@ -235,8 +242,8 @@ for (const bars of [1, 2]) {
     expect(await scoreScroll(page)).not.toEqual(scrollBefore);
     await expect(status(page)).toContainText('Counting in');
 
-    // The panel: closed on a phone, with the loop's name on its header; left open beside the score.
-    if (expectedLayout(page) === 'horizontal') {
+    // The panel: the sheet closed, with the loop's name on its header; the column left open beside the score.
+    if (expectedLoopPanel(page) === 'sheet') {
       await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'false');
       await expect(loopPanel(page)).toContainText('Loop: Late fill');
     } else {
@@ -257,7 +264,7 @@ for (const bars of [1, 2]) {
       // From the first frame of the count-in, not only on the downbeat.
       expect(sample.loopStart, at).not.toBeNull();
       expect(contains(sample.scoreBox, startOf(sample.loopStart!)), at).toBe(true);
-      if (expectedLayout(page) === 'horizontal') expect(sample.sheetExpanded, at).toBe('false');
+      if (expectedLoopPanel(page) === 'sheet') expect(sample.sheetExpanded, at).toBe('false');
     }
     for (const sample of onBeats) {
       const at = `count-in beat ${sample.beat}`;
@@ -284,16 +291,16 @@ for (const bars of [1, 2]) {
   });
 }
 
-test('the panel after Play loop: closed on a phone and open from 768 px; reopened it has the playing loop and its speed, and switching or restarting leaves it open', async ({
+test('the panel after Play loop: the sheet closed and the column open; reopened it has the playing loop and its speed, and switching or restarting leaves it open', async ({
   user,
   page,
 }) => {
   test.setTimeout(60_000);
-  const isSheet = expectedLayout(page) === 'horizontal';
+  const isSheet = expectedLoopPanel(page) === 'sheet';
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await speedSlider(page).fill('80');
+  await setSpeed(page, 80);
   await saveNewLoop(page, { name: 'First', firstBar: 1, lastBar: 2 });
-  await speedSlider(page).fill('100');
+  await setSpeed(page, 100);
   await saveNewLoop(page, { name: 'Second', firstBar: 5, lastBar: 6 });
   await openLoopPanel(page);
 
@@ -307,7 +314,7 @@ test('the panel after Play loop: closed on a phone and open from 768 px; reopene
     await expect(loopSpeed(page)).toBeHidden();
     await expect.poll(async () => (await loopPanel(page).boundingBox())?.height).toBeLessThan(60);
   }
-  await expect(activeLoopLine(page)).toContainText('First · Bars 1 to 2');
+  await expectLooping(page, 'First', 'Bars 1 to 2');
 
   // Opened again while it plays: the playing loop and its speed control, at its saved speed.
   await recordStatuses(page);
@@ -325,7 +332,7 @@ test('the panel after Play loop: closed on a phone and open from 768 px; reopene
 
   // Another loop, then a restart, while playing: no count-in follows, so the panel stays.
   await playLoopButton(page, 'Second').click();
-  await expect(activeLoopLine(page)).toContainText('Second · Bars 5 to 6');
+  await expectLooping(page, 'Second', 'Bars 5 to 6');
   await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'true');
   await expect(loopPanel(page).getByRole('region', { name: 'Practicing Second' })).toBeVisible();
   await expect(loopPercentField(page)).toHaveValue('100');
@@ -339,7 +346,7 @@ test('the panel after Play loop: closed on a phone and open from 768 px; reopene
   await expect(playButton(page)).toHaveText('Pause');
   expect(await recordedStatuses(page)).toEqual(['playing']);
 
-  // Paused, the same button starts playback again, and on a phone that closes the sheet again.
+  // Paused, the same button starts playback again, and that closes the sheet again.
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Play');
   await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'true');
@@ -351,8 +358,9 @@ test('the panel after Play loop: closed on a phone and open from 768 px; reopene
   await expect(playButton(page)).toHaveText('Play');
 });
 
-for (const width of [767, 768]) {
-  test(`at ${width} px wide, Play loop ${width < 768 ? 'closes the sheet' : 'leaves the side panel open'}`, async ({
+// The panel's breakpoint, not the player's: at 768 to 1023 px the sheet goes with page layout.
+for (const width of [767, 1023, 1024]) {
+  test(`at ${width} px wide, Play loop ${width < 1024 ? 'closes the sheet' : 'leaves the side column open'}`, async ({
     user,
     page,
   }, testInfo) => {
@@ -367,15 +375,68 @@ for (const width of [767, 768]) {
     await expect(playButton(page)).toHaveText('Pause');
     await expect(loopPanelToggle(page)).toHaveAttribute(
       'aria-expanded',
-      width < 768 ? 'false' : 'true',
+      width < 1024 ? 'false' : 'true',
     );
-    if (width < 768) await expect(loopSpeed(page)).toBeHidden();
+    if (width < 1024) await expect(loopSpeed(page)).toBeHidden();
     else await expect(loopSpeed(page)).toBeVisible();
 
     await playButton(page).click();
     await expect(playButton(page)).toHaveText('Play');
   });
 }
+
+// Copilot review on #18: the stylesheet's lg is 64rem, which a media query reads against the
+// browser's default font size. At 20 px a 1100 px window draws the sheet; the code must agree, or
+// the sheet starts open and Play loop leaves it over the score and the count-in number.
+test('with a 20 px default font, 1100 px wide is the sheet, and Play loop closes it', async ({
+  user,
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'one browser is enough for the breakpoint');
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Page.setFontSizes', { fontSizes: { standard: 20 } });
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  // The CSS's choice: the sheet's header on show, the column's toggle not.
+  const header = loopSheetHeader(page);
+  await expect(header).toBeVisible();
+  await expect(page.getByRole('button', { name: /^(Show|Hide) loops$/ })).toBeHidden();
+  // The code's: the sheet starts closed.
+  await expect(header).toHaveAttribute('aria-expanded', 'false');
+
+  // The shared steps go by the viewport's px, so this loop is saved by hand.
+  await header.click();
+  await newLoopButton(page).click();
+  await firstBarField(page).fill('3');
+  await lastBarField(page).fill('4');
+  await loopNameField(page).fill('Wide');
+  await saveLoopButton(page).click();
+  await expect(loopForm(page)).toHaveCount(0);
+  await expect(header).toHaveAttribute('aria-expanded', 'true');
+
+  await playLoopButton(page, 'Wide').click();
+
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect(header).toHaveAttribute('aria-expanded', 'false');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+});
+
+// Copilot review on #18: an open "More" button carries aria-controls too, so the shared steps'
+// sheet header matched two buttons and closing the sheet failed in strict mode.
+test('the loop sheet closes with a loop’s More menu open', async ({ user, page }) => {
+  test.skip(expectedLoopPanel(page) !== 'sheet', 'the column has no header to close it by');
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Menu', firstBar: 3, lastBar: 4 });
+  await openLoopPanel(page);
+  const more = loopItem(page, 'Menu').getByRole('button', { name: 'More actions for Menu' });
+  await more.click();
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+
+  await closeLoopPanel(page);
+
+  await expect(loopPanel(page).getByRole('menu')).toHaveCount(0);
+});
 
 test('with a count-in before every repeat, each repeat’s count-in has the loop’s first bar back in the score box', async ({
   user,
@@ -387,12 +448,12 @@ test('with a count-in before every repeat, each repeat’s count-in has the loop
   const lastBar = { phone: 6, tablet: 12, desktop: 12 }[testInfo.project.name];
   if (!lastBar) throw new Error(`No loop for project ${testInfo.project.name}`);
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('1 bar');
-  await countInModeSelect(page).selectOption('Before every loop repeat');
+  await chooseCountIn(page, 1);
+  await chooseCountInMode(page, 'every_repeat');
   // A bar, and the count-in, last a second.
-  await speedSlider(page).fill('200');
+  await setSpeed(page, 200);
   await saveNewLoop(page, { name: 'Round', firstBar: 5, lastBar });
-  if (expectedLayout(page) === 'horizontal') await closeLoopPanel(page);
+  if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
   await expect(status(page)).toHaveText('Bar 5 of 16');
   await recordGeometry(page);
   await recordStatuses(page);
@@ -446,14 +507,22 @@ test('with a count-in before every repeat, the score box is scrolled back at the
   page,
 }, testInfo) => {
   test.setTimeout(90_000);
-  const lastBar = { phone: 6, tablet: 12, desktop: 12 }[testInfo.project.name];
-  if (!lastBar) throw new Error(`No loop for project ${testInfo.project.name}`);
+  // A loop whose first bar the box leaves behind by its last. On a tablet in portrait, two
+  // bars a line, the whole song is barely taller than the box: only a loop from bar 2 to the
+  // end scrolls its first bar out.
+  const bars = {
+    phone: { firstBar: 5, lastBar: 6 },
+    tablet: { firstBar: 2, lastBar: 16 },
+    desktop: { firstBar: 5, lastBar: 12 },
+  }[testInfo.project.name];
+  if (!bars) throw new Error(`No loop for project ${testInfo.project.name}`);
+  const { firstBar, lastBar } = bars;
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('2 bars');
-  await countInModeSelect(page).selectOption('Before every loop repeat');
-  await speedSlider(page).fill('200');
-  await saveNewLoop(page, { name: 'Round', firstBar: 5, lastBar });
-  if (expectedLayout(page) === 'horizontal') await closeLoopPanel(page);
+  await chooseCountIn(page, 2);
+  await chooseCountInMode(page, 'every_repeat');
+  await setSpeed(page, 200);
+  await saveNewLoop(page, { name: 'Round', firstBar, lastBar });
+  if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
   await recordStatuses(page);
   await playButton(page).click();
 
@@ -464,7 +533,9 @@ test('with a count-in before every repeat, the score box is scrolled back at the
   // The repeat's count-in (two seconds here) has the first bar back from its start: read ten
   // times over its first second, with the status and the boxes taken in the same instant, so
   // a scroll that only came once playback started again would not count.
-  await expect(status(page)).toHaveText('Bar 5 of 16 · Counting in…', { timeout: 10_000 });
+  await expect(status(page)).toHaveText(`Bar ${firstBar} of 16 · Counting in…`, {
+    timeout: 10_000,
+  });
   const reads: string[] = [];
   for (let read = 0; read < 10; read++) {
     reads.push(await loopStartDuringCountIn(page));
@@ -484,9 +555,9 @@ test('Play with a count-in after the score was scrolled away brings the bar it c
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('2 bars');
+  await chooseCountIn(page, 2);
   // Eight seconds of count-in.
-  await speedSlider(page).fill('50');
+  await setSpeed(page, 50);
   await expect(status(page)).toHaveText('Bar 1 of 16');
 
   // The user reads ahead to the end of the song; bar 1, where playback is, is out of the box.
@@ -606,6 +677,8 @@ test('paused: a loop saved from typed bars, another one, and its bars edited eac
     await expect(status(page)).toHaveText(`Bar ${bar} of 16`);
     await expect.poll(() => cursorBarInScoreBox(page)).toBe(true);
     await expect.poll(() => loopStartInScoreBox(page)).toBe(true);
+    // The cursor and the highlight are read one after the other: not while the window moves.
+    await windowScrollSettled(page);
     const [first] = await highlightBoxes(page);
     if (!first) throw new Error('No highlight');
     expect(contains(await barCursorBox(page), startOf(first))).toBe(true);
@@ -627,20 +700,20 @@ test('paused: a loop saved from typed bars, another one, and its bars edited eac
   await expectLoopStartOnShow(1);
 
   // The paused loop's bars, edited: the score goes to its new first bar.
-  await loopItem(page, 'Early').getByRole('button', { name: 'Edit Early' }).click();
+  await chooseLoopAction(page, 'Early', 'Edit');
   await firstBarField(page).fill('9');
   await lastBarField(page).fill('10');
   await saveLoopButton(page).click();
   await expect(loopForm(page)).toHaveCount(0);
-  await expect(activeLoopLine(page)).toContainText('Early · Bars 9 to 10');
+  await expectLooping(page, 'Early', 'Bars 9 to 10');
   await expectLoopStartOnShow(9);
 
   // A bar already on show is left where it is: choosing its neighbour moves nothing.
   const settled = await scoreScroll(page);
-  await loopItem(page, 'Early').getByRole('button', { name: 'Edit Early' }).click();
+  await chooseLoopAction(page, 'Early', 'Edit');
   await lastBarField(page).fill('9');
   await saveLoopButton(page).click();
-  await expect(activeLoopLine(page)).toContainText('Early · Bar 9');
+  await expectLooping(page, 'Early', 'Bar 9');
   await page.waitForTimeout(300);
   expect(await scoreScroll(page)).toEqual(settled);
 });

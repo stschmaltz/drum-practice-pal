@@ -1,18 +1,20 @@
 /// <reference lib="dom" />
 import type { JSHandle, Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
-import { closeLoopPanel, saveNewLoop } from './loopsPage';
+import { closeLoopPanel, saveNewLoop, setSpeed } from './loopsPage';
 import {
   barCursorBox,
   barNumber,
   boxOf,
-  countInModeSelect,
-  countInSelect,
+  chooseCountIn,
+  chooseCountInMode,
+  checkedCountIn,
+  checkedCountInMode,
+  countInModeGroup,
   openFixture,
   playButton,
   scoreBox,
   scrollScoreToStart,
-  speedSlider,
   status,
   windowScrollSettled,
 } from './playerPage';
@@ -123,7 +125,7 @@ async function seekToBar(page: Page, bar: number): Promise<void> {
  * player repeats; the panel is then closed, so the page is as these specs found it.
  */
 async function loopBarFiveAtDoubleSpeed(page: Page): Promise<void> {
-  await speedSlider(page).fill('200');
+  await setSpeed(page, 200);
   await saveNewLoop(page, { name: 'Bar five', firstBar: 5, lastBar: 5 });
   await closeLoopPanel(page);
   await expect(status(page)).toHaveText('Bar 5 of 16');
@@ -146,10 +148,11 @@ const countInsIn = (statuses: string[]) => statuses.filter((entry) => entry === 
 
 test('counts one bar in over the score, then plays', async ({ user, page }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await expect(countInSelect(page)).toHaveValue('0');
-  await expect(countInModeSelect(page)).toBeDisabled();
+  await expect(checkedCountIn(page)).toHaveValue('0');
+  // Off, the mode isn't shown: it only matters with a count-in to play.
+  await expect(countInModeGroup(page)).toHaveCount(0);
 
-  await countInSelect(page).selectOption('1 bar');
+  await chooseCountIn(page, 1);
   await recordPlayer(page);
   const started = Date.now();
   await playButton(page).click();
@@ -174,7 +177,7 @@ test('counts one bar in over the score, then plays', async ({ user, page }) => {
 
 test('counts three beats a bar in 3/4, for two bars', async ({ user, page }) => {
   await openFixture(page, user, 'waltz-34', 'Waltz 3-4');
-  await countInSelect(page).selectOption('2 bars');
+  await chooseCountIn(page, 2);
   await recordPlayer(page);
   await playButton(page).click();
 
@@ -185,7 +188,7 @@ test('counts three beats a bar in 3/4, for two bars', async ({ user, page }) => 
 
 test('Pause during the count-in calls it off', async ({ user, page }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('2 bars');
+  await chooseCountIn(page, 2);
   await recordPlayer(page);
   await playButton(page).click();
   await expect(countIn(page)).toBeVisible();
@@ -201,8 +204,8 @@ test('Pause during the count-in calls it off', async ({ user, page }) => {
 
 test('counts in before every repeat of a loop', async ({ user, page }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('1 bar');
-  await countInModeSelect(page).selectOption('Before every loop repeat');
+  await chooseCountIn(page, 1);
+  await chooseCountInMode(page, 'every_repeat');
   await loopBarFiveAtDoubleSpeed(page);
   await recordPlayer(page);
   await playButton(page).click();
@@ -236,7 +239,7 @@ test('counts in before every repeat of a loop', async ({ user, page }) => {
 
 test('with the count-in off, Play starts straight away with no counter', async ({ user, page }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await expect(countInSelect(page)).toHaveValue('0');
+  await expect(checkedCountIn(page)).toHaveValue('0');
   await recordPlayer(page);
   await recordShownBeats(page);
 
@@ -258,9 +261,9 @@ test('the counter is big, sits over the score on screen and shows each beat', as
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('2 bars');
+  await chooseCountIn(page, 2);
   // Slow enough to measure the counter while a number is up.
-  await speedSlider(page).fill('50');
+  await setSpeed(page, 50);
   await recordShownBeats(page);
   await playButton(page).click();
 
@@ -302,7 +305,7 @@ test('the count-in follows the speed, and the tempo after a tempo change', async
 }) => {
   test.setTimeout(60_000);
   await openFixture(page, user, 'tempo-change', 'Tempo Change');
-  await countInSelect(page).selectOption('1 bar');
+  await chooseCountIn(page, 1);
   await recordPlayer(page);
 
   /** Plays through one count-in, pauses once playback starts, and returns how the count-in ran. */
@@ -339,14 +342,14 @@ test('the count-in follows the speed, and the tempo after a tempo change', async
 
   // 90 BPM at 50% is 45 BPM.
   await seekToBar(page, 9);
-  await speedSlider(page).fill('50');
+  await setSpeed(page, 50);
   const halfSpeed = await countInOnce();
   expectBeat(halfSpeed, 60_000 / 45);
   expect(halfSpeed.startedAtBar).toBe(9);
 
   // The fastest speed, back before the change: 120 BPM at 200% is 240 BPM.
   await seekToBar(page, 2);
-  await speedSlider(page).fill('200');
+  await setSpeed(page, 200);
   expectBeat(await countInOnce(), 250);
 
   expect(countInsIn((await recording(page)).statuses)).toHaveLength(4);
@@ -368,9 +371,9 @@ test('tapping a bar during the count-in starts the count again for that bar', as
   };
 
   await seekToBar(page, 4);
-  await countInSelect(page).selectOption('2 bars');
+  await chooseCountIn(page, 2);
   // Two bars at 60 BPM: eight seconds to tap in.
-  await speedSlider(page).fill('50');
+  await setSpeed(page, 50);
   await recordPlayer(page);
   await playButton(page).click();
   await expect(countInBeat(page)).toHaveText('2', { timeout: 5000 });
@@ -403,8 +406,8 @@ test('start only counts a loop in once; switching the mode mid-loop takes effect
 }) => {
   test.setTimeout(60_000);
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await countInSelect(page).selectOption('1 bar');
-  await expect(countInModeSelect(page)).toHaveValue('start');
+  await chooseCountIn(page, 1);
+  await expect(checkedCountInMode(page)).toHaveValue('start');
   await loopBarFiveAtDoubleSpeed(page);
   await recordPlayer(page);
   await playButton(page).click();
@@ -418,7 +421,7 @@ test('start only counts a loop in once; switching the mode mid-loop takes effect
   await expect(playButton(page)).toHaveText('Pause');
 
   // Mid-loop: from the next pass on, every repeat is counted in. Nothing pauses or stops.
-  await countInModeSelect(page).selectOption('Before every loop repeat');
+  await chooseCountInMode(page, 'every_repeat');
   await expect(playButton(page)).toHaveText('Pause');
   await expect
     .poll(async () => (await recording(page)).statuses.join(' '), { timeout: 15_000 })
@@ -426,7 +429,7 @@ test('start only counts a loop in once; switching the mode mid-loop takes effect
   expect((await recording(page)).statuses.slice(1)).not.toContain('ready');
 
   // And back: once it is playing again the loop wraps round with no more count-ins.
-  await countInModeSelect(page).selectOption('At the start only');
+  await chooseCountInMode(page, 'start');
   // Longer than a count-in that was already under way when the mode changed.
   await page.waitForTimeout(1500);
   await expect.poll(async () => (await recording(page)).statuses.at(-1)).toBe('playing');
@@ -453,9 +456,9 @@ test('count-in defaults come from Settings; a change in the controls bar is for 
   await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
 
   await openFixture(page, user, 'waltz-34', 'Waltz 3-4');
-  await expect(countInSelect(page)).toHaveValue('2');
-  await expect(countInModeSelect(page)).toHaveValue('every_repeat');
-  await expect(countInModeSelect(page)).toBeEnabled();
+  await expect(checkedCountIn(page)).toHaveValue('2');
+  await expect(checkedCountInMode(page)).toHaveValue('every_repeat');
+  await expect(countInModeGroup(page)).toBeVisible();
 
   // The saved default is what Play uses: two bars.
   await recordPlayer(page);
@@ -465,8 +468,8 @@ test('count-in defaults come from Settings; a change in the controls bar is for 
   await expect(countIn(page)).toBeHidden();
 
   // Override for this song: one bar of 3/4.
-  await countInSelect(page).selectOption('1 bar');
-  await countInModeSelect(page).selectOption('At the start only');
+  await chooseCountIn(page, 1);
+  await chooseCountInMode(page, 'start');
   await playButton(page).click();
   await expect(countIn(page)).toBeVisible();
   // A one-bar count-in has no "Bar 1 of 2" line.
@@ -481,8 +484,8 @@ test('count-in defaults come from Settings; a change in the controls bar is for 
   // Opening the song again starts from the saved defaults, not the override.
   await page.reload();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
-  await expect(countInSelect(page)).toHaveValue('2');
-  await expect(countInModeSelect(page)).toHaveValue('every_repeat');
+  await expect(checkedCountIn(page)).toHaveValue('2');
+  await expect(checkedCountInMode(page)).toHaveValue('every_repeat');
 
   // And the saved settings themselves were never touched.
   await page.goto('/settings');

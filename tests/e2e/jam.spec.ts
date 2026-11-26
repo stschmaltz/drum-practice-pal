@@ -4,7 +4,9 @@ import { expect, test } from './auth';
 import {
   barCursorBox,
   barNumber,
+  beatCursorOnScreen,
   boxOf,
+  chooseCountIn,
   expectedLayout,
   nextBarPoint,
   openFixture,
@@ -16,6 +18,7 @@ import {
   tapAndWaitForBar,
   untilStill,
   viewport,
+  visibleBottom,
   windowScrollSettled,
   type Box,
   type Point,
@@ -71,35 +74,6 @@ async function staffLineAt(page: Page, y: number): Promise<number> {
     if (!line) throw new Error(`No line of music at y = ${at}`);
     return line.top + line.height * 0.3;
   }, y);
-}
-
-/** The bottom of the visible window: the top of the phone's fixed tab bar, or the window's bottom. */
-async function visibleBottom(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const tabBar = Array.from(document.querySelectorAll('nav[aria-label="Main"]'))
-      .filter((nav) => getComputedStyle(nav).position === 'fixed')
-      .map((nav) => nav.getBoundingClientRect())
-      .find((rect) => rect.height > 0);
-    return tabBar?.top ?? window.innerHeight;
-  });
-}
-
-/** Whether the beat cursor is on screen: inside the score box and the visible window. */
-async function beatCursorOnScreen(page: Page): Promise<boolean> {
-  return viewport(page).evaluate(
-    (box, windowBottom) => {
-      const cursor = box.querySelector('.at-cursor-beat')?.getBoundingClientRect();
-      if (!cursor || cursor.height === 0) return false;
-      const frame = box.getBoundingClientRect();
-      const top = Math.max(frame.top, 0);
-      const bottom = Math.min(frame.bottom, windowBottom);
-      const left = Math.max(frame.left, 0);
-      const right = Math.min(frame.right, window.innerWidth);
-      const midY = cursor.top + cursor.height / 2;
-      return cursor.left >= left && cursor.right <= right && midY >= top && midY <= bottom;
-    },
-    await visibleBottom(page),
-  );
 }
 
 /** Whether the element is wholly inside the visible window. */
@@ -328,9 +302,10 @@ for (const size of [
 
     await playButton(page).click();
     await expect(playButton(page)).toHaveText('Pause');
-    // Play scrolls the score box into view (smoothly). Neither size fits the
-    // header, controls and score, so the window did scroll.
-    expect(await windowScrollSettled(page)).toBeGreaterThan(0);
+    // Play folds the controls and scrolls the score box into view (smoothly) if it
+    // still isn't all on show; either way, once the window is still, all of it is.
+    await windowScrollSettled(page);
+    expect(await onScreen(viewport(page))).toBe(true);
 
     for (let sample = 0; sample < 12; sample++) {
       await page.waitForTimeout(250);
@@ -343,6 +318,81 @@ for (const size of [
     await expect(playButton(page)).toHaveText('Play');
   });
 }
+
+// 12 QA after the QA fix round, issue 1: Play at the top of a phone's short page holds the
+// fold as room above the score; rotating to landscape kept that room, which put the score box
+// and the beat cursor below the 390 px window. Unit 06: the cursor stays in view through a
+// rotation, portrait to landscape and back, and nothing is left over at the Pause.
+test('rotating a phone while playing keeps the beat cursor on screen, portrait to landscape and back', async ({
+  user,
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'phone', 'phone project only');
+  const portrait = { width: 390, height: 844 };
+  await page.setViewportSize(portrait);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await scrollWindowToTop(page);
+  // At 50% the song lasts 64 s: still playing through both rotations.
+  await speedSlider(page).fill('50');
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await windowScrollSettled(page);
+  expect(await beatCursorOnScreen(page)).toBe(true);
+
+  for (const size of [{ width: 844, height: 390 }, portrait]) {
+    const at = `${size.width} x ${size.height}`;
+    await page.setViewportSize(size);
+    await windowScrollSettled(page);
+    await expect.poll(() => beatCursorOnScreen(page), { message: at }).toBe(true);
+    await expect(playButton(page), at).toHaveText('Pause');
+  }
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  await expect(page.getByTestId('controls-slot')).toHaveCSS('margin-bottom', '0px');
+});
+
+// 12 Test after QA fix round 2: the rotation lands during the count-in, when the controls have
+// folded (counting in is running) but nothing plays yet. The room goes at the rotation, the
+// count-in carries on into playback with the beat cursor on screen, and the Pause leaves no
+// room. Not asserted: the count-in number on screen after the turn, which it isn't (it ends
+// below a landscape window: the handoff note's Test (after QA fix round 2), Bugs found 1).
+test('rotating a phone during a count-in drops the room and plays on with the beat cursor on screen', async ({
+  user,
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'phone', 'phone project only');
+  const portrait = { width: 390, height: 844 };
+  await page.setViewportSize(portrait);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await scrollWindowToTop(page);
+  // At 50% two bars of count-in last 8 s: long enough to rotate in.
+  await speedSlider(page).fill('50');
+  await chooseCountIn(page, 2);
+
+  await playButton(page).click();
+  await expect(status(page)).toContainText('Counting in');
+  const counter = page.getByTestId('count-in');
+  await expect(counter).toBeVisible();
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await windowScrollSettled(page);
+  await expect(status(page), 'still counting in after the rotation').toContainText('Counting in');
+  await expect(counter).toBeVisible();
+  await expect(page.getByTestId('controls-slot')).toHaveCSS('margin-bottom', '0px');
+
+  await expect(status(page)).not.toContainText('Counting in', { timeout: 10_000 });
+  await windowScrollSettled(page);
+  await expect.poll(() => beatCursorOnScreen(page), { message: 'beat cursor' }).toBe(true);
+
+  await page.setViewportSize(portrait);
+  await windowScrollSettled(page);
+  await expect.poll(() => beatCursorOnScreen(page), { message: 'back in portrait' }).toBe(true);
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  await expect(page.getByTestId('controls-slot')).toHaveCSS('margin-bottom', '0px');
+});
 
 // Fix round 1: the sticky bar must never sit over the score, swallow a tap
 // meant for a bar, or pass its own taps through to the score.

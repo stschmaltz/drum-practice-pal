@@ -79,3 +79,24 @@ describe('AppShell', () => {
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
   });
 });
+
+describe('AppShell account line (12 UX pass)', () => {
+  it('shows the address’s initial in a circle, hidden from screen readers, and the whole address in a title', () => {
+    renderRoutes(routes, { path: '/', auth: signedInAs('u1', 'drummer@drumpal.test') });
+    const line = screen.getByTitle('drummer@drumpal.test');
+    expect(line).toHaveTextContent(/^Ddrummer@drumpal\.test$/);
+    const initial = line.querySelector('[aria-hidden="true"]');
+    expect(initial).toHaveTextContent('D');
+    expect(line.querySelector('.truncate')).toHaveTextContent('drummer@drumpal.test');
+  });
+
+  it('marks the current page in the selected colour with an edge, not the brand', () => {
+    renderRoutes(routes, { path: '/library' });
+    for (const nav of navs()) {
+      const current = within(nav).getByRole('link', { name: 'Library' });
+      expect(current).toHaveAttribute('aria-current', 'page');
+      expect(current.className).toMatch(/selected-line/);
+      expect(current.className).not.toMatch(/text-brand/);
+    }
+  });
+});

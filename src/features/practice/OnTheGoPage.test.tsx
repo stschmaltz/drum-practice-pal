@@ -459,3 +459,47 @@ describe('On the go offline (Unit 11)', () => {
     expect(tab(/^Finished/)).toHaveTextContent('Finished (1)');
   });
 });
+
+describe('On the go cards (12 UX pass)', () => {
+  it('shows a loop with a target its way there as a progress bar, in the percents its line shows', async () => {
+    serve([fill, intro]);
+    renderHome();
+    await screen.findByText('Chorus fill', { selector: 'p' });
+    const bar = item('Chorus fill').getByRole('progressbar', {
+      name: 'Speed towards the target of Chorus fill',
+    });
+    // 0.708333 shows as 71%; the bar says the same.
+    expect(bar).toHaveAttribute('aria-valuenow', '71');
+    expect(bar).toHaveAttribute('aria-valuemax', '100');
+    expect(bar).toHaveAttribute('aria-valuetext', '71% of a 100% target');
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe('71%');
+  });
+
+  it('draws no bar for a loop with no target', async () => {
+    serve([{ ...intro, target_ratio: null }]);
+    renderHome();
+    await screen.findByText('Intro', { selector: 'p' });
+    expect(item('Intro').queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
+  it('a speed past its target fills the bar and says so', async () => {
+    serve([{ ...fill, speed_ratio: 1.1, target_ratio: 1 }]);
+    renderHome();
+    await screen.findByText('Chorus fill', { selector: 'p' });
+    const bar = item('Chorus fill').getByRole('progressbar');
+    expect(bar).toHaveAttribute('aria-valuenow', '100');
+    expect(bar).toHaveAttribute('aria-valuetext', '110% of a 100% target');
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe('100%');
+  });
+
+  it('lays the loops out as a grid that goes to columns on a wide screen', async () => {
+    serve([fill, intro]);
+    renderHome();
+    await screen.findByText('Chorus fill', { selector: 'p' });
+    expect(screen.getByRole('list', { name: 'On the go' })).toHaveClass(
+      'grid',
+      'lg:grid-cols-2',
+      'xl:grid-cols-3',
+    );
+  });
+});

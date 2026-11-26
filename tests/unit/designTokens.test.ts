@@ -39,15 +39,18 @@ const TEXT_PAIRS: [text: string, on: string[]][] = [
       'danger-soft',
       'warning-soft',
       'success-soft',
+      'selected',
     ],
   ],
-  ['ink-soft', ['canvas', 'surface', 'raised', 'raised-hover', 'brand-soft']],
-  ['ink-muted', ['canvas', 'surface', 'raised', 'brand-soft']],
+  ['ink-soft', ['canvas', 'surface', 'raised', 'raised-hover', 'brand-soft', 'selected']],
+  ['ink-muted', ['canvas', 'surface', 'raised', 'brand-soft', 'selected']],
+  ['selected-line', ['canvas', 'surface', 'raised', 'selected']],
   ['brand', ['canvas', 'surface', 'raised', 'brand-soft']],
   ['brand-hover', ['canvas', 'surface']],
   ['on-brand', ['brand', 'brand-hover']],
   ['on-danger', ['danger-solid', 'danger-solid-hover']],
-  ['danger', ['canvas', 'surface', 'raised', 'danger-soft', 'brand-soft']],
+  // raised-hover: a destructive item in an overflow menu, hovered or focused.
+  ['danger', ['canvas', 'surface', 'raised', 'raised-hover', 'danger-soft', 'brand-soft']],
   ['warning', ['canvas', 'surface', 'warning-soft', 'brand-soft']],
   ['success', ['canvas', 'surface', 'success-soft']],
   ['score-ink', ['score-paper']],
@@ -66,6 +69,12 @@ const NON_TEXT_PAIRS: [part: string, on: string[]][] = [
   ['brand', ['canvas', 'surface', 'raised', 'brand-soft']],
   ['danger-solid', ['canvas', 'surface']],
   ['score-accent', ['score-paper']],
+  // A toggle that is on: its ring and its check against the tile and the page around it.
+  ['selected-line', ['canvas', 'surface', 'raised', 'selected']],
+  // The loop range's dashed edge on the score.
+  ['score-range', ['score-paper']],
+  // The focus ring on a toggle that is on.
+  ['focus', ['selected']],
 ];
 
 describe('token contrast', () => {

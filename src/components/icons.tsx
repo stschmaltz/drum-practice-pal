@@ -102,6 +102,14 @@ const PATHS = {
   ),
   trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5" />,
   close: <path d="M6 6l12 12M18 6 6 18" />,
+  more: (
+    <>
+      <circle cx="5.5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="18.5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    </>
+  ),
+  controls: <path d="M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4" />,
   plus: <path d="M12 5v14M5 12h14" />,
   keyboard: (
     <>

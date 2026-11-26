@@ -71,6 +71,9 @@ function renderPanel() {
   return userEvent.setup();
 }
 
+/** A `dragover` of a file from the desktop: the browser lists "Files" among its types. */
+const fileDrag = { dataTransfer: { types: ['Files'] } };
+
 /** jsdom has no DragEvent, so `relatedTarget` (where the drag went) is set by hand. */
 function dragLeaveTo(zone: HTMLElement, relatedTarget: Element) {
   const leave = createEvent.dragLeave(zone);
@@ -228,7 +231,7 @@ describe('UploadPanel', () => {
     const zone = screen.getByTestId('drop-zone');
     const highlighted = () => zone.classList.contains('border-brand');
 
-    fireEvent.dragOver(zone);
+    fireEvent.dragOver(zone, fileDrag);
     expect(highlighted()).toBe(true);
     // Moving onto the button inside the zone is still inside it.
     dragLeaveTo(zone, picker());
@@ -236,7 +239,7 @@ describe('UploadPanel', () => {
     dragLeaveTo(zone, document.body);
     expect(highlighted()).toBe(false);
 
-    fireEvent.dragOver(zone);
+    fireEvent.dragOver(zone, fileDrag);
     fireEvent.drop(zone, { dataTransfer: { files: [] } });
     expect(highlighted()).toBe(false);
   });
@@ -250,7 +253,7 @@ describe('UploadPanel', () => {
     expect(await screen.findByText('Uploading first.gp…')).toBeInTheDocument();
 
     const zone = screen.getByTestId('drop-zone');
-    fireEvent.dragOver(zone);
+    fireEvent.dragOver(zone, fileDrag);
     expect(zone.classList.contains('border-brand')).toBe(false);
     fireEvent.drop(zone, { dataTransfer: { files: [gpFile('second.gp')] } });
     expect(screen.getByText('Uploading first.gp…')).toBeInTheDocument();
@@ -307,5 +310,126 @@ describe('UploadPanel offline', () => {
     fireEvent.drop(screen.getByTestId('drop-zone'), { dataTransfer: { files: [gpFile()] } });
     expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
     expect(storageMethods()).toEqual(['upload']);
+  });
+});
+
+describe('UploadPanel once the library has songs (compact)', () => {
+  function renderCompact() {
+    renderRoutes(
+      <Route
+        path="/library"
+        element={
+          <UploadPanel compact>
+            <ul aria-label="Songs">
+              <li>Groove</li>
+            </ul>
+          </UploadPanel>
+        }
+      />,
+      { path: '/library' },
+    );
+    return userEvent.setup();
+  }
+
+  it('is an Upload button with the same name, and no drop box', () => {
+    renderCompact();
+    const label = picker().closest('label');
+    expect(label).toHaveTextContent(/^Upload a Guitar Pro file$/);
+    // "Upload" on screen; the rest is for screen readers.
+    expect(label?.querySelector('.sr-only')).toHaveTextContent('a Guitar Pro file');
+    expect(screen.queryByText(/or drop one here/)).not.toBeInTheDocument();
+    expect(screen.getByText(/drop a Guitar Pro file anywhere here/)).toBeInTheDocument();
+  });
+
+  it('takes a file dropped anywhere over the library, the list included', async () => {
+    serve({});
+    renderCompact();
+    const zone = screen.getByTestId('drop-zone');
+    expect(zone).toContainElement(screen.getByRole('list', { name: 'Songs' }));
+    fireEvent.drop(screen.getByRole('list', { name: 'Songs' }), {
+      dataTransfer: { files: [gpFile('dropped.gp')] },
+    });
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(storageMethods()).toEqual(['upload']);
+  });
+
+  it('outlines the library while a file is dragged over it, and not after it leaves', () => {
+    renderCompact();
+    const zone = screen.getByTestId('drop-zone');
+    fireEvent.dragOver(screen.getByRole('list', { name: 'Songs' }), fileDrag);
+    expect(screen.getByText('Drop the file to upload it')).toBeInTheDocument();
+    dragLeaveTo(zone, screen.getByRole('list', { name: 'Songs' }));
+    expect(screen.getByText('Drop the file to upload it')).toBeInTheDocument();
+    dragLeaveTo(zone, document.body);
+    expect(screen.queryByText('Drop the file to upload it')).not.toBeInTheDocument();
+  });
+
+  it('uploads from the picker as the drop box does', async () => {
+    serve({});
+    const user = renderCompact();
+    await user.upload(picker(), gpFile());
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+  });
+
+  // 12 UX pass, Test: the list is a second way in, and asks what the button asks.
+  it('offline, a file dragged over the list draws no outline and a drop on it uploads nothing', async () => {
+    serve({});
+    renderCompact();
+    act(() => onlineManager.setOnline(false));
+    expect(picker()).toBeDisabled();
+    const list = screen.getByRole('list', { name: 'Songs' });
+    fireEvent.dragOver(list, fileDrag);
+    expect(screen.queryByText('Drop the file to upload it')).not.toBeInTheDocument();
+    fireEvent.drop(list, { dataTransfer: { files: [gpFile()] } });
+    await settle();
+    expect(storageMethods()).toEqual([]);
+    expect(queryResult).not.toHaveBeenCalled();
+
+    act(() => onlineManager.setOnline(true));
+    fireEvent.drop(list, { dataTransfer: { files: [gpFile()] } });
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+  });
+
+  it('while an upload runs, the list takes no drop and draws no outline', async () => {
+    const upload = deferred();
+    storageResult.mockReturnValueOnce(upload.promise);
+    serve({});
+    const user = renderCompact();
+    await user.upload(picker(), gpFile('first.gp'));
+    expect(await screen.findByText('Uploading first.gp…')).toBeInTheDocument();
+
+    const list = screen.getByRole('list', { name: 'Songs' });
+    fireEvent.dragOver(list, fileDrag);
+    expect(screen.queryByText('Drop the file to upload it')).not.toBeInTheDocument();
+    fireEvent.drop(list, { dataTransfer: { files: [gpFile('second.gp')] } });
+    expect(screen.getByText('Uploading first.gp…')).toBeInTheDocument();
+
+    upload.resolve(ok({}));
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(storageMethods()).toEqual(['upload']);
+    expect(inserts()).toHaveLength(1);
+  });
+
+  // 12 Review (after UX pass): a song card's link, or selected text, dragged a little across
+  // the list drew "Drop the file to upload it" over the whole library.
+  it('a drag that carries no file (a link, some text) draws no outline', () => {
+    renderCompact();
+    const list = screen.getByRole('list', { name: 'Songs' });
+    fireEvent.dragOver(list, { dataTransfer: { types: ['text/uri-list', 'text/plain'] } });
+    expect(screen.queryByText('Drop the file to upload it')).not.toBeInTheDocument();
+    fireEvent.dragOver(list, fileDrag);
+    expect(screen.getByText('Drop the file to upload it')).toBeInTheDocument();
+  });
+
+  it('a drop clears the outline, and several files dropped on the list are refused', async () => {
+    serve({});
+    renderCompact();
+    const list = screen.getByRole('list', { name: 'Songs' });
+    fireEvent.dragOver(list, fileDrag);
+    fireEvent.drop(list, { dataTransfer: { files: [gpFile('a.gp'), gpFile('b.gp')] } });
+    expect(screen.queryByText('Drop the file to upload it')).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Drop one file at a time.');
+    await settle();
+    expect(storageResult).not.toHaveBeenCalled();
   });
 });

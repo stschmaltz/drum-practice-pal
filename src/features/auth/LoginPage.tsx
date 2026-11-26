@@ -128,6 +128,10 @@ function EmailStep({
           name="email"
           autoComplete="email"
           inputMode="email"
+          placeholder="you@example.com"
+          // Straight to the one field on a laptop. Not on a touch screen, where focus brings
+          // up the keyboard over the page before it has been read (and iOS ignores it anyway).
+          autoFocus={pointerIsFine()}
           required
           value={email}
           onChange={(event) => onEmailChange(event.target.value)}
@@ -139,6 +143,11 @@ function EmailStep({
       {sendError}
     </form>
   );
+}
+
+/** A mouse or trackpad: no on-screen keyboard to bring up. False where it can't be asked (tests, old browsers). */
+function pointerIsFine(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: fine)').matches;
 }
 
 function CodeStep({

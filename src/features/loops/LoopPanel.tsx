@@ -3,6 +3,7 @@ import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { Icon } from '@/components/icons';
+import { OverflowMenu } from '@/components/OverflowMenu';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
 import {
   activeCardClass,
@@ -12,10 +13,7 @@ import {
   focusRing,
   ghostButtonClass,
   inlineIconClass,
-  pressedButtonClass,
   primaryButtonClass,
-  quietButtonClass,
-  quietPressedButtonClass,
   sectionHeadingClass,
 } from '@/components/styles';
 import { canPickBars, canPlay } from '@/features/player/controlGates';
@@ -28,6 +26,7 @@ import {
   isItemListed,
   itemAttributes,
   itemControlAttributes,
+  itemMenuAttributes,
   neighbourAfterLeaving,
 } from '@/lib/itemFocus';
 import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
@@ -36,6 +35,7 @@ import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
   editButtonAttributes,
   findFormOpener,
+  findLoopSpeed,
   findStatusButton,
   NEW_LOOP_BUTTON_ATTRIBUTES,
   type LoopFormOpener,
@@ -49,6 +49,7 @@ import {
 } from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';
 import { speedLabel } from './loopLabels';
+import { editorOnPanel } from './loopPanelContent';
 import { LoopSpeedControl } from './LoopSpeedControl';
 import { LoopStatusButton } from './LoopStatusButton';
 import { loopPanelIsSheet, playLoopClosesPanel } from './useLoopPanelOpen';
@@ -64,15 +65,17 @@ interface LoopPanelProps {
   loops: ReturnType<typeof useLoops>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** For the `aria-controls` of a toggle the page places elsewhere (beside the status line, from 768 px). */
+  /** For the `aria-controls` of a toggle the page places elsewhere (beside the status line, from 1024 px). */
   bodyId: string;
 }
 
 /**
- * The song's loops: a bottom sheet on a phone (fixed above the tab bar, its
- * header always on show and opening the rest), a side panel from 768 px (in
- * the page beside the score, shown or hidden by the page's own toggle). One
- * component and one `open` state for both; only the classes differ.
+ * The song's loops: a bottom sheet below 1024 px, so on a phone and a tablet
+ * in portrait (fixed at the foot of the window, its header always on show and
+ * opening the rest), a column beside the score from 1024 px (shown or hidden
+ * by the page's own toggle). The width rule is `loopPanelLayout.ts`, which is
+ * the CSS's `lg`. One component and one `open` state for both; only the
+ * classes differ.
  */
 export function LoopPanel({
   songId,
@@ -97,15 +100,17 @@ export function LoopPanel({
     <aside
       aria-label="Loops"
       data-testid="loop-panel"
-      // Phone: fixed just above the tab bar (3.5rem plus its border). From md: a
-      // column beside the score that stays put while the page scrolls.
-      className={`fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 rounded-t-card border-t border-line bg-surface shadow-sheet md:sticky md:inset-x-auto md:top-20 md:bottom-auto md:z-auto md:max-h-[calc(100dvh-6rem)] md:w-64 md:shrink-0 md:self-start md:overflow-y-auto md:rounded-card md:border md:shadow-card lg:w-80 ${
-        open ? '' : 'md:hidden'
+      // Phone: fixed just above the tab bar (3.5rem plus its border). Tablet in
+      // portrait (md): no tab bar, so on the safe area, and as wide as the content
+      // column to the right of the sidebar (the page's gutter each side), not under
+      // it. From lg: a column beside the score that stays put while the page scrolls.
+      className={`fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 rounded-t-card border-t border-line bg-surface shadow-sheet md:right-gutter md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+var(--spacing-gutter))] md:border-x lg:sticky lg:inset-x-auto lg:top-20 lg:bottom-auto lg:z-auto lg:max-h-[calc(100dvh-6rem)] lg:w-80 lg:shrink-0 lg:self-start lg:overflow-y-auto lg:rounded-card lg:border lg:shadow-card ${
+        open ? '' : 'lg:hidden'
       }`}
     >
       <button
         type="button"
-        className={`flex min-h-touch w-full items-center justify-between gap-3 rounded-t-card px-4 text-left font-semibold md:hidden ${focusRing} focus-visible:-outline-offset-2`}
+        className={`flex min-h-touch w-full items-center justify-between gap-3 rounded-t-card px-4 text-left font-semibold lg:hidden ${focusRing} focus-visible:-outline-offset-2`}
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => onOpenChange(!open)}
@@ -127,8 +132,9 @@ export function LoopPanel({
       <div
         id={bodyId}
         hidden={!open}
-        // The sheet stops well short of the top so the score stays in reach above it.
-        className="max-h-[45dvh] overflow-y-auto p-4 pt-1 md:max-h-none md:overflow-visible md:pt-4"
+        // The sheet stops well short of the top so the score stays in reach above it;
+        // on a tall tablet less of the window, so a few lines of the score stay readable.
+        className="max-h-[45dvh] overflow-y-auto p-4 pt-1 md:max-h-[min(40dvh,30rem)] lg:max-h-none lg:overflow-visible lg:pt-4"
       >
         <LoopPanelBody
           songId={songId}
@@ -157,6 +163,9 @@ type LoopListProps = LoopPanelBodyProps & {
   onStatusSet: (loop: Loop, status: LoopStatus) => void;
   /** "Delete loop" was pressed: the item leaves once the server confirms, taking focus with it. */
   onDeletePressed: (loop: Loop) => void;
+  /** The playing loop's saved speed has reached its target and the user hasn't said "Not yet". */
+  askToFinish: boolean;
+  onDeclineFinish: () => void;
 };
 
 function LoopPanelBody({
@@ -167,9 +176,7 @@ function LoopPanelBody({
   loops,
   onPlayLoop,
 }: LoopPanelBodyProps) {
-  const { editor, editedLoop, activeLoop } = practice;
-  // Loops need the score: its bar count checks a range, and a loop can't play before it.
-  const { barCount } = snapshot;
+  const { editedLoop, activeLoop } = practice;
   // "Not yet" to "Mark finished?", for the loop at the speed it was asked about:
   // saving a faster speed asks again. Here, not in the card, which the form replaces.
   const [declinedFinish, setDeclinedFinish] = useState<string | null>(null);
@@ -205,7 +212,10 @@ function LoopPanelBody({
     });
   };
 
-  if (editor && barCount !== null) {
+  // Loops need the score: its bar count checks a range, and a loop can't play before it.
+  const form = editorOnPanel(practice, snapshot);
+  if (form) {
+    const { editor, barCount } = form;
     if (editor.loopId !== null && !editedLoop) {
       return <DeletedLoopNotice onBack={closeForm} />;
     }
@@ -246,20 +256,6 @@ function LoopPanelBody({
           New loop
         </button>
       </div>
-      {activeLoop && (
-        <ActiveLoopCard
-          songId={songId}
-          loop={activeLoop}
-          player={player}
-          snapshot={snapshot}
-          onExit={practice.exitLoop}
-          askToFinish={
-            hasReachedTarget(activeLoop) && declinedFinish !== finishQuestionKey(activeLoop)
-          }
-          onDeclineFinish={() => setDeclinedFinish(finishQuestionKey(activeLoop))}
-          onFinished={() => followStatusButton(activeLoop, 'finished')}
-        />
-      )}
       <LoopList
         songId={songId}
         player={player}
@@ -270,6 +266,14 @@ function LoopPanelBody({
         onEdit={openForm}
         onStatusSet={followStatusButton}
         onDeletePressed={followDelete}
+        askToFinish={
+          activeLoop !== null &&
+          hasReachedTarget(activeLoop) &&
+          declinedFinish !== finishQuestionKey(activeLoop)
+        }
+        onDeclineFinish={() => {
+          if (activeLoop) setDeclinedFinish(finishQuestionKey(activeLoop));
+        }}
       />
     </div>
   );
@@ -290,53 +294,6 @@ function DeletedLoopNotice({ onBack }: { onBack: () => void }) {
         Back to loops
       </button>
     </div>
-  );
-}
-
-/** The loop that is repeating, with its speed control and the way back to the whole song. */
-function ActiveLoopCard({
-  songId,
-  loop,
-  player,
-  snapshot,
-  onExit,
-  askToFinish,
-  onDeclineFinish,
-  onFinished,
-}: Pick<LoopPanelProps, 'songId' | 'player' | 'snapshot'> & {
-  loop: Loop;
-  onExit: () => void;
-  /** The saved speed has reached the target, and the user hasn't said "Not yet" to it. */
-  askToFinish: boolean;
-  onDeclineFinish: () => void;
-  /** "Mark finished" in the prompt was sent; the prompt goes with the loop's move. */
-  onFinished: () => void;
-}) {
-  return (
-    <section
-      aria-label={`Practicing ${loop.name}`}
-      className={`${activeCardClass} flex flex-col gap-3 p-3`}
-    >
-      <div className="flex flex-col gap-1">
-        <p className="text-xs font-semibold tracking-wider text-brand uppercase">Now looping</p>
-        <p className="font-semibold break-words">{loop.name}</p>
-        <p className="text-sm text-ink-soft">
-          {barsLabel(loop.start_bar, loop.end_bar)}, repeating
-        </p>
-      </div>
-      <LoopSpeedControl songId={songId} loop={loop} player={player} snapshot={snapshot} />
-      {askToFinish && (
-        <FinishPrompt
-          songId={songId}
-          loop={loop}
-          onDecline={onDeclineFinish}
-          onFinished={onFinished}
-        />
-      )}
-      <button type="button" className={ghostButtonClass} onClick={onExit}>
-        Back to whole song
-      </button>
-    </section>
   );
 }
 
@@ -402,6 +359,8 @@ function LoopList({
   onEdit,
   onStatusSet,
   onDeletePressed,
+  askToFinish,
+  onDeclineFinish,
 }: LoopListProps) {
   if (waitsForNetwork(loops)) {
     return (
@@ -434,7 +393,19 @@ function LoopList({
           key={loop.id}
           songId={songId}
           loop={loop}
-          active={loop.id === practice.activeLoop?.id}
+          player={player}
+          snapshot={snapshot}
+          active={
+            loop.id === practice.activeLoop?.id
+              ? {
+                  onExit: practice.exitLoop,
+                  askToFinish,
+                  onDeclineFinish,
+                  // The prompt's "Mark finished" moves the loop, as its own status button does.
+                  onFinished: () => onStatusSet(loop, 'finished'),
+                }
+              : null
+          }
           // Null until the score loads: the item then shows the percent alone.
           tempo={player?.tempoAtBar(loop.start_bar) ?? null}
           // The same gate as playLoop itself and the loop keys.
@@ -472,9 +443,33 @@ function LoopList({
   );
 }
 
+/** What the playing loop's item adds: its speed, "Mark finished?" and the way back to the whole song. */
+interface ActiveLoopProps {
+  onExit: () => void;
+  /** The saved speed has reached the target, and the user hasn't said "Not yet" to it. */
+  askToFinish: boolean;
+  onDeclineFinish: () => void;
+  /** "Mark finished" in the prompt was sent; focus follows the loop to the other section. */
+  onFinished: () => void;
+}
+
+/**
+ * One loop. The playing loop is marked in place rather than shown again in a
+ * card of its own (12 UX pass: one presentation of it, where it was pressed):
+ * its item opens out to hold its speed control, "Mark finished?" and "Exit
+ * loop". Each item's main action stands alone (Play loop, or Restart loop
+ * while it plays), beside its status button; Edit, History and Delete are in
+ * its "More" menu, Delete last, away from the main action.
+ *
+ * The children keep their places whether the loop plays or not (each extra
+ * part is a slot of its own), so "Play loop" stays the same element as it
+ * turns into "Restart loop", and keeps focus.
+ */
 function LoopListItem({
   songId,
   loop,
+  player,
+  snapshot,
   active,
   tempo,
   canPlay,
@@ -486,7 +481,10 @@ function LoopListItem({
 }: {
   songId: string;
   loop: Loop;
-  active: boolean;
+  player: PlayerService | null;
+  snapshot: PlayerSnapshot;
+  /** Set while this is the loop playing. */
+  active: ActiveLoopProps | null;
   /** The file's tempo at the loop's first bar, for the BPM. */
   tempo: number | null;
   canPlay: boolean;
@@ -498,21 +496,40 @@ function LoopListItem({
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const focusWhenReady = useFocusWhenReady();
+  // "Keep it" brings back the row; focus goes to the "More" button whose menu held Delete.
   const keepIt = () => {
     setConfirmingDelete(false);
     focusWhenReady(() => findItemControl(loop.id, 'delete'));
+  };
+  // Exit loop goes with the loop's playing state; its Play loop, which stays, takes focus.
+  const exitLoop = () => {
+    if (!active) return;
+    active.onExit();
+    focusWhenReady(() => findItemControl(loop.id, 'play'));
+  };
+  // "Not yet" goes with its prompt; the loop's speed control, just above it, takes focus.
+  const declineFinish = () => {
+    if (!active) return;
+    active.onDeclineFinish();
+    focusWhenReady(findLoopSpeed);
   };
   const [showingHistory, setShowingHistory] = useState(false);
   const named = <span className="sr-only"> {loop.name}</span>;
 
   return (
     <li
-      className={`flex flex-col gap-3 rounded-card border bg-canvas p-3 ${
-        active ? 'border-brand-line' : 'border-line'
+      className={`flex flex-col gap-3 p-3 ${
+        active ? activeCardClass : 'rounded-card border border-line bg-canvas'
       }`}
       {...itemAttributes(loop.id)}
+      data-testid={active ? 'active-loop' : undefined}
     >
       <div className="flex flex-col gap-1">
+        {active && (
+          <span className="text-xs font-semibold tracking-wider text-brand uppercase">
+            Now looping
+          </span>
+        )}
         <p className="flex items-start gap-2 font-semibold wrap-anywhere">
           {active && <Icon name="loop" className="mt-0.5 size-4 text-brand" />}
           {loop.name}
@@ -525,6 +542,19 @@ function LoopListItem({
           {lastPracticedLabel(loop.last_practiced_at, new Date())}
         </p>
       </div>
+      {active && (
+        <section aria-label={`Practicing ${loop.name}`} className="flex flex-col gap-3">
+          <LoopSpeedControl songId={songId} loop={loop} player={player} snapshot={snapshot} />
+          {active.askToFinish && (
+            <FinishPrompt
+              songId={songId}
+              loop={loop}
+              onDecline={declineFinish}
+              onFinished={active.onFinished}
+            />
+          )}
+        </section>
+      )}
       {confirmingDelete ? (
         <ConfirmDelete
           songId={songId}
@@ -536,8 +566,10 @@ function LoopListItem({
         <div className="flex flex-wrap items-center gap-1">
           <button
             type="button"
-            className={`${active ? pressedButtonClass : primaryButtonClass} mr-1`}
+            // Restart is a second action on a loop already playing: the brand stays with Play.
+            className={`${active ? buttonClass : primaryButtonClass} mr-1`}
             disabled={!canPlay}
+            {...itemControlAttributes(loop.id, 'play')}
             // No await before the player is told to play: iOS only starts audio inside the tap.
             onClick={onPlay}
           >
@@ -545,36 +577,36 @@ function LoopListItem({
             {active ? 'Restart loop' : 'Play loop'}
             {named}
           </button>
-          <button
-            type="button"
-            className={quietButtonClass}
-            disabled={!canEdit}
-            {...editButtonAttributes(loop.id)}
-            onClick={onEdit}
-          >
-            <Icon name="edit" className="size-4" />
-            Edit{named}
-          </button>
-          <button
-            type="button"
-            className={showingHistory ? quietPressedButtonClass : quietButtonClass}
-            aria-expanded={showingHistory}
-            onClick={() => setShowingHistory((showing) => !showing)}
-          >
-            <Icon name="history" className="size-4" />
-            History{named}
-          </button>
           <LoopStatusButton loop={loop} onSet={onStatusSet} />
-          <button
-            type="button"
-            className={quietButtonClass}
-            {...itemControlAttributes(loop.id, 'delete')}
-            onClick={() => setConfirmingDelete(true)}
-          >
-            <Icon name="trash" className="size-4" />
-            Delete{named}
-          </button>
+          <OverflowMenu
+            name={loop.name}
+            // The button stands for what its menu holds: closing the edit form and "Keep it"
+            // hand focus back to it, as they did to Edit and Delete.
+            buttonAttributes={{ ...itemMenuAttributes(loop.id), ...editButtonAttributes(loop.id) }}
+            items={[
+              { id: 'edit', label: 'Edit', icon: 'edit', disabled: !canEdit, onSelect: onEdit },
+              {
+                id: 'history',
+                label: showingHistory ? 'Hide history' : 'Show history',
+                icon: 'history',
+                onSelect: () => setShowingHistory((showing) => !showing),
+              },
+              {
+                id: 'delete',
+                label: 'Delete',
+                icon: 'trash',
+                danger: true,
+                onSelect: () => setConfirmingDelete(true),
+              },
+            ]}
+          />
         </div>
+      )}
+      {active && (
+        <button type="button" className={`${ghostButtonClass} self-start`} onClick={exitLoop}>
+          <Icon name="close" className="size-4" />
+          Exit loop
+        </button>
       )}
       {showingHistory && <LoopHistory loopId={loop.id} loopName={loop.name} tempo={tempo} />}
     </li>

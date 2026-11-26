@@ -228,3 +228,34 @@ describe('LoginPage offline', () => {
     expect(fakeSupabase.auth.verifyOtp).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('LoginPage email field (12 UX pass)', () => {
+  const pointer = (fine: boolean) =>
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({
+          matches: query === '(pointer: fine)' ? fine : false,
+          media: query,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        }) as unknown as MediaQueryList,
+    );
+  afterEach(() => vi.restoreAllMocks());
+
+  it('shows an example address in the empty field', () => {
+    renderLogin();
+    expect(screen.getByLabelText('Email')).toHaveAttribute('placeholder', 'you@example.com');
+  });
+
+  it('takes focus on a device with a mouse or trackpad', () => {
+    pointer(true);
+    renderLogin();
+    expect(screen.getByLabelText('Email')).toHaveFocus();
+  });
+
+  it('leaves focus alone on a touch screen, where it would bring up the keyboard unasked', () => {
+    pointer(false);
+    renderLogin();
+    expect(screen.getByLabelText('Email')).not.toHaveFocus();
+  });
+});

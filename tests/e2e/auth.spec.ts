@@ -120,3 +120,19 @@ test('an unknown address shows not found inside the shell', async ({ user, page 
   await page.getByRole('link', { name: 'Go to On the go' }).click();
   await expect(page.getByRole('heading', { name: 'On the go' })).toBeVisible();
 });
+
+// 12 UX pass, Test: straight to the one field with a mouse or trackpad; on a touch screen
+// focus would bring the keyboard up over a page not yet read.
+test('the email field takes focus on load on a laptop, and not on a phone or tablet', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/login');
+  const email = page.getByLabel('Email');
+  await expect(email).toBeVisible();
+  await expect(email).toHaveAttribute('placeholder', 'you@example.com');
+  if (testInfo.project.name === 'desktop') {
+    await expect(email).toBeFocused();
+  } else {
+    await expect(email).not.toBeFocused();
+  }
+});

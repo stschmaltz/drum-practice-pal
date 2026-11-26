@@ -80,7 +80,12 @@ export function SongListItem({
   }, [editing, song.id, onEditingChange]);
 
   return (
-    <li className={`${cardClass} flex flex-col gap-3 p-4`} {...itemAttributes(song.id)}>
+    // relative: the title's link stretches over the whole card (its ::after), and the item's
+    // buttons and its delete question sit above that (relative z-10), so nothing is nested.
+    <li
+      className={`${cardClass} relative flex flex-col gap-3 p-4 transition-colors duration-150 hover:border-line-strong`}
+      {...itemAttributes(song.id)}
+    >
       {editing ? (
         <EditSongForm
           song={song}
@@ -94,7 +99,7 @@ export function SongListItem({
         <SongSummary song={song} />
       )}
       {mode === 'view' && (
-        <div className="flex flex-wrap gap-1">
+        <div className="relative z-10 flex flex-wrap gap-1 self-start">
           <button
             type="button"
             className={quietButtonClass}
@@ -129,9 +134,11 @@ export function SongListItem({
 function SongSummary({ song }: { song: LibrarySong }) {
   return (
     <div className="flex flex-col gap-1">
+      {/* The whole card opens the song: one link, its hit area stretched over the card
+          by ::after (the item is `relative`), rather than a link wrapping the buttons. */}
       <Link
         to={songPath(song.id)}
-        className={`inline-flex min-h-touch max-w-full items-center self-start rounded-sm text-lg font-semibold wrap-anywhere text-ink hover:text-brand ${focusRing}`}
+        className={`inline-flex min-h-touch max-w-full items-center self-start rounded-sm text-lg font-semibold wrap-anywhere text-ink after:absolute after:inset-0 after:rounded-card after:content-[''] hover:text-brand ${focusRing}`}
       >
         {song.title}
       </Link>
@@ -289,7 +296,8 @@ function ConfirmDelete({
       tabIndex={-1}
       role="group"
       aria-label={`Delete ${song.title}`}
-      className={`${dangerPanelClass} flex flex-col gap-2 focus:outline-none`}
+      // Above the title's stretched link, which would otherwise take its presses.
+      className={`${dangerPanelClass} relative z-10 flex flex-col gap-2 focus:outline-none`}
     >
       <p className="text-ink">
         Delete “{song.title}”? Its loops and practice history are deleted too. This can't be undone.

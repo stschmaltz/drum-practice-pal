@@ -54,7 +54,14 @@ export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs
       if (event.key === ' ') swallowSpaceKeyup = false;
       const target = event.target instanceof HTMLElement ? event.target : null;
       const resolved = resolveShortcut(event, {
-        focus: focusKindOf(target),
+        focus: focusKindOf(
+          target && {
+            tagName: target.tagName,
+            type: target instanceof HTMLInputElement ? target.type : undefined,
+            isContentEditable: target.isContentEditable,
+            role: target.getAttribute('role'),
+          },
+        ),
         helpOpen: latest.current.helpOpen,
         // Read at the press, so turning it off in Settings or another tab needs no reload.
         characterKeys: readCharacterKeysOn(),

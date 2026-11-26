@@ -14,7 +14,9 @@ export function CountInCounter({ snapshot }: { snapshot: PlayerSnapshot }) {
       data-testid="count-in"
       // The status line announces "Counting in"; reading every beat aloud would lag behind the clicks.
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-card bg-canvas/90"
+      // Below 768 px the score box is one line of music tall, so the bar count sits beside
+      // the number rather than under it; the number keeps its size (read from the throne).
+      className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-4 rounded-card bg-canvas/90 md:flex-col md:gap-2"
     >
       <span
         // A new element each beat, so its small pop plays again (not under reduced motion).

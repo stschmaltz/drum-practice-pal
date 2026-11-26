@@ -8,15 +8,30 @@
  * that appears in place of a button focuses itself on mount (`tabIndex={-1}`).
  */
 
-/** The item's controls that stand in for one another. */
-export type ItemControl = 'edit' | 'delete';
+/**
+ * The item's controls that stand in for one another, and its main action
+ * (`play`: a loop's Play loop, which takes focus from its Exit loop as that goes).
+ */
+export type ItemControl = 'edit' | 'delete' | 'play';
 
 export function itemControlAttributes(itemId: string, control: ItemControl) {
   return { 'data-item-control': `${control}:${itemId}` };
 }
 
+/**
+ * On the "More" button of an item whose controls live in an overflow menu
+ * (`OverflowMenu`): the button stands for them while the menu is closed.
+ */
+export function itemMenuAttributes(itemId: string) {
+  return { 'data-item-menu': itemId };
+}
+
+/** The control, or the item's "More" button when the control is in its closed menu. */
 export function findItemControl(itemId: string, control: ItemControl): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`[data-item-control="${control}:${itemId}"]`);
+  return (
+    document.querySelector<HTMLElement>(`[data-item-control="${control}:${itemId}"]`) ??
+    document.querySelector<HTMLElement>(`[data-item-menu="${itemId}"]`)
+  );
 }
 
 /** On the item itself, so a hand-over can wait until it has left the list. */

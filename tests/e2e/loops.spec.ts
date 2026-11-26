@@ -3,26 +3,33 @@ import type { Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
 import {
   activeLoopLine,
+  targetField,
+  chooseLoopAction,
   closeLoopPanel,
   commit,
   firstBarField,
   highlightBoxes,
   lastBarField,
+  playLoopButton,
   loopBpmField,
   loopForm,
   loopItem,
   loopNameField,
   loopPanel,
+  loopPanelToggle,
   loopPercentField,
   loopSpeed,
   newLoopButton,
   openLoopPanel,
-  playLoopButton,
   savedSpeed,
   saveLoopButton,
   saveNewLoop,
   saveSpeedButton,
-  targetField,
+  exitLoop,
+  expectLooping,
+  expectedLoopPanel,
+  setSpeed,
+  loopSheetHeader,
 } from './loopsPage';
 import {
   barCursorBox,
@@ -38,7 +45,6 @@ import {
   recordStatuses,
   scoreBox,
   scrollScoreToCursor,
-  speedSlider,
   status,
   tapAndWaitForBar,
   viewport,
@@ -257,7 +263,7 @@ test('a saved loop opens on another device at the same range and speed, with BPM
 
     // The same range, the same speed, and the BPM the first device typed.
     await expect(playButton(other)).toHaveText('Pause');
-    // On a phone the press closed the sheet, to show the score; the speed fields are inside it.
+    // Below 1024 px the press closed the sheet, to show the score; the speed fields are inside it.
     await openLoopPanel(other);
     await expect(activeLoopLine(other)).toContainText('Bars 9 to 12');
     await expect(speed(other)).toHaveText('86%');
@@ -285,7 +291,7 @@ test('the loop speed shows % and BPM, each editable, with nudges; Save speed kee
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await speedSlider(page).fill('80');
+  await setSpeed(page, 80);
   await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
   // A new loop saves at the speed playing now.
   await expect(savedSpeed(page)).toHaveText('Saved: 80% (96 BPM)');
@@ -349,7 +355,7 @@ test('edit a loop’s name, bars and target; delete it after confirming', async 
   await expect(activeLoopLine(page)).toContainText('Outro');
 
   // Edit the loop that is playing: its new bars take over at once.
-  await loopItem(page, 'Outro').getByRole('button', { name: 'Edit Outro' }).click();
+  await chooseLoopAction(page, 'Outro', 'Edit');
   await expect(loopNameField(page)).toHaveValue('Outro');
   await expect(firstBarField(page)).toHaveValue('13');
   await expect(targetField(page)).toHaveValue('120');
@@ -362,11 +368,11 @@ test('edit a loop’s name, bars and target; delete it after confirming', async 
   await expect(loopItem(page, 'Last chorus')).toContainText('Bars 9 to 12 · 100% (120 BPM)');
   await expect(loopItem(page, 'Last chorus')).not.toContainText('target');
   await expect(loopItem(page, 'Outro')).toHaveCount(0);
-  await expect(activeLoopLine(page)).toContainText('Last chorus · Bars 9 to 12');
+  await expectLooping(page, 'Last chorus', 'Bars 9 to 12');
   await expect(status(page)).toHaveText('Bar 9 of 16');
 
   // What can't be saved says why, and saves nothing.
-  await loopItem(page, 'Intro').getByRole('button', { name: 'Edit Intro' }).click();
+  await chooseLoopAction(page, 'Intro', 'Edit');
   await loopNameField(page).fill('   ');
   await lastBarField(page).fill('17');
   await targetField(page).fill('500');
@@ -378,14 +384,14 @@ test('edit a loop’s name, bars and target; delete it after confirming', async 
   await expect(loopItem(page, 'Intro')).toContainText('Bars 1 to 4');
 
   // Delete asks first, in the item, and Keep it backs out.
-  await loopItem(page, 'Intro').getByRole('button', { name: 'Delete Intro' }).click();
+  await chooseLoopAction(page, 'Intro', 'Delete');
   const confirm = loopPanel(page).getByRole('group', { name: 'Delete Intro' });
   await expect(confirm).toContainText('practice history is deleted too');
   await confirm.getByRole('button', { name: 'Keep it' }).click();
   await expect(loopItem(page, 'Intro')).toBeVisible();
 
   // Deleting the loop that is playing goes back to the whole song.
-  await loopItem(page, 'Last chorus').getByRole('button', { name: 'Delete Last chorus' }).click();
+  await chooseLoopAction(page, 'Last chorus', 'Delete');
   await loopPanel(page)
     .getByRole('group', { name: 'Delete Last chorus' })
     .getByRole('button', { name: 'Delete loop' })
@@ -404,7 +410,7 @@ test('edit a loop’s name, bars and target; delete it after confirming', async 
 
 test('Exit loop goes back to the whole song without stopping playback', async ({ user, page }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await speedSlider(page).fill('200');
+  await setSpeed(page, 200);
   await saveNewLoop(page, { name: 'One bar', firstBar: 5, lastBar: 5 });
   await closeLoopPanel(page);
 
@@ -413,8 +419,14 @@ test('Exit loop goes back to the whole song without stopping playback', async ({
   await expect(playButton(page)).toHaveText('Pause');
   expect([...(await barsPlayedFor(page, 3000))]).toEqual([5]);
 
-  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
+  // From the keyboard (12 Test after the QA fix round): Exit loop goes with the loop's playing
+  // state, and focus lands on that loop's Play loop, not on the page.
+  await openLoopPanel(page);
+  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).focus();
+  await page.keyboard.press('Enter');
   await expect(activeLoopLine(page)).toHaveCount(0);
+  await expect(loopItem(page, 'One bar').getByRole('button', { name: /^Play loop/ })).toBeFocused();
+  await closeLoopPanel(page);
   await expect(playButton(page)).toHaveText('Pause');
   // Free of the range, the song plays on past bar 5.
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(6);
@@ -432,8 +444,8 @@ test('a tap on a bar outside the playing loop moves nothing, paused or playing',
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Bar two', firstBar: 2, lastBar: 2 });
   await expect(status(page)).toHaveText('Bar 2 of 16');
-  // Only the phone's sheet is in the way of the score; the side panel stays as it is.
-  if (expectedLayout(page) === 'horizontal') await closeLoopPanel(page);
+  // Only the sheet is in the way of the score; the side column stays as it is.
+  if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
   await expect.poll(async () => (await barCursorBox(page)).width).toBeGreaterThan(2);
   await scrollScoreToCursor(page);
   const bar3 = await nextBarPoint(page);
@@ -453,10 +465,11 @@ test('a tap on a bar outside the playing loop moves nothing, paused or playing',
   await page.waitForTimeout(700);
   await expect(status(page)).toHaveText('Bar 2 of 16');
 
-  // Playing: the readout stays in the loop and goes on following it.
+  // Playing: the readout stays in the loop and goes on following it. Play folds the
+  // controls above the score, which moves it up, so bar 3 is found again.
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Pause');
-  await tapScore(page, bar3, touch);
+  await tapScore(page, await nextBarPoint(page), touch);
   await expect.poll(tappedBars).toEqual([3, 3]);
   expect([...(await barsPlayedFor(page, 2500))]).toEqual([2]);
   await expect(playButton(page)).toHaveText('Pause');
@@ -464,8 +477,8 @@ test('a tap on a bar outside the playing loop moves nothing, paused or playing',
   await expect(playButton(page)).toHaveText('Play');
 
   // Out of the loop the bar after the cursor's, found the same way, is one a tap seeks to.
-  // (Measured again: the "Looping" line has gone, and the score moved up with it.)
-  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
+  // (Measured again: Pause unfolded the controls above the score.)
+  await exitLoop(page);
   await expect(activeLoopLine(page)).toHaveCount(0);
   await expect(status(page)).toHaveText('Bar 2 of 16');
   await scrollScoreToCursor(page);
@@ -480,7 +493,7 @@ test('in a song with a repeat, a loop inside the repeat plays just its bars', as
   // Bars 3 and 4 of this fixture play twice; a loop over them is one playthrough.
   await openFixture(page, user, 'repeats', 'Repeats');
   await expect(status(page)).toHaveText('Bar 1 of 8');
-  await speedSlider(page).fill('200');
+  await setSpeed(page, 200);
   await saveNewLoop(page, { name: 'Repeated bars', firstBar: 3, lastBar: 4 });
   await expect(status(page)).toHaveText('Bar 3 of 8');
 
@@ -493,33 +506,57 @@ test('in a song with a repeat, a loop inside the repeat plays just its bars', as
   // Out of the loop, a tap on the bar after the cursor's seeks to that bar's number.
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Play');
-  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
-  // Only the phone's sheet is in the way of the score; closing the side panel
+  await exitLoop(page);
+  // Only the sheet is in the way of the score; closing the side column
   // would lay the score out again while the tap point is being measured.
-  if (expectedLayout(page) === 'horizontal') await closeLoopPanel(page);
+  if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
   const from = await barNumber(page);
   await scrollScoreToCursor(page);
   const landed = await tapAndWaitForBar(page, await nextBarPoint(page), from);
   expect(landed).toBe(from + 1);
 });
 
-test('the loop panel is a bottom sheet on a phone and a side panel from a tablet up', async ({
+test('the loop panel is a bottom sheet on a phone and a tablet in portrait, and a side column from 1024 px', async ({
   user,
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
+  const sheetHeader = loopSheetHeader(page);
+  const columnToggle = page.getByRole('button', { name: /^(Show|Hide) loops$/ });
+  const sheet = expectedLoopPanel(page) === 'sheet';
+  // One toggle on show at each width, the one the shared steps use.
+  await expect(sheet ? columnToggle : sheetHeader).toBeHidden();
+  await expect(sheet ? sheetHeader : columnToggle).toBeVisible();
+  // The sheet starts closed, so the score opens with nothing over it; the column starts open.
+  await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', sheet ? 'false' : 'true');
+
   await openLoopPanel(page);
   await expect(newLoopButton(page)).toBeVisible();
   const panel = await boxOf(loopPanel(page), 'loop panel');
   const size = page.viewportSize();
   if (!size) throw new Error('No viewport size');
 
-  if (expectedLayout(page) === 'horizontal') {
-    // Full width, sitting on the tab bar, and short enough to leave the score in reach.
-    const tabBar = await boxOf(page.locator('nav[aria-label="Main"]:visible'), 'tab bar');
-    expect(panel.x).toBe(0);
-    expect(panel.width).toBe(size.width);
-    expect(Math.abs(panel.y + panel.height - tabBar.y)).toBeLessThanOrEqual(2);
+  if (sheet) {
+    const tabBar = page.locator('nav[aria-label="Main"]:visible');
+    if (expectedLayout(page) === 'horizontal') {
+      // A phone: full width, sitting on the tab bar.
+      const tabBarBox = await boxOf(tabBar, 'tab bar');
+      expect(panel.x).toBe(0);
+      expect(panel.width).toBe(size.width);
+      expect(Math.abs(panel.y + panel.height - tabBarBox.y)).toBeLessThanOrEqual(2);
+    } else {
+      // A tablet in portrait: no tab bar, so on the foot of the window, and as wide as the
+      // score above it, to the right of the sidebar rather than under it.
+      const sidebar = await boxOf(page.locator('aside:has(nav[aria-label="Main"])'), 'sidebar');
+      const score = await scoreBox(page);
+      expect(panel.x).toBeGreaterThanOrEqual(sidebar.x + sidebar.width);
+      expect(Math.abs(panel.x - score.x)).toBeLessThanOrEqual(2);
+      expect(Math.abs(panel.width - score.width)).toBeLessThanOrEqual(2);
+      expect(Math.abs(panel.y + panel.height - size.height)).toBeLessThanOrEqual(2);
+      // The score has the content column's whole width, with no column beside it.
+      expect(score.width).toBeGreaterThan((size.width - sidebar.width) * 0.85);
+    }
+    // Short enough to leave the score in reach.
     expect(panel.height).toBeLessThan(size.height * 0.6);
 
     // Closed, only its header is left, and the page behind is clear of it.
@@ -538,6 +575,21 @@ test('the loop panel is a bottom sheet on a phone and a side panel from a tablet
     await expect.poll(async () => (await scoreBox(page)).width).toBeGreaterThan(score.width);
     await expect(viewport(page).locator('svg').first()).toBeVisible();
   }
+});
+
+test('on a tablet in portrait the score fits two bars a line', async ({ user, page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'tablet', 'the gutter at md is what this measures');
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  // Bars 2 to 15: bar 1 has the clef, time and tempo and sits alone, as can the last bar.
+  await saveNewLoop(page, { name: 'Middle', firstBar: 2, lastBar: 15 });
+  await closeLoopPanel(page);
+  // One highlight block per line of music the loop touches: 14 bars, two a line.
+  await expect
+    .poll(async () => new Set((await highlightBoxes(page)).map((box) => Math.round(box.y))).size)
+    .toBe(7);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(
+    0,
+  );
 });
 
 test('a loop across the tempo change opens on another device with BPM from its first bar, and keeps it past the change', async ({
@@ -573,7 +625,7 @@ test('a loop across the tempo change opens on another device with BPM from its f
     await playLoopButton(other, 'Across the change').click();
     await expect(playButton(other)).toHaveText('Pause');
     await openLoopPanel(other);
-    await expect(activeLoopLine(other)).toContainText('Across the change · Bars 7 to 10');
+    await expectLooping(other, 'Across the change', 'Bars 7 to 10');
     await expect(speed(other)).toHaveText('71%');
     await expect(bpm(other)).toHaveText('85');
     await expect(loopBpmField(other)).toHaveValue('85');
@@ -596,7 +648,7 @@ test('a loop across the tempo change opens on another device with BPM from its f
     expect([...bars].sort((a, b) => a - b)).toEqual([7, 8, 9, 10]);
 
     // Out of the loop it is jam mode again: BPM follows the bar playing.
-    await activeLoopLine(other).getByRole('button', { name: 'Exit loop' }).click();
+    await exitLoop(other);
     await expect
       .poll(
         async () => {
@@ -674,11 +726,11 @@ test('while a loop is being edited taps pick its new bars; saving moves the loop
   await openFixture(page, user, 'groove-120', 'Groove 120');
   // Saving the loop moves playback, and the cursor, to its first bar.
   await saveNewLoop(page, { name: 'Late', firstBar: 9, lastBar: 12 });
-  await activeLoopLine(page).getByRole('button', { name: 'Exit loop' }).click();
+  await exitLoop(page);
   await expect(status(page)).toHaveText('Bar 9 of 16');
 
   await openLoopPanel(page);
-  await loopItem(page, 'Late').getByRole('button', { name: 'Edit Late' }).click();
+  await chooseLoopAction(page, 'Late', 'Edit');
   await expect(firstBarField(page)).toHaveValue('9');
   await expect(lastBarField(page)).toHaveValue('12');
   await windowScrollSettled(page);
@@ -757,7 +809,7 @@ test('switching, editing and deleting the playing loop never stop playback', asy
 
   await playLoopButton(page, 'First').click();
   await expect(playButton(page)).toHaveText('Pause');
-  // On a phone the press that starts playback closes the sheet; one that switches loops doesn't.
+  // Below 1024 px the press that starts playback closes the sheet; one that switches loops doesn't.
   await openLoopPanel(page);
   await expect.poll(async () => (await barAndBpm(page)).bar).toBeLessThanOrEqual(2);
   await recordStatuses(page);
@@ -767,22 +819,22 @@ test('switching, editing and deleting the playing loop never stop playback', asy
 
   // Another loop, mid-play: its bars at its saved speed.
   await playLoopButton(page, 'Second').click();
-  await expect(activeLoopLine(page)).toContainText('Second · Bars 5 to 6');
+  await expectLooping(page, 'Second', 'Bars 5 to 6');
   await expect(speed(page)).toHaveText('100%');
   await commit(loopPercentField(page), '200');
   expect([...(await barsPlayedFor(page, 3000))].sort((a, b) => a - b)).toEqual([5, 6]);
 
   // Its bars edited while it plays: the loop moves there.
-  await loopItem(page, 'Second').getByRole('button', { name: 'Edit Second' }).click();
+  await chooseLoopAction(page, 'Second', 'Edit');
   await firstBarField(page).fill('9');
   await lastBarField(page).fill('10');
   await saveLoopButton(page).click();
-  await expect(activeLoopLine(page)).toContainText('Second · Bars 9 to 10');
+  await expectLooping(page, 'Second', 'Bars 9 to 10');
   await expect.poll(() => barNumber(page)).toBeGreaterThanOrEqual(9);
   expect([...(await barsPlayedFor(page, 3000))].sort((a, b) => a - b)).toEqual([9, 10]);
 
   // Deleted while it plays: the song carries on past its last bar.
-  await loopItem(page, 'Second').getByRole('button', { name: 'Delete Second' }).click();
+  await chooseLoopAction(page, 'Second', 'Delete');
   await loopPanel(page)
     .getByRole('group', { name: 'Delete Second' })
     .getByRole('button', { name: 'Delete loop' })
@@ -816,7 +868,7 @@ test('in a song with a repeat, taps seek by bar number and a loop out of the rep
   // Played straight through from the top, the current bar revisits 3 and 4.
   await page.getByRole('button', { name: 'Back to start' }).click();
   await expect(status(page)).toHaveText('Bar 1 of 8');
-  await speedSlider(page).fill('200');
+  await setSpeed(page, 200);
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Pause');
   // Ten bars at 240 BPM are ten seconds.
@@ -891,4 +943,82 @@ test('a finger dragged across the score scrolls it: it picks no bars and never s
   await expect(lastBarField(page)).toHaveValue('');
   expect(await highlightBoxes(page)).toEqual([]);
   await expect(status(page)).toHaveText('Bar 2 of 16');
+});
+
+// 12 UX pass, items 2, 3 and 9: the playing loop shown once, its speed reached from the
+// controls bar, and the item's less-used actions in a keyboard-driven "More" menu.
+test('a loop item’s More menu works from the keyboard and hands focus back', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await openLoopPanel(page);
+  const more = loopItem(page, 'Verse').getByRole('button', { name: 'More actions for Verse' });
+  await expect(more).toHaveAttribute('aria-haspopup', 'menu');
+
+  await more.focus();
+  await page.keyboard.press('ArrowDown');
+  const menu = loopPanel(page).getByRole('menu', { name: 'Actions for Verse' });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Edit' })).toBeFocused();
+  // The arrows move in the menu and the speed shortcut leaves them alone.
+  const speedBefore = await page.getByTestId('jam-speed').textContent();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Show history' })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await expect(menu.getByRole('menuitem', { name: 'Delete' })).toBeFocused();
+  await expect(page.getByTestId('jam-speed')).toHaveText(speedBefore ?? '');
+
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(more).toBeFocused();
+
+  // Enter on Show history opens it inline; focus is back on More.
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(loopItem(page, 'Verse').getByText(/No practice logged yet/)).toBeVisible();
+  await expect(more).toBeFocused();
+
+  // A press outside closes it without choosing anything.
+  await more.click();
+  await expect(menu).toBeVisible();
+  await page.getByRole('heading', { level: 1 }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(loopForm(page)).toHaveCount(0);
+});
+
+test('while a loop plays its speed is set in its own item, which the controls bar’s Loop speed opens', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  const bar = page.getByRole('region', { name: 'Player controls' });
+  await expect(bar.getByRole('slider', { name: 'Speed' })).toBeVisible();
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await openLoopPanel(page);
+  await playLoopButton(page, 'Verse').click();
+  await expect(playButton(page)).toHaveText('Pause');
+
+  // One active loop on the page, in its item; no line about it above the score.
+  await expect(activeLoopLine(page)).toHaveCount(1);
+  await expect(page.getByText(/^Looping /)).toHaveCount(0);
+  // The slider has given way to the loop's own control (in the folded strip too).
+  await expect(bar.getByRole('slider', { name: 'Speed' })).toHaveCount(0);
+  await bar.getByRole('button', { name: /^Loop speed \d+%$/ }).click();
+  await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect(loopSpeed(page)).toBeFocused();
+  await expect(loopSpeed(page)).toBeInViewport();
+  // Nothing to save: "Save speed" is drawn off (no fill, a dashed edge), not as a faded orange.
+  await expect(saveSpeedButton(page)).toBeDisabled();
+  await expect(saveSpeedButton(page)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(saveSpeedButton(page)).toHaveCSS('border-top-style', 'dashed');
+  await expect(saveSpeedButton(page)).toHaveCSS('opacity', '1');
+
+  await exitLoop(page);
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  await expect(bar.getByRole('slider', { name: 'Speed' })).toBeVisible();
 });

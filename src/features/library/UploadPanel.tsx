@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { Icon } from '@/components/icons';
-import { buttonClass, linkClass, primaryButtonClass } from '@/components/styles';
+import {
+  buttonClass,
+  linkClass,
+  primaryButtonClass,
+  primaryLabelOffClass,
+} from '@/components/styles';
 import { isOnline, useOnline } from '@/lib/network';
 import { songPath } from '@/lib/routes';
 import { GUITAR_PRO_EXTENSIONS } from './songFile';
@@ -25,8 +30,20 @@ const STEP_LABELS: Record<UploadStep, string> = {
  * doesn't cancel: the upload finishes and the song shows up in the list.
  * Offline both are off: an upload can't wait for the connection (the file
  * would have to be held, and the duplicate check needs the server).
+ *
+ * `compact` once the library has songs (12 UX pass): the big drop box gives
+ * way to an "Upload" button, and a file can be dropped anywhere over the
+ * library (`children`, the list), which outlines itself while a file is
+ * dragged over it. The upload is the same either way.
  */
-export function UploadPanel() {
+export function UploadPanel({
+  compact = false,
+  children,
+}: {
+  compact?: boolean;
+  /** What the panel wraps: in compact mode the whole of it takes a dropped file. */
+  children?: ReactNode;
+}) {
   const upload = useUploadSong();
   const online = useOnline();
   const blocked = upload.isPending || !online;
@@ -62,68 +79,122 @@ export function UploadPanel() {
   const onDragOver = (event: DragEvent) => {
     // Without preventDefault the browser opens the dropped file instead.
     event.preventDefault();
-    if (!blocked) setDragging(true);
+    // Only for a file: a song card's link or selected text dragged across the list is no upload.
+    if (!blocked && carriesFiles(event)) setDragging(true);
   };
 
   const fileName = upload.variables?.file.name;
+  const dropHandlers = {
+    onDragOver,
+    onDragLeave: (event: DragEvent<HTMLElement>) => {
+      // Moving over the button or text inside the zone also fires dragleave.
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+    },
+    onDrop,
+  };
+  const picker = <FilePicker compact={compact} disabled={blocked} onPick={start} />;
 
   return (
-    <section aria-labelledby="upload-heading" className="flex flex-col gap-3">
-      <h2 id="upload-heading" className="sr-only">
-        Add a song
-      </h2>
-      <div
-        data-testid="drop-zone"
-        onDragOver={onDragOver}
-        onDragLeave={(event) => {
-          // Moving over the button or text inside the zone also fires dragleave.
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
-        }}
-        onDrop={onDrop}
-        className={`flex flex-col items-start gap-3 rounded-card border-2 border-dashed p-5 transition-colors duration-150 sm:flex-row sm:items-center ${
-          dragging ? 'border-brand bg-brand-soft' : 'border-line-strong bg-surface'
-        }`}
-      >
-        <label
-          // The real input is visually hidden, so the label shows its focus ring.
-          className={`${primaryButtonClass} shrink-0 cursor-pointer has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus`}
-        >
-          <Icon name="upload" />
-          Upload a Guitar Pro file
-          <input
-            type="file"
-            className="sr-only"
-            disabled={blocked}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              // Cleared so picking the same file again still fires a change.
-              event.target.value = '';
-              if (file) start(file);
-            }}
-          />
-        </label>
-        <p className="text-sm text-ink-muted">
-          or drop one here. {GUITAR_PRO_EXTENSIONS.join(', ')} files, such as Songsterr's Guitar Pro
-          export.
-        </p>
-      </div>
-
-      {!online && (
-        <OfflineNote>You're offline. Songs can be uploaded once you're back online.</OfflineNote>
-      )}
-      <div aria-live="polite" className="flex flex-col gap-2">
-        {upload.isPending && (
-          <UploadProgress
-            step={step}
-            fileName={fileName}
-            onCancel={() => controller.current?.abort()}
-          />
+    <div
+      className="relative flex flex-col gap-6"
+      {...(compact && { 'data-testid': 'drop-zone', ...dropHandlers })}
+    >
+      <section aria-labelledby="upload-heading" className="flex flex-col gap-3">
+        <h2 id="upload-heading" className="sr-only">
+          Add a song
+        </h2>
+        {compact ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {picker}
+            <p className="text-sm text-ink-muted">or drop a Guitar Pro file anywhere here.</p>
+          </div>
+        ) : (
+          <div
+            data-testid="drop-zone"
+            {...dropHandlers}
+            className={`flex flex-col items-start gap-3 rounded-card border-2 border-dashed p-5 transition-colors duration-150 sm:flex-row sm:items-center ${
+              dragging ? 'border-brand bg-brand-soft' : 'border-line-strong bg-surface'
+            }`}
+          >
+            {picker}
+            <p className="text-sm text-ink-muted">
+              or drop one here. {GUITAR_PRO_EXTENSIONS.join(', ')} files, such as Songsterr's Guitar
+              Pro export.
+            </p>
+          </div>
         )}
-        {upload.isSuccess && <UploadOutcome result={upload.data} />}
-        {upload.isError && <UploadFailure error={upload.error} fileName={fileName} />}
-        {dropError && <ErrorAlert>{dropError}</ErrorAlert>}
-      </div>
-    </section>
+
+        {!online && (
+          <OfflineNote>You're offline. Songs can be uploaded once you're back online.</OfflineNote>
+        )}
+        <div aria-live="polite" className="flex flex-col gap-2">
+          {upload.isPending && (
+            <UploadProgress
+              step={step}
+              fileName={fileName}
+              onCancel={() => controller.current?.abort()}
+            />
+          )}
+          {upload.isSuccess && <UploadOutcome result={upload.data} />}
+          {upload.isError && <UploadFailure error={upload.error} fileName={fileName} />}
+          {dropError && <ErrorAlert>{dropError}</ErrorAlert>}
+        </div>
+      </section>
+      {children}
+      {compact && dragging && (
+        // Over the whole library while a file is dragged across it; never in the drop's way.
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -inset-2 flex items-start justify-center rounded-card border-2 border-dashed border-brand bg-canvas/85 pt-24 text-lg font-semibold text-ink"
+        >
+          <span className="flex items-center gap-2">
+            <Icon name="upload" />
+            Drop the file to upload it
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The file picker: a label styled as the primary button over a visually
+ * hidden file input (the label shows the input's focus ring). Its name is
+ * "Upload a Guitar Pro file" either way; compact, it reads "Upload".
+ */
+function FilePicker({
+  compact,
+  disabled,
+  onPick,
+}: {
+  compact: boolean;
+  disabled: boolean;
+  onPick: (file: File) => void;
+}) {
+  return (
+    <label
+      className={`${primaryButtonClass} ${primaryLabelOffClass} shrink-0 cursor-pointer has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus`}
+    >
+      <Icon name="upload" />
+      {compact ? (
+        <>
+          Upload<span className="sr-only"> a Guitar Pro file</span>
+        </>
+      ) : (
+        'Upload a Guitar Pro file'
+      )}
+      <input
+        type="file"
+        className="sr-only"
+        disabled={disabled}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          // Cleared so picking the same file again still fires a change.
+          event.target.value = '';
+          if (file) onPick(file);
+        }}
+      />
+    </label>
   );
 }
 
@@ -131,6 +202,11 @@ export function UploadPanel() {
  * A file dropped just outside the zone would otherwise replace the app with
  * the browser's view of that file.
  */
+/** Whether a drag holds files. The files themselves can only be read on the drop. */
+function carriesFiles(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
 function useIgnoreStrayFileDrops() {
   useEffect(() => {
     const ignore = (event: Event) => event.preventDefault();

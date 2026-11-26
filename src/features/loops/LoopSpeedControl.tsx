@@ -11,6 +11,7 @@ import {
 import { bpmAtSpeed } from '@/features/player/tempo';
 import { useOnline } from '@/lib/network';
 import type { Loop } from './loopForm';
+import { LOOP_SPEED_ATTRIBUTES } from './loopFocus';
 import { speedLabel } from './loopLabels';
 import { useUpdateLoop } from './useLoops';
 
@@ -53,7 +54,14 @@ export function LoopSpeedControl({
   };
 
   return (
-    <div role="group" aria-label="Loop speed" className="flex flex-col gap-2">
+    <div
+      role="group"
+      aria-label="Loop speed"
+      // Focus lands here from the controls bar's "Loop speed"; not a field, or a phone's keyboard comes up.
+      tabIndex={-1}
+      {...LOOP_SPEED_ATTRIBUTES}
+      className="flex flex-col gap-2 rounded-control focus:outline-none"
+    >
       <div className="flex flex-wrap items-end gap-2">
         <CommitField
           label="Speed %"
@@ -68,8 +76,8 @@ export function LoopSpeedControl({
           onCommit={(text) => setSpeed(tempo === null ? null : parseSpeedBpm(text, tempo))}
         />
       </div>
-      {/* One even row where the panel is wide enough (the phone sheet, the side panel from lg); two rows in the narrow tablet panel, never three buttons and a stray fourth. */}
-      <div className="grid grid-cols-4 gap-2 md:grid-cols-2 lg:grid-cols-4">
+      {/* One even row, in the sheet and in the column: never three buttons and a stray fourth. */}
+      <div className="grid grid-cols-4 gap-2">
         {NUDGES.map((delta) => (
           <button
             key={delta}

@@ -87,10 +87,28 @@ describe('SettingsPage', () => {
     const everyRepeat = await screen.findByRole('radio', { name: 'Before every loop repeat' });
     expect(everyRepeat).toBeDisabled();
 
+    // Off controls say why they are off.
+    const modes = screen.getByRole('radiogroup', { name: 'When the count-in plays' });
+    expect(modes).toHaveAccessibleDescription(
+      'Choose 1 bar or 2 bars to say when the count-in plays.',
+    );
+
     await user.click(screen.getByRole('radio', { name: '1 bar' }));
     expect(everyRepeat).toBeEnabled();
+    expect(modes).not.toHaveAccessibleDescription();
+    expect(screen.queryByText(/to say when the count-in plays/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: 'Off' }));
     expect(everyRepeat).toBeDisabled();
+  });
+
+  it('says how each section saves: the account’s on Save, the keyboard’s on this device at once', async () => {
+    serveSettings(saved);
+    renderSettings();
+    await screen.findByRole('button', { name: 'Save settings' });
+    expect(
+      screen.getByText('For your account, on every device. Saved when you press Save settings.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Saved on this device as soon as you change it.')).toBeInTheDocument();
   });
 
   it('enables Save only while something differs from what is saved', async () => {
@@ -260,7 +278,10 @@ describe('SettingsPage', () => {
       const { user } = renderSettings();
       await screen.findByRole('button', { name: 'Save settings' });
       expect(toggle()).toBeChecked();
-      expect(toggle()).toHaveAccessibleDescription(/this device only/i);
+      // How it saves, said beside it: unlike the account's settings above, there is no Save.
+      expect(toggle()).toHaveAccessibleDescription(
+        /^Saved on this device as soon as you change it\./,
+      );
 
       await user.click(toggle());
       expect(toggle()).not.toBeChecked();

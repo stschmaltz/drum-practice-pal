@@ -14,53 +14,92 @@ const motion = 'transition-colors duration-150';
 
 // inline-flex lines an icon up with its label. A button hidden below md takes
 // `max-md:hidden`, which wins over it; plain `hidden` doesn't.
-const buttonShape = `inline-flex items-center justify-center rounded-control font-medium ${focusRing} ${motion} disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50`;
+const buttonShape = `inline-flex items-center justify-center rounded-control font-medium ${focusRing} ${motion} disabled:cursor-not-allowed aria-disabled:cursor-not-allowed`;
+
+/** Off: faded. Every button but the primary one, whose off state is drawn on its own (`primaryButtonClass`). */
+const dimmedWhenOff = 'disabled:opacity-50 aria-disabled:opacity-50';
 
 const buttonBase = `${buttonShape} min-h-touch gap-2 px-4 py-2`;
 
-const neutralColors = 'bg-raised text-ink hover:bg-raised-hover';
+const neutralColors = `bg-raised text-ink hover:bg-raised-hover ${dimmedWhenOff}`;
 
-// The ring is the state, not only the fill (WCAG 1.4.11).
-const pressedColors = 'bg-brand-soft text-ink ring-2 ring-inset ring-brand hover:bg-brand-soft';
+/**
+ * Selected or on (a toggle, the current view): the quiet `selected` fill with
+ * a ring, never the brand, which is kept for the main action and for what is
+ * playing. The ring is the state, not only the fill (WCAG 1.4.11); a toggle
+ * also draws a check (`ToggleMark`), so on and off differ in shape too (1.4.1).
+ */
+const selectedColors = `bg-selected text-ink ring-2 ring-inset ring-selected-line ${dimmedWhenOff}`;
 
 export const buttonClass = `${buttonBase} ${neutralColors}`;
 
 /** A toggle button (aria-pressed) while on; buttonClass while off. */
-export const pressedButtonClass = `${buttonBase} ${pressedColors}`;
+export const pressedButtonClass = `${buttonBase} ${selectedColors}`;
 
 /**
  * A tool in the player's controls bar: icon over a short label in a tile, so
  * four share a row on a phone and in a tablet's column; icon beside the label
- * from lg, where a line of them fits.
+ * from lg, where a line of them fits. `relative`: a toggle's `ToggleMark` sits
+ * in its corner. `inline` lays it out as a row whatever the width (the folded
+ * controls' strip, 12 UX pass).
  */
-export function toolButtonClass(pressed: boolean): string {
-  return `${buttonShape} min-h-14 min-w-0 flex-col gap-1 px-1 py-1.5 max-[359px]:px-0.5 text-center text-xs max-[359px]:text-[0.6875rem] leading-tight hyphens-auto lg:min-h-touch lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-sm ${
-    pressed ? pressedColors : neutralColors
-  }`;
+export function toolButtonClass(pressed: boolean, { inline = false } = {}): string {
+  const shape = inline
+    ? 'min-h-touch flex-row gap-2 px-3 py-2 text-sm'
+    : 'min-h-14 min-w-0 flex-col gap-1 px-1 py-1.5 max-[359px]:px-0.5 text-center text-xs max-[359px]:text-[0.6875rem] leading-tight hyphens-auto lg:min-h-touch lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-sm';
+  return `${buttonShape} relative ${shape} ${pressed ? selectedColors : neutralColors}`;
 }
 
-export const primaryButtonClass = `${buttonBase} bg-brand text-on-brand hover:bg-brand-hover`;
+// Written out in full (not built from the variant name): Tailwind only finds whole class names.
+const primaryOff =
+  'disabled:border-dashed disabled:border-line-strong disabled:bg-transparent disabled:text-ink-muted aria-disabled:border-dashed aria-disabled:border-line-strong aria-disabled:bg-transparent aria-disabled:text-ink-muted';
+
+/** The primary look's off state for a `<label>` that stands for a disabled input (the upload's file picker). */
+export const primaryLabelOffClass =
+  'has-[:disabled]:cursor-not-allowed has-[:disabled]:border-dashed has-[:disabled]:border-line-strong has-[:disabled]:bg-transparent has-[:disabled]:text-ink-muted';
+
+/**
+ * The main action of an area. Off, it is drawn as off rather than as a faded
+ * orange (12 UX pass, Nielsen's "visibility of system status": a dimmed
+ * primary still reads as the thing to press): no fill, a dashed edge, muted text.
+ */
+export const primaryButtonClass = `${buttonBase} border border-transparent bg-brand text-on-brand hover:bg-brand-hover ${primaryOff}`;
 
 /** A quieter button for actions beside a primary one: no fill until hovered. */
-export const ghostButtonClass = `${buttonBase} text-ink-soft hover:bg-raised hover:text-ink`;
+export const ghostButtonClass = `${buttonBase} text-ink-soft hover:bg-raised hover:text-ink ${dimmedWhenOff}`;
 
 const quietBase = `${buttonShape} min-h-touch gap-1.5 px-3 py-2 text-sm`;
 
 /** A list item's secondary actions (Edit, History, Delete): ghost, smaller text, still 44 px tall. */
-export const quietButtonClass = `${quietBase} text-ink-soft hover:bg-raised hover:text-ink`;
+export const quietButtonClass = `${quietBase} text-ink-soft hover:bg-raised hover:text-ink ${dimmedWhenOff}`;
 
 /** quietButtonClass while its toggle is on. */
-export const quietPressedButtonClass = `${quietBase} ${pressedColors}`;
+export const quietPressedButtonClass = `${quietBase} ${selectedColors}`;
 
-export const dangerButtonClass = `${buttonBase} bg-danger-solid text-on-danger hover:bg-danger-solid-hover`;
+export const dangerButtonClass = `${buttonBase} bg-danger-solid text-on-danger hover:bg-danger-solid-hover ${dimmedWhenOff}`;
 
 /** One of a few views of the same list (the home page's tabs), in a `rounded-card` track. */
-export const segmentOffClass = `${buttonBase} text-ink-muted hover:text-ink`;
-export const segmentOnClass = `${buttonBase} ${pressedColors}`;
+export const segmentOffClass = `${buttonBase} text-ink-muted hover:text-ink ${dimmedWhenOff}`;
+export const segmentOnClass = `${buttonBase} ${selectedColors}`;
+
+/**
+ * A segmented control's option (`SegmentedControl`): a label over a visually
+ * hidden radio. The label draws the radio's focus ring and its checked state,
+ * so the focus audit measures the label (checklist 6, a hidden stand-in).
+ */
+export const segmentOptionClass = `inline-flex min-h-touch flex-1 cursor-pointer items-center justify-center whitespace-nowrap rounded-control px-3 text-sm font-medium text-ink-soft ${motion} hover:text-ink has-[:checked]:bg-selected has-[:checked]:text-ink has-[:checked]:ring-2 has-[:checked]:ring-inset has-[:checked]:ring-selected-line has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50`;
+
+/** The track the options of a `SegmentedControl` sit in. */
+export const segmentTrackClass = 'flex gap-1 rounded-control border border-line bg-canvas p-1';
 
 export const inputClass = `min-h-touch rounded-control border border-field-line bg-canvas px-3 py-2 text-base text-ink placeholder:text-ink-muted ${focusRing}`;
 
-export const selectClass = `${inputClass} py-1 disabled:cursor-not-allowed disabled:opacity-50`;
+/**
+ * A list of cards (the home page's loops, the library's songs): one column,
+ * then two from 1024 px and three from 1280 px. Text pages (Settings) keep
+ * their measure instead.
+ */
+export const cardGridClass = 'grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3';
 
 /** A panel or list item: a raised surface with a hairline edge. */
 export const cardClass = 'rounded-card border border-line bg-surface shadow-card';

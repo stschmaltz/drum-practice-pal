@@ -8,7 +8,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
 import { expect, type E2eUser } from './auth';
-import { loopItem, loopPanel, openLoopPanel } from './loopsPage';
+import { chooseLoopAction, loopPanel } from './loopsPage';
 import { playButton, status } from './playerPage';
 
 const admin = createAdminClient();
@@ -59,10 +59,7 @@ export const homeItem = (page: Page, name: string) =>
 
 /** Opens a loop's history in the panel (opening the panel first) and returns it. */
 export async function openLoopHistory(page: Page, loopName: string): Promise<Locator> {
-  await openLoopPanel(page);
-  await loopItem(page, loopName)
-    .getByRole('button', { name: /^History/ })
-    .click();
+  await chooseLoopAction(page, loopName, 'History');
   return loopPanel(page).getByRole('region', { name: `History of ${loopName}` });
 }
 
