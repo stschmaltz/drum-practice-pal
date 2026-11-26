@@ -186,10 +186,15 @@ describe('uploadSong', () => {
       ]);
     });
 
-    it('to the insert, with no row saved: removes the file and says why', async () => {
+    // Copilot review: an empty look-up can't prove the insert won't still
+    // commit (it may be running yet), so removing the file could leave a
+    // listed song with nothing to play. The file stays; at worst it is an orphan.
+    it('to the insert, with no row found: keeps the file, as the insert may still commit', async () => {
       answerQueries(ok(null), dropped(), ok(null));
-      await expect(uploadSong(USER, gpFile())).rejects.toThrow('Failed to fetch');
-      expect(storageCalls().map((call) => call.method)).toEqual(['upload', 'remove']);
+      await expect(uploadSong(USER, gpFile())).rejects.toThrow(
+        `${FAILURE_COPY.network} The song may have been added anyway: reload the library to see.`,
+      );
+      expect(storageCalls().map((call) => call.method)).toEqual(['upload']);
     });
 
     it('to the insert, and the look-up fails too: keeps the file, which the row may name', async () => {

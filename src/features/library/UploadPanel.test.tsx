@@ -337,15 +337,17 @@ describe('UploadPanel when the save’s answer is lost', () => {
     expect(picker()).toBeEnabled();
   });
 
-  it('with no row saved, removes the file and says the connection failed', async () => {
+  // Copilot review: the insert may still be running when the look-up finds nothing.
+  it('when the look-up finds no row, says the song may be there and removes nothing', async () => {
     serveLostInsert(ok(null));
     const user = renderPanel();
     await user.upload(picker(), gpFile());
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't upload groove.gp. The server couldn't be reached. Check the connection and try again.",
+      "Couldn't upload groove.gp. The server couldn't be reached. Check the connection and try again. The song may have been added anyway: reload the library to see.",
     );
-    expect(storageMethods()).toEqual(['upload', 'remove']);
+    expect(storageMethods()).toEqual(['upload']);
+    expect(picker()).toBeEnabled();
   });
 });
 

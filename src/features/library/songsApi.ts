@@ -96,7 +96,8 @@ export interface UploadOptions {
 /**
  * Checks, parses and hashes the file in the browser, then uploads it and
  * inserts its row. Nothing is created for a refused file, a duplicate or a
- * cancel, and a failed insert removes the uploaded file again.
+ * cancel, and an insert the server refused removes the uploaded file again;
+ * one whose answer was lost keeps it, since the row may yet name it.
  */
 export async function uploadSong(
   userId: string,
@@ -150,10 +151,15 @@ export async function uploadSong(
 
   if (inserted.error) {
     if (failureKind(inserted.error) === 'network') {
-      // The row may have committed with only its answer lost; removing the
-      // file then would leave a listed song with nothing to play.
+      // The row may have committed with only its answer lost, or may still
+      // commit: the insert can be running yet when a look-up finds nothing.
+      // So only a row found settles it, and otherwise the file stays. Removing
+      // it could leave a listed song with nothing to play; keeping it at worst
+      // leaves a file no row names, which blocks nothing (a new upload takes a
+      // new id and path).
       const landed = await findSavedSong(userId, songId, inserted.error);
       if (landed) return uploadedSong(landed);
+      throw mayHaveBeenAdded(inserted.error);
     }
     await removeUploadedFile(filePath, inserted.error);
     // Another tab or device added the same file since the check above
@@ -188,8 +194,8 @@ async function readSongFile(file: File): Promise<{ bytes: Uint8Array; metadata: 
 }
 
 /**
- * After an insert whose answer never came: the row, if it was saved. When
- * even that can't be read the file stays, since the row may name it.
+ * After an insert whose answer never came: the row, if it is saved by now.
+ * Null doesn't mean it never will be, and a failed read is just as unsure.
  */
 async function findSavedSong(userId: string, songId: string, cause: unknown): Promise<Song | null> {
   const landed = await supabase
@@ -198,13 +204,16 @@ async function findSavedSong(userId: string, songId: string, cause: unknown): Pr
     .eq('id', songId)
     .eq('user_id', userId)
     .maybeSingle();
-  if (landed.error) {
-    throw new UserFacingError(
-      `${failureCopy(cause)} The song may have been added anyway: reload the library to see.`,
-      { cause },
-    );
-  }
+  if (landed.error) throw mayHaveBeenAdded(cause);
   return landed.data;
+}
+
+/** An insert whose outcome can't be known from here: the file is kept, and the user told to look. */
+function mayHaveBeenAdded(cause: unknown): UserFacingError {
+  return new UserFacingError(
+    `${failureCopy(cause)} The song may have been added anyway: reload the library to see.`,
+    { cause },
+  );
 }
 
 /** Rollback for a file whose row won't exist. Throws if the file stays behind. */

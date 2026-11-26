@@ -277,3 +277,32 @@ Checked and left alone: `uploadSong`'s look-up checks its `error` and keeps the 
 - `npm run check`: 111 files, 4337 tests green.
 - `npm run test:db`: 204 passed, 1 failed (the environment note above).
 - `npm run e2e` (`E2E_PORT=4180`, fresh `npm run build -- --mode development`): 407 passed, 28 skipped, 0 failed (435 listed). The rewritten `offline.spec.ts` case passed at all three sizes.
+
+## Copilot review
+
+Two comments on PR #17, each checked against the code before acting. Both were real.
+
+### 1. An empty look-up after a lost insert answer removed the file (`songsApi.ts:156`)
+
+**Real.** After an insert that failed for the connection, `uploadSong` looked the row up by id and, finding none, removed the file. But a lost answer says nothing about the insert: it may have committed, or may still be running (a slow commit, a request that reached PostgREST after the client gave up). A look-up that finds nothing then only says "not yet", and if the row commits after the removal, the library lists a song whose file is gone and which can't play.
+
+What is knowable after a lost answer: only a row found settles it (the upload succeeded). An empty look-up and a failed look-up are equally unsure, since nothing the client can read proves the insert won't still commit. So both now keep the file and say "…The song may have been added anyway: reload the library to see." (`mayHaveBeenAdded` in `songsApi.ts`, used by `findSavedSong`'s failure and by the empty case). A refused insert (a Postgres code) still removes the file, since the server has said no.
+
+The trade-off: when the insert really never lands, the file stays in Storage with no row naming it. That orphan blocks nothing (a new upload of the same file takes a new song id and path, and the duplicate check reads rows, not files) and costs only storage, against a listed song that can't play. It joins the orphans already noted in Unit 13's Carried forward line on files with no songs row (sweep script or accept). A retry of the insert under the same id with "on conflict do nothing" would settle it (it waits on the first insert's lock), but `songs` has a second unique key (`file_hash`) that the retry would also hit, so it isn't the few lines it looks; not done.
+
+- Tests: `songsApi.test.ts` "to the insert, with no row found: keeps the file, as the insert may still commit" and `UploadPanel.test.tsx` "when the look-up finds no row, says the song may be there and removes nothing" (replacing the two "no row: removes the file" cases). Both failed before the fix (storage calls `['upload', 'remove']`, and the old copy).
+- Checklist: no row covered it. "What counts as a refusal" is about which codes drop a queued write; this is about reading an unknown outcome as a known one. Added "A lost answer is an unknown outcome" to section 1.
+
+### 2. The last song's delete handed focus to a disabled file input (`LibraryPage.tsx:149`)
+
+**Real.** With an upload pending, or the connection gone before the delete's answer, the upload's file input is `disabled`. `findUploadPicker` returned it anyway, `useFocusWhenReady` cleared its pending request on finding a target, and `focus()` on a disabled input does nothing, so focus stayed on `<body>`.
+
+Fix: the upload's `<section>` ("Add a song") carries `UPLOAD_SECTION_ATTRIBUTES` (`data-upload-section`, `tabIndex={-1}`, a focus ring), and `findUploadPicker` returns the file input only when it is enabled, the section otherwise. During a pending upload the section's next control is the upload's Cancel.
+
+- Tests: `LibraryPage.test.tsx`, "the last song deleted while the upload is off": "…when the connection went meanwhile" (the delete's Storage remove held, then offline, then answered) and "…while an upload is under way" (the file's upload never answers). Both failed before the fix at `toHaveFocus` with the input asserted disabled; both pass after. The file mocks `./parseScore` now, so an upload can get under way.
+- Checklist: section 5, "Focus when a control replaces itself", covered the hand-over but not a target that can't take focus. Added that sentence with this miss as its example. AGENTS.md (Unit 10's focus bullet) says a finder never returns a control that can't take focus.
+
+### Results
+
+- `npm run check`: 111 files, 4339 tests green.
+- `npm run build -- --mode development`, then `E2E_PORT=4180 npx playwright test` on `library.spec.ts`, `release-fixes.spec.ts`, `journey.spec.ts` and `design.spec.ts` (the upload section gained a focus ring): 75 passed, 6 skipped, 0 failed, at all three sizes.

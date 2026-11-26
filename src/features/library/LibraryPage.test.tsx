@@ -17,6 +17,14 @@ import { songKeys } from './useSongs';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
+// Real parsing is covered by parseScore.test.ts; an upload here only needs to get under way.
+vi.mock('./parseScore', () => ({
+  parseScore: () => ({
+    ok: true,
+    metadata: { title: 'New', artist: '', originalTempo: 120, barCount: 16, drumTrackIndex: 0 },
+  }),
+}));
+
 const song = (id: string, overrides: Partial<LibrarySong>): LibrarySong => ({
   id,
   title: id,
@@ -275,6 +283,60 @@ describe('LibraryPage', () => {
     await user.click(confirm);
     expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText('Upload a Guitar Pro file')).toHaveFocus());
+  });
+
+  // Copilot review: with the upload off, its file input can't take focus, and
+  // the hand-over was used up on it, leaving focus on <body>.
+  describe('the last song deleted while the upload is off', () => {
+    const uploadSection = () => screen.getByRole('region', { name: 'Add a song' });
+
+    it('hands focus to the upload section when the connection went meanwhile', async () => {
+      serveLibrary([library[0]!]);
+      let removeFile!: () => void;
+      storageResult.mockImplementationOnce(
+        () => new Promise((resolve) => (removeFile = () => resolve({ data: {}, error: null }))),
+      );
+      const { user } = renderLibrary();
+      await screen.findByRole('list');
+      await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+      await user.click(screen.getByRole('button', { name: 'Delete song' }));
+      await waitFor(() => expect(removeFile).toBeDefined());
+
+      act(() => onlineManager.setOnline(false));
+      await act(async () => removeFile());
+
+      expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
+      expect(screen.getByLabelText('Upload a Guitar Pro file')).toBeDisabled();
+      await waitFor(() => expect(uploadSection()).toHaveFocus());
+    });
+
+    it('hands focus to the upload section while an upload is under way', async () => {
+      serveLibrary([library[0]!]);
+      const answerLibrary = queryResult.getMockImplementation()!;
+      queryResult.mockImplementation(async (call) =>
+        call.ops.some((op) => op.method === 'eq' && op.args[0] === 'file_hash')
+          ? { data: null, error: null }
+          : answerLibrary(call),
+      );
+      // The file's upload never answers, so the upload stays pending.
+      storageResult.mockImplementation(async (call) =>
+        call.method === 'upload' ? new Promise<FakeResult>(() => {}) : { data: {}, error: null },
+      );
+      const { user } = renderLibrary();
+      await screen.findByRole('list');
+      await user.upload(
+        screen.getByLabelText('Upload a Guitar Pro file'),
+        new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2])], 'new.gp'),
+      );
+      expect(await screen.findByText('Uploading new.gp…')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+      await user.click(screen.getByRole('button', { name: 'Delete song' }));
+
+      expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
+      expect(screen.getByLabelText('Upload a Guitar Pro file')).toBeDisabled();
+      await waitFor(() => expect(uploadSection()).toHaveFocus());
+    });
   });
 
   it('hands focus to the search when the deleted song was the only one it showed', async () => {
