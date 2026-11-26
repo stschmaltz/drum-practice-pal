@@ -3,11 +3,17 @@ import { Link } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { isOnline, useOnline } from '@/lib/network';
+import { Icon } from '@/components/icons';
 import {
   buttonClass,
+  cardClass,
   dangerButtonClass,
+  dangerPanelClass,
+  focusRing,
   inputClass,
+  labelClass,
   primaryButtonClass,
+  quietButtonClass,
 } from '@/components/styles';
 import {
   findItemControl,
@@ -74,10 +80,7 @@ export function SongListItem({
   }, [editing, song.id, onEditingChange]);
 
   return (
-    <li
-      className="flex flex-col gap-3 rounded-lg border border-neutral-800 p-4"
-      {...itemAttributes(song.id)}
-    >
+    <li className={`${cardClass} flex flex-col gap-3 p-4`} {...itemAttributes(song.id)}>
       {editing ? (
         <EditSongForm
           song={song}
@@ -91,21 +94,23 @@ export function SongListItem({
         <SongSummary song={song} />
       )}
       {mode === 'view' && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1">
           <button
             type="button"
-            className={buttonClass}
+            className={quietButtonClass}
             {...itemControlAttributes(song.id, 'edit')}
             onClick={() => setMode('edit')}
           >
+            <Icon name="edit" className="size-4" />
             Edit<span className="sr-only"> {song.title}</span>
           </button>
           <button
             type="button"
-            className={buttonClass}
+            className={quietButtonClass}
             {...itemControlAttributes(song.id, 'delete')}
             onClick={() => setMode('confirm-delete')}
           >
+            <Icon name="trash" className="size-4" />
             Delete<span className="sr-only"> {song.title}</span>
           </button>
         </div>
@@ -126,12 +131,12 @@ function SongSummary({ song }: { song: LibrarySong }) {
     <div className="flex flex-col gap-1">
       <Link
         to={songPath(song.id)}
-        className="text-lg font-semibold break-words text-neutral-100 hover:underline"
+        className={`inline-flex min-h-touch max-w-full items-center self-start rounded-sm text-lg font-semibold wrap-anywhere text-ink hover:text-brand ${focusRing}`}
       >
         {song.title}
       </Link>
-      {song.artist && <p className="break-words text-neutral-300">{song.artist}</p>}
-      <p className="text-sm text-neutral-400">
+      {song.artist && <p className="break-words text-ink-soft">{song.artist}</p>}
+      <p className="text-sm text-ink-muted">
         {song.bar_count} bars · {formatTempo(song.original_tempo)} BPM · added{' '}
         {formatDay(song.created_at)}
         {' · '}
@@ -140,7 +145,10 @@ function SongSummary({ song }: { song: LibrarySong }) {
           : 'not practiced yet'}
       </p>
       {song.drum_track_index === null && (
-        <p className="text-sm text-amber-300">{NO_DRUM_TRACK_NOTE}</p>
+        <p className="flex items-start gap-2 text-sm text-warning">
+          <Icon name="alert" className="mt-0.5 size-4" />
+          {NO_DRUM_TRACK_NOTE}
+        </p>
       )}
     </div>
   );
@@ -244,7 +252,9 @@ function TextField({
   const id = useId();
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id} className={labelClass}>
+        {label}
+      </label>
       <input
         id={id}
         className={inputClass}
@@ -253,7 +263,7 @@ function TextField({
         aria-invalid={error ? true : undefined}
         onChange={(event) => onChange(event.target.value)}
       />
-      {error && <span className="text-sm text-red-300">{error}</span>}
+      {error && <span className="text-sm text-danger">{error}</span>}
     </div>
   );
 }
@@ -279,9 +289,9 @@ function ConfirmDelete({
       tabIndex={-1}
       role="group"
       aria-label={`Delete ${song.title}`}
-      className="flex flex-col gap-2 focus:outline-none"
+      className={`${dangerPanelClass} flex flex-col gap-2 focus:outline-none`}
     >
-      <p className="text-neutral-200">
+      <p className="text-ink">
         Delete “{song.title}”? Its loops and practice history are deleted too. This can't be undone.
       </p>
       <div className="flex flex-wrap gap-2">

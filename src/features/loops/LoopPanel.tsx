@@ -2,11 +2,21 @@ import { useEffect, useRef, useState } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
+import { Icon } from '@/components/icons';
+import { EmptyState, LoadingLine } from '@/components/StatusMessages';
 import {
+  activeCardClass,
   buttonClass,
   dangerButtonClass,
+  dangerPanelClass,
+  focusRing,
+  ghostButtonClass,
+  inlineIconClass,
   pressedButtonClass,
   primaryButtonClass,
+  quietButtonClass,
+  quietPressedButtonClass,
+  sectionHeadingClass,
 } from '@/components/styles';
 import { canPickBars, canPlay } from '@/features/player/controlGates';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
@@ -89,21 +99,30 @@ export function LoopPanel({
       data-testid="loop-panel"
       // Phone: fixed just above the tab bar (3.5rem plus its border). From md: a
       // column beside the score that stays put while the page scrolls.
-      className={`fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 border-t border-neutral-800 bg-neutral-950 md:sticky md:inset-x-auto md:top-20 md:bottom-auto md:z-auto md:max-h-[calc(100dvh-6rem)] md:w-64 md:shrink-0 md:self-start md:overflow-y-auto md:rounded-lg md:border lg:w-80 ${
+      className={`fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 rounded-t-card border-t border-line bg-surface shadow-sheet md:sticky md:inset-x-auto md:top-20 md:bottom-auto md:z-auto md:max-h-[calc(100dvh-6rem)] md:w-64 md:shrink-0 md:self-start md:overflow-y-auto md:rounded-card md:border md:shadow-card lg:w-80 ${
         open ? '' : 'md:hidden'
       }`}
     >
       <button
         type="button"
-        className="flex min-h-11 w-full items-center justify-between gap-3 px-4 text-left font-medium md:hidden"
+        className={`flex min-h-touch w-full items-center justify-between gap-3 rounded-t-card px-4 text-left font-semibold md:hidden ${focusRing} focus-visible:-outline-offset-2`}
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => onOpenChange(!open)}
       >
-        <span className="truncate">
-          {practice.activeLoop ? `Loop: ${practice.activeLoop.name}` : `Loops (${count})`}
+        <span className="flex min-w-0 items-center gap-2">
+          <Icon
+            name="loop"
+            className={`size-5 ${practice.activeLoop ? 'text-brand' : 'text-ink-muted'}`}
+          />
+          <span className="truncate">
+            {practice.activeLoop ? `Loop: ${practice.activeLoop.name}` : `Loops (${count})`}
+          </span>
         </span>
-        <span className="shrink-0 text-sm text-sky-400">{open ? 'Close' : 'Open'}</span>
+        <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand">
+          {open ? 'Close' : 'Open'}
+          <Icon name={open ? 'chevronDown' : 'chevronUp'} className="size-4" />
+        </span>
       </button>
       <div
         id={bodyId}
@@ -215,7 +234,7 @@ function LoopPanelBody({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Loops</h2>
+        <h2 className={sectionHeadingClass}>Loops</h2>
         <button
           type="button"
           className={primaryButtonClass}
@@ -223,6 +242,7 @@ function LoopPanelBody({
           {...NEW_LOOP_BUTTON_ATTRIBUTES}
           onClick={() => openForm(null)}
         >
+          <Icon name="plus" />
           New loop
         </button>
       </div>
@@ -262,7 +282,10 @@ const finishQuestionKey = (loop: Loop) => `${loop.id}:${loop.speed_ratio}`;
 function DeletedLoopNotice({ onBack }: { onBack: () => void }) {
   return (
     <div className="flex flex-col items-start gap-3">
-      <p className="text-neutral-300">This loop has been deleted.</p>
+      <p className="flex items-center gap-2 text-ink-soft">
+        <Icon name="alert" className="text-warning" />
+        This loop has been deleted.
+      </p>
       <button type="button" className={buttonClass} onClick={onBack}>
         Back to loops
       </button>
@@ -292,11 +315,12 @@ function ActiveLoopCard({
   return (
     <section
       aria-label={`Practicing ${loop.name}`}
-      className="flex flex-col gap-3 rounded-lg border border-sky-800 bg-sky-950/40 p-3"
+      className={`${activeCardClass} flex flex-col gap-3 p-3`}
     >
       <div className="flex flex-col gap-1">
+        <p className="text-xs font-semibold tracking-wider text-brand uppercase">Now looping</p>
         <p className="font-semibold break-words">{loop.name}</p>
-        <p className="text-sm text-neutral-300">
+        <p className="text-sm text-ink-soft">
           {barsLabel(loop.start_bar, loop.end_bar)}, repeating
         </p>
       </div>
@@ -309,7 +333,7 @@ function ActiveLoopCard({
           onFinished={onFinished}
         />
       )}
-      <button type="button" className={buttonClass} onClick={onExit}>
+      <button type="button" className={ghostButtonClass} onClick={onExit}>
         Back to whole song
       </button>
     </section>
@@ -337,9 +361,10 @@ function FinishPrompt({
       role="group"
       aria-label="Mark finished?"
       data-testid="finish-prompt"
-      className="flex flex-col gap-2 rounded-md border border-emerald-800 bg-emerald-950/40 p-3"
+      className="flex flex-col gap-2 rounded-control border border-success-line bg-success-soft p-3 motion-safe:animate-fade-in"
     >
-      <p className="text-sm text-neutral-100">
+      <p className="text-sm text-ink">
+        <Icon name="check" className={`${inlineIconClass} size-4 text-success`} />
         You've reached your target of {ratioToPercent(loop.target_ratio ?? loop.speed_ratio)}%. Mark
         this loop finished?
       </p>
@@ -353,9 +378,10 @@ function FinishPrompt({
             if (status.setStatus('finished')) onFinished();
           }}
         >
+          <Icon name="check" />
           Mark finished
         </button>
-        <button type="button" className={buttonClass} onClick={onDecline}>
+        <button type="button" className={ghostButtonClass} onClick={onDecline}>
           Not yet
         </button>
       </div>
@@ -379,12 +405,12 @@ function LoopList({
 }: LoopListProps) {
   if (waitsForNetwork(loops)) {
     return (
-      <p className="text-neutral-400">
+      <EmptyState icon="offline">
         You're offline, and this song's loops haven't been opened on this device yet.
-      </p>
+      </EmptyState>
     );
   }
-  if (loops.isPending) return <p className="text-neutral-400">Loading loops…</p>;
+  if (loops.isPending) return <LoadingLine>Loading loops…</LoadingLine>;
   // isLoadingError, not isError: a failed background refetch keeps the list (and a playing loop).
   if (loops.isLoadingError) {
     return (
@@ -395,9 +421,9 @@ function LoopList({
   }
   if (loops.data.length === 0) {
     return (
-      <p className="text-neutral-400">
+      <EmptyState icon="loop">
         No loops yet. Choose New loop, then pick the bars you want to practice.
-      </p>
+      </EmptyState>
     );
   }
   const { active, finished } = loopsByStatus(loops.data);
@@ -429,11 +455,16 @@ function LoopList({
       {active.length > 0 ? (
         items(active)
       ) : (
-        <p className="text-neutral-400">Every loop of this song is finished.</p>
+        <p className="flex items-center gap-2 text-ink-muted">
+          <Icon name="check" className="text-success" />
+          Every loop of this song is finished.
+        </p>
       )}
       {finished.length > 0 && (
         <section aria-label="Finished loops" className="flex flex-col gap-3">
-          <h3 className="font-semibold text-neutral-300">Finished ({finished.length})</h3>
+          <h3 className="border-t border-line pt-4 text-sm font-semibold tracking-wider text-ink-muted uppercase">
+            Finished ({finished.length})
+          </h3>
           {items(finished)}
         </section>
       )}
@@ -476,18 +507,21 @@ function LoopListItem({
 
   return (
     <li
-      className={`flex flex-col gap-3 rounded-lg border p-3 ${
-        active ? 'border-sky-700' : 'border-neutral-800'
+      className={`flex flex-col gap-3 rounded-card border bg-canvas p-3 ${
+        active ? 'border-brand-line' : 'border-line'
       }`}
       {...itemAttributes(loop.id)}
     >
       <div className="flex flex-col gap-1">
-        <p className="font-semibold break-words">{loop.name}</p>
-        <p className="text-sm text-neutral-400">
+        <p className="flex items-start gap-2 font-semibold wrap-anywhere">
+          {active && <Icon name="loop" className="mt-0.5 size-4 text-brand" />}
+          {loop.name}
+        </p>
+        <p className="text-sm text-ink-muted">
           {barsLabel(loop.start_bar, loop.end_bar)} · {speedLabel(loop.speed_ratio, tempo)}
           {loop.target_ratio !== null && ` · target ${speedLabel(loop.target_ratio, tempo)}`}
         </p>
-        <p className="text-sm text-neutral-400" data-testid="loop-last-practiced">
+        <p className="text-sm text-ink-muted" data-testid="loop-last-practiced">
           {lastPracticedLabel(loop.last_practiced_at, new Date())}
         </p>
       </div>
@@ -499,41 +533,45 @@ function LoopListItem({
           onDeletePressed={onDeletePressed}
         />
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-1">
           <button
             type="button"
-            className={active ? pressedButtonClass : primaryButtonClass}
+            className={`${active ? pressedButtonClass : primaryButtonClass} mr-1`}
             disabled={!canPlay}
             // No await before the player is told to play: iOS only starts audio inside the tap.
             onClick={onPlay}
           >
+            <Icon name={active ? 'reopen' : 'play'} />
             {active ? 'Restart loop' : 'Play loop'}
             {named}
           </button>
           <button
             type="button"
-            className={buttonClass}
+            className={quietButtonClass}
             disabled={!canEdit}
             {...editButtonAttributes(loop.id)}
             onClick={onEdit}
           >
+            <Icon name="edit" className="size-4" />
             Edit{named}
           </button>
           <button
             type="button"
-            className={showingHistory ? pressedButtonClass : buttonClass}
+            className={showingHistory ? quietPressedButtonClass : quietButtonClass}
             aria-expanded={showingHistory}
             onClick={() => setShowingHistory((showing) => !showing)}
           >
+            <Icon name="history" className="size-4" />
             History{named}
           </button>
           <LoopStatusButton loop={loop} onSet={onStatusSet} />
           <button
             type="button"
-            className={buttonClass}
+            className={quietButtonClass}
             {...itemControlAttributes(loop.id, 'delete')}
             onClick={() => setConfirmingDelete(true)}
           >
+            <Icon name="trash" className="size-4" />
             Delete{named}
           </button>
         </div>
@@ -567,9 +605,9 @@ function ConfirmDelete({
       tabIndex={-1}
       role="group"
       aria-label={`Delete ${loop.name}`}
-      className="flex flex-col gap-2 focus:outline-none"
+      className={`${dangerPanelClass} flex flex-col gap-2 focus:outline-none`}
     >
-      <p className="text-neutral-200">
+      <p className="text-ink">
         Delete “{loop.name}”? Its practice history is deleted too. This can't be undone.
       </p>
       <div className="flex flex-wrap gap-2">
@@ -583,6 +621,7 @@ function ConfirmDelete({
             onDeletePressed();
           }}
         >
+          <Icon name="trash" />
           {remove.isPending ? 'Deleting…' : 'Delete loop'}
         </button>
         <button

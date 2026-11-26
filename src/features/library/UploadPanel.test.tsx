@@ -226,7 +226,7 @@ describe('UploadPanel', () => {
   it('highlights the drop zone while a file is dragged over it', () => {
     renderPanel();
     const zone = screen.getByTestId('drop-zone');
-    const highlighted = () => zone.classList.contains('border-sky-500');
+    const highlighted = () => zone.classList.contains('border-brand');
 
     fireEvent.dragOver(zone);
     expect(highlighted()).toBe(true);
@@ -251,7 +251,7 @@ describe('UploadPanel', () => {
 
     const zone = screen.getByTestId('drop-zone');
     fireEvent.dragOver(zone);
-    expect(zone.classList.contains('border-sky-500')).toBe(false);
+    expect(zone.classList.contains('border-brand')).toBe(false);
     fireEvent.drop(zone, { dataTransfer: { files: [gpFile('second.gp')] } });
     expect(screen.getByText('Uploading first.gp…')).toBeInTheDocument();
 

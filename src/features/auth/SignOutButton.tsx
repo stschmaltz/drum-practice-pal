@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { ErrorAlert } from '@/components/ErrorAlert';
+import { Icon } from '@/components/icons';
 import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass } from '@/components/styles';
 import {
@@ -39,6 +40,7 @@ export function SignOutButton({ className = buttonClass }: { className?: string 
           });
         }}
       >
+        <Icon name="signOut" />
         {signOut.isPending ? 'Signing out…' : 'Sign out'}
       </button>
       {!online ? (

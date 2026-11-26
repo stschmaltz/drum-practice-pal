@@ -46,6 +46,7 @@ export async function openFixture(page: Page, user: E2eUser, name: string, title
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await viewport(page).scrollIntoViewIfNeeded();
   await expect(viewport(page).locator('svg').first()).toBeVisible();
+  await scoreSettled(page);
 }
 
 export async function barNumber(page: Page): Promise<number> {
@@ -93,6 +94,7 @@ export async function tapAndWaitForBar(page: Page, point: Point, from: number): 
  * the clef, and fills a line on a tablet).
  */
 export async function nextBarPoint(page: Page): Promise<Point> {
+  await scoreSettled(page);
   const box = await barCursorBox(page);
   const frame = await scoreBox(page);
   const right = { x: box.x + box.width + 20, y: box.y + box.height / 2 };
@@ -100,8 +102,32 @@ export async function nextBarPoint(page: Page): Promise<Point> {
   return { x: frame.x + 40, y: box.y + box.height * 1.5 };
 }
 
+/**
+ * Waits until the window, the score box and the bar cursor have stopped
+ * moving, so a point measured next is still on the same bar when it is
+ * tapped. alphaTab scrolls the box to its cursor once the player is ready
+ * (on a phone the box ends 40 to 47 px along, 06 QA), at about the moment
+ * Play is enabled; under a full parallel run that can land after a spec has
+ * measured a bar and before it taps, and the tap then hits the bar before.
+ */
+export async function scoreSettled(page: Page): Promise<void> {
+  await untilStill(() =>
+    viewport(page).evaluate((box) => {
+      const cursor = box.querySelector('.at-cursor-bar')?.getBoundingClientRect();
+      return JSON.stringify([
+        window.scrollX,
+        window.scrollY,
+        box.scrollLeft,
+        box.scrollTop,
+        cursor && [cursor.x, cursor.y, cursor.width, cursor.height].map(Math.round),
+      ]);
+    }),
+  );
+}
+
 /** The middle of the bar the cursor is on. */
 export async function cursorBarPoint(page: Page): Promise<Point> {
+  await scoreSettled(page);
   const box = await barCursorBox(page);
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }

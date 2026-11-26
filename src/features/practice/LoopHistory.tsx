@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
+import { LoadingLine } from '@/components/StatusMessages';
 import { buttonClass } from '@/components/styles';
 import { speedLabel } from '@/features/loops/loopLabels';
 import { waitsForNetwork } from '@/lib/network';
@@ -38,12 +39,12 @@ export function LoopHistory({
 
   if (waitsForNetwork(sessions)) {
     return (
-      <p className="text-sm text-neutral-400">
+      <p className="text-sm text-ink-muted">
         You're offline. This loop's history shows once you're back online.
       </p>
     );
   }
-  if (sessions.isPending) return <p className="text-sm text-neutral-400">Loading history…</p>;
+  if (sessions.isPending) return <LoadingLine small>Loading history…</LoadingLine>;
   // isLoadingError, not isError: a failed background refetch keeps the history that is showing.
   if (sessions.isLoadingError) {
     return (
@@ -54,7 +55,7 @@ export function LoopHistory({
   }
   if (sessions.data.length === 0) {
     return (
-      <p className="text-sm text-neutral-400">
+      <p className="text-sm text-ink-muted">
         No practice logged yet. A session is logged once you've played the loop for{' '}
         {SESSION_MIN_PLAY_SECONDS} seconds.
       </p>
@@ -66,12 +67,15 @@ export function LoopHistory({
   const now = new Date();
 
   return (
-    <section aria-label={`History of ${loopName}`} className="flex flex-col gap-2">
-      <p className="text-sm text-neutral-300" data-testid="loop-history-summary">
+    <section
+      aria-label={`History of ${loopName}`}
+      className="flex flex-col gap-2 rounded-control border border-line bg-surface p-3"
+    >
+      <p className="text-sm font-semibold text-ink-soft" data-testid="loop-history-summary">
         {sorted.length === 1 ? '1 session' : `${sorted.length} sessions`} ·{' '}
         {durationLabel(totalPracticeSeconds(sorted))} in all
       </p>
-      <ol className="flex flex-col gap-1">
+      <ol className="flex flex-col divide-y divide-line">
         {shown.map((session) => (
           <HistoryItem key={session.id} session={session} tempo={tempo} now={now} />
         ))}
@@ -95,7 +99,7 @@ function HistoryItem({
   now: Date;
 }) {
   return (
-    <li className="text-sm text-neutral-400 tabular-nums">
+    <li className="py-1.5 text-sm text-ink-muted tabular-nums">
       <time dateTime={session.started_at}>
         {practiceDateLabel(session.started_at, now)}, {practiceTimeLabel(session.started_at)}
       </time>{' '}

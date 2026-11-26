@@ -2,7 +2,8 @@ import { useCallback, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
-import { inputClass } from '@/components/styles';
+import { EmptyState, LoadingLine } from '@/components/StatusMessages';
+import { inputClass, labelClass, sectionHeadingClass } from '@/components/styles';
 import { findItemControl, isItemListed, neighbourAfterLeaving } from '@/lib/itemFocus';
 import { waitsForNetwork } from '@/lib/network';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
@@ -28,20 +29,20 @@ export function LibraryPage() {
       <PageHeader title="Library" />
       <UploadPanel />
       {waitsForNetwork(songs) ? (
-        <p className="text-neutral-400">
+        <EmptyState icon="offline">
           You're offline, and your library hasn't been opened on this device yet. It shows once
           you're back online.
-        </p>
+        </EmptyState>
       ) : songs.isPending ? (
-        <p className="text-neutral-400">Loading your songs…</p>
+        <LoadingLine>Loading your songs…</LoadingLine>
       ) : songs.isLoadingError ? (
         <LoadErrorAlert onRetry={() => void songs.refetch()}>
           Couldn't load your songs: {songs.error.message}
         </LoadErrorAlert>
       ) : songs.data.length === 0 ? (
-        <p className="text-neutral-400">
+        <EmptyState icon="library">
           No songs yet. Upload a Guitar Pro file to start your library.
-        </p>
+        </EmptyState>
       ) : (
         <SongList songs={songs.data} />
       )}
@@ -134,12 +135,14 @@ function SongList({ songs }: { songs: LibrarySong[] }) {
 
   return (
     <section aria-labelledby="songs-heading" className="flex flex-col gap-4">
-      <h2 id="songs-heading" className="text-lg font-semibold">
-        Your songs <span className="text-neutral-400">({songs.length})</span>
+      <h2 id="songs-heading" className={sectionHeadingClass}>
+        Your songs <span className="text-ink-muted">({songs.length})</span>
       </h2>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="flex flex-1 flex-col gap-1">
-          <label htmlFor={searchId}>Search title or artist</label>
+          <label htmlFor={searchId} className={labelClass}>
+            Search title or artist
+          </label>
           <input
             ref={searchRef}
             id={searchId}
@@ -150,7 +153,9 @@ function SongList({ songs }: { songs: LibrarySong[] }) {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label htmlFor={sortId}>Sort by</label>
+          <label htmlFor={sortId} className={labelClass}>
+            Sort by
+          </label>
           <select
             id={sortId}
             className={inputClass}
@@ -169,7 +174,7 @@ function SongList({ songs }: { songs: LibrarySong[] }) {
       </div>
       {shown.length === 0 ? (
         // Not the query itself: it comes from the URL.
-        <p className="text-neutral-400">No songs match your search.</p>
+        <p className="text-ink-muted">No songs match your search.</p>
       ) : (
         <ul className="flex flex-col gap-3">
           {shown.map((song) => (

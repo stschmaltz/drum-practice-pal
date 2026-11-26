@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Link } from 'react-router';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
-import { buttonClass, primaryButtonClass } from '@/components/styles';
+import { Icon } from '@/components/icons';
+import { buttonClass, linkClass, primaryButtonClass } from '@/components/styles';
 import { isOnline, useOnline } from '@/lib/network';
 import { songPath } from '@/lib/routes';
 import { GUITAR_PRO_EXTENSIONS } from './songFile';
@@ -79,14 +80,15 @@ export function UploadPanel() {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
         }}
         onDrop={onDrop}
-        className={`flex flex-col items-start gap-3 rounded-lg border-2 border-dashed p-4 sm:flex-row sm:items-center ${
-          dragging ? 'border-sky-500 bg-sky-950' : 'border-neutral-700'
+        className={`flex flex-col items-start gap-3 rounded-card border-2 border-dashed p-5 transition-colors duration-150 sm:flex-row sm:items-center ${
+          dragging ? 'border-brand bg-brand-soft' : 'border-line-strong bg-surface'
         }`}
       >
         <label
           // The real input is visually hidden, so the label shows its focus ring.
-          className={`${primaryButtonClass} inline-flex shrink-0 cursor-pointer items-center has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-sky-400`}
+          className={`${primaryButtonClass} shrink-0 cursor-pointer has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus`}
         >
+          <Icon name="upload" />
           Upload a Guitar Pro file
           <input
             type="file"
@@ -100,7 +102,7 @@ export function UploadPanel() {
             }}
           />
         </label>
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-ink-muted">
           or drop one here. {GUITAR_PRO_EXTENSIONS.join(', ')} files, such as Songsterr's Guitar Pro
           export.
         </p>
@@ -152,7 +154,7 @@ function UploadProgress({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <p role="status" className="text-neutral-300">
+      <p role="status" className="text-ink-soft">
         {STEP_LABELS[step]} {fileName}…
       </p>
       {/* The insert can't be cancelled safely, so the button goes once it starts. */}
@@ -170,10 +172,10 @@ function UploadOutcome({ result }: { result: UploadResult }) {
   if (result.kind === 'duplicate') {
     return (
       <div role="status" className="flex flex-col items-start gap-1">
-        <p className="text-amber-300">
+        <p className="text-warning">
           You've already uploaded this file as “{song.title}”. Nothing new was added.
         </p>
-        <Link to={songPath(song.id)} className="text-sky-400 underline">
+        <Link to={songPath(song.id)} className={linkClass}>
           Open “{song.title}”
         </Link>
       </div>
@@ -181,9 +183,9 @@ function UploadOutcome({ result }: { result: UploadResult }) {
   }
   return (
     <div role="status" className="flex flex-col items-start gap-1">
-      <p className="text-neutral-200">Added “{song.title}”.</p>
-      {song.drum_track_index === null && <p className="text-amber-300">{NO_DRUM_TRACK_NOTE}</p>}
-      <Link to={songPath(song.id)} className="text-sky-400 underline">
+      <p className="text-ink">Added “{song.title}”.</p>
+      {song.drum_track_index === null && <p className="text-warning">{NO_DRUM_TRACK_NOTE}</p>}
+      <Link to={songPath(song.id)} className={linkClass}>
         Open “{song.title}”
       </Link>
     </div>
@@ -193,7 +195,7 @@ function UploadOutcome({ result }: { result: UploadResult }) {
 function UploadFailure({ error, fileName }: { error: Error; fileName: string | undefined }) {
   if (error.name === 'AbortError') {
     return (
-      <p role="status" className="text-neutral-300">
+      <p role="status" className="text-ink-soft">
         Upload cancelled. Nothing was saved.
       </p>
     );

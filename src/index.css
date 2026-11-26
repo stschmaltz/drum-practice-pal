@@ -1,20 +1,140 @@
 @import 'tailwindcss';
 
 /*
+ * Design tokens (Unit 12). Every colour the app uses is one of these: the
+ * default palette is switched off below, so `text-sky-400` and the like draw
+ * nothing, and tests/unit/designTokens.test.ts fails on any palette class or
+ * hard-coded colour in src/. Colours are hex so that test, the contrast check
+ * over the pairs the app draws, and scripts/generate-icons.ts can read them.
+ *
+ * One dark theme: practice happens in dim rooms, and the score is the one
+ * light surface (warm paper, so the notation reads in a bright room too).
+ * `static`: every token is a CSS variable on :root, used by a class or not.
+ */
+@theme static {
+  --color-*: initial;
+
+  /* Surfaces, darkest to lightest. */
+  --color-canvas: #0d0f14;
+  --color-surface: #161a22;
+  --color-raised: #222835;
+  --color-raised-hover: #2d3445;
+  --color-scrim: #05060a;
+
+  /* Lines. `line` separates; `field-line` bounds an input (3:1, WCAG 1.4.11). */
+  --color-line: #2a3140;
+  --color-line-strong: #3d4659;
+  --color-field-line: #6b7488;
+
+  /* Text. */
+  --color-ink: #f1f3f7;
+  --color-ink-soft: #c9cfdb;
+  --color-ink-muted: #9aa3b5;
+
+  /* The brand: a warm stick-tip orange. Solid fills carry `on-brand` text. */
+  --color-brand: #ff8a3d;
+  --color-brand-hover: #ffa463;
+  --color-brand-soft: #3a2314;
+  --color-brand-line: #8a4a20;
+  --color-on-brand: #1a0c02;
+
+  /* Keyboard focus, apart from the brand so it shows on a brand button too. */
+  --color-focus: #8ecbff;
+
+  /* States. */
+  --color-danger: #ff8f8f;
+  --color-danger-solid: #c62828;
+  --color-danger-solid-hover: #a51f1f;
+  --color-danger-soft: #3a1517;
+  --color-on-danger: #ffffff;
+  --color-warning: #f5c451;
+  --color-warning-soft: #33280f;
+  --color-warning-line: #7a5d17;
+  --color-success: #6fd49a;
+  --color-success-soft: #0f2d1d;
+  --color-success-line: #23643f;
+
+  /* The score (alphaTab draws with these too: scoreTheme.ts copies them). */
+  --color-score-paper: #fbf8f2;
+  --color-score-ink: #1b1e26;
+  --color-score-muted: #5b6272;
+  --color-score-accent: #c2410c;
+
+  /* Type: the system stack (no web font, so nothing to fetch offline). */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --text-readout: 1.75rem;
+  --text-readout--line-height: 1;
+  --text-readout--font-weight: 700;
+  /* The count-in number: a large share of the window, read from the throne. */
+  --text-count-in: min(40vw, 45dvh);
+  --text-count-in--line-height: 1;
+
+  /* Spacing: Tailwind's 0.25rem steps, plus the touch target every control meets. */
+  --spacing-touch: 2.75rem;
+
+  /* Radius and shadow. */
+  --radius-control: 0.625rem;
+  --radius-card: 0.875rem;
+  --shadow-card: 0 1px 0 0 rgb(255 255 255 / 0.04) inset, 0 10px 24px -16px rgb(0 0 0 / 0.8);
+  --shadow-sheet: 0 -12px 32px -8px rgb(0 0 0 / 0.75);
+  --shadow-dialog: 0 24px 64px -16px rgb(0 0 0 / 0.9);
+
+  /* Motion: small, and off under prefers-reduced-motion (see the end of this file). */
+  --animate-beat: beat-pop 160ms ease-out;
+  --animate-fade-in: fade-in 150ms ease-out;
+
+  @keyframes beat-pop {
+    from {
+      transform: scale(1.12);
+    }
+    to {
+      transform: scale(1);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+  /* Range inputs, checkboxes and radios in the brand colour. */
+  input[type='range'],
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--color-brand);
+  }
+}
+
+/*
  * alphaTab draws its cursors as bare elements with no styles of its own, so
- * without these the playing bar and beat are invisible. Colours are picked
- * for the score box, which is always white.
+ * without these the playing bar and beat are invisible. The score box is
+ * always paper-coloured, whatever the page around it.
  */
 .jam-score .at-cursor-bar {
-  background: rgb(250 204 21 / 0.25);
+  background: color-mix(in srgb, var(--color-brand) 22%, transparent);
 }
 .jam-score .at-cursor-beat {
-  background: rgb(2 132 199 / 0.85);
+  background: var(--color-score-accent);
   width: 3px;
 }
 .jam-score .at-highlight * {
-  fill: rgb(2 132 199);
-  stroke: rgb(2 132 199);
+  fill: var(--color-score-accent);
+  stroke: var(--color-score-accent);
 }
 
 /* Bars are tappable (jam mode seeks there); alphaTab's own style says cursor: default. */
@@ -36,20 +156,40 @@
 }
 .jam-score .bar-highlight > div {
   position: absolute;
-  background: rgb(2 132 199 / 0.16);
-  outline: 2px solid rgb(2 132 199 / 0.7);
+  background: color-mix(in srgb, var(--color-brand) 16%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--color-score-accent) 75%, transparent);
   outline-offset: -2px;
   border-radius: 4px;
 }
 
 /* A mouse drag across bars picks a loop's range; it shouldn't select the score as text on the way. */
 .jam-score {
+  background: var(--color-score-paper);
+  color: var(--color-score-ink);
   user-select: none;
   -webkit-user-select: none;
+  /* Pans and pinch-zooms as usual, but a double tap on two bars never zooms the page. */
+  touch-action: manipulation;
   /*
    * alphaTab gives its cursor layer z-index 1000. Its own stacking context keeps
    * that inside the score, under the count-in number, the shortcut overlay and
    * anything else drawn over the page.
    */
   isolation: isolate;
+}
+
+/*
+ * Motion is decoration only here; nothing waits for a transition or an animation to end.
+ * Except alphaTab's beat cursor: its inline transition, as long as the beat, is how it
+ * keeps time. Cut to nothing, it jumps to the end of each beat as the beat starts and
+ * points a beat ahead of the music.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.at-cursor-beat),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -54,6 +54,25 @@ async function tapNextBar(page: Page): Promise<number> {
   return landed;
 }
 
+/**
+ * A height on the staves of the line of music at window height `y`. alphaTab
+ * draws each line as its own block in `.at-surface`, its staves at the top
+ * and a gap under them. A tap in that gap seeks to the line above (the
+ * nearest), so the bar cursor, which covers only the staves, isn't over the
+ * point tapped: the middle of the score box fell in a gap in about one run in
+ * ten, depending on where alphaTab had scrolled the box to on load.
+ */
+async function staffLineAt(page: Page, y: number): Promise<number> {
+  return viewport(page).evaluate((box, at) => {
+    const lines = Array.from(box.querySelectorAll('.at-surface > div'))
+      .map((line) => line.getBoundingClientRect())
+      .filter((rect) => rect.height > 0);
+    const line = lines.find((rect) => rect.top <= at && rect.bottom > at);
+    if (!line) throw new Error(`No line of music at y = ${at}`);
+    return line.top + line.height * 0.3;
+  }, y);
+}
+
 /** The bottom of the visible window: the top of the phone's fixed tab bar, or the window's bottom. */
 async function visibleBottom(page: Page): Promise<number> {
   return page.evaluate(() => {
@@ -130,7 +149,10 @@ test('tapping a bar moves playback and the cursor to that bar', async ({ user, p
   const cursor = await barCursorBox(page);
   const far = {
     x: frame.x + frame.width / 2,
-    y: expectedLayout(page) === 'page' ? frame.y + frame.height / 2 : cursor.y + cursor.height / 2,
+    y:
+      expectedLayout(page) === 'page'
+        ? await staffLineAt(page, frame.y + frame.height / 2)
+        : cursor.y + cursor.height / 2,
   };
   const landed = await tapAndWaitForBar(page, far, 2);
   expect(landed).toBeGreaterThan(2);

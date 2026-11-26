@@ -1,4 +1,5 @@
-import { buttonClass } from '@/components/styles';
+import { Icon } from '@/components/icons';
+import { primaryButtonClass } from '@/components/styles';
 import { useOnline } from '@/lib/network';
 import { applyWaitingUpdate, useUpdateWaiting } from './appUpdate';
 
@@ -17,8 +18,9 @@ export function OfflineBanner() {
       {!online && (
         <p
           role="status"
-          className="rounded-md border border-amber-700 bg-amber-950/60 px-3 py-2 text-sm text-amber-100"
+          className="flex items-start gap-3 rounded-card border border-warning-line bg-warning-soft px-4 py-3 text-sm text-ink"
         >
+          <Icon name="offline" className="mt-0.5 size-5 text-warning" />
           You're offline. Songs opened on this device still play, and your practice, saved speeds
           and finished loops are sent when you're back online.
         </p>
@@ -26,10 +28,10 @@ export function OfflineBanner() {
       {updateWaiting && (
         <div
           role="status"
-          className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-sky-800 bg-sky-950/60 px-3 py-2 text-sm"
+          className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-brand-line bg-brand-soft px-4 py-2 text-sm text-ink"
         >
           <p>A new version of the app is ready.</p>
-          <button type="button" className={buttonClass} onClick={applyWaitingUpdate}>
+          <button type="button" className={primaryButtonClass} onClick={applyWaitingUpdate}>
             Reload to update
           </button>
         </div>

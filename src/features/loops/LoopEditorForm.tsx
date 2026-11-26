@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
-import { buttonClass, inputClass, primaryButtonClass } from '@/components/styles';
+import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { percentToRatio } from '@/features/player/speed';
 import { isOnline, useOnline } from '@/lib/network';
@@ -135,7 +135,7 @@ export function LoopEditorForm({
       onSubmit={onSubmit}
       noValidate
     >
-      <p className="text-sm text-neutral-300" aria-live="polite" data-testid="loop-bars-hint">
+      <p className="text-sm text-ink-soft" aria-live="polite" data-testid="loop-bars-hint">
         {hint}
       </p>
       <div className="flex flex-col gap-1">
@@ -159,7 +159,7 @@ export function LoopEditorForm({
             onChange={(endBar) => editBars({ endBar })}
           />
         </div>
-        {errors.bars && <span className="text-sm text-red-300">{errors.bars}</span>}
+        {errors.bars && <span className="text-sm text-danger">{errors.bars}</span>}
       </div>
       <Field
         label="Name"
@@ -180,7 +180,7 @@ export function LoopEditorForm({
         onChange={(targetPercent) => edit({ targetPercent })}
       />
       {!loop && (
-        <p className="text-sm text-neutral-400" data-testid="loop-new-speed">
+        <p className="text-sm text-ink-muted" data-testid="loop-new-speed">
           Saves at the speed playing now: {speedLabel(snapshot.speedRatio, tempo)}.
         </p>
       )}
@@ -243,7 +243,7 @@ function Field({
   const id = useId();
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm text-neutral-300">
+      <label htmlFor={id} className={labelClass}>
         {label}
       </label>
       <div className="flex items-center gap-2">
@@ -258,9 +258,9 @@ function Field({
           aria-invalid={invalid ? true : undefined}
           onChange={(event) => onChange(event.target.value)}
         />
-        {note && <span className="text-sm text-neutral-400">{note}</span>}
+        {note && <span className="text-sm text-ink-muted">{note}</span>}
       </div>
-      {error && <span className="text-sm text-red-300">{error}</span>}
+      {error && <span className="text-sm text-danger">{error}</span>}
     </div>
   );
 }

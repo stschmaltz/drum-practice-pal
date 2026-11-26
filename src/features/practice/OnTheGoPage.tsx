@@ -1,7 +1,16 @@
 import { Link, useSearchParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
-import { buttonClass, pressedButtonClass, primaryButtonClass } from '@/components/styles';
+import { Icon } from '@/components/icons';
+import { EmptyState, LoadingLine } from '@/components/StatusMessages';
+import {
+  cardClass,
+  inlineIconClass,
+  linkClass,
+  primaryButtonClass,
+  segmentOffClass,
+  segmentOnClass,
+} from '@/components/styles';
 import { findStatusButton } from '@/features/loops/loopFocus';
 import { neighbourAfterLeaving } from '@/lib/itemFocus';
 import { barsLabel } from '@/features/loops/loopForm';
@@ -74,12 +83,12 @@ export function OnTheGoPage() {
       <PageHeader title="On the go">Your loops, most recently practiced first.</PageHeader>
       <PracticeTabButtons tab={tab} loops={loops.data} onShow={showTab} />
       {waitsForNetwork(loops) ? (
-        <p className="text-neutral-400">
+        <EmptyState icon="offline">
           You're offline, and your loops haven't been opened on this device yet. They show once
           you're back online.
-        </p>
+        </EmptyState>
       ) : loops.isPending ? (
-        <p className="text-neutral-400">Loading your loops…</p>
+        <LoadingLine>Loading your loops…</LoadingLine>
       ) : loops.isLoadingError ? (
         // isLoadingError, not isError: a failed background refetch keeps the list.
         <LoadErrorAlert onRetry={() => void loops.refetch()}>
@@ -104,12 +113,16 @@ function PracticeTabButtons({
 }) {
   return (
     // Toggle buttons rather than ARIA tabs: two views of one list, with no arrow-key model to keep up.
-    <div role="group" aria-label="Loops to show" className="flex gap-2">
+    <div
+      role="group"
+      aria-label="Loops to show"
+      className="inline-flex gap-1 self-start rounded-card border border-line bg-surface p-1"
+    >
       {PRACTICE_TABS.map((option) => (
         <button
           key={option}
           type="button"
-          className={option === tab ? pressedButtonClass : buttonClass}
+          className={option === tab ? segmentOnClass : segmentOffClass}
           aria-pressed={option === tab}
           data-practice-tab={option}
           onClick={() => onShow(option)}
@@ -137,14 +150,18 @@ function PracticeLoopList({
 }) {
   if (loops.length === 0) {
     return (
-      <div className="flex flex-col items-start gap-3">
-        <p className="text-neutral-400">{EMPTY_COPY[tab]}</p>
-        {tab === 'active' && (
-          <Link to="/library" className="text-sky-400 underline">
-            Go to Library
-          </Link>
-        )}
-      </div>
+      <EmptyState
+        icon={tab === 'active' ? 'loop' : 'check'}
+        action={
+          tab === 'active' && (
+            <Link to="/library" className={linkClass}>
+              Go to Library
+            </Link>
+          )
+        }
+      >
+        {EMPTY_COPY[tab]}
+      </EmptyState>
     );
   }
   return (
@@ -171,30 +188,29 @@ function PracticeLoopItem({
   const now = new Date();
 
   return (
-    <li className="flex flex-col gap-3 rounded-lg border border-neutral-800 p-4">
+    <li className={`${cardClass} flex flex-col gap-3 p-4`}>
       <div className="flex flex-col gap-1">
         <p className="text-lg font-semibold break-words">{loop.name}</p>
-        <p className="break-words text-neutral-300">
+        <p className="break-words text-ink-soft">
+          <Icon name="library" className={`${inlineIconClass} size-4 text-ink-muted`} />
           {loop.song.title}
           {loop.song.artist && ` · ${loop.song.artist}`}
         </p>
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-ink-muted">
           {barsLabel(loop.start_bar, loop.end_bar)} · {ratioToPercent(loop.speed_ratio)}%
           {loop.target_ratio !== null && ` · target ${ratioToPercent(loop.target_ratio)}%`}
         </p>
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-ink-muted">
           {lastPracticedLabel(loop.last_practiced_at, now)}
           {finished &&
             loop.finished_at !== null &&
             ` · finished ${practiceDayInSentence(loop.finished_at, now)}`}
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-1">
         {/* A link, so the song opens on the loop; playback needs a tap on that page (iOS audio). */}
-        <Link
-          to={loopPracticePath(loop.song_id, loop.id)}
-          className={`${primaryButtonClass} inline-flex items-center`}
-        >
+        <Link to={loopPracticePath(loop.song_id, loop.id)} className={`${primaryButtonClass} mr-1`}>
+          <Icon name="play" />
           Practice<span className="sr-only"> {loop.name}</span>
         </Link>
         <LoopStatusButton loop={loop} onSet={onStatusSet} />
