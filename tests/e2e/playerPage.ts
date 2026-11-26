@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { expect, signIn, type E2eUser } from './auth';
 
-/** Mirrors layout.ts: page layout from this width, horizontal below. */
+/** Mirrors layout.ts: page layout from this width (48rem at the default 16 px font size), horizontal below. */
 const PAGE_LAYOUT_MIN_WIDTH = 768;
 
 /** The layout the app should pick at this width (layout.ts). */

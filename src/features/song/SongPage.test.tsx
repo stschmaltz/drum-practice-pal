@@ -2233,6 +2233,36 @@ describe('SongPage controls while playing (12 UX pass)', () => {
     expect(controls().getByRole('slider', { name: 'Speed' })).toBeInTheDocument();
   });
 
+  // Copilot review on #18: the loop form takes the list's place, and the loop's speed control with
+  // it, so a "Loop speed" there had nothing to show and did nothing.
+  it.each(['New loop', 'Edit'])(
+    'while the loop form is open (%s), the slider is back and changes the speed',
+    async (opener) => {
+      const { user } = await openSong();
+      await user.click(panel().getByRole('button', { name: 'Play loop Verse' }));
+      expect(controls().queryByRole('slider', { name: 'Speed' })).not.toBeInTheDocument();
+
+      if (opener === 'New loop') {
+        await user.click(panel().getByRole('button', { name: 'New loop' }));
+      } else {
+        await user.click(panel().getByRole('button', { name: 'More actions for Verse' }));
+        await user.click(panel().getByRole('menuitem', { name: 'Edit' }));
+      }
+      expect(panel().getByRole('form')).toBeInTheDocument();
+      expect(panel().queryByRole('group', { name: 'Loop speed' })).not.toBeInTheDocument();
+      expect(controls().queryByRole('button', { name: /^Loop speed/ })).not.toBeInTheDocument();
+      fireEvent.change(controls().getByRole('slider', { name: 'Speed' }), {
+        target: { value: '60' },
+      });
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('60%');
+
+      // The form gone, the loop's own control is back, and the bar's button leads to it.
+      await user.click(panel().getByRole('button', { name: 'Cancel' }));
+      expect(panel().getByRole('group', { name: 'Loop speed' })).toBeInTheDocument();
+      expect(controls().getByRole('button', { name: 'Loop speed 60%' })).toBeInTheDocument();
+    },
+  );
+
   it('shows the playing loop once: in its own item, with no line above the score and no second card', async () => {
     const { user } = await openSong([
       verse,

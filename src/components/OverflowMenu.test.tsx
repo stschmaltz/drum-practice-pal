@@ -117,6 +117,22 @@ describe('OverflowMenu', () => {
     expect(menu()).toBeInTheDocument();
   });
 
+  // Copilot review on #18: the focused item was also kept as state, which a click moved behind its back.
+  it('the keys go on from an item a click focused, whichever item the keys last chose', async () => {
+    const { user } = setup({ editDisabled: true });
+    more().focus();
+    await user.keyboard('{ArrowUp}');
+    expect(items()[2]).toHaveFocus();
+    // A click on the disabled Edit focuses it and keeps the menu open.
+    await user.click(screen.getByRole('menuitem', { name: 'Edit' }));
+    expect(items()[0]).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(items()[2]).toHaveFocus();
+    await user.click(screen.getByRole('menuitem', { name: 'Edit' }));
+    await user.keyboard('{ArrowUp}');
+    expect(items()[2]).toHaveFocus();
+  });
+
   it('a press outside closes it and leaves focus where the press put it', async () => {
     const { user } = setup();
     await user.click(more());

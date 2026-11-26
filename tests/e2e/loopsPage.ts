@@ -39,6 +39,8 @@ export const playLoopButton = (page: Page, name: string) =>
  * Mirrors loopPanelLayout.ts: the loop panel is a column from this width, a
  * sheet below. Apart from the player's 768 px layout breakpoint
  * (`expectedLayout`): a tablet in portrait has page layout and the sheet.
+ * The app's query is 64rem; in px only at Playwright's default 16 px font
+ * size, so a spec that changes the font size can't use these steps.
  */
 const LOOP_COLUMN_MIN_WIDTH = 1024;
 
@@ -46,8 +48,13 @@ const LOOP_COLUMN_MIN_WIDTH = 1024;
 export const expectedLoopPanel = (page: Page): 'sheet' | 'column' =>
   (page.viewportSize()?.width ?? 0) >= LOOP_COLUMN_MIN_WIDTH ? 'column' : 'sheet';
 
-/** The sheet's header, which opens and closes it. Hidden from 1024 px. */
-const sheetHeader = (page: Page) => loopPanel(page).locator('button[aria-controls]');
+/**
+ * The sheet's header, which opens and closes it. Hidden from 1024 px. The
+ * panel's own child, so an open "More" button inside it, which also carries
+ * `aria-controls`, isn't matched too (Copilot review on #18).
+ */
+export const loopSheetHeader = (page: Page) =>
+  loopPanel(page).locator(':scope > button[aria-controls]');
 
 /** The column's toggle beside the status line. Hidden below 1024 px. */
 const columnToggle = (page: Page) => page.getByRole('button', { name: /^(Show|Hide) loops$/ });
@@ -57,7 +64,7 @@ const columnToggle = (page: Page) => page.getByRole('button', { name: /^(Show|Hi
  * there; its `aria-expanded` says whether the panel is open.
  */
 export const loopPanelToggle = (page: Page) =>
-  expectedLoopPanel(page) === 'sheet' ? sheetHeader(page) : columnToggle(page);
+  expectedLoopPanel(page) === 'sheet' ? loopSheetHeader(page) : columnToggle(page);
 
 /** Opens the loop panel if it is closed: the sheet below 1024 px, the column from there. */
 export async function openLoopPanel(page: Page): Promise<void> {

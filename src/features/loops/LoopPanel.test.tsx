@@ -1,3 +1,4 @@
+import { stubWindow } from '@/test/mediaQueries';
 import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -145,13 +146,8 @@ async function rename(view: View, name: string) {
   await view.user.type(field, name);
 }
 
-/** A window this many px wide, as the browser would answer any `(min-width: Npx)` query. */
-const atWidth = (width: number) =>
-  vi.stubGlobal('matchMedia', (query: string) => {
-    const min = /^\(min-width: (\d+)px\)$/.exec(query)?.[1];
-    if (min === undefined) throw new Error(`Unexpected media query ${query}`);
-    return { matches: width >= Number(min) };
-  });
+/** A window this many px wide, at the browser's default font size. */
+const atWidth = (width: number) => stubWindow({ width });
 const PHONE = 390;
 const TABLET_PORTRAIT = 820;
 const TABLET_LANDSCAPE = 1180;

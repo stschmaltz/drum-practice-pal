@@ -1011,3 +1011,52 @@ No mutations, migrations, services or scripts changed in this range.
 
 - `npm run check`: 110 files, 4294 tests green (was 4292).
 - `npm run e2e`: 440 passed, 39 skipped, 1 failed (480 listed) on a fresh `npm run build -- --mode development` from bash, served by the `vite preview` already on 4173 (PID 64276, reused and left running; it served the fresh `dist`'s `assets/index-2VcG1Mj0.js`). The failure was `offline.spec.ts:339` on desktop, at line 405: the loop was already `finished` in the database before the test went back online, while `writes.sent` (PATCHes seen while offline) was empty. The same test passed on phone and tablet in that run, and 6 of 6 times alone on desktop (`--repeat-each=6`). The rerun replaced its `error-context.md`. Nothing changed here touches the offline queue. It is the test the first Review saw fail once on phone (`offline.spec.ts:338` then). Twice now, so it is logged as open finding 7 and carried to Unit 13: either the recorder misses a request (one sent before `offline` is set, or one the context's `request` event doesn't report), or a queued write leaves while the context is offline.
+
+## Copilot review (PR #18)
+
+Copilot left four comments on the PR. Each was checked in the code (and the breakpoint one in Chromium) before anything changed; all four held up. Each fix has a test written first and seen failing.
+
+### 1. Confirmed: the "More" menu's keys stopped after a click moved focus
+
+`src/components/OverflowMenu.tsx`. The menu kept the item to focus as state (`focusIndex`) and focused it from a layout effect. A click focuses an item too (a disabled item keeps the menu open), so the state went stale: open with ArrowUp (Delete), click the disabled Edit, press End, and `setFocusIndex(2)` set the value already held, the effect didn't run and focus stayed on Edit.
+
+- **Fix**: the state is now only where focus goes when the menu opens (`openingFocus`). Moves inside the open menu focus the item directly from the key handler, which already reads where focus is from `document.activeElement`.
+- **Test**: `OverflowMenu.test.tsx` "the keys go on from an item a click focused, whichever item the keys last chose" (failed before: End left focus on Edit).
+
+### 2. Confirmed: the code's breakpoints were px, the stylesheet's rem
+
+`src/features/loops/loopPanelLayout.ts`, and the same in `src/features/player/layout.ts`. `LOOP_COLUMN_QUERY` was `(min-width: 1024px)` and `PAGE_LAYOUT_QUERY` `(min-width: 768px)`, while Tailwind's `lg:` and `md:` are `64rem` and `48rem`. A rem in a media query is the browser's default font size, not 16 px. Checked in Chromium with `Page.setFontSizes` at 20 px and a 1100 px window: `(min-width: 1024px)` matched, `(min-width: 64rem)` didn't. So the CSS drew the sheet while `loopPanelIsSheet()` said column: the sheet started open and "Play loop" left it over the score. Between 768 and 959 px at 20 px, alphaTab got page layout under the phone's CSS. The old test compared the two at 16 px a rem, which hid it.
+
+- **Fix**: both queries are written in rem (`LOOP_COLUMN_MIN_REM`, `PAGE_LAYOUT_MIN_REM`). The px constants stay, derived at 16 px, for code that only has a width (jsdom's fallback with no `matchMedia`, `SpikePage`). Nothing else in `src/` mirrors a breakpoint in px. The e2e mirrors (`expectedLoopPanel`, `layoutForWidth` in `playerPage.ts`) go by the viewport at Playwright's 16 px default and now say so.
+- **Tests**: `loopPanelLayout.test.ts` checks each query equals the stylesheet's value, units and all (failed before). `useLoopPanelOpen.test.ts` and a new `useLayout.test.ts` answer queries at a 20 px default font through a new shared `stubWindow({ width, fontSize })` (`src/test/mediaQueries.ts`, now also behind `LoopPanel.test.tsx`'s `atWidth`). 1100 px is the sheet and starts closed; 900 px is horizontal (both failed before). e2e: `loop-scroll.spec.ts` "with a 20 px default font, 1100 px wide is the sheet, and Play loop closes it" (desktop only, through CDP). It failed against a build without the fix: the sheet was still open after Play loop.
+
+### 3. Confirmed: "Loop speed" did nothing while the loop form was open
+
+`src/features/song/SongPage.tsx:259`. `onShowLoopSpeed` was offered whenever `practice.activeLoop` was set. The panel draws the form in place of its list whenever a new loop or an edit is open and the score's bars are in, and the loop's `LoopSpeedControl` lives in its list item. So with a loop playing and New loop or Edit open, the slider had given way to a button whose `findLoopSpeed` found nothing, and there was no speed control at all.
+
+- **Fix**: one module for what the panel shows, `src/features/loops/loopPanelContent.ts`. `editorOnPanel(practice, snapshot)` is the panel's render condition (it returns the editor and the bar count, so `LoopPanelBody` renders from it), and `panelShowsLoopSpeed` is "a loop is playing and the list shows". The page offers "Loop speed" only while that holds, so the slider comes back while the form is open and works on the speed playing.
+- **Tests**: `SongPage.test.tsx` "while the loop form is open (New loop / Edit), the slider is back and changes the speed", which also checks Cancel brings back the loop's control and the button (failed before: "Loop speed" was still there). `loopPanelContent.test.ts` tables the predicates, the form without the score's bars included.
+
+### 4. Confirmed: the e2e sheet header matched an open "More" button
+
+`tests/e2e/loopsPage.ts:50`. `sheetHeader` was `loopPanel(page).locator('button[aria-controls]')`, and an open `OverflowMenu` button carries `aria-controls`, so `openLoopPanel`, `closeLoopPanel` and `loopPanelToggle` hit a strict-mode violation with a menu open. No spec did that yet.
+
+- **Fix**: `loopSheetHeader` is the panel's own child, `:scope > button[aria-controls]`, exported, and the copy in `loops.spec.ts` uses it.
+- **Test**: `loop-scroll.spec.ts` "the loop sheet closes with a loop's More menu open" (phone and tablet). With the old locator it failed: "strict mode violation … resolved to 2 elements".
+
+### Checklist rows added (`docs/review-checklist.md`)
+
+None of the four was covered by an existing row.
+
+- Section 2, **"A stand-in for a control that isn't drawn"** (comment 3): the stand-in's condition is the target's render condition, from one predicate.
+- Section 3, **"A copy of what the browser holds"** (comment 1): state mirroring focus, scroll or selection goes stale when the browser changes it another way. Read the browser's state when it is used.
+- Section 6, **"A breakpoint mirrored in code in other units"** (comment 2): write the query in the stylesheet's unit and test at a non-default font size.
+- Section 7, hygiene: test locators that match by an attribute another element can carry (comment 4).
+
+AGENTS.md: rem media queries and `stubWindow` (Loops, UI), `panelShowsLoopSpeed` (the controls fold), and `md` at 48rem (Player).
+
+### Results
+
+- `npm run check`: 112 files, 4316 tests green (was 4294).
+- `npm run e2e`: 444 passed, 42 skipped, none failed, on a fresh `npm run build -- --mode development` from bash, served by the `vite preview` already on 4173 (reused, left running). The two new specs were also run against builds and helpers without their fixes and failed there, as described above.
+- **Async windows and inputs**: none added. The menu's keys now act on focus at the press; the predicates and the queries are synchronous.

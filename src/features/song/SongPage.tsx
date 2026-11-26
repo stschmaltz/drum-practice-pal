@@ -27,6 +27,7 @@ import { useSong, useSongFile } from '@/features/library/useSongs';
 import type { Loop } from '@/features/loops/loopForm';
 import { findLoopSpeed } from '@/features/loops/loopFocus';
 import { LoopPanel } from '@/features/loops/LoopPanel';
+import { panelShowsLoopSpeed } from '@/features/loops/loopPanelContent';
 import { useLoopPanelOpen } from '@/features/loops/useLoopPanelOpen';
 import { useLoopPractice } from '@/features/loops/useLoopPractice';
 import { useLoops } from '@/features/loops/useLoops';
@@ -256,7 +257,8 @@ function SongPlayer({
           snapshot={snapshot}
           showPlayButton={false}
           fold={fold}
-          onShowLoopSpeed={practice.activeLoop ? showLoopSpeed : null}
+          // Only while the panel has the loop's speed on it: the loop form takes its place.
+          onShowLoopSpeed={panelShowsLoopSpeed(practice, snapshot) ? showLoopSpeed : null}
         />
       </div>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-4">
