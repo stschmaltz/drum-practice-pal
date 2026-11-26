@@ -12,8 +12,12 @@ import {
   loopBpmField,
   loopForm,
   loopPanel,
+  loopItem,
+  loopNameField,
   loopPanelToggle,
   loopPercentField,
+  loopSheetHeader,
+  newLoopButton,
   loopSpeed,
   openLoopPanel,
   saveLoopButton,
@@ -380,6 +384,59 @@ for (const width of [767, 1023, 1024]) {
     await expect(playButton(page)).toHaveText('Play');
   });
 }
+
+// Copilot review on #18: the stylesheet's lg is 64rem, which a media query reads against the
+// browser's default font size. At 20 px a 1100 px window draws the sheet; the code must agree, or
+// the sheet starts open and Play loop leaves it over the score and the count-in number.
+test('with a 20 px default font, 1100 px wide is the sheet, and Play loop closes it', async ({
+  user,
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'one browser is enough for the breakpoint');
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Page.setFontSizes', { fontSizes: { standard: 20 } });
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  // The CSS's choice: the sheet's header on show, the column's toggle not.
+  const header = loopSheetHeader(page);
+  await expect(header).toBeVisible();
+  await expect(page.getByRole('button', { name: /^(Show|Hide) loops$/ })).toBeHidden();
+  // The code's: the sheet starts closed.
+  await expect(header).toHaveAttribute('aria-expanded', 'false');
+
+  // The shared steps go by the viewport's px, so this loop is saved by hand.
+  await header.click();
+  await newLoopButton(page).click();
+  await firstBarField(page).fill('3');
+  await lastBarField(page).fill('4');
+  await loopNameField(page).fill('Wide');
+  await saveLoopButton(page).click();
+  await expect(loopForm(page)).toHaveCount(0);
+  await expect(header).toHaveAttribute('aria-expanded', 'true');
+
+  await playLoopButton(page, 'Wide').click();
+
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect(header).toHaveAttribute('aria-expanded', 'false');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+});
+
+// Copilot review on #18: an open "More" button carries aria-controls too, so the shared steps'
+// sheet header matched two buttons and closing the sheet failed in strict mode.
+test('the loop sheet closes with a loop’s More menu open', async ({ user, page }) => {
+  test.skip(expectedLoopPanel(page) !== 'sheet', 'the column has no header to close it by');
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Menu', firstBar: 3, lastBar: 4 });
+  await openLoopPanel(page);
+  const more = loopItem(page, 'Menu').getByRole('button', { name: 'More actions for Menu' });
+  await more.click();
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+
+  await closeLoopPanel(page);
+
+  await expect(loopPanel(page).getByRole('menu')).toHaveCount(0);
+});
 
 test('with a count-in before every repeat, each repeat’s count-in has the loop’s first bar back in the score box', async ({
   user,

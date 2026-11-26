@@ -1,5 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import type { PlayerStatus } from '@/features/player/PlayerService';
+import { stubWindow } from '@/test/mediaQueries';
 import { LOOP_COLUMN_QUERY } from './loopPanelLayout';
 import {
   loopPanelIsSheet,
@@ -75,4 +76,21 @@ describe('useLoopPanelOpen', () => {
     const { result } = renderHook(useLoopPanelOpen);
     expect(result.current.open).toBe(open);
   });
+
+  // Copilot review on #18: the stylesheet's lg is 64rem, which a 20 px default font makes 1280 px.
+  it.each([
+    [16, 1100, false],
+    [20, 1100, true],
+    [20, 1279, true],
+    [20, 1280, false],
+  ])(
+    'with a %i px default font, a %i px window is the sheet: %s, as the CSS draws it',
+    (fontSize, width, sheet) => {
+      stubWindow({ width, fontSize });
+      expect(loopPanelIsSheet()).toBe(sheet);
+      const { result } = renderHook(useLoopPanelOpen);
+      // The sheet starts closed, the column open.
+      expect(result.current.open).toBe(!sheet);
+    },
+  );
 });

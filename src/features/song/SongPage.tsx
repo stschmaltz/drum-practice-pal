@@ -27,6 +27,7 @@ import { useSong, useSongFile } from '@/features/library/useSongs';
 import type { Loop } from '@/features/loops/loopForm';
 import { findLoopSpeed } from '@/features/loops/loopFocus';
 import { LoopPanel } from '@/features/loops/LoopPanel';
+import { panelShowsLoopSpeed } from '@/features/loops/loopPanelContent';
 import { useLoopPanelOpen } from '@/features/loops/useLoopPanelOpen';
 import { useLoopPractice } from '@/features/loops/useLoopPractice';
 import { useLoops } from '@/features/loops/useLoops';
@@ -207,8 +208,10 @@ function SongPlayer({
     { scrollRef, stickyBarRef, stickyControlsRef: controlsRef },
     {
       seekOnTap: !pickingBars,
-      // The count-in counter sits over the score, so the score comes on screen for it too.
-      scoreOnScreen: pickingBars ? 'picking-bars' : isRunning(snapshot.status) ? 'playing' : null,
+      // The count-in counter sits over the score, so the score comes on screen for it too. Keyed on
+      // the fold rather than on running, so Hide controls brings it back as well: the user had
+      // scrolled up to that button, and in phone landscape kept still the score was off the window.
+      scoreOnScreen: pickingBars ? 'picking-bars' : fold.folded ? 'playing' : null,
     },
   );
   // A soundfont failure still leaves readable notation; these leave an empty white box.
@@ -246,9 +249,7 @@ function SongPlayer({
         // No style prop: useStaysOnScreen writes the room it holds as this element's bottom margin.
         data-testid="controls-slot"
         className={
-          fold.folded
-            ? 'sticky top-(--jam-bar-height) z-10 -mx-4 -mt-3 border-b border-line bg-canvas px-4 md:-mx-gutter md:px-gutter'
-            : undefined
+          fold.folded ? `sticky top-(--jam-bar-height) -mt-3 ${fullBleedBarClass}` : undefined
         }
       >
         <PlayerControls
@@ -256,7 +257,8 @@ function SongPlayer({
           snapshot={snapshot}
           showPlayButton={false}
           fold={fold}
-          onShowLoopSpeed={practice.activeLoop ? showLoopSpeed : null}
+          // Only while the panel has the loop's speed on it: the loop form takes its place.
+          onShowLoopSpeed={panelShowsLoopSpeed(practice, snapshot) ? showLoopSpeed : null}
         />
       </div>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-4">
@@ -460,10 +462,14 @@ function SessionNotice({
   );
 }
 
+/** A bar that sticks at the top of the window, full-bleed over the page gutter. */
+const fullBleedBarClass =
+  'z-10 -mx-4 border-b border-line bg-canvas px-4 md:-mx-gutter md:px-gutter';
+
 /**
  * The readout and Play/Pause, sticky at the top of the window so both stay on
  * screen when Play scrolls the page to the score: on a phone the header,
- * controls and score don't all fit. Full-bleed over the page gutter.
+ * controls and score don't all fit.
  */
 function JamBar({
   ref,
@@ -481,7 +487,7 @@ function JamBar({
     <div
       ref={ref}
       data-testid="jam-bar"
-      className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-canvas px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:-mx-gutter md:px-gutter"
+      className={`sticky top-0 ${fullBleedBarClass} flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]`}
     >
       <JamReadout speedRatio={snapshot.speedRatio} tempo={tempo} />
       <PlayPauseButton player={player} snapshot={snapshot} />

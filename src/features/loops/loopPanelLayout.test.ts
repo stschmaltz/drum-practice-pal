@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PAGE_LAYOUT_MIN_WIDTH } from '@/features/player/layout';
+import { PAGE_LAYOUT_MIN_WIDTH, PAGE_LAYOUT_QUERY } from '@/features/player/layout';
 import { LOOP_COLUMN_MIN_WIDTH, LOOP_COLUMN_QUERY, loopPanelKindForWidth } from './loopPanelLayout';
 
 const css = readFileSync(
@@ -10,12 +10,15 @@ const css = readFileSync(
   'utf8',
 );
 
-/** A breakpoint from the stylesheet's theme, in px (1rem = 16px). */
-function breakpointPx(name: string): number {
-  const rem = new RegExp(`--breakpoint-${name}:\\s*([\\d.]+)rem;`).exec(css)?.[1];
-  if (rem === undefined) throw new Error(`No --breakpoint-${name} in index.css`);
-  return Number(rem) * 16;
+/** A breakpoint from the stylesheet's theme, as written there ("64rem"). */
+function breakpoint(name: string): string {
+  const value = new RegExp(`--breakpoint-${name}:\\s*([\\d.]+rem);`).exec(css)?.[1];
+  if (value === undefined) throw new Error(`No --breakpoint-${name} in rem in index.css`);
+  return value;
 }
+
+/** The same in px at the browser's default 16 px font size. */
+const breakpointPx = (name: string) => Number.parseFloat(breakpoint(name)) * 16;
 
 describe('loopPanelKindForWidth', () => {
   it.each([
@@ -35,8 +38,8 @@ describe('loopPanelKindForWidth', () => {
     expect(loopPanelKindForWidth(width)).toBe(kind);
   });
 
-  it('is a query for the same width', () => {
-    expect(LOOP_COLUMN_QUERY).toBe('(min-width: 1024px)');
+  it('is a query for the same width, in rem', () => {
+    expect(LOOP_COLUMN_QUERY).toBe('(min-width: 64rem)');
   });
 });
 
@@ -48,5 +51,12 @@ describe('the breakpoints the CSS and the code share', () => {
   it("the player's page layout is the stylesheet's md, and stays apart from the column", () => {
     expect(breakpointPx('md')).toBe(PAGE_LAYOUT_MIN_WIDTH);
     expect(LOOP_COLUMN_MIN_WIDTH).toBeGreaterThan(PAGE_LAYOUT_MIN_WIDTH);
+  });
+
+  // Copilot review on #18: a rem media query follows the browser's default font size, a px one
+  // doesn't, so at 20 px a 1100 px window drew the sheet while the code took it for the column.
+  it("the queries are the stylesheet's, units and all", () => {
+    expect(LOOP_COLUMN_QUERY).toBe(`(min-width: ${breakpoint('lg')})`);
+    expect(PAGE_LAYOUT_QUERY).toBe(`(min-width: ${breakpoint('md')})`);
   });
 });

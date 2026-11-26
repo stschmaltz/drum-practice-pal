@@ -29,6 +29,7 @@ import {
   expectLooping,
   expectedLoopPanel,
   setSpeed,
+  loopSheetHeader,
 } from './loopsPage';
 import {
   barCursorBox,
@@ -520,7 +521,7 @@ test('the loop panel is a bottom sheet on a phone and a tablet in portrait, and 
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  const sheetHeader = loopPanel(page).locator('button[aria-controls]');
+  const sheetHeader = loopSheetHeader(page);
   const columnToggle = page.getByRole('button', { name: /^(Show|Hide) loops$/ });
   const sheet = expectedLoopPanel(page) === 'sheet';
   // One toggle on show at each width, the one the shared steps use.

@@ -1,6 +1,13 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, useSyncExternalStore } from 'react';
+import {
+  chooseIn,
+  chosenCountIn,
+  chosenCountInMode,
+  countInGroup,
+  countInModeGroup,
+} from '@/test/countInControls';
 import { FakeClickOutput, FakePlayerEngine } from '@/test/fakePlayerEngine';
 import { PlayerControls, PlayPauseButton } from './PlayerControls';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
@@ -425,43 +432,30 @@ describe('PlayPauseButton', () => {
 });
 
 describe('PlayerControls count-in', () => {
-  const countIn = () => screen.getByRole('radiogroup', { name: 'Count-in' });
-  const countInMode = () => screen.queryByRole('radiogroup', { name: 'When to count in' });
-  /** The label of the option a segmented control has on, or null for none. */
-  const chosen = (group: HTMLElement | null) => {
-    if (!group) return null;
-    const radio = within(group)
-      .getAllByRole<HTMLInputElement>('radio')
-      .find((each) => each.checked);
-    return radio?.closest('label')?.textContent ?? null;
-  };
-  const choose = (user: ReturnType<typeof userEvent.setup>, group: HTMLElement, label: string) =>
-    user.click(within(group).getByRole('radio', { name: label }));
-
   it('starts from the options it is given', () => {
     setup({
       options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2, countInMode: 'every_repeat' },
     });
-    expect(chosen(countIn())).toBe('2 bars');
-    expect(chosen(countInMode())).toBe('Every repeat');
+    expect(chosenCountIn()).toBe('2 bars');
+    expect(chosenCountInMode()).toBe('Every repeat');
   });
 
   it('offers off, 1 bar and 2 bars as a segmented control, and no mode while off', () => {
     setup();
-    expect(chosen(countIn())).toBe('Off');
+    expect(chosenCountIn()).toBe('Off');
     expect(
-      within(countIn())
+      within(countInGroup())
         .getAllByRole('radio')
         .map((radio) => radio.closest('label')?.textContent),
     ).toEqual(['Off', '1 bar', '2 bars']);
     // Progressive disclosure: the mode only matters with a count-in to play.
-    expect(countInMode()).not.toBeInTheDocument();
+    expect(countInModeGroup()).not.toBeInTheDocument();
   });
 
   it('shows the mode once a count-in is chosen, with both of its choices in full', async () => {
     const { user } = setup();
-    await choose(user, countIn(), '1 bar');
-    const mode = countInMode();
+    await chooseIn(user, countInGroup(), '1 bar');
+    const mode = countInModeGroup();
     expect(mode).not.toBeNull();
     expect(
       within(mode as HTMLElement)
@@ -476,11 +470,11 @@ describe('PlayerControls count-in', () => {
     engine.play.mockClear();
     engine.loadScore.mockClear();
 
-    await choose(user, countIn(), '1 bar');
-    await choose(user, countInMode() as HTMLElement, 'Every repeat');
+    await chooseIn(user, countInGroup(), '1 bar');
+    await chooseIn(user, countInModeGroup(), 'Every repeat');
 
     expect(player.getSnapshot()).toMatchObject({ countInBars: 1, countInMode: 'every_repeat' });
-    expect(chosen(countIn())).toBe('1 bar');
+    expect(chosenCountIn()).toBe('1 bar');
     expect(engine.restartCalls()).toBe(0);
   });
 
@@ -495,20 +489,20 @@ describe('PlayerControls count-in', () => {
         })}
       />,
     );
-    expect(chosen(countIn())).toBe('1 bar');
-    for (const radio of within(countIn()).getAllByRole('radio')) expect(radio).toBeDisabled();
-    expect(chosen(countInMode())).toBe('Every repeat');
-    for (const radio of within(countInMode() as HTMLElement).getAllByRole('radio')) {
+    expect(chosenCountIn()).toBe('1 bar');
+    for (const radio of within(countInGroup()).getAllByRole('radio')) expect(radio).toBeDisabled();
+    expect(chosenCountInMode()).toBe('Every repeat');
+    for (const radio of within(countInModeGroup() as HTMLElement).getAllByRole('radio')) {
       expect(radio).toBeDisabled();
     }
   });
 
   it('can be set while the song is still loading', async () => {
     const { player, user } = setup({ loaded: false });
-    expect(within(countIn()).getByRole('radio', { name: '2 bars' })).toBeEnabled();
-    await choose(user, countIn(), '2 bars');
+    expect(within(countInGroup()).getByRole('radio', { name: '2 bars' })).toBeEnabled();
+    await chooseIn(user, countInGroup(), '2 bars');
     expect(player.getSnapshot().countInBars).toBe(2);
-    expect(countInMode()).toBeInTheDocument();
+    expect(countInModeGroup()).toBeInTheDocument();
   });
 
   it.each([
@@ -520,9 +514,9 @@ describe('PlayerControls count-in', () => {
       // Start from a different value so each choice is a change.
       options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: bars === 1 ? 2 : 1 },
     });
-    await choose(user, countIn(), label);
+    await chooseIn(user, countInGroup(), label);
     expect(player.getSnapshot().countInBars).toBe(bars);
-    expect(chosen(countIn())).toBe(label);
+    expect(chosenCountIn()).toBe(label);
   });
 
   it.each([
@@ -532,30 +526,30 @@ describe('PlayerControls count-in', () => {
     const { player, user } = setup({
       options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1, countInMode: from },
     });
-    await choose(user, countInMode() as HTMLElement, label);
+    await chooseIn(user, countInModeGroup(), label);
     expect(player.getSnapshot().countInMode).toBe(mode);
-    expect(chosen(countInMode())).toBe(label);
+    expect(chosenCountInMode()).toBe(label);
   });
 
   it('keeps the chosen mode while the count-in is off, and shows it again when it is back on', async () => {
     const { player, user } = setup({
       options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1, countInMode: 'every_repeat' },
     });
-    await choose(user, countIn(), 'Off');
-    expect(countInMode()).not.toBeInTheDocument();
+    await chooseIn(user, countInGroup(), 'Off');
+    expect(countInModeGroup()).not.toBeInTheDocument();
     expect(player.getSnapshot().countInMode).toBe('every_repeat');
 
-    await choose(user, countIn(), '2 bars');
-    expect(chosen(countInMode())).toBe('Every repeat');
+    await chooseIn(user, countInGroup(), '2 bars');
+    expect(chosenCountInMode()).toBe('Every repeat');
     expect(player.getSnapshot()).toMatchObject({ countInBars: 2, countInMode: 'every_repeat' });
   });
 
   it('the arrow keys move the choice, as in any radio group', async () => {
     const { player, user } = setup();
-    within(countIn()).getByRole('radio', { name: 'Off' }).focus();
+    within(countInGroup()).getByRole('radio', { name: 'Off' }).focus();
     await user.keyboard('{ArrowRight}');
     expect(player.getSnapshot().countInBars).toBe(1);
-    expect(chosen(countIn())).toBe('1 bar');
+    expect(chosenCountIn()).toBe('1 bar');
   });
 
   it('the choice made in the bar is what the next Play counts', async () => {
@@ -570,7 +564,7 @@ describe('PlayerControls count-in', () => {
     await user.click(playButton());
     act(() => engine.fire('stateChanged', { playing: false }));
 
-    await choose(user, countIn(), '2 bars');
+    await chooseIn(user, countInGroup(), '2 bars');
     await user.click(playButton());
     expect(player.getSnapshot().status).toBe('countingIn');
     // Two bars of 4/4: eight clicks, two of them accented.
@@ -592,8 +586,8 @@ describe('PlayerControls count-in', () => {
     expect(player.getSnapshot().status).toBe('countingIn');
     const restartsBefore = engine.restartCalls();
 
-    await choose(user, countInMode() as HTMLElement, 'Every repeat');
-    await choose(user, countIn(), '1 bar');
+    await chooseIn(user, countInModeGroup(), 'Every repeat');
+    await chooseIn(user, countInGroup(), '1 bar');
 
     expect(player.getSnapshot().status).toBe('countingIn');
     expect(playButton()).toHaveTextContent('Pause');
@@ -619,8 +613,8 @@ describe('PlayerControls count-in', () => {
 
   it('both groups have an accessible name, the first from the words beside it', () => {
     setup({ options: { ...DEFAULT_PLAYER_OPTIONS, countInBars: 1 } });
-    expect(countIn()).toHaveAccessibleName('Count-in');
-    expect(countInMode()).toHaveAccessibleName('When to count in');
+    expect(countInGroup()).toHaveAccessibleName('Count-in');
+    expect(countInModeGroup()).toHaveAccessibleName('When to count in');
   });
 
   it('shows Pause during a count-in, and Pause calls it off', async () => {

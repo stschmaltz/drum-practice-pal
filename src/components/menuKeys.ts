@@ -14,7 +14,10 @@ export type MenuKeyResult =
   | { kind: 'close' };
 
 /** On the closed menu's button: the arrows open it on the first or the last item. */
-export function menuButtonKey(key: string, count: number): MenuKeyResult | null {
+export function menuButtonKey(
+  key: string,
+  count: number,
+): Extract<MenuKeyResult, { kind: 'focus' }> | null {
   if (count === 0) return null;
   if (key === 'ArrowDown') return { kind: 'focus', index: 0 };
   if (key === 'ArrowUp') return { kind: 'focus', index: count - 1 };

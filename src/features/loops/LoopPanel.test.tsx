@@ -1,3 +1,4 @@
+import { stubWindow } from '@/test/mediaQueries';
 import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -145,13 +146,8 @@ async function rename(view: View, name: string) {
   await view.user.type(field, name);
 }
 
-/** A window this many px wide, as the browser would answer any `(min-width: Npx)` query. */
-const atWidth = (width: number) =>
-  vi.stubGlobal('matchMedia', (query: string) => {
-    const min = /^\(min-width: (\d+)px\)$/.exec(query)?.[1];
-    if (min === undefined) throw new Error(`Unexpected media query ${query}`);
-    return { matches: width >= Number(min) };
-  });
+/** A window this many px wide, at the browser's default font size. */
+const atWidth = (width: number) => stubWindow({ width });
 const PHONE = 390;
 const TABLET_PORTRAIT = 820;
 const TABLET_LANDSCAPE = 1180;
@@ -1393,6 +1389,22 @@ describe('LoopPanel keeping focus', () => {
     await waitFor(() =>
       expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toHaveFocus(),
     );
+  });
+
+  // 12 Review (after UX pass): the prompt goes with its "Not yet", which took focus to <body>.
+  it('the prompt’s Not yet hands focus to the loop’s speed, just above where the prompt was', async () => {
+    const view = renderPanel({ loops: [intro, atTarget] });
+    await view.press('Play loop Late');
+    view.enginePlays();
+
+    const prompt = within(view.panel.getByRole('group', { name: 'Mark finished?' }));
+    await view.user.click(prompt.getByRole('button', { name: 'Not yet' }));
+
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(view.panel.getByRole('group', { name: 'Loop speed' })).toHaveFocus(),
+    );
+    expect(view.player.getSnapshot().status).toBe('playing');
   });
 
   // Held: the loop's new button is rendered while its write is still pending, as on a real network.

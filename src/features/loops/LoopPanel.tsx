@@ -36,6 +36,7 @@ import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
   editButtonAttributes,
   findFormOpener,
+  findLoopSpeed,
   findStatusButton,
   NEW_LOOP_BUTTON_ATTRIBUTES,
   type LoopFormOpener,
@@ -49,6 +50,7 @@ import {
 } from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';
 import { speedLabel } from './loopLabels';
+import { editorOnPanel } from './loopPanelContent';
 import { LoopSpeedControl } from './LoopSpeedControl';
 import { LoopStatusButton } from './LoopStatusButton';
 import { loopPanelIsSheet, playLoopClosesPanel } from './useLoopPanelOpen';
@@ -175,9 +177,7 @@ function LoopPanelBody({
   loops,
   onPlayLoop,
 }: LoopPanelBodyProps) {
-  const { editor, editedLoop, activeLoop } = practice;
-  // Loops need the score: its bar count checks a range, and a loop can't play before it.
-  const { barCount } = snapshot;
+  const { editedLoop, activeLoop } = practice;
   // "Not yet" to "Mark finished?", for the loop at the speed it was asked about:
   // saving a faster speed asks again. Here, not in the card, which the form replaces.
   const [declinedFinish, setDeclinedFinish] = useState<string | null>(null);
@@ -213,7 +213,10 @@ function LoopPanelBody({
     });
   };
 
-  if (editor && barCount !== null) {
+  // Loops need the score: its bar count checks a range, and a loop can't play before it.
+  const form = editorOnPanel(practice, snapshot);
+  if (form) {
+    const { editor, barCount } = form;
     if (editor.loopId !== null && !editedLoop) {
       return <DeletedLoopNotice onBack={closeForm} />;
     }
@@ -505,13 +508,19 @@ function LoopListItem({
     active.onExit();
     focusWhenReady(() => findItemControl(loop.id, 'play'));
   };
+  // "Not yet" goes with its prompt; the loop's speed control, just above it, takes focus.
+  const declineFinish = () => {
+    if (!active) return;
+    active.onDeclineFinish();
+    focusWhenReady(findLoopSpeed);
+  };
   const [showingHistory, setShowingHistory] = useState(false);
   const named = <span className="sr-only"> {loop.name}</span>;
 
   return (
     <li
-      className={`flex flex-col gap-3 rounded-card border p-3 ${
-        active ? activeCardClass : 'border-line bg-canvas'
+      className={`flex flex-col gap-3 p-3 ${
+        active ? activeCardClass : 'rounded-card border border-line bg-canvas'
       }`}
       {...itemAttributes(loop.id)}
       data-testid={active ? 'active-loop' : undefined}
@@ -541,7 +550,7 @@ function LoopListItem({
             <FinishPrompt
               songId={songId}
               loop={loop}
-              onDecline={active.onDeclineFinish}
+              onDecline={declineFinish}
               onFinished={active.onFinished}
             />
           )}

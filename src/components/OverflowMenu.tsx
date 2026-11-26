@@ -52,8 +52,10 @@ export function OverflowMenu({
   buttonAttributes?: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
-  // The item to focus once the menu is drawn; null leaves focus alone.
-  const [focusIndex, setFocusIndex] = useState<number | null>(null);
+  // The item to focus once the menu is drawn, at opening only. Moves inside the open menu focus
+  // the item directly: a click focuses an item too, so a copy of "the focused item" kept here
+  // goes stale, and setting it to the value it still holds would focus nothing.
+  const [openingFocus, setOpeningFocus] = useState<number | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLUListElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -61,18 +63,18 @@ export function OverflowMenu({
 
   const openAt = (index: number) => {
     setOpen(true);
-    setFocusIndex(index);
+    setOpeningFocus(index);
   };
   const close = (returnFocus: boolean) => {
     setOpen(false);
-    setFocusIndex(null);
+    setOpeningFocus(null);
     if (returnFocus) buttonRef.current?.focus();
   };
 
   useLayoutEffect(() => {
-    if (!open || focusIndex === null) return;
-    itemRefs.current[focusIndex]?.focus();
-  }, [open, focusIndex]);
+    if (!open || openingFocus === null) return;
+    itemRefs.current[openingFocus]?.focus();
+  }, [open, openingFocus]);
 
   useEffect(() => {
     if (!open) return;
@@ -84,7 +86,7 @@ export function OverflowMenu({
       const target = event.target as Node | null;
       if (menuRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
       setOpen(false);
-      setFocusIndex(null);
+      setOpeningFocus(null);
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
@@ -92,7 +94,7 @@ export function OverflowMenu({
 
   const onButtonKeyDown = (event: KeyboardEvent) => {
     const result = menuButtonKey(event.key, items.length);
-    if (!result || result.kind !== 'focus') return;
+    if (!result) return;
     // Taken: the song page's arrow-key shortcuts skip a press something has handled.
     event.preventDefault();
     openAt(result.index);
@@ -104,7 +106,7 @@ export function OverflowMenu({
     if (!result) return;
     event.preventDefault();
     if (result.kind === 'close') close(true);
-    else setFocusIndex(result.index);
+    else itemRefs.current[result.index]?.focus();
   };
 
   return (
