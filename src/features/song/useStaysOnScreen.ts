@@ -26,11 +26,9 @@ import { keepInPlace, roomAfterResize } from './keepInPlace';
  * the new layout's controls are another height, and the room could push the
  * score, and the beat cursor with it, off a shorter window.
  *
- * The browser's own scroll anchoring is off on the page while this is
- * mounted. Chrome's runs after the layout effect, as the frame is drawn, so
- * at a Pause it scrolled up by the room just taken away and the score moved
- * by as much (with a count-in on, where it picked another anchor); Safari has
- * none. With it off, this is the one owner of the window's scroll at a fold.
+ * The browser's own scroll anchoring is off while this is mounted
+ * (`useScrollAnchoringOff`), so this is the one owner of the window's scroll
+ * at a fold.
  */
 export function useStaysOnScreen(
   ref: RefObject<HTMLElement | null>,
@@ -40,22 +38,16 @@ export function useStaysOnScreen(
   const reserve = useRef(0);
   const lastFolded = useRef(folded);
   const width = useRef<number | null>(null);
-  // Where the score is on screen before this render's change reaches the page. Read during
-  // render on purpose: by the layout effect the page has changed, and nothing else runs between
-  // the two. A render that is thrown away leaves a value the next render reads again.
+  // Read during render on purpose (see above): by the layout effect the page has changed. A
+  // render that is thrown away leaves a value the next render reads again.
   const before = useRef<number | null>(null);
   if (lastFolded.current !== folded) {
     before.current = ref.current ? ref.current.getBoundingClientRect().top : null;
   }
 
-  useEffect(() => {
-    const root = document.documentElement;
-    const body = document.body;
-    const rootAnchor = root.style.overflowAnchor;
-    const bodyAnchor = body.style.overflowAnchor;
-    root.style.overflowAnchor = 'none';
-    body.style.overflowAnchor = 'none';
+  useScrollAnchoringOff();
 
+  useEffect(() => {
     const onResize = () => {
       const widthAfter = window.innerWidth;
       const room = roomAfterResize({
@@ -68,11 +60,7 @@ export function useStaysOnScreen(
     };
     width.current = window.innerWidth;
     window.addEventListener('resize', onResize);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      root.style.overflowAnchor = rootAnchor;
-      body.style.overflowAnchor = bodyAnchor;
-    };
+    return () => window.removeEventListener('resize', onResize);
   }, [roomRef]);
 
   useLayoutEffect(() => {
@@ -98,4 +86,26 @@ export function useStaysOnScreen(
 function holdRoom(reserve: RefObject<number>, element: HTMLElement | null, px: number): void {
   reserve.current = px;
   if (element) element.style.marginBottom = px > 0 ? `${px}px` : '';
+}
+
+/**
+ * Turns the browser's scroll anchoring off on the page while mounted, for a
+ * hook that scrolls the window itself to keep something still. Chrome's
+ * anchoring runs after the layout effect, as the frame is drawn, so at a
+ * Pause it scrolled up by the room just taken away and the score moved by as
+ * much (with a count-in on, where it picked another anchor); Safari has none.
+ */
+function useScrollAnchoringOff(): void {
+  useEffect(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    const rootAnchor = root.style.overflowAnchor;
+    const bodyAnchor = body.style.overflowAnchor;
+    root.style.overflowAnchor = 'none';
+    body.style.overflowAnchor = 'none';
+    return () => {
+      root.style.overflowAnchor = rootAnchor;
+      body.style.overflowAnchor = bodyAnchor;
+    };
+  }, []);
 }

@@ -97,6 +97,7 @@ export function PlayerControls({
 }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist.
   const optionsDisabled = !canChangeOptions(player);
+  const playDisabled = !canPlay(player, snapshot);
   const drumTogglesDisabled = !canUseDrumToggles(player, snapshot);
   const noDrumsReason = snapshot.hasDrumTrack ? undefined : 'This song has no drum track';
   const folded = fold?.folded ?? false;
@@ -126,7 +127,7 @@ export function PlayerControls({
           <button
             type="button"
             className={toolButtonClass(false)}
-            disabled={!canPlay(player, snapshot)}
+            disabled={playDisabled}
             onClick={() => player?.stop()}
           >
             <Icon name="backToStart" />

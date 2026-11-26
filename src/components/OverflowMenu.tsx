@@ -92,7 +92,7 @@ export function OverflowMenu({
 
   const onButtonKeyDown = (event: KeyboardEvent) => {
     const result = menuButtonKey(event.key, items.length);
-    if (!result || result.kind !== 'focus') return;
+    if (!result) return;
     // Taken: the song page's arrow-key shortcuts skip a press something has handled.
     event.preventDefault();
     openAt(result.index);

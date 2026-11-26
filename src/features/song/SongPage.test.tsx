@@ -45,7 +45,7 @@ async function showControls(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Show controls' }));
 }
 
-/** A loop's Edit, History or Delete, which live in its "More" menu. */
+/** A loop's Edit or Delete, which live in its "More" menu with History. */
 async function chooseFromMenu(
   user: ReturnType<typeof userEvent.setup>,
   panel: ReturnType<typeof within>,

@@ -509,8 +509,8 @@ function LoopListItem({
 
   return (
     <li
-      className={`flex flex-col gap-3 rounded-card border p-3 ${
-        active ? activeCardClass : 'border-line bg-canvas'
+      className={`flex flex-col gap-3 p-3 ${
+        active ? activeCardClass : 'rounded-card border border-line bg-canvas'
       }`}
       {...itemAttributes(loop.id)}
       data-testid={active ? 'active-loop' : undefined}

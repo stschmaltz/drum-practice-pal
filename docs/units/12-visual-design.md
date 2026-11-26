@@ -936,3 +936,29 @@ Shots are `docs/units/12-shots/qa5-*.png`:
 
 - `npm run check`: 110 files, 4292 tests green (unchanged; QA changed no app code).
 - `npm run e2e`: 441 passed, 39 skipped, 0 failed (480 listed, unchanged), against a fresh `npm run build -- --mode development` from bash, served by the `vite preview` QA started on 4173. The temporary specs were deleted first.
+
+## Readability (after UX pass)
+
+No behaviour or visual change, over `git diff ee74bc4..HEAD` (the tablet loop sheet, the narrower gutter, the UX pass and three QA fix rounds). The built stylesheet is byte-identical before and after (`index-CIrHFcZC.css`, same md5).
+
+### Changes
+
+- **`useStaysOnScreen.ts`**: turning the browser's scroll anchoring off is its own hook, `useScrollAnchoringOff()` in the same file, with the why (Chrome's anchoring runs after the layout effect) on it. The resize effect now only listens for `resize`. The hook's doc comment points to it rather than repeating it, and the render-time read's inline comment no longer restates the doc comment. The QA fix round 3 rewrite had already removed the `scroll` listener; nothing of that path was left.
+- **`menuKeys.ts` / `OverflowMenu.tsx`**: `menuButtonKey` returns only what it can return, `{ kind: 'focus' } | null`, so the button's handler loses its `result.kind !== 'focus'` check.
+- **`styles.ts`**: `selectClass` removed. Nothing has used it since the count-in became two `SegmentedControl`s (UX pass). It is gone from AGENTS.md's list too.
+- **`SongPage.tsx`**: the jam bar and the folded controls' slot shared their full-bleed sticky-bar classes (`z-10`, the gutter's negative margin and padding, the bottom border, the canvas). They now use one local constant, `fullBleedBarClass`. Each element still gets the same set of classes.
+- **`PlayerControls.tsx`**: `canPlay(player, snapshot)` is worked out once as `playDisabled`.
+- **`LoopPanel.tsx`**: the loop item's class no longer writes out `rounded-card border` next to `activeCardClass`, which already holds them. The idle look keeps them.
+- **Test helpers**: `PlayerControls.test.tsx`'s count-in block had its own copies of `src/test/countInControls.ts` (the group locators, `chosen`, `choose`). It now uses `countInGroup`, `countInModeGroup`, `chosenCountIn`, `chosenCountInMode` and `chooseIn`, which the helper's doc already said both test files share. `chooseIn` takes the mode group as it is, so the `as HTMLElement` casts are gone. In `SongPage.test.tsx`, `chooseFromMenu`'s comment named History, which its type doesn't take.
+
+### Left alone
+
+- `keepInPlace.ts`, `useControlsFold.ts` and `SegmentedControl.tsx` read clearly as they are. Their long comments are the why of rules that QA fixed, and are worth keeping.
+- `useStaysOnScreen.test.tsx`'s page model still has `userScrolls` (which fires `scroll`) next to `scrollsSilently`. The hook ignores both events now, but the pair still says what each case is about: a scroll the page has heard of, and one it hasn't yet.
+- The `OverflowMenu`'s outside-press handler sets its state by hand rather than calling `close(false)`. `close` is a render-scope function, so using it from the effect would mean adding it to the effect's deps.
+- e2e duplicates that predate this range (`focusNothing` in `design.spec.ts` and `shortcuts.spec.ts`, the `jam-speed` locator in four specs).
+
+### Results
+
+- Before: `npm run check` gave 110 files, 4292 tests green. `npm run e2e` on a fresh `npm run build -- --mode development` of HEAD gave 441 passed, 39 skipped, 0 failed.
+- After: `npm run check` gave 110 files, 4292 tests green. `npm run e2e` on a rebuilt `dist` gave 441 passed, 39 skipped, 0 failed (480 listed, unchanged). The rebuilt stylesheet has the same name and md5 as the one built from HEAD.

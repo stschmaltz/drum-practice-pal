@@ -94,8 +94,6 @@ export const segmentTrackClass = 'flex gap-1 rounded-control border border-line 
 
 export const inputClass = `min-h-touch rounded-control border border-field-line bg-canvas px-3 py-2 text-base text-ink placeholder:text-ink-muted ${focusRing}`;
 
-export const selectClass = `${inputClass} py-1 disabled:cursor-not-allowed disabled:opacity-50`;
-
 /**
  * A list of cards (the home page's loops, the library's songs): one column,
  * then two from 1024 px and three from 1280 px. Text pages (Settings) keep

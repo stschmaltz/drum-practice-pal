@@ -248,9 +248,7 @@ function SongPlayer({
         // No style prop: useStaysOnScreen writes the room it holds as this element's bottom margin.
         data-testid="controls-slot"
         className={
-          fold.folded
-            ? 'sticky top-(--jam-bar-height) z-10 -mx-4 -mt-3 border-b border-line bg-canvas px-4 md:-mx-gutter md:px-gutter'
-            : undefined
+          fold.folded ? `sticky top-(--jam-bar-height) -mt-3 ${fullBleedBarClass}` : undefined
         }
       >
         <PlayerControls
@@ -456,10 +454,14 @@ function SessionNotice({
   );
 }
 
+/** A bar that sticks at the top of the window, full-bleed over the page gutter. */
+const fullBleedBarClass =
+  'z-10 -mx-4 border-b border-line bg-canvas px-4 md:-mx-gutter md:px-gutter';
+
 /**
  * The readout and Play/Pause, sticky at the top of the window so both stay on
  * screen when Play scrolls the page to the score: on a phone the header,
- * controls and score don't all fit. Full-bleed over the page gutter.
+ * controls and score don't all fit.
  */
 function JamBar({
   ref,
@@ -477,7 +479,7 @@ function JamBar({
     <div
       ref={ref}
       data-testid="jam-bar"
-      className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-canvas px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:-mx-gutter md:px-gutter"
+      className={`sticky top-0 ${fullBleedBarClass} flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]`}
     >
       <JamReadout speedRatio={snapshot.speedRatio} tempo={tempo} />
       <PlayPauseButton player={player} snapshot={snapshot} />
