@@ -768,6 +768,29 @@ describe('SongPage jam mode', () => {
       act(() => engine.fire('stateChanged', { playing: true }));
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
     });
+
+    // 12 QA after QA fix round 2, issue 1: Hide controls is pressed after scrolling up to it,
+    // and in phone landscape the score kept still there was below the window.
+    it('Hide controls brings the score back on screen; Show controls leaves the page alone', async () => {
+      serve();
+      const user = renderSong(SONG_A);
+      const engine = await loadPlayer();
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+
+      await user.click(screen.getByRole('button', { name: 'Show controls' }));
+      await screen.findByRole('button', { name: 'Hide controls' });
+      await settle();
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+      await user.click(screen.getByRole('button', { name: 'Hide controls' }));
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
+      expect(scrollIntoView.mock.contexts[1]).toBe(screen.getByTestId('score-viewport'));
+      expect(scrollIntoView).toHaveBeenLastCalledWith(
+        expect.objectContaining({ block: 'nearest' }),
+      );
+    });
   });
 });
 

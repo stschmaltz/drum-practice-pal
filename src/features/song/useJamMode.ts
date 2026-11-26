@@ -15,8 +15,9 @@ interface JamModeRefs {
 }
 
 /**
- * When the score box is brought into the window. `playing`: as close as it
- * needs to move to be fully visible. `picking-bars`: its top right under the
+ * When the score box is brought into the window. `playing`: whenever the
+ * controls fold away while playback runs (its start, and Hide controls), as
+ * close as it needs to move to be fully visible. `picking-bars`: its top right under the
  * sticky bar, because below 1024 px the loop sheet covers the lower part of the
  * window and the staff is at the top of the box.
  */
@@ -73,7 +74,8 @@ function useScoreOnScreen(
       stickyHeight(stickyControlsRef?.current ?? null);
     box.style.scrollMarginTop = `${Math.ceil(barHeight) + GAP_BELOW_STICKY_BAR_PX}px`;
     // 'nearest' leaves the page alone when the box is already fully visible,
-    // and only once per start, so it never fights the user scrolling the page.
+    // and only when the controls fold (a start, or Hide controls), so it never fights the user
+    // scrolling the page while playing.
     // jsdom has no scrollIntoView.
     box.scrollIntoView?.({
       block: when === 'picking-bars' ? 'start' : 'nearest',

@@ -207,8 +207,10 @@ function SongPlayer({
     { scrollRef, stickyBarRef, stickyControlsRef: controlsRef },
     {
       seekOnTap: !pickingBars,
-      // The count-in counter sits over the score, so the score comes on screen for it too.
-      scoreOnScreen: pickingBars ? 'picking-bars' : isRunning(snapshot.status) ? 'playing' : null,
+      // The count-in counter sits over the score, so the score comes on screen for it too. Keyed on
+      // the fold rather than on running, so Hide controls brings it back as well: the user had
+      // scrolled up to that button, and in phone landscape kept still the score was off the window.
+      scoreOnScreen: pickingBars ? 'picking-bars' : fold.folded ? 'playing' : null,
     },
   );
   // A soundfont failure still leaves readable notation; these leave an empty white box.

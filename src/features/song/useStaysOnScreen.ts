@@ -15,8 +15,13 @@ import { keepInPlace, roomAfterResize } from './keepInPlace';
  * the score never moves at Play or Pause, and a bar tapped just after a Pause
  * is the bar that was under the finger.
  *
- * Where it was is kept from the last render, the last scroll and the last
- * resize, so a scroll the user made since counts as where it was. A resize to
+ * Where it was is read in the render that changes `folded`, before React
+ * changes the page, so it is where the score is on screen at that moment,
+ * whatever scrolled the window since the last render. Not from `scroll`
+ * events: they reach the page a frame after the scroll, so a press in the
+ * same frame as a scroll (a tap on Hide controls that the browser first
+ * scrolled into view) found the score where it was before that scroll, and
+ * the hook put it back there, off a phone's window in landscape. A resize to
  * a new width while folded (a rotation) drops the room (`roomAfterResize`):
  * the new layout's controls are another height, and the room could push the
  * score, and the beat cursor with it, off a shorter window.
@@ -33,9 +38,15 @@ export function useStaysOnScreen(
   folded: boolean,
 ): void {
   const reserve = useRef(0);
-  const lastTop = useRef<number | null>(null);
   const lastFolded = useRef(folded);
   const width = useRef<number | null>(null);
+  // Where the score is on screen before this render's change reaches the page. Read during
+  // render on purpose: by the layout effect the page has changed, and nothing else runs between
+  // the two. A render that is thrown away leaves a value the next render reads again.
+  const before = useRef<number | null>(null);
+  if (lastFolded.current !== folded) {
+    before.current = ref.current ? ref.current.getBoundingClientRect().top : null;
+  }
 
   useEffect(() => {
     const root = document.documentElement;
@@ -45,9 +56,6 @@ export function useStaysOnScreen(
     root.style.overflowAnchor = 'none';
     body.style.overflowAnchor = 'none';
 
-    const measure = () => {
-      lastTop.current = ref.current ? ref.current.getBoundingClientRect().top : null;
-    };
     const onResize = () => {
       const widthAfter = window.innerWidth;
       const room = roomAfterResize({
@@ -57,25 +65,23 @@ export function useStaysOnScreen(
       });
       width.current = widthAfter;
       if (room !== reserve.current) holdRoom(reserve, roomRef.current, room);
-      measure();
     };
     width.current = window.innerWidth;
-    window.addEventListener('scroll', measure, { passive: true });
     window.addEventListener('resize', onResize);
     return () => {
-      window.removeEventListener('scroll', measure);
       window.removeEventListener('resize', onResize);
       root.style.overflowAnchor = rootAnchor;
       body.style.overflowAnchor = bodyAnchor;
     };
-  }, [ref, roomRef]);
+  }, [roomRef]);
 
   useLayoutEffect(() => {
     const element = ref.current;
-    const before = lastTop.current;
-    if (element && lastFolded.current !== folded && before !== null) {
+    if (element && lastFolded.current !== folded && before.current !== null) {
+      // Both read after the change, so a scroll the browser clamped as the page got shorter is
+      // in each: the shift is how far the score really moved, from where the window really is.
       const next = keepInPlace({
-        shift: element.getBoundingClientRect().top - before,
+        shift: element.getBoundingClientRect().top - before.current,
         scrollY: window.scrollY,
         reserve: reserve.current,
         folded,
@@ -84,7 +90,7 @@ export function useStaysOnScreen(
       if (next.scrollBy !== 0) window.scrollBy({ top: next.scrollBy, behavior: 'instant' });
     }
     lastFolded.current = folded;
-    lastTop.current = element ? element.getBoundingClientRect().top : null;
+    before.current = null;
   });
 }
 

@@ -4,6 +4,7 @@ import { expect, test } from './auth';
 import {
   barCursorBox,
   barNumber,
+  beatCursorOnScreen,
   boxOf,
   chooseCountIn,
   expectedLayout,
@@ -17,6 +18,7 @@ import {
   tapAndWaitForBar,
   untilStill,
   viewport,
+  visibleBottom,
   windowScrollSettled,
   type Box,
   type Point,
@@ -72,35 +74,6 @@ async function staffLineAt(page: Page, y: number): Promise<number> {
     if (!line) throw new Error(`No line of music at y = ${at}`);
     return line.top + line.height * 0.3;
   }, y);
-}
-
-/** The bottom of the visible window: the top of the phone's fixed tab bar, or the window's bottom. */
-async function visibleBottom(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const tabBar = Array.from(document.querySelectorAll('nav[aria-label="Main"]'))
-      .filter((nav) => getComputedStyle(nav).position === 'fixed')
-      .map((nav) => nav.getBoundingClientRect())
-      .find((rect) => rect.height > 0);
-    return tabBar?.top ?? window.innerHeight;
-  });
-}
-
-/** Whether the beat cursor is on screen: inside the score box and the visible window. */
-async function beatCursorOnScreen(page: Page): Promise<boolean> {
-  return viewport(page).evaluate(
-    (box, windowBottom) => {
-      const cursor = box.querySelector('.at-cursor-beat')?.getBoundingClientRect();
-      if (!cursor || cursor.height === 0) return false;
-      const frame = box.getBoundingClientRect();
-      const top = Math.max(frame.top, 0);
-      const bottom = Math.min(frame.bottom, windowBottom);
-      const left = Math.max(frame.left, 0);
-      const right = Math.min(frame.right, window.innerWidth);
-      const midY = cursor.top + cursor.height / 2;
-      return cursor.left >= left && cursor.right <= right && midY >= top && midY <= bottom;
-    },
-    await visibleBottom(page),
-  );
 }
 
 /** Whether the element is wholly inside the visible window. */

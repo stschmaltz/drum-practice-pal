@@ -5,6 +5,7 @@ import { expect, signIn, test } from './auth';
 import { closeLoopPanel, openLoopPanel, playLoopButton, saveNewLoop } from './loopsPage';
 import {
   barNumber,
+  beatCursorOnScreen,
   boxOf,
   chooseCountIn,
   controls,
@@ -441,28 +442,45 @@ test('on a short page with a count-in on, Pause leaves the score where it is, co
 // 12 QA after the QA fix round, issue 3: the bar unfolded while playing (Show controls) is
 // taller than when paused, so on a phone the room held at Hide controls was more than the
 // paused bar took back, and the difference stayed under the paused controls.
-test('Show controls, Hide controls and Pause leave no room under the controls', async ({
-  user,
-  page,
-}) => {
-  await openFixture(page, user, 'groove-120', 'Groove 120');
-  await closeLoopPanel(page);
-  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
-  await windowScrollSettled(page);
-  const slot = page.getByTestId('controls-slot');
+// 12 QA after QA fix round 2, issue 1: in phone landscape the window sits near the page's end
+// after Show controls, so Hide controls is above the window and a press on it is preceded by a
+// scroll to it. Its scroll event reaches the page a frame later, after the press, so the score
+// was put back where it was before that scroll: off the window, and the beat cursor with it.
+for (const size of [null, { name: 'landscape phone', width: 844, height: 390 }]) {
+  test(`Show controls, Hide controls and Pause leave no room under the controls, and the beat cursor on screen${size ? ` (${size.name})` : ''}`, async ({
+    user,
+    page,
+  }, testInfo) => {
+    test.skip(size !== null && testInfo.project.name !== 'phone', 'phone project only');
+    if (size) await page.setViewportSize({ width: size.width, height: size.height });
+    await openFixture(page, user, 'groove-120', 'Groove 120');
+    await closeLoopPanel(page);
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    await windowScrollSettled(page);
+    const slot = page.getByTestId('controls-slot');
 
-  for (let run = 0; run < 2; run++) {
-    await playButton(page).click();
-    await expect(playButton(page)).toHaveText('Pause');
-    await showControls(page);
-    await controls(page).getByRole('button', { name: 'Hide controls' }).click();
-    await expect(controls(page).getByRole('button', { name: 'Show controls' })).toBeVisible();
-    await playButton(page).click();
-    await expect(playButton(page)).toHaveText('Play');
-    await expect(muteDrumsButton(page)).toBeVisible();
-    await expect(slot, `run ${run}`).toHaveCSS('margin-bottom', '0px');
-  }
-});
+    for (let run = 0; run < 2; run++) {
+      await playButton(page).click();
+      await expect(playButton(page)).toHaveText('Pause');
+      await windowScrollSettled(page);
+      await showControls(page);
+      await windowScrollSettled(page);
+      // A plain click: Playwright scrolls the button into view and presses it in one go.
+      await controls(page).getByRole('button', { name: 'Hide controls' }).click();
+      await expect(controls(page).getByRole('button', { name: 'Show controls' })).toBeVisible();
+      await windowScrollSettled(page);
+      await expect
+        .poll(() => beatCursorOnScreen(page), { message: `run ${run}: beat cursor after Hide` })
+        .toBe(true);
+      await playButton(page).click();
+      await expect(playButton(page)).toHaveText('Play');
+      await expect(muteDrumsButton(page)).toBeVisible();
+      await expect(slot, `run ${run}`).toHaveCSS('margin-bottom', '0px');
+      await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+      await windowScrollSettled(page);
+    }
+  });
+}
 
 // 12 UX pass, Test: the fold changes the bar's height above the score; the score itself must
 // not move on screen, or a bar tapped just after Pause is not the bar that was under the finger.

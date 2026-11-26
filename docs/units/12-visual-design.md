@@ -805,3 +805,54 @@ Shots are `docs/units/12-shots/qa4-*.png`. Sizes are `phone`, `phone320`, `phone
 
 - `npm run check`: 110 files, 4277 tests green (unchanged; QA changed no app code).
 - `npm run e2e`: 428 passed, 28 skipped, 0 failed (456 listed), on a fresh `npm run build -- --mode development` from bash; the `vite preview` on 4173 was reused and left running.
+
+## QA fix round 3 (after UX pass)
+
+Build fix for QA (after QA fix round 2) issue 1 (major), with tests seen to fail first: the e2e against a build of 72cd369, the unit and component cases against the code before the fix.
+
+### Cause (from a trace)
+
+An init script logged every `scroll` event, every `scrollBy` / `scrollTo` / `scrollIntoView` / `focus` call, pointer events and each frame's `scrollY` and score top at 844 x 390. After Show controls the window is at 387 and the score at 124, so Hide controls (in the full, unsticky controls) is above the window. Playwright's click first scrolls the button into view (387 to 382, 36, then 209) and presses it in the same frame. The scroll events for the last of those scrolls hadn't reached the page yet: a browser sends them with the next frame. `useStaysOnScreen` took "where the score was" from its `scroll` listener, so it still had 475 (the score at scroll 36), and it put the score back there: a 196 px scroll up to the top and 191 px of room. The score ended at 475 in a 390 px window.
+
+QA's guess, the browser clamping `scrollY` as the fold shortens the page, does happen (209 to 196 at the layout effect, the new end of the page), but it isn't the cause: the shift and the scroll are both read after the change, so the clamp is in each and cancels out. A unit case now pins that.
+
+A user meets the same thing whenever a press lands in the same frame as a scroll, such as a tap that stops a fling. The main cost was elsewhere, though. Even with the position read correctly, keeping the score where it was at the press (302 px down at 844 x 390, 266 at 667 x 375, 259 at 740 x 360) left the beat cursor below the window at every landscape size but 915 x 412. The user scrolled up to reach Hide controls, so keeping the score still there keeps it off screen.
+
+### Summary
+
+1. **Where the score was is read during the render that changes the fold** (`useStaysOnScreen`). React hasn't touched the page yet at that point, so the read is fresh whatever scrolled the window since. The `scroll` listener and the re-measure on resize are gone. The layout effect then measures the score after the change and works the room out as before (`keepInPlace` is unchanged).
+2. **Hide controls brings the score on screen**, as the start of a run does. The song page's `scoreOnScreen` is now keyed on `fold.folded` rather than on running, so `useScoreOnScreen`'s "nearest" scroll runs whenever the controls fold away while playing. Show controls scrolls nothing (`scoreOnScreen` goes to null), so the controls the user asked for stay on screen. At 844 x 390 the score now goes 124 → 124 (Show) → 124 (Hide) → 124 (Pause), with the beat cursor on screen throughout. The same holds at 667 x 375, 740 x 360, 915 x 412 and 640 x 320. Portrait phone, 320 x 640, tablet portrait and landscape keep their earlier numbers.
+
+### Files
+
+- `src/features/song/useStaysOnScreen.ts`: the render-time read (`before`), no scroll listener.
+- `src/features/song/SongPage.tsx`: `scoreOnScreen` keyed on the fold. `src/features/song/useJamMode.ts`: comments only.
+- `src/features/song/useStaysOnScreen.test.tsx`: the page model now changes the fold and the notice as React commits (a `Draw` child's layout effect, before the hook's), not before the render, so a render-time read sees the page as it was. `scrollsSilently` is a scroll whose event hasn't come yet. New cases: "a fold in the same frame as a scroll (no scroll event yet)…", plain and StrictMode, which failed on the old code with the score at 200 rather than 456; and "a fold near the end of the page, where the shorter page pulls the scroll back…", the clamp, which passes before and after. The listener test now counts one window listener.
+- `src/features/song/SongPage.test.tsx`: "Hide controls brings the score back on screen; Show controls leaves the page alone". It failed with `scoreOnScreen` keyed on running.
+- `tests/e2e/player.spec.ts`: "Show controls, Hide controls and Pause leave no room under the controls, and the beat cursor on screen" runs at the project's size on all three projects, and at 844 x 390 on the phone project. It now asserts the beat cursor is on screen after Hide on each run. Against the old build the landscape case failed ("run 0: beat cursor after Hide"); the other three passed.
+- `tests/e2e/playerPage.ts`: `visibleBottom` and `beatCursorOnScreen` moved here from `jam.spec.ts`, which imports them.
+- `AGENTS.md` (the fold bullet).
+
+### Decisions
+
+- **Read during render, not in an event or a capture listener.** Folds come from Play, Pause, the end of the song (player events) and Show / Hide controls. The render is the one place all of them pass before the DOM changes. A thrown-away render leaves a value that the next render reads again. The fold is never a transition, so render and commit run back to back.
+- **Bring the score back at Hide controls rather than only keep it still.** The fold keeps the score still so that a tap just after Play or Pause lands on the bar under the finger. Hide controls is pressed once the user has scrolled up, and what they want is the score. "Nearest" does nothing when the box is already fully on show.
+
+### Async windows and inputs
+
+No new async window. The scroll into view at Hide controls is the same smooth scroll as at Play, started from an effect after the layout effect. A user scroll during it wins, as at Play. Pause during it: the unfold's layout effect measures where the score is at that render, so it keeps the score where the smooth scroll had got to.
+
+### Known gaps
+
+- The 320 px phone turned to landscape a second time while playing (Unit 13's Carried forward line, from the last QA's issue 2) is not fixed by this: nothing brings the score back after a width change while running. That line stays.
+- Chromium only. The trace explains Chrome's behaviour; Safari sends scroll events with the frame too, so the same race should apply there.
+
+### Manual verify
+
+1. Phone in landscape (844 x 390, 667 x 375), `groove-120`, sheet closed, at the top: Play, Show controls, scroll up to Hide controls and press it. The score comes back under the strip with the beat cursor on screen. Pause: no blank band.
+2. The same in portrait and on a tablet: Show controls and Hide controls leave the score where it was, and Pause leaves no room.
+
+### Results
+
+- `npm run check`: 110 files, 4280 tests green (was 110 / 4277).
+- `npm run e2e`: 429 passed, 30 skipped, 0 failed (459 listed, was 456), on a fresh `npm run build -- --mode development` from bash. No `vite preview` was left on 4173 this time (the first run found the port free and Playwright started its own).
