@@ -18,6 +18,7 @@ import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreferenc
 import { characterKeysLabel } from '@/features/shortcuts/shortcuts';
 import { useCharacterKeysOn } from '@/features/shortcuts/useCharacterKeysOn';
 import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_LABELS } from '@/features/player/countInLabels';
+import { MetronomeSampleButton } from '@/features/player/MetronomeSampleButton';
 import { MetronomeVoiceFields } from '@/features/player/MetronomeVoiceFields';
 import { metronomeVoiceFromSettings } from '@/features/player/playerOptions';
 import { COUNT_IN_BAR_OPTIONS, type CountInMode } from '@/lib/schema';
@@ -163,6 +164,7 @@ function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
   const volumePercent = volumeToPercent(values.metronome_volume);
   const voiceError =
     errors.metronome_sound ?? errors.metronome_accent_sound ?? errors.metronome_subdivision;
+  const voice = metronomeVoiceFromSettings(values);
 
   return (
     <fieldset className="flex flex-col gap-3">
@@ -205,11 +207,9 @@ function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
           </span>
         )}
       </div>
-      <MetronomeVoiceFields
-        voice={metronomeVoiceFromSettings(values)}
-        onChange={(voice) => edit(metronomeVoiceSettings(voice))}
-      />
+      <MetronomeVoiceFields voice={voice} onChange={(next) => edit(metronomeVoiceSettings(next))} />
       {voiceError && <p className="text-sm text-danger">{voiceError}</p>}
+      <MetronomeSampleButton voice={voice} volume={values.metronome_volume} />
     </fieldset>
   );
 }
