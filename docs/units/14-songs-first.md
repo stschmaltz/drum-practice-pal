@@ -273,3 +273,57 @@ Main's `docs/plan.md` had taken 14 (Songs with recordings) and 15 (play-along pl
 - `npm run check`: green (typecheck, lint, format, 4,627 passed, 2 skipped).
 - e2e on a fresh build (`E2E_PORT=4199`, this worktree's stack) at phone, tablet and desktop, one run of journey, practice, loops, loop-scroll, player, stats, design, library and shortcuts: 285 passed, 42 skipped, 6 failed. Three were "Session complete comes and goes without moving the score" and one was the desktop drag, both fixed as above; practice and journey at all three sizes and the drag at desktop then passed on rerun. The other two are the known phone count-in cases in loop-scroll ("Play loop with a 1-bar / 2-bar count-in"), which still fail as before the merge.
 - Not run: the full `npm run e2e`, and no second confirming run (the coordinator's instruction).
+
+## Build (Shane's first-try items)
+
+### Walk-through against docs/product.md
+
+- Day one with a song: Songs, the song, a loop's round play opens the practice screen with just its bars; Play is one tap. Someone who wants to find another hard part taps "Show whole song", taps two bars, names it, Save as loop: the new loop is on screen, no backing out. No order is forced: the jam page still has New loop.
+- Missing a piece: a song with one track shows no mixer (nothing to mix); a song with no drum track lists its tracks with none marked as the drums. A loop near the song's start or end draws what bars exist (clamped). A loop whose tempo is unknown keeps the BPM steps and BPM typing off, the percent works.
+- Offline: speed changes queue as before (`useSaveLoopSpeed`); "Save as loop" is online only (off, with its note, and the handler refuses); the drawing and mixer need no connection.
+- No chore added: nothing asks the user to record anything.
+
+### Summary
+
+1. Practice screen focus: the score draws the loop and a bar either side from the first drawing (`initialVisibleBars`), "Show whole song" draws it all, and there taps or drags pick bars for a "Save as loop" sheet (the loop form in a bar layout, fixed at the window's foot so the score doesn't move; client id per form lifetime; online only). Saving opens the new loop on this screen, URL replaced. A tap on a context bar never seeks out of the loop (seekToBar refuses), a drag in the loop view opens nothing.
+2. Speed: a stepper pill (ends ±5%, percent over BPM, each tapped to type, quiet ±1 BPM beside the BPM, a thin progress bar to full speed with its words for screen readers). Typed BPM is stored as the exact ratio; values clamp to the DB bounds; each change saves as made.
+3. Track mixer: "Tracks" disclosure in the controls bar on both player screens, live, no restart; Drums only / Mute drums keep overriding.
+4. Bar count in the loop form ("5 bars", "1 bar", nothing while invalid), in the panel and the Save as loop sheet.
+5. Header redone after Shane's review: one sticky band, stepper on the band's centre from 1024 px (three-column grid), its own centred row below that, one row in `short`; Show whole song and Shortcuts quiet in the band (icons alone below 1024 px); "Bar n of N" in the meta line. Screenshots: `docs/units/14-shots/practice-header-*.png`, `practice-whole-song-*.png`.
+
+### Files
+
+- Engine and service: `playerEngine.ts` (`trackNames`, `setVisibleBars`), `alphaTabEngine.ts` (`redraw`, `redrawing`), `PlayerService.ts` (`TrackMix`, `tracks`, `visibleBars`, `setVisibleBars`, `tracksPatch`), `usePlayer.ts` (`initialVisibleBars`), `speed.ts` (`nudgeSpeedBpm`), `src/test/fakePlayerEngine.ts`.
+- UI: `PlayerControls.tsx` (`TrackMixer`), `PracticeSpeed.tsx` (stepper, `TapToType`), `useTypedValue.ts` (new), `LoopSpeedControl.tsx`, `LoopEditorForm.tsx` (`layout`, bar count), `loopForm.ts` (`barCountLabel`), `useLoopPractice.ts` (`dragOpensForm`), `LoopPracticePage.tsx` (band, `useDrawnBars`, `WholeSongToggle`, `SaveAsLoopSheet`), `practiceView.ts` (new), `playerScreen.tsx` (`fitsScore`, `PlayerStatusText`, compact `ShortcutsButton`), `SongFileGate.tsx` (`header`), `icons.tsx` (`minus`).
+- Tests: `PlayerService.test.ts` (mixer, visible bars), `alphaTabEngine.pointer.test.ts` (drawing only some bars), `usePlayer.test.tsx`, `speed.test.ts`, `practiceView.test.ts`, `loopForm.test.ts`, `LoopEditorForm.test.tsx`, `useLoopPractice.test.tsx`, `PlayerControls.test.tsx`, `LoopPracticePage.test.tsx` (speed exactly, the loop or the whole song); e2e `practice-screen.spec.ts` (new), `drums-only.spec.ts` (mixer). Every direct `scoreLoaded` fire now sends `trackNames`.
+
+### Decisions
+
+- The whole-song view is `practice.editor !== null` rather than its own flag, so the drawing, the taps and the sheet can't disagree; Cancel or a save goes back to the loop. The toggle is locked while the save is pending (unmounting the form would drop its `onSuccess`).
+- The mixer shows each track's own switch, not what Drums only makes of it; it isn't disabled under Drums only (the service remembers such a change), and says why the others are silent.
+- The stepper is about 98 px tall, not 56: the percent and the BPM row are each a 44 px target and stacked. In `short` they sit side by side, one 44 px row.
+- Tablet (820 wide, 556 px beside the sidebar) can't fit name, stepper and Play in three columns, so the stepper takes its own row there, as on a phone.
+
+### Async windows and inputs
+
+- **A drawing asked for (setVisibleBars, setLayout) until alphaTab's postRenderFinished.** `scrollToBar` answers false; a `showBar` meanwhile is kept and done on `rendered`; a `setRange` meanwhile drops it (as before). If alphaTab never finishes that render (it waits while the box is hidden), the scroll waits too.
+- **Save as loop pending.** The fields are read-only, taps and drags pick nothing (`setEditorSaving`), the whole-song toggle is disabled, Space still plays or pauses. Offline before the press: the button is off and the handler refuses. A lost answer: as `LoopEditorForm` already does (23505 on the same id is "already saved").
+- **Typing a value.** Space and the shortcut keys go to the field; a blur commits; Enter or Escape is cancelled so it can't press the value's button that comes back.
+
+### Known gaps
+
+- e2e: `practice.spec.ts` "on a phone on its side the practice bar is one row…" fails at 844 x 390 after the header rework (the band's measured height or a target in it; not looked into, the coordinator stopped e2e). `practice-screen.spec.ts` and the mixer test passed at phone, tablet and desktop; `practice`, `journey` and `design` were otherwise green at desktop and phone before the stepper restyle and the bar count; nothing ran after them.
+- `design.spec.ts` has no audit of the whole-song view or an open mixer yet.
+- A Session complete that comes up while the Save as loop sheet is open lies over it until dismissed.
+- A track name from the file shown in the mixer is not checked for duplicates (two "Guitar" switches read the same).
+
+### Manual verify steps
+
+1. Practice screen of a loop in the middle of a song: only it and a bar either side are drawn. Tap a bar outside it: nothing moves. Show whole song: every bar, the loop on screen; tap two bars, see "n bars", name it, Save as loop: the new loop's screen, Back goes to the song.
+2. Stepper: −5% / +5% ends, −1 / +1 by the BPM, tap the percent or the BPM and type; reload, the speed is kept.
+3. Multi-track song, playing: open Tracks, turn Bass off and on: no stop. Drums only on: the note shows, switches stay as set.
+4. Header at 1440, 820 and 390 wide and 844 x 390.
+
+### Checks
+
+- `npx tsc -b`, eslint, prettier and the touched unit tests green (3,608 in loops, song, player and tests/unit). Full `npm run check` was green before the header rework and the bar count.

@@ -63,7 +63,7 @@ describe('PlayerService loading', () => {
     service.load(bytes);
     engine.fire('scoreLoaded', {
       barCount: 16,
-      trackCount: 3,
+      trackNames: ['Drums', 'Bass', 'Guitar'],
       barTempos: Array<number>(16).fill(120),
       barMeters: Array<Meter>(16).fill(COMMON_TIME),
     });
@@ -624,7 +624,12 @@ describe('PlayerService bar taps', () => {
     service.on('barsDragged', dragged);
     engine.soundFont = Promise.reject(new Error('Failed to fetch'));
     service.load(bytes);
-    engine.fire('scoreLoaded', { barCount: 16, trackCount: 3, barTempos: [], barMeters: [] });
+    engine.fire('scoreLoaded', {
+      barCount: 16,
+      trackNames: ['Drums', 'Bass', 'Guitar'],
+      barTempos: [],
+      barMeters: [],
+    });
     expect(service.getSnapshot().status).toBe('loading');
 
     engine.fire('barTapped', { barIndex: 2 });
@@ -809,5 +814,132 @@ describe('PlayerService drums only', () => {
     service.setDrumsOnly(true);
     expect(engine.setTrackMuted).not.toHaveBeenCalled();
     expect(service.getSnapshot().drumsOnly).toBe(false);
+  });
+});
+
+describe('PlayerService track mixer', () => {
+  const names = ['Guitar', 'Bass', 'Drums', 'Keys'];
+  const mixer = (service: PlayerService) =>
+    service.getSnapshot().tracks.map(({ name, muted, drums }) => ({ name, muted, drums }));
+
+  it('has no tracks until the score loads, then every track by name, all on', () => {
+    const { engine, service } = setup();
+    expect(service.getSnapshot().tracks).toEqual([]);
+    service.load(bytes);
+    engine.finishLoading({ trackNames: names });
+    expect(mixer(service)).toEqual([
+      { name: 'Guitar', muted: false, drums: false },
+      { name: 'Bass', muted: false, drums: false },
+      { name: 'Drums', muted: false, drums: true },
+      { name: 'Keys', muted: false, drums: false },
+    ]);
+    expect(service.getSnapshot().tracks.map((track) => track.index)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('mutes and unmutes one track while playing, live, and shows it', () => {
+    const { engine, service } = playing();
+    service.setTrackMuted(1, true);
+    expect(engine.soundingTracks()).toEqual([0, 2]);
+    expect(service.getSnapshot().tracks[1]?.muted).toBe(true);
+    service.setTrackMuted(1, false);
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
+    expect(service.getSnapshot().tracks[1]?.muted).toBe(false);
+    expect(engine.restartCalls()).toBe(0);
+    expect(service.getSnapshot().status).toBe('playing');
+  });
+
+  it('shows the drum track muted along with Mute drums, either way it was done', () => {
+    const { service } = playing();
+    service.setDrumsMuted(true);
+    expect(service.getSnapshot().tracks[2]?.muted).toBe(true);
+    service.setTrackMuted(2, false);
+    expect(service.getSnapshot()).toMatchObject({ drumsMuted: false });
+    expect(service.getSnapshot().tracks[2]?.muted).toBe(false);
+  });
+
+  it('under Drums only keeps each track as the mixer set it, and brings it back after', () => {
+    const { engine, service } = playing();
+    service.setTrackMuted(0, true);
+    service.setDrumsOnly(true);
+    expect(engine.soundingTracks()).toEqual([2]);
+    // The mixer still shows what the user chose; Drums only silences over it.
+    expect(service.getSnapshot().tracks.map((track) => track.muted)).toEqual([true, false, false]);
+    service.setTrackMuted(1, true);
+    expect(engine.soundingTracks()).toEqual([2]);
+    service.setDrumsOnly(false);
+    expect(engine.soundingTracks()).toEqual([2]);
+    service.setTrackMuted(0, false);
+    service.setTrackMuted(1, false);
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
+    expect(engine.restartCalls()).toBe(0);
+  });
+
+  it('turning Drums only on unmutes the drums in the mixer too', () => {
+    const { service } = playing({ options: { drumsMuted: true } });
+    expect(service.getSnapshot().tracks[2]?.muted).toBe(true);
+    service.setDrumsOnly(true);
+    expect(service.getSnapshot().tracks[2]?.muted).toBe(false);
+  });
+
+  it('marks no track as the drums for a song without one', () => {
+    const { engine, service } = setup({ drumTrackIndex: null });
+    service.load(bytes);
+    engine.finishLoading();
+    expect(service.getSnapshot().tracks.some((track) => track.drums)).toBe(false);
+  });
+
+  it("forgets the old score's track names on a new load", () => {
+    const { engine, service } = setup();
+    service.load(bytes);
+    engine.finishLoading({ trackNames: names });
+    service.load(bytes);
+    expect(service.getSnapshot().tracks).toEqual([]);
+  });
+});
+
+describe('PlayerService visible bars', () => {
+  it('draws the whole score unless asked otherwise', () => {
+    const { engine, service } = setup();
+    service.load(bytes);
+    engine.finishLoading();
+    expect(service.getSnapshot().visibleBars).toBeNull();
+    expect(engine.setVisibleBars).not.toHaveBeenCalled();
+  });
+
+  it('starting bars go to the engine before the score, so the first drawing has them', () => {
+    const { engine, service } = setup({ visibleBars: { startBar: 4, endBar: 9 } });
+    expect(service.getSnapshot().visibleBars).toEqual({ startBar: 4, endBar: 9 });
+    expect(engine.setVisibleBars).toHaveBeenCalledWith({ startBarIndex: 3, endBarIndex: 8 });
+    service.load(bytes);
+    expect(engine.setVisibleBars.mock.invocationCallOrder[0]).toBeLessThan(
+      engine.loadScore.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it('changes the bars drawn while playing, without restarting or moving playback', () => {
+    const { engine, service } = playing();
+    service.setVisibleBars({ startBar: 4, endBar: 9 });
+    expect(engine.setVisibleBars).toHaveBeenLastCalledWith({ startBarIndex: 3, endBarIndex: 8 });
+    service.setVisibleBars(null);
+    expect(engine.setVisibleBars).toHaveBeenLastCalledWith(null);
+    expect(engine.restartCalls()).toBe(0);
+    expect(engine.seek).not.toHaveBeenCalled();
+    expect(service.getSnapshot()).toMatchObject({ status: 'playing', visibleBars: null });
+  });
+
+  it('sends nothing and notifies nobody for the bars already drawn', () => {
+    const { engine, service, listener } = setup({ visibleBars: { startBar: 4, endBar: 9 } });
+    engine.setVisibleBars.mockClear();
+    listener.mockClear();
+    service.setVisibleBars({ startBar: 4, endBar: 9 });
+    expect(engine.setVisibleBars).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('does nothing after dispose', () => {
+    const { engine, service } = setup();
+    service.dispose();
+    service.setVisibleBars({ startBar: 1, endBar: 2 });
+    expect(engine.setVisibleBars).not.toHaveBeenCalled();
   });
 });

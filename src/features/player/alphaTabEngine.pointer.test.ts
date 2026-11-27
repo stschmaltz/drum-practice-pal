@@ -16,6 +16,11 @@ interface StubApi {
   boundsLookup: { staffSystems: SystemBoundsLike[] } | null;
   postRenderFinished: StubEvent;
   renderer: { partialRenderFinished: StubEvent };
+  settings: { display: { startBar: number; barCount: number; layoutMode: number } };
+  /** Set once a score is loaded; null before. */
+  score: object | null;
+  updateSettings: ReturnType<typeof vi.fn>;
+  render: ReturnType<typeof vi.fn>;
   destroy: () => void;
 }
 
@@ -35,6 +40,10 @@ vi.mock('@coderline/alphatab', () => {
     boundsLookup: StubApi['boundsLookup'] = null;
     postRenderFinished = new Event();
     renderer = { partialRenderFinished: new Event() };
+    settings = { display: { startBar: 1, barCount: -1, layoutMode: 0 } };
+    score: object | null = { tracks: [] };
+    updateSettings = vi.fn();
+    render = vi.fn();
     // The metronome's (createMetronomeTrack): never fired here.
     midiLoad = new Event();
     midiLoaded = new Event();
@@ -567,6 +576,57 @@ describe('the highlight layer', () => {
 });
 
 // 08 QA issues 1 and 2: alphaTab only scrolls to its cursor while playing.
+describe('drawing only some bars', () => {
+  it('draws the bars asked for, 0-based in and alphaTab 1-based out', () => {
+    const { engine, api } = mounted();
+    engine.setVisibleBars({ startBarIndex: 3, endBarIndex: 8 });
+    expect(api.settings.display).toMatchObject({ startBar: 4, barCount: 6 });
+    expect(api.updateSettings).toHaveBeenCalledTimes(1);
+    expect(api.render).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws the whole score again for null', () => {
+    const { engine, api } = mounted();
+    engine.setVisibleBars({ startBarIndex: 3, endBarIndex: 8 });
+    engine.setVisibleBars(null);
+    expect(api.settings.display).toMatchObject({ startBar: 1, barCount: -1 });
+    expect(api.render).toHaveBeenCalledTimes(2);
+  });
+
+  it('draws nothing again for the bars already drawn', () => {
+    const { engine, api } = mounted();
+    engine.setVisibleBars(null);
+    engine.setVisibleBars({ startBarIndex: 0, endBarIndex: 1 });
+    engine.setVisibleBars({ startBarIndex: 0, endBarIndex: 1 });
+    expect(api.render).toHaveBeenCalledTimes(1);
+  });
+
+  it('before a score has loaded, only sets what the first drawing will use', () => {
+    const { engine, api } = mounted();
+    api.score = null;
+    engine.setVisibleBars({ startBarIndex: 2, endBarIndex: 4 });
+    expect(api.settings.display).toMatchObject({ startBar: 3, barCount: 3 });
+    expect(api.render).not.toHaveBeenCalled();
+    expect(engine.scrollToBar(0)).toBe(true);
+  });
+
+  it('can scroll to no bar until the new drawing is done: its bounds are the old one’s', () => {
+    const { engine, api } = mounted();
+    engine.setVisibleBars({ startBarIndex: 3, endBarIndex: 5 });
+    expect(engine.scrollToBar(4)).toBe(false);
+    api.postRenderFinished.fire();
+    expect(engine.scrollToBar(4)).toBe(true);
+  });
+
+  it('a layout change waits for its drawing the same way', () => {
+    const { engine, api } = mounted();
+    engine.setLayout('horizontal');
+    expect(engine.scrollToBar(1)).toBe(false);
+    api.postRenderFinished.fire();
+    expect(engine.scrollToBar(1)).toBe(true);
+  });
+});
+
 describe('scrolling a bar into view', () => {
   const BOX = { x: 50, y: 60, width: 200, height: 100 };
 

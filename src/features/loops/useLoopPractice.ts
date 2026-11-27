@@ -77,7 +77,8 @@ function applyLoopRange(player: PlayerService, range: BarRange | null): void {
  * - While the form is open (`editor`), taps on the score pick bars instead of
  *   seeking; the screen turns jam mode's seek off for as long (`editor !== null`).
  * - A mouse drag across bars picks a range, opening the form for a new loop
- *   if none is open.
+ *   if none is open (unless `dragOpensForm` is false: the practice screen
+ *   picks bars only once "Show whole song" has opened the form).
  * - The score highlights the form's bars while it is open, otherwise the
  *   playing loop's.
  */
@@ -85,6 +86,7 @@ export function useLoopPractice(
   player: PlayerService | null,
   snapshot: PlayerSnapshot,
   loops: readonly Loop[] | undefined,
+  { dragOpensForm = true }: { dragOpensForm?: boolean } = {},
 ) {
   const [activeLoopId, setActiveLoopId] = useState<string | null>(null);
   const [editor, setEditor] = useState<LoopEditor | null>(null);
@@ -213,6 +215,8 @@ export function useLoopPractice(
         setEditor((open) => withPickedBars(open, range, false));
         return;
       }
+      // Here a drag only picks the bars of a form already open.
+      if (!dragOpensForm) return;
       // The form opens on release: opening it mid-drag would move the score under the pointer.
       if (!done) {
         setDragPreview(range);
@@ -223,7 +227,7 @@ export function useLoopPractice(
       if (startBar === endBar) return;
       setEditor({ loopId: null, bars: barFieldsOf(range), awaitingEnd: false, saving: false });
     });
-  }, [player, editorOpen]);
+  }, [player, editorOpen, dragOpensForm]);
 
   // --- The highlight ---
 

@@ -2,7 +2,12 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { exposePlayerForDebugging } from './debugPlayer';
 import type { EngineFactory, EngineMount, PlayerEngine } from './playerEngine';
 import type { PlayerOptions } from './playerOptions';
-import { initialPlayerSnapshot, PlayerService, type PlayerSnapshot } from './PlayerService';
+import {
+  initialPlayerSnapshot,
+  PlayerService,
+  type BarRange,
+  type PlayerSnapshot,
+} from './PlayerService';
 import { useLayout } from './useLayout';
 
 export interface UsePlayerOptions {
@@ -11,6 +16,12 @@ export interface UsePlayerOptions {
   drumTrackIndex: number | null;
   /** Starting values, usually from user_settings. Read once, on mount. */
   initialOptions: PlayerOptions;
+  /**
+   * The bars the score is first drawn with (the practice screen's loop), so it
+   * never draws the whole song first. Read once, on mount; change it later
+   * with `player.setVisibleBars`. The whole score when absent.
+   */
+  initialVisibleBars?: BarRange | null;
   /** Tests pass a fake; the default loads alphaTab lazily. */
   createEngine?: EngineFactory;
 }
@@ -44,6 +55,7 @@ export function usePlayer({
   fileBytes,
   drumTrackIndex,
   initialOptions,
+  initialVisibleBars = null,
   createEngine = loadAlphaTabEngine,
 }: UsePlayerOptions) {
   const scoreRef = useRef<HTMLDivElement>(null);
@@ -53,7 +65,14 @@ export function usePlayer({
   const layout = useLayout();
 
   // Mount-time inputs, read once by the effect below.
-  const mountInputs = useRef({ fileBytes, drumTrackIndex, initialOptions, createEngine, layout });
+  const mountInputs = useRef({
+    fileBytes,
+    drumTrackIndex,
+    initialOptions,
+    initialVisibleBars,
+    createEngine,
+    layout,
+  });
 
   useEffect(() => {
     const element = scoreRef.current;
@@ -74,6 +93,7 @@ export function usePlayer({
         created = new PlayerService(engine, {
           drumTrackIndex: inputs.drumTrackIndex,
           options: inputs.initialOptions,
+          visibleBars: inputs.initialVisibleBars,
         });
         created.load(inputs.fileBytes);
         setPlayer(created);

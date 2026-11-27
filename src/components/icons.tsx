@@ -111,6 +111,7 @@ const PATHS = {
   ),
   controls: <path d="M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4" />,
   plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
   keyboard: (
     <>
       <rect x="2.5" y="6" width="19" height="12" rx="2" />

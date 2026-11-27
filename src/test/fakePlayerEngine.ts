@@ -37,6 +37,11 @@ export function barsInPlayOrder(barNumbers: readonly number[]): BarTicks[] {
   }));
 }
 
+/** Names for `count` tracks: "Track 1", "Track 2"… */
+export function trackNamesOf(count: number): string[] {
+  return Array.from({ length: count }, (_, trackIndex) => `Track ${trackIndex + 1}`);
+}
+
 /** `barTempos` like the tempo-change fixture: 16 bars, 120 BPM for bars 1 to 8, 90 from bar 9. */
 export const TEMPO_CHANGE_BAR_TEMPOS: readonly number[] = Array.from(
   { length: 16 },
@@ -66,6 +71,7 @@ export class FakePlayerEngine implements PlayerEngine {
   setPlaybackRange = vi.fn();
   setLooping = vi.fn();
   setHighlight = vi.fn();
+  setVisibleBars = vi.fn();
   scrollToBar = vi.fn<PlayerEngine['scrollToBar']>(() => this.laidOut);
   destroy = vi.fn();
 
@@ -86,6 +92,7 @@ export class FakePlayerEngine implements PlayerEngine {
   finishLoading({
     barCount = 16,
     trackCount = 3,
+    trackNames = trackNamesOf(trackCount),
     barTempos = Array.from({ length: barCount }, () => 120),
     meter = COMMON_TIME,
     barMeters = Array.from({ length: barCount }, () => meter),
@@ -93,6 +100,8 @@ export class FakePlayerEngine implements PlayerEngine {
   }: {
     barCount?: number;
     trackCount?: number;
+    /** Each track's name; `trackCount` tracks named "Track 1", "Track 2"… unless given. */
+    trackNames?: readonly string[];
     barTempos?: readonly number[];
     /** Every bar's time signature. */
     meter?: Meter;
@@ -103,7 +112,7 @@ export class FakePlayerEngine implements PlayerEngine {
   } = {}): void {
     this.fire('scoreLoaded', {
       barCount,
-      trackCount,
+      trackNames: [...trackNames],
       barTempos: [...barTempos],
       barMeters: [...barMeters],
     });

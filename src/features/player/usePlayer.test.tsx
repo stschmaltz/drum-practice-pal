@@ -4,15 +4,23 @@ import { FakePlayerEngine, fakeEngineFactory } from '@/test/fakePlayerEngine';
 import { PAGE_LAYOUT_QUERY } from './layout';
 import { DEFAULT_PLAYER_OPTIONS } from './playerOptions';
 import type { EngineFactory, EngineMount, PlayerEngine } from './playerEngine';
+import type { BarRange } from './PlayerService';
 import { lazyEngineFactory, usePlayer } from './usePlayer';
 
 const bytes = new Uint8Array([7]);
 
-function Harness({ createEngine }: { createEngine: EngineFactory }) {
+function Harness({
+  createEngine,
+  initialVisibleBars,
+}: {
+  createEngine: EngineFactory;
+  initialVisibleBars?: BarRange;
+}) {
   const { scoreRef, scrollRef, player, snapshot } = usePlayer({
     fileBytes: bytes,
     drumTrackIndex: 0,
     initialOptions: { ...DEFAULT_PLAYER_OPTIONS, drumsMuted: true },
+    initialVisibleBars,
     createEngine,
   });
   return (
@@ -35,6 +43,21 @@ describe('usePlayer', () => {
     expect(engine.mount?.element).toBeInstanceOf(HTMLDivElement);
     expect(engine.mount?.scrollElement).toContainElement(engine.mount?.element ?? null);
     expect(engine.loadScore).toHaveBeenCalledWith(bytes, [0]);
+  });
+
+  it('draws the starting bars from the first drawing, before the file is loaded', async () => {
+    const engine = new FakePlayerEngine();
+    render(
+      <Harness
+        createEngine={fakeEngineFactory(engine)}
+        initialVisibleBars={{ startBar: 4, endBar: 7 }}
+      />,
+    );
+    await screen.findByText('player yes');
+    expect(engine.setVisibleBars).toHaveBeenCalledWith({ startBarIndex: 3, endBarIndex: 6 });
+    expect(engine.setVisibleBars.mock.invocationCallOrder[0]).toBeLessThan(
+      engine.loadScore.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it('shows the service state as it changes', async () => {

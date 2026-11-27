@@ -16,7 +16,10 @@ const verse = loopRow('verse', { name: 'Verse', start_bar: 5, end_bar: 8, speed_
 const outro = loopRow('outro', { name: 'Outro', start_bar: 13, end_bar: 16, speed_ratio: 1.1 });
 
 /** The practice hook over a real player and the song's loops query, as the song page wires it. */
-async function renderPractice(loops: Loop[] = [verse, outro], { loaded = true } = {}) {
+async function renderPractice(
+  loops: Loop[] = [verse, outro],
+  { loaded = true, dragOpensForm = true } = {},
+) {
   const table = serveLoopTable(loops);
   const { engine, player, finishLoading } = loopPlayer({ loaded });
   const queryClient = testQueryClient();
@@ -24,7 +27,10 @@ async function renderPractice(loops: Loop[] = [verse, outro], { loaded = true } 
     ({ mounted }: { mounted: PlayerService | null }) => {
       const snapshot = usePlayerSnapshot(player);
       const query = useLoops(LOOP_SONG_ID);
-      return { practice: useLoopPractice(mounted, snapshot, query.data), query };
+      return {
+        practice: useLoopPractice(mounted, snapshot, query.data, { dragOpensForm }),
+        query,
+      };
     },
     {
       wrapper: wrapperFor(queryClient, signedInAs()),
@@ -70,7 +76,7 @@ describe('playing a loop', () => {
     act(() =>
       engine.fire('scoreLoaded', {
         barCount: 16,
-        trackCount: 3,
+        trackNames: ['Drums', 'Bass', 'Guitar'],
         barTempos: Array.from({ length: 16 }, () => 120),
         barMeters: Array.from({ length: 16 }, () => ({ beats: 4, beatValue: 4 })),
       }),
@@ -557,6 +563,23 @@ describe('dragging across bars', () => {
     expect(practice().editor).toMatchObject({ loopId: null, awaitingEnd: false });
     expect(fields()).toEqual({ startBar: '3', endBar: '6' });
     expect(player.getSnapshot().highlight).toEqual({ startBar: 3, endBar: 6 });
+  });
+
+  it('where a drag opens no form (the practice screen’s loop view), shows and opens nothing', async () => {
+    const { practice, drag, player } = await renderPractice(undefined, { dragOpensForm: false });
+    drag(3, 6, false);
+    expect(player.getSnapshot().highlight).toBeNull();
+    drag(3, 6, true);
+    expect(practice().editor).toBeNull();
+    expect(player.getSnapshot().highlight).toBeNull();
+  });
+
+  it('where a drag opens no form, still picks the bars of a form opened another way', async () => {
+    const { practice, drag, fields } = await renderPractice(undefined, { dragOpensForm: false });
+    act(() => practice().openEditor(null));
+    drag(3, 6, false);
+    drag(3, 6, true);
+    expect(fields()).toEqual({ startBar: '3', endBar: '6' });
   });
 
   it('a drag the browser cancels opens nothing and leaves no mark (bug hunt P4)', async () => {

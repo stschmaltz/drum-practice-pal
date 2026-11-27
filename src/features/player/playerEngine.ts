@@ -14,7 +14,8 @@ export type EngineEvents = {
   /** The score parsed. Fires once per load. */
   scoreLoaded: {
     barCount: number;
-    trackCount: number;
+    /** Each track's name, by track index: the track mixer lists them. */
+    trackNames: string[];
     /** The tempo each bar starts at, by 0-based bar index (see tempo.ts). */
     barTempos: number[];
     /** Each bar's time signature, by 0-based bar index (see countIn.ts). */
@@ -89,6 +90,15 @@ export interface PlayerEngine {
    * drawing: playback is untouched. Kept across re-renders (resize, layout).
    */
   setHighlight(range: BarIndexRange | null): void;
+  /**
+   * Draws only these bars of the score (0-based, inclusive), or the whole
+   * score for null. Only a drawing: every bar still plays, and ticks keep
+   * their places. Kept across loads; set before loadScore it applies to the
+   * first render. Until the new drawing has finished, scrollToBar answers
+   * false (its bounds are the old drawing's), so a scroll asked meanwhile
+   * waits for `rendered`.
+   */
+  setVisibleBars(range: BarIndexRange | null): void;
   /**
    * Scrolls the score box so a bar (0-based) can be read, if it isn't all on
    * show already. For when nothing is playing: alphaTab only follows the

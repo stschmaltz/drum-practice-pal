@@ -77,6 +77,21 @@ export function createAlphaTabEngine({
     },
   });
 
+  // A render asked for here (bars to draw, layout) hasn't finished: the bounds are the last
+  // drawing's, so a scroll would aim at where a bar was. Registered before anything else
+  // listens to postRenderFinished, so it is cleared before the service hears `rendered`.
+  let redrawing = false;
+  api.postRenderFinished.on(() => {
+    redrawing = false;
+  });
+  /** Applies changed display settings: drawn again now if there is a score, else at its load. */
+  const redraw = () => {
+    api.updateSettings();
+    if (!api.score) return;
+    redrawing = true;
+    api.render();
+  };
+
   // Read afresh each time: the bounds change with every layout, and are null until the first.
   const staffSystems = () => api.boundsLookup?.staffSystems ?? [];
   const stopWatchingPointer = watchScorePointer(element, scrollElement, staffSystems, taps);
@@ -123,8 +138,18 @@ export function createAlphaTabEngine({
       const mode = toLayoutMode(next);
       if (api.settings.display.layoutMode === mode) return;
       api.settings.display.layoutMode = mode;
-      api.updateSettings();
-      api.render();
+      redraw();
+    },
+
+    setVisibleBars(range) {
+      const display = api.settings.display;
+      // alphaTab counts from bar 1, and -1 bars is all of them.
+      const startBar = range ? range.startBarIndex + 1 : 1;
+      const barCount = range ? range.endBarIndex - range.startBarIndex + 1 : -1;
+      if (display.startBar === startBar && display.barCount === barCount) return;
+      display.startBar = startBar;
+      display.barCount = barCount;
+      redraw();
     },
 
     play() {
@@ -173,6 +198,7 @@ export function createAlphaTabEngine({
       highlight.show(range);
     },
     scrollToBar(barIndex) {
+      if (redrawing) return false;
       return scrollBoxToBar(element, scrollElement, staffSystems(), barIndex);
     },
     destroy() {
@@ -393,7 +419,7 @@ function subscribe<K extends keyof EngineEvents>(
       api.scoreLoaded.on((score) =>
         emit({
           barCount: score.masterBars.length,
-          trackCount: score.tracks.length,
+          trackNames: score.tracks.map((track) => track.name),
           barTempos: barStartTempos(score),
           barMeters: barMeters(score),
         }),

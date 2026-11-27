@@ -6,6 +6,7 @@ import {
   dangerCardClass,
   ghostButtonClass,
   inlineIconClass,
+  quietButtonClass,
 } from '@/components/styles';
 import type { Loop } from '@/features/loops/loopForm';
 import { CountInCounter } from '@/features/player/CountInCounter';
@@ -25,16 +26,30 @@ import { useOnline } from '@/lib/network';
  * Opens the shortcut overlay, which `?` also does. From 768 px only: a tablet
  * or laptop is where a keyboard is likely, and the phone's row has no room.
  */
-export function ShortcutsButton({ onOpen }: { onOpen: () => void }) {
+export function ShortcutsButton({
+  onOpen,
+  compact = false,
+}: {
+  onOpen: () => void;
+  /**
+   * In a header band beside Play (the practice screen): quiet, the icon alone
+   * below 1024 px, and gone in a short window, a phone on its side.
+   */
+  compact?: boolean;
+}) {
   return (
     <button
       type="button"
-      className={`max-md:hidden ${ghostButtonClass} whitespace-nowrap`}
+      className={
+        compact
+          ? `max-md:hidden short:hidden ${quietButtonClass} whitespace-nowrap`
+          : `max-md:hidden ${ghostButtonClass} whitespace-nowrap`
+      }
       aria-haspopup="dialog"
       onClick={onOpen}
     >
       <Icon name="keyboard" />
-      Shortcuts
+      {compact ? <span className="max-lg:sr-only">Shortcuts</span> : 'Shortcuts'}
     </button>
   );
 }
@@ -45,11 +60,17 @@ export function ScoreBox({
   scoreRef,
   snapshot,
   hidden,
+  fitsScore = false,
 }: {
   scrollRef: Ref<HTMLDivElement>;
   scoreRef: Ref<HTMLDivElement>;
   snapshot: PlayerSnapshot;
   hidden: boolean;
+  /**
+   * From 768 px the box is as tall as what is drawn, up to its usual height:
+   * a loop's few bars, not a fixed 60% of the window of blank paper under them.
+   */
+  fitsScore?: boolean;
 }) {
   return (
     // The counter covers the score box without scrolling with what's inside it.
@@ -68,7 +89,7 @@ export function ScoreBox({
         // Below 768 px the score is one line of music scrolling sideways, so the box is as tall
         // as that line (alphaTab sizes it) rather than a fixed height of blank paper under it.
         // At least as tall as the count-in number drawn over it.
-        className="jam-score relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:h-[60dvh] md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))]"
+        className={`jam-score relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card ${fitsScore ? 'md:max-h-[60dvh]' : 'md:h-[60dvh]'} md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))]`}
       >
         <div ref={scoreRef} />
       </div>
@@ -143,12 +164,30 @@ export function PlayerStatusLine({ snapshot }: { snapshot: PlayerSnapshot }) {
   }
   return (
     <p className="text-sm text-ink-muted" aria-live="polite" data-testid="player-status">
-      {snapshot.status === 'loading'
-        ? 'Loading the score and sounds…'
-        : `Bar ${snapshot.barNumber ?? 1} of ${snapshot.barCount ?? '?'}`}
-      {snapshot.status === 'countingIn' && ' · Counting in…'}
+      {playerStatusText(snapshot)}
     </p>
   );
+}
+
+/**
+ * The same words inline, for a line that says more (the practice screen's
+ * meta line). A failure isn't said here: the screen shows `PlayerStatusLine`'s
+ * alert for it.
+ */
+export function PlayerStatusText({ snapshot }: { snapshot: PlayerSnapshot }) {
+  return (
+    <span aria-live="polite" data-testid="player-status">
+      {snapshot.status === 'error' ? "Can't play" : playerStatusText(snapshot)}
+    </span>
+  );
+}
+
+function playerStatusText(snapshot: PlayerSnapshot): string {
+  const where =
+    snapshot.status === 'loading'
+      ? 'Loading the score and sounds…'
+      : `Bar ${snapshot.barNumber ?? 1} of ${snapshot.barCount ?? '?'}`;
+  return snapshot.status === 'countingIn' ? `${where} · Counting in…` : where;
 }
 
 /** A bar that sticks at the top of the window, full-bleed over the page gutter. */

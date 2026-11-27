@@ -289,6 +289,79 @@ describe('PlayerControls metronome sounds', () => {
   });
 });
 
+describe('PlayerControls track mixer', () => {
+  // Inside a closed <details>: jsdom keeps its content in the accessibility tree.
+  const mixer = () => screen.getByRole('group', { name: 'Tracks' });
+  const track = (name: string) => within(mixer()).getByRole('button', { name });
+  const pressedTracks = () =>
+    within(mixer())
+      .getAllByRole('button')
+      .map((button) => `${button.textContent} ${button.getAttribute('aria-pressed')}`);
+
+  function setupTracks(options?: PlayerOptions) {
+    const view = setup({ loaded: false, ...(options && { options }) });
+    act(() => view.engine.finishLoading({ trackNames: ['Guitar', 'Bass', 'Drums'] }));
+    return view;
+  }
+
+  it('lists every track by name, all on at open, and says how many are on', () => {
+    setupTracks();
+    expect(pressedTracks()).toEqual(['Guitar true', 'Bass true', 'Drums true']);
+    expect(screen.getByText('Tracks').closest('summary')).toHaveTextContent('3 of 3 on');
+  });
+
+  it('mutes one track while playing, live, and turns it back on', async () => {
+    const { engine, player, user } = setupTracks();
+    await startPlaying(engine, user);
+    const restartsBefore = engine.restartCalls();
+
+    await user.click(track('Bass'));
+    expect(track('Bass')).toHaveAttribute('aria-pressed', 'false');
+    expect(engine.soundingTracks()).toEqual([0, 2]);
+    expect(screen.getByText('Tracks').closest('summary')).toHaveTextContent('2 of 3 on');
+
+    await user.click(track('Bass'));
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(player.getSnapshot().status).toBe('playing');
+  });
+
+  it('the drum track and Mute drums are one switch', async () => {
+    const { user } = setupTracks();
+    await user.click(muteDrums());
+    expect(track('Drums')).toHaveAttribute('aria-pressed', 'false');
+    await user.click(track('Drums'));
+    expect(muteDrums()).toHaveAttribute('aria-pressed', 'false');
+    expect(track('Drums')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('under Drums only keeps each switch as set, says why the others are silent, and brings them back', async () => {
+    const { engine, user } = setupTracks();
+    await user.click(track('Guitar'));
+    await user.click(drumsOnly());
+    expect(engine.soundingTracks()).toEqual([2]);
+    expect(pressedTracks()).toEqual(['Guitar false', 'Bass true', 'Drums true']);
+    expect(within(mixer()).getByText(/Drums only is on/)).toBeInTheDocument();
+
+    await user.click(drumsOnly());
+    expect(engine.soundingTracks()).toEqual([1, 2]);
+    expect(within(mixer()).queryByText(/Drums only is on/)).not.toBeInTheDocument();
+  });
+
+  it('is off before the player exists and once it has failed', () => {
+    const { engine } = setupTracks();
+    act(() => engine.fire('error', { error: new Error('worker died') }));
+    for (const button of within(mixer()).getAllByRole('button')) expect(button).toBeDisabled();
+  });
+
+  it('shows nothing to mix before the score has loaded, or for a song of one track', () => {
+    const { engine } = setup({ loaded: false });
+    expect(screen.queryByRole('group', { name: 'Tracks' })).not.toBeInTheDocument();
+    act(() => engine.finishLoading({ trackNames: ['Drums'] }));
+    expect(screen.queryByRole('group', { name: 'Tracks' })).not.toBeInTheDocument();
+  });
+});
+
 describe('PlayerControls drums only', () => {
   it('sits right after Mute drums and starts off, even when drums open muted', () => {
     setup({ options: { ...DEFAULT_PLAYER_OPTIONS, drumsMuted: true } });

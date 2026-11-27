@@ -279,7 +279,7 @@ describe('LoopPanel list', () => {
     act(() =>
       view.engine.fire('scoreLoaded', {
         barCount: 16,
-        trackCount: 3,
+        trackNames: ['Drums', 'Bass', 'Guitar'],
         barTempos: [...TEMPO_CHANGE_BAR_TEMPOS],
         barMeters: Array.from({ length: 16 }, () => ({ beats: 4, beatValue: 4 })),
       }),
@@ -307,7 +307,7 @@ describe('LoopPanel list', () => {
     act(() =>
       view.engine.fire('scoreLoaded', {
         barCount: 16,
-        trackCount: 3,
+        trackNames: ['Drums', 'Bass', 'Guitar'],
         barTempos: [...TEMPO_CHANGE_BAR_TEMPOS],
         barMeters: Array.from({ length: 16 }, () => ({ beats: 4, beatValue: 4 })),
       }),

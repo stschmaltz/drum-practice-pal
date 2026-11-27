@@ -659,7 +659,12 @@ describe('SongPage jam mode', () => {
     await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
     const engine = engines[0]!;
     act(() => {
-      engine.fire('scoreLoaded', { barCount: 16, trackCount: 3, barTempos: [], barMeters: [] });
+      engine.fire('scoreLoaded', {
+        barCount: 16,
+        trackNames: ['Drums', 'Bass', 'Guitar'],
+        barTempos: [],
+        barMeters: [],
+      });
       engine.fire('ticksReady', { bars: straightBars(16) });
     });
 

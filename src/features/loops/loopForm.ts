@@ -231,6 +231,17 @@ export function barsLabel(startBar: number, endBar: number): string {
 }
 
 /**
+ * How many bars a range covers, both ends included ("5 bars", "1 bar"), for
+ * the loop form beside its two bar fields; null while the fields make no range
+ * (`formBarRange` gives null), so nothing is shown.
+ */
+export function barCountLabel(range: { startBar: number; endBar: number } | null): string | null {
+  if (!range) return null;
+  const count = range.endBar - range.startBar + 1;
+  return count === 1 ? '1 bar' : `${count} bars`;
+}
+
+/**
  * Every loop aims at the song's own speed: 100%. Not stored, so it can't drift
  * per loop; the "Mark finished?" prompt and the home page's bar read it here.
  */

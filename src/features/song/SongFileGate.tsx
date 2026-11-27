@@ -25,9 +25,12 @@ export interface SongPlayerInputs {
  */
 export function SongFileGate({
   song,
+  header,
   children,
 }: {
   song: Song;
+  /** Shown above the waits and failures only: the player, once open, draws its own. */
+  header?: ReactNode;
   children: (inputs: SongPlayerInputs) => ReactNode;
 }) {
   const file = useSongFile(song.id);
@@ -41,22 +44,33 @@ export function SongFileGate({
   // isLoadingError, not isError: a failed background refetch keeps the bytes, so a playing song stays mounted.
   if (file.isLoadingError) {
     return (
-      <LoadErrorAlert onRetry={() => void file.refetch()}>
-        Couldn't download this song's file. Check your connection and try again.
-      </LoadErrorAlert>
+      <>
+        {header}
+        <LoadErrorAlert onRetry={() => void file.refetch()}>
+          Couldn't download this song's file. Check your connection and try again.
+        </LoadErrorAlert>
+      </>
     );
   }
   if (waitsForNetwork(file)) {
     return (
-      <OfflineMessage>
-        This song's file isn't on this device yet. Open the song once while online to play it
-        offline.
-      </OfflineMessage>
+      <>
+        {header}
+        <OfflineMessage>
+          This song's file isn't on this device yet. Open the song once while online to play it
+          offline.
+        </OfflineMessage>
+      </>
     );
   }
   // Settings that can't be fetched offline give way to the defaults, like a failed fetch.
   if (file.isPending || (settings.isPending && !waitsForNetwork(settings) && !playerOpened)) {
-    return <LoadingLine>Downloading the song…</LoadingLine>;
+    return (
+      <>
+        {header}
+        <LoadingLine>Downloading the song…</LoadingLine>
+      </>
+    );
   }
   // Remembered during render, so the next render already knows (React's "state from
   // the previous render" pattern); per song, since another song's file is waited for again.

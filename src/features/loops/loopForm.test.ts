@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { LOOP_NAME_MAX_LENGTH } from '@/lib/schema';
 import {
   applySavedLoopEdit,
+  barCountLabel,
   barsLabel,
   changedLoopDetails,
   changedLoopFields,
@@ -356,5 +357,22 @@ describe('shouldAskToFinish', () => {
     ['under full speed', 0.9, practised, true, false],
   ] as const)('%s', (_what, speed_ratio, last_practiced_at, moved, asks) => {
     expect(shouldAskToFinish(loop({ speed_ratio, last_practiced_at }), moved)).toBe(asks);
+  });
+});
+
+describe('barCountLabel', () => {
+  it.each([
+    [{ startBar: 5, endBar: 9 }, '5 bars'],
+    [{ startBar: 7, endBar: 7 }, '1 bar'],
+    [{ startBar: 1, endBar: 2 }, '2 bars'],
+  ])('%o covers %s, both ends included', (range, label) => {
+    expect(barCountLabel(range)).toBe(label);
+  });
+
+  it('says nothing while the fields make no range', () => {
+    expect(barCountLabel(null)).toBeNull();
+    expect(barCountLabel(formBarRange({ startBar: '9', endBar: '5' }, 16))).toBeNull();
+    expect(barCountLabel(formBarRange({ startBar: '5', endBar: '' }, 16))).toBeNull();
+    expect(barCountLabel(formBarRange({ startBar: '5', endBar: '9' }, 16))).toBe('5 bars');
   });
 });

@@ -1,4 +1,4 @@
-import { useId, useState, type KeyboardEvent } from 'react';
+import { useId } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { buttonClass, inputClass, labelClass } from '@/components/styles';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
@@ -13,6 +13,7 @@ import { failureCopy } from '@/lib/errorCopy';
 import type { Loop } from './loopForm';
 import { LOOP_SPEED_ATTRIBUTES } from './loopFocus';
 import { useLoopSpeed } from './useLoopSpeed';
+import { useTypedValue } from './useTypedValue';
 
 /** The nudge buttons, in percent. */
 const NUDGES = [-5, -1, 1, 5] as const;
@@ -84,11 +85,7 @@ export function LoopSpeedControl({
   );
 }
 
-/**
- * A text field that shows `value` and reports what was typed when the user
- * leaves it or presses Enter (Escape puts the value back). Committing per
- * keystroke would turn "8" on the way to "85" into the slowest speed.
- */
+/** A text field that shows `value` and reports what was typed on Enter or on leaving it (useTypedValue). */
 function CommitField({
   label,
   value,
@@ -101,19 +98,7 @@ function CommitField({
   onCommit: (text: string) => void;
 }) {
   const id = useId();
-  // What is being typed; null shows the current value.
-  const [typed, setTyped] = useState<string | null>(null);
-
-  const commit = () => {
-    if (typed === null) return;
-    setTyped(null);
-    onCommit(typed);
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') commit();
-    if (event.key === 'Escape') setTyped(null);
-  };
+  const { typed, change, commit, onKeyDown } = useTypedValue(onCommit);
 
   return (
     <div className="flex flex-col gap-1">
@@ -127,7 +112,7 @@ function CommitField({
         autoComplete="off"
         value={typed ?? value}
         disabled={disabled}
-        onChange={(event) => setTyped(event.target.value)}
+        onChange={(event) => change(event.target.value)}
         onBlur={commit}
         onKeyDown={onKeyDown}
       />

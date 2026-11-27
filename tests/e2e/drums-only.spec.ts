@@ -244,3 +244,36 @@ test('a song that is only drums plays on with drums only on', async ({ user, pag
   await expect(playButton(page)).toHaveText('Pause');
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(barBefore);
 });
+
+// Unit 16, Shane's first try: the track mixer mutes one track on its own, live.
+test('the track mixer mutes one track mid-play and brings it back, with no restart', async ({
+  user,
+  page,
+}) => {
+  await recordSynthMessages(page);
+  await openFixture(page, user, 'multi-track', 'Multi Track');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+  const transportBefore = await transportCommands(page);
+  expect(transportBefore).toBeGreaterThan(0);
+
+  await showControls(page);
+  await page.locator('summary', { hasText: /^Tracks/ }).click();
+  const mixer = page.getByRole('group', { name: 'Tracks' });
+  await expect(mixer.getByRole('button')).toHaveCount(3);
+  await mixer.getByRole('button', { name: 'Bass' }).click();
+  await expect(mixer.getByRole('button', { name: 'Bass' })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  const muted = await mutedChannels(page);
+  // The bass's own channels, and neither the drums nor the guitar's.
+  expect(muted).toHaveLength(2);
+  expect(muted).not.toContain(DRUM_CHANNEL);
+
+  await mixer.getByRole('button', { name: 'Bass' }).click();
+  expect(await mutedChannels(page)).toEqual([]);
+  expect(await transportCommands(page)).toBe(transportBefore);
+  await expect(playButton(page)).toHaveText('Pause');
+});

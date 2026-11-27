@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { Route } from 'react-router';
@@ -200,6 +200,90 @@ describe('LoopPracticePage', () => {
     expect(screen.queryByRole('button', { name: 'Save speed' })).not.toBeInTheDocument();
   });
 
+  describe('setting the speed exactly', () => {
+    const bpm = () =>
+      within(screen.getByRole('group', { name: 'Loop speed' })).getByTestId('practice-bpm');
+
+    async function openChorus() {
+      serve();
+      const user = renderPractice(CHORUS_ID);
+      await loadPlayer();
+      await waitFor(() => expect(speed()).toHaveTextContent('71%'));
+      await settle();
+      return user;
+    }
+
+    it('steps one BPM at a time, to the exact ratio of each whole BPM, saving each', async () => {
+      const user = await openChorus();
+      // 0.708333 of 90 BPM is 63.75, shown as 64.
+      expect(bpm()).toHaveTextContent('64 BPM');
+
+      await user.click(screen.getByRole('button', { name: 'Faster by 1 BPM' }));
+      expect(bpm()).toHaveTextContent('65 BPM');
+      await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.722222 }]));
+
+      await user.click(screen.getByRole('button', { name: 'Slower by 1 BPM' }));
+      await user.click(screen.getByRole('button', { name: 'Slower by 1 BPM' }));
+      expect(bpm()).toHaveTextContent('63 BPM');
+      await waitFor(() => expect(loops.sent('update').at(-1)).toEqual({ speed_ratio: 0.7 }));
+    });
+
+    it('takes a typed BPM: tap it, type, Enter, saved as the ratio it implies', async () => {
+      const user = await openChorus();
+      await user.click(screen.getByRole('button', { name: 'Type a BPM, now 64' }));
+      const field = screen.getByRole('textbox', { name: 'BPM' });
+      expect(field).toHaveFocus();
+      await user.clear(field);
+      await user.type(field, '60{Enter}');
+
+      expect(bpm()).toHaveTextContent('60 BPM');
+      expect(speed()).toHaveTextContent('67%');
+      await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.666667 }]));
+      // Back to the value, with focus on it for the next change.
+      expect(screen.getByRole('button', { name: 'Type a BPM, now 60' })).toHaveFocus();
+    });
+
+    it('takes a typed percent the same way', async () => {
+      const user = await openChorus();
+      await user.click(screen.getByRole('button', { name: 'Type a speed, now 71%' }));
+      const field = screen.getByRole('textbox', { name: 'Speed %' });
+      await user.clear(field);
+      await user.type(field, '85{Enter}');
+
+      expect(speed()).toHaveTextContent('85%');
+      await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.85 }]));
+    });
+
+    it('clamps a typed value to the bounds a loop can be saved at', async () => {
+      const user = await openChorus();
+      await user.click(screen.getByRole('button', { name: 'Type a speed, now 71%' }));
+      await user.clear(screen.getByRole('textbox', { name: 'Speed %' }));
+      await user.type(screen.getByRole('textbox', { name: 'Speed %' }), '900{Enter}');
+      expect(speed()).toHaveTextContent('200%');
+      await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 2 }]));
+    });
+
+    it('changes nothing for Escape, for what is not a number, or for the value left as it was', async () => {
+      const user = await openChorus();
+      await user.click(screen.getByRole('button', { name: 'Type a speed, now 71%' }));
+      await user.clear(screen.getByRole('textbox', { name: 'Speed %' }));
+      await user.type(screen.getByRole('textbox', { name: 'Speed %' }), '50{Escape}');
+      expect(screen.getByRole('button', { name: 'Type a speed, now 71%' })).toHaveFocus();
+
+      await user.click(screen.getByRole('button', { name: 'Type a speed, now 71%' }));
+      await user.clear(screen.getByRole('textbox', { name: 'Speed %' }));
+      await user.type(screen.getByRole('textbox', { name: 'Speed %' }), 'fast{Enter}');
+
+      // Opened and left as it was: 71% shown must not become 0.71 over the saved 0.708333.
+      await user.click(screen.getByRole('button', { name: 'Type a BPM, now 64' }));
+      await user.keyboard('{Enter}');
+
+      await settle();
+      expect(speed()).toHaveTextContent('71%');
+      expect(loops.sent('update')).toEqual([]);
+    });
+  });
+
   it('saves nothing when a loop key moves to another loop at its own speed', async () => {
     serve();
     const user = renderPractice(CHORUS_ID);
@@ -247,6 +331,201 @@ describe('LoopPracticePage', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Verse' })).toBeInTheDocument();
     expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${VERSE_ID}`);
     expect(speed()).toHaveTextContent('100%');
+  });
+
+  describe('the score: the loop, or the whole song', () => {
+    const wholeSong = () => screen.getByRole('button', { name: 'Show whole song' });
+    const saveForm = () => screen.getByRole('form', { name: 'New loop' });
+    const tap = (engine: FakePlayerEngine, barNumber: number) =>
+      act(() => engine.fire('barTapped', { barIndex: barNumber - 1 }));
+    const drag = (engine: FakePlayerEngine, fromBar: number, toBar: number) =>
+      act(() => {
+        engine.fire('barsDragged', {
+          fromBarIndex: fromBar - 1,
+          toBarIndex: toBar - 1,
+          done: false,
+        });
+        engine.fire('barsDragged', {
+          fromBarIndex: fromBar - 1,
+          toBarIndex: toBar - 1,
+          done: true,
+        });
+      });
+
+    async function openChorus(before?: string[]) {
+      serve();
+      const { user, queryClient } = renderPracticeWithClient(CHORUS_ID, undefined, before);
+      const engine = await loadPlayer();
+      await waitFor(() => expect(speed()).toHaveTextContent('71%'));
+      return { user, engine, queryClient };
+    }
+
+    it('draws only the loop and a bar either side, from the first drawing on', async () => {
+      const { engine } = await openChorus();
+      // Chorus fill is bars 9 to 12: bars 8 to 13 are drawn, 0-based 7 to 12.
+      expect(engine.setVisibleBars).toHaveBeenCalledTimes(1);
+      expect(engine.setVisibleBars).toHaveBeenCalledWith({ startBarIndex: 7, endBarIndex: 12 });
+      expect(engine.setVisibleBars.mock.invocationCallOrder[0]).toBeLessThan(
+        engine.loadScore.mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(wholeSong()).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.queryByRole('form', { name: 'New loop' })).not.toBeInTheDocument();
+    });
+
+    it('a tap in the loop seeks there; a tap on a bar drawn around it never leaves the loop', async () => {
+      const { engine } = await openChorus();
+      engine.seek.mockClear();
+      tap(engine, 13);
+      tap(engine, 8);
+      expect(engine.seek).not.toHaveBeenCalled();
+      tap(engine, 10);
+      expect(engine.seek).toHaveBeenCalledWith(startOfBar(10));
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(9),
+        endTick: startOfBar(13),
+      });
+    });
+
+    it('a mouse drag in the loop view picks nothing and opens no form', async () => {
+      const { engine } = await openChorus();
+      drag(engine, 9, 11);
+      await settle();
+      expect(screen.queryByRole('form', { name: 'New loop' })).not.toBeInTheDocument();
+      expect(engine.setVisibleBars).toHaveBeenCalledTimes(1);
+    });
+
+    it('"Show whole song" draws every bar and keeps the loop on screen, live; again goes back to the loop', async () => {
+      const { user, engine } = await openChorus();
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      const restartsBefore = engine.restartCalls();
+
+      await user.click(wholeSong());
+      expect(wholeSong()).toHaveAttribute('aria-pressed', 'true');
+      expect(engine.setVisibleBars).toHaveBeenLastCalledWith(null);
+      expect(saveForm()).toBeInTheDocument();
+      expect(screen.getByTestId('loop-bars-hint')).toHaveTextContent('Tap the first bar');
+
+      await user.click(wholeSong());
+      expect(engine.setVisibleBars).toHaveBeenLastCalledWith({ startBarIndex: 7, endBarIndex: 12 });
+      expect(screen.queryByRole('form', { name: 'New loop' })).not.toBeInTheDocument();
+      // A drawing only: the loop played on throughout.
+      expect(engine.restartCalls()).toBe(restartsBefore);
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(9),
+        endTick: startOfBar(13),
+      });
+    });
+
+    it('scrolls back to the loop once the new drawing is done', async () => {
+      const { user, engine } = await openChorus();
+      engine.scrollToBar.mockClear();
+      // The new drawing hasn't finished: the engine can't scroll yet.
+      engine.laidOut = false;
+      await user.click(wholeSong());
+      expect(engine.scrollToBar).toHaveBeenLastCalledWith(8);
+      engine.laidOut = true;
+      engine.scrollToBar.mockClear();
+      act(() => engine.fire('rendered', undefined));
+      expect(engine.scrollToBar).toHaveBeenCalledWith(8);
+    });
+
+    it('in the whole song, taps pick a new loop’s bars and never seek; Save as loop opens its screen, replaced', async () => {
+      const { user, engine } = await openChorus([`/songs/${SONG}`]);
+      await user.click(wholeSong());
+      engine.seek.mockClear();
+      tap(engine, 3);
+      tap(engine, 5);
+      expect(engine.seek).not.toHaveBeenCalled();
+      expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('3');
+      expect(screen.getByRole('textbox', { name: 'Last bar' })).toHaveValue('5');
+
+      await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Intro');
+      await user.click(screen.getByRole('button', { name: 'Save as loop' }));
+
+      expect(await screen.findByRole('heading', { level: 1, name: 'Intro' })).toBeInTheDocument();
+      const [sent] = loops.sent('insert') as Loop[];
+      expect(sent).toMatchObject({
+        name: 'Intro',
+        start_bar: 3,
+        end_bar: 5,
+        speed_ratio: 0.708333,
+      });
+      expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${sent?.id}`);
+      // The new loop plays, drawn with a bar either side; the form has gone.
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(3),
+        endTick: startOfBar(6),
+      });
+      await waitFor(() =>
+        expect(engine.setVisibleBars).toHaveBeenLastCalledWith({
+          startBarIndex: 1,
+          endBarIndex: 5,
+        }),
+      );
+      expect(screen.queryByRole('form', { name: 'New loop' })).not.toBeInTheDocument();
+
+      historyBack();
+      expect(await screen.findByText('At song overview')).toBeInTheDocument();
+    });
+
+    it('a mouse drag in the whole song picks the bars', async () => {
+      const { user, engine } = await openChorus();
+      await user.click(wholeSong());
+      drag(engine, 14, 16);
+      expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('14');
+      expect(screen.getByRole('textbox', { name: 'Last bar' })).toHaveValue('16');
+    });
+
+    it('Cancel goes back to the loop, saving nothing', async () => {
+      const { user, engine } = await openChorus();
+      await user.click(wholeSong());
+      tap(engine, 3);
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(wholeSong()).toHaveAttribute('aria-pressed', 'false');
+      expect(engine.setVisibleBars).toHaveBeenLastCalledWith({ startBarIndex: 7, endBarIndex: 12 });
+      await settle();
+      expect(loops.sent('insert')).toEqual([]);
+    });
+
+    it('while the save is on its way, taps pick nothing and the view stays', async () => {
+      const { user, engine } = await openChorus();
+      await user.click(wholeSong());
+      tap(engine, 3);
+      tap(engine, 4);
+      await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Intro');
+      const release = loops.holdNext('insert');
+      await user.click(screen.getByRole('button', { name: 'Save as loop' }));
+      expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
+
+      expect(wholeSong()).toBeDisabled();
+      tap(engine, 10);
+      expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('3');
+
+      release();
+      expect(await screen.findByRole('heading', { level: 1, name: 'Intro' })).toBeInTheDocument();
+      expect(loops.sent('insert')).toHaveLength(1);
+    });
+
+    it('offline, Save as loop is off and says why; a submit anyway sends nothing', async () => {
+      const { user, engine } = await openChorus();
+      await user.click(wholeSong());
+      tap(engine, 3);
+      tap(engine, 4);
+      await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Intro');
+      act(() => onlineManager.setOnline(false));
+      expect(screen.getByRole('button', { name: 'Save as loop' })).toBeDisabled();
+      expect(screen.getByText(/Loops can be saved once you're back online/)).toBeInTheDocument();
+      fireEvent.submit(saveForm());
+      await settle();
+      expect(loops.sent('insert')).toEqual([]);
+    });
+
+    it('is off until the score is in', async () => {
+      serve();
+      renderPractice(CHORUS_ID);
+      expect(await screen.findByRole('button', { name: 'Show whole song' })).toBeDisabled();
+    });
   });
 
   it('waits for the loops when the score is in first, then opens the loop', async () => {
