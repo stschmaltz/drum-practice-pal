@@ -148,6 +148,7 @@ export function createAlphaTabEngine({
       api.stop();
     },
     seek(tick) {
+      metronome.seeked(tick);
       api.tickPosition = tick;
     },
     setSpeed(ratio) {
@@ -548,14 +549,28 @@ function createMetronomeTrack(api: alphaTab.AlphaTabApi) {
       reload = null;
     },
 
+    /** engine.seek(): a rebuild under way starts again from the new tick. */
+    seeked(tick: number) {
+      if (reload !== null) reload.tick = tick;
+    },
+
     /**
      * True for the state and position events of a rebuild under playback, which
-     * the service must not see. Ends at the "playing" that follows the restart.
+     * the service must not see. Ends at the "playing" that follows the restart,
+     * which is forwarded when the service never heard a "playing" for its play
+     * (a voice change just after a count-in's downbeat): it waits for one.
      */
     hidesPlayback(event: { playing: boolean } | null): boolean {
-      if (event?.playing) startRequested = false;
-      if (reload === null) return false;
-      if (event?.playing && reload.resumed) reload = null;
+      if (reload === null) {
+        if (event?.playing) startRequested = false;
+        return false;
+      }
+      if (event?.playing && reload.resumed) {
+        const serviceWaits = startRequested;
+        reload = null;
+        startRequested = false;
+        return !serviceWaits;
+      }
       return true;
     },
   };
