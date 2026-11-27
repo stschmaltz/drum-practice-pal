@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { addDays, dateOfDayKey, dayKeyOf, nextDayKey } from './days';
-import {
-  currentStreak,
-  daysLabel,
-  longestStreak,
-  longestStreakRun,
-  practiceDayKeys,
-} from './streak';
+import { currentStreak, longestStreak, longestStreakRun, practiceDayKeys } from './streak';
 import { hoursInLocalDay, inTimeZone } from '@/test/timeZone';
 
 // Local-time dates throughout, so the tests mean the same in every zone. The
@@ -129,11 +123,6 @@ describe('longestStreak', () => {
     expect(longestStreak([])).toBe(0);
     expect(longestStreak([session(at(2026, 5, 5))])).toBe(1);
   });
-});
-
-it('daysLabel', () => {
-  expect(daysLabel(1)).toBe('1 day');
-  expect(daysLabel(4)).toBe('4 days');
 });
 
 // The cases above run in whatever zone the machine is in, which may never

@@ -1,8 +1,9 @@
 import { useId, useState } from 'react';
 import { Icon } from '@/components/icons';
 import { ProgressBar } from '@/components/ProgressMarks';
-import { ghostButtonClass, smallHeadingClass } from '@/components/styles';
+import { smallHeadingClass } from '@/components/styles';
 import { nextUpBadges, type BadgeProgress } from './badges';
+import { ExpandButton } from './ExpandButton';
 
 /**
  * Badges without the wall (Unit 17): the earned ones in a line, then "Next
@@ -46,17 +47,13 @@ export function BadgeSection({ badges }: { badges: readonly BadgeProgress[] }) {
 
       {rest.length > 0 && (
         <>
-          {/* One button whose words change, so focus stays on it either way. */}
-          <button
-            type="button"
-            className={`${ghostButtonClass} -ml-4 self-start`}
-            aria-expanded={showingAll}
-            aria-controls={restId}
-            onClick={() => setShowingAll((all) => !all)}
+          <ExpandButton
+            expanded={showingAll}
+            controls={restId}
+            onToggle={() => setShowingAll((all) => !all)}
           >
-            <Icon name={showingAll ? 'chevronUp' : 'chevronDown'} />
             {showingAll ? 'Show fewer badges' : 'Show all badges'}
-          </button>
+          </ExpandButton>
           <div id={restId} hidden={!showingAll}>
             {showingAll && <LockedBadges badges={rest} label="More badges" />}
           </div>

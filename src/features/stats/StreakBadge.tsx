@@ -1,6 +1,7 @@
 import { Icon } from '@/components/icons';
 import { useAllSessions } from '@/features/practice/useSessions';
-import { currentStreak, daysLabel } from './streak';
+import { daysLabel } from './statLabels';
+import { currentStreak } from './streak';
 
 /**
  * The practice streak in the Songs header (Unit 16): a flame and the number

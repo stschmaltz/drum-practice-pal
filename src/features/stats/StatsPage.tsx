@@ -1,47 +1,36 @@
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { Icon } from '@/components/icons';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
-import {
-  focusRing,
-  linkClass,
-  sectionHeadingClass,
-  smallHeadingClass as statLabelClass,
-} from '@/components/styles';
-import type { PracticeLoop } from '@/features/loops/practiceList';
+import { linkClass, sectionHeadingClass } from '@/components/styles';
 import { usePracticeLoops } from '@/features/loops/useLoops';
-import type { PracticeSession } from '@/features/practice/sessions';
 import { useAllSessions } from '@/features/practice/useSessions';
 import { failureCopy } from '@/lib/errorCopy';
 import { waitsForNetwork } from '@/lib/network';
-import { songPath, SONGS_PATH } from '@/lib/routes';
+import { SONGS_PATH } from '@/lib/routes';
 import { badgeProgress } from './badges';
 import { BadgeSection } from './BadgeSection';
-import { DailyMinutesChart, PracticeHeatmap } from './charts';
-import { dateSpan, shortDate, weekdayDate } from './dateLabels';
+import { DailyMinutesChart } from './DailyMinutesChart';
+import { practiceHeatmap } from './heatmap';
 import { LoopProgressList } from './LoopProgressList';
 import { NeglectedLoops } from './NeglectedLoops';
-import { hasRecords, practiceRecords } from './records';
-import { barShare, songBarScale, timeBySong } from './songTime';
-import { currentStreak, daysLabel, longestStreak } from './streak';
+import { PeriodTotals, StreakLine } from './PeriodTotals';
+import { PracticeHeatmap } from './PracticeHeatmap';
+import { hasRecords } from './records';
+import { RecordsList } from './RecordsList';
+import { SongTimeBars } from './SongTimeBars';
+import type { StatsData } from './statsData';
+import { StatsSection } from './StatsSection';
 import {
-  countLabel,
   dailyPractice,
   hasPracticeHistory,
-  minutesLabel,
-  periodBeforeHasPractice,
-  practiceHeatmap,
-  previousTotals,
   statsRangeFrom,
-  statsTotals,
-  totalChange,
+  STATS_RANGE_HEADINGS,
   STATS_RANGE_LABELS,
   STATS_RANGES,
   type StatsRange,
-  type StatsTotals,
 } from './totals';
 
 /** The URL's parameter for the range on show, so Back and a reload keep it. */
@@ -51,9 +40,9 @@ const RANGE_PARAM = 'range';
  * /stats (Units 16 and 17). Every number answers one of three questions: am I
  * showing up (totals against the period before, the streak, the last two
  * weeks, the practice days), is each loop getting faster (loop progress), and
- * what have I been neglecting (where the time went). All worked out here from
- * every session and loop the user has (nothing is stored), read like any
- * other list, so it shows offline from the cache.
+ * what have I been neglecting (where the time went, not practised lately).
+ * All worked out here from every session and loop the user has (nothing is
+ * stored), read like any other list, so it shows offline from the cache.
  */
 export function StatsPage() {
   const sessions = useAllSessions();
@@ -123,24 +112,13 @@ function useStatsRange(): [StatsRange, (range: StatsRange) => void] {
   return [range, setRange];
 }
 
-/** The chosen period in words: the totals' heading, and what "Where the time went" covers. */
-const RANGE_HEADINGS: Record<StatsRange, string> = {
-  week: 'Last 7 days',
-  month: 'Last 30 days',
-  all: 'All time',
-};
-
 /** Two sections side by side from `lg`, one under the other below. */
 const pairClass = 'grid gap-8 lg:grid-cols-2 lg:gap-x-12';
 
-interface StatsData {
-  sessions: readonly PracticeSession[];
-  loops: readonly PracticeLoop[];
-}
-
 /** Beside the heading of a section that doesn't follow the Period choice (17 QA issue 5). */
-const ALL_TIME = 'All time';
+const ALL_TIME = STATS_RANGE_HEADINGS.all;
 
+/** The page once both lists are in and there is practice to show: its sections, top to bottom. */
 function Stats({ sessions, loops }: StatsData) {
   const [range, setRange] = useStatsRange();
   const now = new Date();
@@ -151,7 +129,7 @@ function Stats({ sessions, loops }: StatsData) {
       <section aria-labelledby="totals-heading" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 id="totals-heading" className={sectionHeadingClass}>
-            {RANGE_HEADINGS[range]}
+            {STATS_RANGE_HEADINGS[range]}
           </h2>
           <SegmentedControl
             label="Period"
@@ -160,273 +138,51 @@ function Stats({ sessions, loops }: StatsData) {
             onChange={setRange}
           />
         </div>
-        <Totals sessions={sessions} loops={loops} range={range} now={now} />
+        <PeriodTotals sessions={sessions} loops={loops} range={range} now={now} />
         <StreakLine sessions={sessions} now={now} />
       </section>
 
       <div className={pairClass}>
-        <Section id="song-time-heading" title="Where the time went" aside={RANGE_HEADINGS[range]}>
+        <StatsSection
+          id="song-time-heading"
+          title="Where the time went"
+          aside={STATS_RANGE_HEADINGS[range]}
+        >
           <SongTimeBars sessions={sessions} loops={loops} range={range} now={now} />
-        </Section>
-        <Section id="daily-heading" title="Last two weeks">
+        </StatsSection>
+        <StatsSection id="daily-heading" title="Last two weeks">
           <DailyMinutesChart days={dailyPractice(sessions, now)} now={now} />
-        </Section>
+        </StatsSection>
       </div>
 
-      <Section id="progress-heading" title="Loop progress" aside={ALL_TIME}>
+      <StatsSection id="progress-heading" title="Loop progress" aside={ALL_TIME}>
         <p className="max-w-prose text-sm text-ink-muted">
           Each day counts at the speed you spent the most time at, so a quick try at full speed
           isn&apos;t a day at full speed.
         </p>
         <LoopProgressList sessions={sessions} loops={loops} now={now} />
         <NeglectedLoops sessions={sessions} loops={loops} now={now} />
-      </Section>
+      </StatsSection>
 
       <div className={pairClass}>
-        <Section
+        <StatsSection
           id="heatmap-heading"
           title="Practice days"
           aside={`Last ${heatmapWeeks.length} weeks`}
         >
           <PracticeHeatmap weeks={heatmapWeeks} now={now} />
-        </Section>
+        </StatsSection>
         {/* Not on day one, when every record would be that day's one session (17 QA issue 7). */}
         {hasRecords(sessions) && (
-          <Section id="records-heading" title="Records" aside={ALL_TIME}>
-            <Records sessions={sessions} loops={loops} now={now} />
-          </Section>
+          <StatsSection id="records-heading" title="Records" aside={ALL_TIME}>
+            <RecordsList sessions={sessions} loops={loops} now={now} />
+          </StatsSection>
         )}
       </div>
 
-      <Section id="badges-heading" title="Badges" aside={ALL_TIME}>
+      <StatsSection id="badges-heading" title="Badges" aside={ALL_TIME}>
         <BadgeSection badges={badgeProgress({ sessions, loops })} />
-      </Section>
+      </StatsSection>
     </>
-  );
-}
-
-function Section({
-  id,
-  title,
-  aside,
-  children,
-}: {
-  id: string;
-  title: string;
-  /** Said quietly after the heading: the time the section covers, which the Period choice may or may not set. */
-  aside?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section aria-labelledby={id} className="flex min-w-0 flex-col gap-3">
-      {/* Inline, with a real space between: the heading reads "Records All time", not "RecordsAll time". */}
-      <h2 id={id} className={sectionHeadingClass}>
-        {title}
-        {aside && (
-          <>
-            {' '}
-            <span className="ml-1 text-sm font-normal tracking-normal whitespace-nowrap text-ink-muted">
-              {aside}
-            </span>
-          </>
-        )}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-const statValueClass = 'text-2xl font-bold tabular-nums';
-
-/** No "Loop passes" (17 QA): a pass of one bar and of sixteen counted the same, so the total said nothing. */
-const TOTALS: { kind: keyof StatsTotals; label: string; testId: string }[] = [
-  { kind: 'seconds', label: 'Practice time', testId: 'total-time' },
-  { kind: 'days', label: 'Days practised', testId: 'total-days' },
-  { kind: 'mastered', label: 'Loops mastered', testId: 'total-mastered' },
-];
-
-/**
- * The period's three totals, each with how it compares with the period
- * before: none for all time, and none while the period before has no practice
- * to compare with.
- */
-function Totals({ sessions, loops, range, now }: StatsData & { range: StatsRange; now: Date }) {
-  const totals = statsTotals(sessions, loops, range, now);
-  const before = previousTotals(sessions, loops, range, now);
-  return (
-    <dl
-      className="grid grid-cols-2 gap-x-6 gap-y-4 border-y border-line py-4 sm:grid-cols-3"
-      data-testid="stats-totals"
-    >
-      {TOTALS.map(({ kind, label, testId }) => {
-        const change =
-          before === null || range === 'all' || !periodBeforeHasPractice(before)
-            ? null
-            : totalChange(kind, totals, before, range);
-        return (
-          <div key={kind} className="flex flex-col gap-0.5">
-            <dt className={statLabelClass}>{label}</dt>
-            <dd className={statValueClass} data-testid={testId}>
-              {kind === 'seconds' ? minutesLabel(totals.seconds) : countLabel(totals[kind])}
-            </dd>
-            {change && (
-              <dd
-                className={`text-sm ${change.direction === 'up' ? 'text-success' : 'text-ink-muted'}`}
-                data-testid={`${testId}-change`}
-              >
-                {change.label}
-              </dd>
-            )}
-          </div>
-        );
-      })}
-    </dl>
-  );
-}
-
-/** The streak running now and the longest there has been. */
-function StreakLine({ sessions, now }: { sessions: readonly PracticeSession[]; now: Date }) {
-  const current = currentStreak(sessions, now);
-  const longest = longestStreak(sessions);
-  if (longest === 0) return null;
-  return (
-    <p className="flex items-center gap-2 text-ink-soft" data-testid="streak-line">
-      <Icon
-        name="flame"
-        className={`shrink-0 ${current > 0 ? 'text-warning' : 'text-ink-muted'}`}
-      />
-      <span>
-        {current > 0 ? `On a ${current}-day streak.` : 'No streak running.'}{' '}
-        {current === longest ? 'Your longest yet.' : `Your longest is ${daysLabel(longest)}.`}
-      </span>
-    </p>
-  );
-}
-
-/** Play time per song in the period, as bars with their minutes, most first. */
-function SongTimeBars({
-  sessions,
-  loops,
-  range,
-  now,
-}: StatsData & { range: StatsRange; now: Date }) {
-  const time = timeBySong(sessions, loops, range, now);
-  const { songs, other } = time;
-  // The longest named song's time, never Other's (17 QA issue 9).
-  const scale = songBarScale(time);
-  if (scale === 0) {
-    return <p className="text-ink-muted">No practice in this period.</p>;
-  }
-  return (
-    <ol aria-label="Practice time by song" className="flex flex-col">
-      {songs.map((song) => (
-        <SongTimeRow key={song.songId} seconds={song.seconds} scale={scale}>
-          <Link
-            to={songPath(song.songId)}
-            title={song.title}
-            className={`inline-flex min-h-touch max-w-full min-w-touch items-center rounded-sm text-ink hover:text-brand ${focusRing}`}
-          >
-            <span className="truncate">{song.title}</span>
-          </Link>
-        </SongTimeRow>
-      ))}
-      {other && (
-        <SongTimeRow seconds={other.seconds} scale={scale} muted>
-          <span className="inline-flex min-h-touch items-center text-ink-soft">
-            {other.songs > 0
-              ? `Other (${other.songs} ${other.songs === 1 ? 'song' : 'songs'})`
-              : 'Other'}
-          </span>
-        </SongTimeRow>
-      )}
-    </ol>
-  );
-}
-
-function SongTimeRow({
-  seconds,
-  scale,
-  muted = false,
-  children,
-}: {
-  seconds: number;
-  /** The play time a full-width bar stands for. */
-  scale: number;
-  /** "Other": several songs together, drawn apart from the songs and never wider than the widest. */
-  muted?: boolean;
-  children: ReactNode;
-}) {
-  // To a hundredth of a percent, so 540 of 600 is "90%", not 90.00000000000001.
-  const width = Math.round(barShare(seconds, scale) * 10_000) / 100;
-  return (
-    <li className="flex flex-col pb-2" data-testid="song-time">
-      <div className="flex items-center justify-between gap-3">
-        <span className="min-w-0 font-medium">{children}</span>
-        <span className="shrink-0 text-sm text-ink-soft tabular-nums">{minutesLabel(seconds)}</span>
-      </div>
-      <div aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-raised">
-        <div
-          className={`h-full min-w-1 rounded-full ${muted ? 'bg-ink-muted' : 'bg-selected-line'}`}
-          style={{ width: `${width}%` }}
-          data-testid="song-bar"
-        />
-      </div>
-    </li>
-  );
-}
-
-/**
- * The bests: longest streak, most practice in a day, longest single session,
- * each with when. Drawn once `hasRecords` says there is more than one day to
- * choose between.
- */
-function Records({ sessions, loops, now }: StatsData & { now: Date }) {
-  const { longestStreak: streak, bestDay, longestSession } = practiceRecords(sessions);
-  if (!streak || !bestDay || !longestSession) return null;
-  const loopName = loops.find((loop) => loop.id === longestSession.loopId)?.name;
-  const sessionDay = shortDate(longestSession.startedAt, now);
-  return (
-    <dl className="grid grid-cols-1 divide-y divide-line border-y border-line">
-      <Record label="Longest streak" value={daysLabel(streak.days)} testId="record-streak">
-        {dateSpan(streak.start, streak.end, now)}
-      </Record>
-      <Record label="Most in one day" value={minutesLabel(bestDay.seconds)} testId="record-day">
-        {weekdayDate(bestDay.date, now)}
-      </Record>
-      <Record
-        label="Longest session"
-        value={minutesLabel(longestSession.seconds)}
-        testId="record-session"
-      >
-        {loopName ? `${loopName}, ${sessionDay}` : sessionDay}
-      </Record>
-    </dl>
-  );
-}
-
-function Record({
-  label,
-  value,
-  testId,
-  children,
-}: {
-  label: string;
-  value: string;
-  testId: string;
-  /** When it was set, and on what. */
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 py-3">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <dt className={statLabelClass}>{label}</dt>
-        <dd className="text-sm text-ink-muted wrap-anywhere" data-testid={`${testId}-when`}>
-          {children}
-        </dd>
-      </div>
-      <dd className={`${statValueClass} shrink-0`} data-testid={testId}>
-        {value}
-      </dd>
-    </div>
   );
 }

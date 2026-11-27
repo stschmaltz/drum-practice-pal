@@ -93,3 +93,12 @@ export function songBarScale({ songs, other }: TimeBySong): number {
 export function barShare(seconds: number, scale: number): number {
   return scale <= 0 ? 0 : Math.min(Math.max(seconds, 0) / scale, 1);
 }
+
+/**
+ * The name of the "Other" row: "Other (2 songs)", "Other (1 song)", and
+ * plain "Other" when it holds only sessions whose loop isn't in the list.
+ */
+export function otherSongsLabel(songs: number): string {
+  if (songs <= 0) return 'Other';
+  return `Other (${songs} ${songs === 1 ? 'song' : 'songs'})`;
+}

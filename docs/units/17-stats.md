@@ -417,3 +417,66 @@ The full e2e suite and `npm run test:db` (another agent was running e2e against 
 ### Verdict
 
 **PASS.** The major issue is fixed and holds at 337 and 1,100 days; issues 2 to 9 and the two product gaps are fixed as described. New: one minor product issue (1), one minor (2), four cosmetic (3 to 6).
+
+## Readability
+
+No behaviour changed: the page draws the same markup, test ids, words and classes (one class string's order differs where it now comes from a shared constant). Nothing in `tests/e2e` or `scripts` was touched.
+
+### What changed
+
+**The page and its sections.** `StatsPage.tsx` had grown to the gate, the layout and five sections' components (432 lines). It is now the gate (offline, failed, loading, empty) and the order of the sections (188 lines); each section is a file that takes `StatsData & { now }` (`statsData.ts`):
+
+- `PeriodTotals.tsx` (the three totals with their change lines, and `StreakLine`), `SongTimeBars.tsx`, `RecordsList.tsx`, beside the existing `LoopProgressList.tsx`, `NeglectedLoops.tsx` and `BadgeSection.tsx`.
+- `StatsSection.tsx` is the heading with its aside (was `Section` inside the page).
+- `ExpandButton.tsx` is the "Show all / Show fewer" button the loop list and the badges each wrote out.
+
+**The charts.** `charts.tsx` (645 lines, four charts) is gone; each chart is a file: `DailyMinutesChart.tsx`, `PracticeHeatmap.tsx`, `SpeedChart.tsx`, `Sparkline.tsx`. What they share (the width cap, the font size and its class, the one-letter weekday) is `chartText.ts`, which also carries the comment on how charts are drawn and sized. Inside them:
+
+- `SpeedChart`'s body was one 150-line run of label arithmetic before its JSX. It is now `plotOf` (where the points fall), `axisLabelsOf`, `percentLabelsOf`, `dateLabelsOf` and `speedSummary`, each with the comment that was inline, and a component that draws them. The numbers are computed exactly as before.
+- `PracticeHeatmap` draws through `DayCell`, `BestWeek`, `Legend` and `WeeksTable`.
+
+**Pure modules.** `totals.ts` (428 lines) held ranges, totals, the heatmap's data and every label. Split by subject, each with its tests moved beside it:
+
+- `heatmap.ts` / `heatmap.test.ts`: `practiceHeatmap`, `heatLevel`, `heatmapWeekCount`, `heatmapWeekRows`, `heatmapSummary`, `heatmapLine`, `heatmapMonths`.
+- `statLabels.ts` / `statLabels.test.ts`: `minutesLabel`, `barMinutesLabel`, `countLabel`, `clockLabel`, and `daysLabel` (moved from `streak.ts`, where it was the one label among date maths). `heatmapLine` wrote its own "day" / "days"; it uses `daysLabel` now.
+- `totals.ts` keeps ranges, totals, the comparison, `secondsByDay` and the daily chart's data, and gains `STATS_RANGE_HEADINGS` (the period in words, moved from the page; "All time" beside a heading is its `all`, no longer a second string) and `latestSessionTimes`, the per-loop "latest session" map that `loopProgress.ts` and `neglected.ts` each built for themselves.
+- `songTime.ts`: `otherSongsLabel` ("Other (1 song)", "Other (7 songs)", "Other"), which the component worked out inline.
+- `dateLabels.ts`: `shortDate`, `weekdayDate` and `axisDates` each built the same `Intl.DateTimeFormat` options; one `dayMonthFormat` builds them.
+
+**Class strings** (`src/components/styles.ts`): `nameLinkClass`, an item's name as the link to it, was written out four times (the song overview's loop, the progress row, the neglected loop, the song's bar); `statValueClass` is the large figure the totals and the records share. `StatsPage`'s alias `statLabelClass` for `smallHeadingClass` is gone.
+
+**Dead code removed.**
+
+- `StatsTotals.passes`: nothing has shown it since "Loop passes" left the totals in QA fix round 1 (the badges count passes themselves, in `badges.ts`).
+- `speedChangeLabel` (`loopProgress.ts`): only its test called it; the row draws `speedChange`'s two parts.
+- Nothing was left of the old "Speed over time" picker (`speedHistory`, `SpeedPoint` and the `<select>` went in Build); a search for its names and for unused exports in `src/features/stats/` found no more. The exports that only a test imports are types of public functions and the named limits the tests pin (`HEATMAP_MIN_WEEKS`, `NEGLECTED_AFTER_DAYS`, `SPEED_DOTS_MAX_DAYS`).
+
+**Tests.**
+
+- `StatsPage.test.tsx` repeated three lines 46 times (render, wait for the totals) and wrote out each period and chart press. It now has a render view: `await openStats(path)` (rendered and both lists in) or `renderStats(path)` (for the states before that) return `user`, `choosePeriod(name)`, `toggleChart(loopName)`, `readAgain()` and `queryClient`; `chartButton(loopName)` is the button. `renderStatsWithClient` and the module's `readAgain(queryClient)` went into it. Every test and assertion is as it was (62 tests before and after).
+- The heatmap's and the labels' tests moved, unchanged, with their functions (`heatmap.test.ts`, `statLabels.test.ts`); the zone tables stay in `totals.test.ts`.
+- With `passes` gone, the tests that used a session's passes to tell which sessions a period counted (the midnight boundary, the week and month before across a change of clocks) use its seconds the same way: the same numbers on `duration_seconds`, read back from `seconds`. The count that tests grouping ("1,200 fewer") and the locale is `mastered` in place of `passes`.
+- `speedChangeLabel`'s cases assert `speedChange`'s two parts (`{ span: '70% → 85%', moved: 'up 15' }`), the same words.
+- Added: `latestSessionTimes` (1) and `otherSongsLabel` (3).
+
+### Assertions removed, and why
+
+Two rows of one table in `totals.test.ts`, "the change across a year's end, in words": `passes` for the week ("35 more than the week before") and for the month ("355 fewer than the month before"). They tested the change line of the total that was removed; the same table still has the play time, the days and the loops mastered for both periods. Nothing else was deleted or loosened. The stats folder's test names were compared before and after from vitest's JSON report: 403 before, 405 after; the only differences are those two rows, the renames above and the four added.
+
+### Left alone
+
+- `TimeBySong.totalSeconds` is read only by tests. It is the total the rows are checked to add up to (the rule in AGENTS.md), so it stays.
+- `tests/e2e/stats.spec.ts` (1,037 lines) works every number out without the app's code, by design; its helpers are already functions of its own and nothing in it duplicates a shared e2e helper. Not restructured.
+- `SpeedChart.tsx` is still the longest component (323 lines): its label helpers are pure and could move into `speedChartLayout.ts` with tests of their own. They are covered through the component tests and the e2e's measured boxes; moving them is a larger change than this stage's.
+- `badges.ts` writes its passes with `toLocaleString('en')` while `countLabel` follows the locale (QA after fix round 1, issue 2). Changing it changes what a non-English reader sees, so it is not a readability change.
+- `neglectedLabel` writes "days ago" itself: it is only ever called with 7 or more.
+
+### AGENTS.md
+
+Updated: the stats modules' list (`heatmap.ts`, `statLabels.ts`, `STATS_RANGE_HEADINGS`, `latestSessionTimes`, `otherSongsLabel`; a total nothing shows comes out of `StatsTotals`); a new bullet on the page's components (the page is the gate and the order, a section or a chart is a file, `StatsData`, `StatsSection`, `ExpandButton`, `chartText.ts`); the chart bullet no longer names `charts.tsx`; the labels' rule names `daysLabel` and `statLabels.ts`; the class-string list gains `smallHeadingClass`, `statValueClass` and `nameLinkClass`; the Stats test bullet describes the render view in place of `readAgain(queryClient)`.
+
+### Results
+
+- Before: `npm run check` green (135 files, 5005 passed, 2 skipped); e2e 14 of 14.
+- After: `npm run check` green (137 files, 5029 passed, 2 skipped: 2 more in the stats folder, the rest are the per-file checks in `tests/unit/designTokens.test.ts` running over the new files); e2e 14 of 14.
+- e2e was `stats.spec.ts` (6 tests) and `design.spec.ts` "the library, the song page with its loops…" at phone and desktop, `E2E_PORT=4183`, this worktree's stack on 54421, on a fresh build each time (no preview server was up). Tablet and the full suite were not run, by instruction; the database was not seeded or reset.

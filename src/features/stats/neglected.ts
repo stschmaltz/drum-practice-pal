@@ -5,7 +5,7 @@
  * asked of the user, and a finished loop is never one.
  */
 import { daysBetween } from './days';
-import type { StatsLoop, StatsSession } from './totals';
+import { latestSessionTimes, type StatsLoop, type StatsSession } from './totals';
 
 /** Calendar days without a session before a loop is named. */
 export const NEGLECTED_AFTER_DAYS = 7;
@@ -34,11 +34,7 @@ export function neglectedLoops<L extends NeglectedInput>(
   loops: readonly L[],
   now: Date,
 ): NeglectedLoop<L>[] {
-  const latest = new Map<string, number>();
-  for (const session of sessions) {
-    const time = Date.parse(session.started_at);
-    latest.set(session.loop_id, Math.max(latest.get(session.loop_id) ?? -Infinity, time));
-  }
+  const latest = latestSessionTimes(sessions);
   return loops
     .filter((loop) => loop.status === 'active')
     .map((loop) => {

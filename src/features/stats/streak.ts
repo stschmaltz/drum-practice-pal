@@ -55,8 +55,3 @@ export function longestStreakRun(sessions: readonly Dated[]): StreakRun | null {
 export function longestStreak(sessions: readonly Dated[]): number {
   return longestStreakRun(sessions)?.days ?? 0;
 }
-
-/** "1 day" / "12 days". */
-export function daysLabel(days: number): string {
-  return days === 1 ? '1 day' : `${days} days`;
-}

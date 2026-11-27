@@ -1,25 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { inTimeZone } from '@/test/timeZone';
 import { nextDayKey } from './days';
+import { practiceHeatmap } from './heatmap';
+import { countLabel } from './statLabels';
 import {
-  barMinutesLabel,
-  clockLabel,
-  countLabel,
   dailyPractice,
   dailySummary,
   hasPracticeHistory,
-  heatLevel,
-  heatmapLine,
-  heatmapMonths,
-  heatmapSummary,
-  heatmapWeekCount,
-  heatmapWeekRows,
-  minutesLabel,
+  latestSessionTimes,
   periodBeforeHasPractice,
-  practiceHeatmap,
   previousRange,
-  HEATMAP_MAX_WEEKS,
-  HEATMAP_MIN_WEEKS,
   previousTotals,
   rangeStart,
   statsRangeFrom,
@@ -56,6 +46,20 @@ const loop = (overrides: Partial<StatsLoop>): StatsLoop => ({
   ...overrides,
 });
 
+it('latestSessionTimes gives each loop the start of its latest session, whatever order they come in', () => {
+  const latest = latestSessionTimes([
+    session(at(2026, 11, 20), { loop_id: 'a' }),
+    session(at(2026, 11, 24), { loop_id: 'a' }),
+    session(at(2026, 11, 22), { loop_id: 'a' }),
+    session(at(2026, 11, 3), { loop_id: 'b' }),
+  ]);
+  expect([...latest]).toEqual([
+    ['a', at(2026, 11, 24).getTime()],
+    ['b', at(2026, 11, 3).getTime()],
+  ]);
+  expect(latestSessionTimes([]).size).toBe(0);
+});
+
 describe('hasPracticeHistory', () => {
   it('is false with no session and no finished loop, active loops or not', () => {
     expect(hasPracticeHistory([], [])).toBe(false);
@@ -85,13 +89,13 @@ describe('ranges', () => {
 
 describe('statsTotals', () => {
   const sessions = [
-    session(at(2026, 11, 26, 8), { duration_seconds: 300, repeats: 10 }),
-    session(at(2026, 11, 26, 9), { duration_seconds: 120, repeats: 3 }),
+    session(at(2026, 11, 26, 8), { duration_seconds: 300 }),
+    session(at(2026, 11, 26, 9), { duration_seconds: 120 }),
     // The first day of the week, just after midnight.
-    session(new Date(2026, 10, 20, 0, 5), { duration_seconds: 60, repeats: 1 }),
+    session(new Date(2026, 10, 20, 0, 5), { duration_seconds: 60 }),
     // Just before it: the month and all time only.
-    session(new Date(2026, 10, 19, 23, 55), { duration_seconds: 600, repeats: 20 }),
-    session(at(2026, 1, 3), { duration_seconds: 1000, repeats: 50 }),
+    session(new Date(2026, 10, 19, 23, 55), { duration_seconds: 600 }),
+    session(at(2026, 1, 3), { duration_seconds: 1000 }),
   ];
   const loops = [
     loop({ id: 'a', status: 'finished', finished_at: at(2026, 11, 25).toISOString() }),
@@ -105,7 +109,6 @@ describe('statsTotals', () => {
     expect(statsTotals(sessions, loops, 'week', now)).toEqual({
       seconds: 480,
       days: 2,
-      passes: 14,
       mastered: 2,
     });
   });
@@ -114,7 +117,6 @@ describe('statsTotals', () => {
     expect(statsTotals(sessions, loops, 'month', now)).toEqual({
       seconds: 1080,
       days: 3,
-      passes: 34,
       mastered: 2,
     });
   });
@@ -123,7 +125,6 @@ describe('statsTotals', () => {
     expect(statsTotals(sessions, loops, 'all', now)).toEqual({
       seconds: 2080,
       days: 4,
-      passes: 84,
       mastered: 3,
     });
   });
@@ -132,7 +133,6 @@ describe('statsTotals', () => {
     expect(statsTotals([], [], 'week', now)).toEqual({
       seconds: 0,
       days: 0,
-      passes: 0,
       mastered: 0,
     });
   });
@@ -165,54 +165,6 @@ describe('dailyPractice', () => {
   });
 });
 
-describe('practiceHeatmap', () => {
-  const weeks = practiceHeatmap(
-    [session(at(2026, 11, 24), { duration_seconds: 25 * 60 }), session(at(2026, 6, 1))],
-    now,
-  );
-
-  it('is 26 columns of Monday-to-Sunday weeks, this week last', () => {
-    expect(weeks).toHaveLength(26);
-    for (const week of weeks) {
-      expect(week).toHaveLength(7);
-      expect(week[0]?.date.getDay()).toBe(1);
-    }
-    const thisWeek = weeks[25];
-    expect(thisWeek?.[0]?.key).toBe('2026-11-23');
-    expect(thisWeek?.[3]).toMatchObject({ key: '2026-11-26', today: true, future: false });
-  });
-
-  it('marks the days after today as future, and shades days by play time', () => {
-    const thisWeek = weeks[25] ?? [];
-    expect(thisWeek.slice(4).every((day) => day.future)).toBe(true);
-    expect(thisWeek[1]).toMatchObject({ key: '2026-11-24', level: 3 });
-    expect(weeks[0]?.[0]?.key).toBe('2026-06-01');
-    expect(weeks[0]?.[0]?.level).toBe(1);
-  });
-
-  it('starts every week on a Monday when today is a Monday or a Sunday', () => {
-    expect(practiceHeatmap([], at(2026, 11, 23), 26)[25]?.[0]?.key).toBe('2026-11-23');
-    expect(practiceHeatmap([], at(2026, 11, 29), 26)[25]?.[6]).toMatchObject({
-      key: '2026-11-29',
-      today: true,
-      future: false,
-    });
-  });
-});
-
-it.each([
-  [0, 0],
-  [1, 1],
-  [9 * 60 + 59, 1],
-  [10 * 60, 2],
-  [20 * 60, 3],
-  [39 * 60, 3],
-  [40 * 60, 4],
-  [5 * 3600, 4],
-])('heatLevel(%i s) is %i', (seconds, level) => {
-  expect(heatLevel(seconds)).toBe(level);
-});
-
 describe('the period before', () => {
   it('is the seven days before the week, and the thirty before the month', () => {
     expect(previousRange('week', now)).toEqual({
@@ -241,15 +193,15 @@ describe('the period before', () => {
 
   const sessions = [
     // This week.
-    session(at(2026, 11, 26), { duration_seconds: 600, repeats: 10 }),
+    session(at(2026, 11, 26), { duration_seconds: 600 }),
     // Its first instant is this week's, the instant before is the week before's.
-    session(new Date(2026, 10, 20, 0, 0), { duration_seconds: 60, repeats: 1 }),
-    session(new Date(2026, 10, 19, 23, 59, 59, 999), { duration_seconds: 300, repeats: 5 }),
-    session(new Date(2026, 10, 13, 0, 0), { duration_seconds: 120, repeats: 2 }),
+    session(new Date(2026, 10, 20, 0, 0), { duration_seconds: 60 }),
+    session(new Date(2026, 10, 19, 23, 59, 59, 999), { duration_seconds: 300 }),
+    session(new Date(2026, 10, 13, 0, 0), { duration_seconds: 120 }),
     // A moment before the week before: neither.
-    session(new Date(2026, 10, 12, 23, 59, 59, 999), { duration_seconds: 7000, repeats: 70 }),
+    session(new Date(2026, 10, 12, 23, 59, 59, 999), { duration_seconds: 7000 }),
     // The month before the month.
-    session(at(2026, 10, 1), { duration_seconds: 900, repeats: 9 }),
+    session(at(2026, 10, 1), { duration_seconds: 900 }),
   ];
   const loops = [
     loop({ id: 'now', status: 'finished', finished_at: at(2026, 11, 25).toISOString() }),
@@ -262,13 +214,11 @@ describe('the period before', () => {
     expect(statsTotals(sessions, loops, 'week', now)).toEqual({
       seconds: 660,
       days: 2,
-      passes: 11,
       mastered: 2,
     });
     expect(previousTotals(sessions, loops, 'week', now)).toEqual({
       seconds: 420,
       days: 2,
-      passes: 7,
       mastered: 1,
     });
   });
@@ -277,7 +227,6 @@ describe('the period before', () => {
     expect(previousTotals(sessions, loops, 'month', now)).toEqual({
       seconds: 900,
       days: 1,
-      passes: 9,
       mastered: 0,
     });
   });
@@ -289,11 +238,11 @@ describe('the period before', () => {
   it('compares a week that starts in January with the last week of December', () => {
     const january = at(2027, 1, 3, 9);
     const acrossNewYear = [
-      session(at(2027, 1, 1), { duration_seconds: 100, repeats: 1 }),
-      session(at(2026, 12, 28), { duration_seconds: 200, repeats: 2 }),
-      session(at(2026, 12, 27), { duration_seconds: 400, repeats: 4 }),
-      session(at(2026, 12, 21), { duration_seconds: 800, repeats: 8 }),
-      session(at(2026, 12, 20), { duration_seconds: 1600, repeats: 16 }),
+      session(at(2027, 1, 1), { duration_seconds: 100 }),
+      session(at(2026, 12, 28), { duration_seconds: 200 }),
+      session(at(2026, 12, 27), { duration_seconds: 400 }),
+      session(at(2026, 12, 21), { duration_seconds: 800 }),
+      session(at(2026, 12, 20), { duration_seconds: 1600 }),
     ];
     expect(statsTotals(acrossNewYear, [], 'week', january)).toMatchObject({ seconds: 300 });
     expect(previousTotals(acrossNewYear, [], 'week', january)).toMatchObject({
@@ -310,7 +259,6 @@ describe('totalChange', () => {
   const totals = (overrides: Partial<ReturnType<typeof statsTotals>>) => ({
     seconds: 0,
     days: 0,
-    passes: 0,
     mastered: 0,
     ...overrides,
   });
@@ -321,7 +269,7 @@ describe('totalChange', () => {
     ['seconds', 600, 600, 'week', 'same', 'Same as the week before'],
     ['seconds', 3 * 3600, 55 * 60, 'month', 'up', '2 h 5 min more than the month before'],
     ['days', 4, 2, 'week', 'up', '2 more than the week before'],
-    ['passes', 40, 1240, 'month', 'down', '1,200 fewer than the month before'],
+    ['mastered', 40, 1240, 'month', 'down', '1,200 fewer than the month before'],
     ['mastered', 1, 0, 'week', 'up', '1 more than the week before'],
     ['mastered', 2, 2, 'month', 'same', 'Same as the month before'],
   ] as const)(
@@ -368,11 +316,11 @@ describe('totalChange', () => {
 
   // 17 QA issue 4: "1.184" over "56 fewer" in one browser, "1,184" over it in another.
   it('writes a count the way the total above it is written, in the reader’s locale', () => {
-    const passes = (locale: string) =>
-      totalChange('passes', totals({ passes: 40 }), totals({ passes: 1240 }), 'month', locale)
+    const fewer = (locale: string) =>
+      totalChange('mastered', totals({ mastered: 40 }), totals({ mastered: 1240 }), 'month', locale)
         ?.label;
-    expect(passes('en-US')).toBe(`${countLabel(1200, 'en-US')} fewer than the month before`);
-    expect(passes('de-DE')).toBe(`${countLabel(1200, 'de-DE')} fewer than the month before`);
+    expect(fewer('en-US')).toBe(`${countLabel(1200, 'en-US')} fewer than the month before`);
+    expect(fewer('de-DE')).toBe(`${countLabel(1200, 'de-DE')} fewer than the month before`);
     expect(countLabel(1200, 'de-DE')).toBe('1.200');
     expect(countLabel(13503, 'en-US')).toBe('13,503');
   });
@@ -415,219 +363,19 @@ it('dailySummary gives the chart’s play time and how many of its days were pra
   expect(dailySummary(dailyPractice([], now))).toEqual({ seconds: 0, practised: 0 });
 });
 
-// 17 QA issue 7: three weeks of practice were a corner of orange in 160 empty squares.
-describe('heatmapWeekCount', () => {
-  // `now` is a Thursday; its week began on Monday 23 November.
-  it('is twelve weeks with no session, or with a first session inside them', () => {
-    expect(HEATMAP_MIN_WEEKS).toBe(12);
-    expect(heatmapWeekCount([], now)).toBe(12);
-    expect(heatmapWeekCount([session(at(2026, 11, 26))], now)).toBe(12);
-    // Monday 7 September opens the twelfth week back.
-    expect(heatmapWeekCount([session(at(2026, 9, 7))], now)).toBe(12);
-  });
-
-  it('grows a week at a time from the week of the first session', () => {
-    // Sunday 6 September is in the thirteenth week back.
-    expect(heatmapWeekCount([session(at(2026, 9, 6, 23))], now)).toBe(13);
-    expect(heatmapWeekCount([session(at(2026, 11, 24)), session(at(2026, 8, 5))], now)).toBe(17);
-  });
-
-  it('stops at twenty-six weeks, however long ago the first session was', () => {
-    expect(HEATMAP_MAX_WEEKS).toBe(26);
-    expect(heatmapWeekCount([session(at(2026, 6, 1))], now)).toBe(26);
-    expect(heatmapWeekCount([session(at(2026, 5, 31))], now)).toBe(26);
-    expect(heatmapWeekCount([session(at(2021, 1, 1))], now)).toBe(26);
-  });
-
-  it('is what the map draws unless told otherwise, the first session’s week first', () => {
-    const weeks = practiceHeatmap([session(at(2026, 8, 5))], now);
-    expect(weeks).toHaveLength(17);
-    expect(weeks[0]?.[0]?.key).toBe('2026-08-03');
-    expect(weeks[0]?.[2]).toMatchObject({ key: '2026-08-05', seconds: 60 });
-    expect(weeks[16]?.[3]).toMatchObject({ key: '2026-11-26', today: true });
-  });
-
-  describe('across a change of clocks', () => {
-    inTimeZone('Europe/London');
-    it('counts whole weeks through the 25-hour day', () => {
-      // Monday 31 August to Monday 23 November, the clocks going back on 25 October between.
-      expect(heatmapWeekCount([session(at(2026, 8, 31, 0))], at(2026, 11, 23, 23))).toBe(13);
-    });
-  });
-});
-
-// 17 QA issue 3: the map's text alternative, a row a week.
-describe('heatmapWeekRows', () => {
-  it('gives each week its Monday, the days practised and the play time, oldest first', () => {
-    const rows = heatmapWeekRows(
-      practiceHeatmap(
-        [
-          session(at(2026, 11, 24), { duration_seconds: 25 * 60 }),
-          session(at(2026, 11, 25), { duration_seconds: 5 * 60 }),
-          session(at(2026, 11, 12), { duration_seconds: 9 * 60 }),
-          session(at(2026, 11, 12, 20), { duration_seconds: 11 * 60 }),
-        ],
-        now,
-      ),
-    );
-    expect(rows).toHaveLength(12);
-    expect(rows[0]).toEqual({ start: new Date(2026, 8, 7), days: 0, seconds: 0 });
-    expect(rows[9]).toEqual({ start: new Date(2026, 10, 9), days: 1, seconds: 20 * 60 });
-    expect(rows[10]).toEqual({ start: new Date(2026, 10, 16), days: 0, seconds: 0 });
-    expect(rows[11]).toEqual({ start: new Date(2026, 10, 23), days: 2, seconds: 30 * 60 });
-  });
-});
-
-describe('heatmapSummary', () => {
-  // 17 QA issue 8: "of the last 180 days" moved between 176 and 182 through the week.
-  it.each([
-    [1, 12, 'Practised on 1 day in the last 12 weeks.'],
-    [9, 26, 'Practised on 9 days in the last 26 weeks.'],
-    [0, 12, 'Practised on 0 days in the last 12 weeks.'],
-  ])('says %i days of %i weeks in words', (daysPractised, weeksShown, line) => {
-    expect(heatmapLine({ daysPractised, weeksShown })).toBe(line);
-  });
-
-  // 17 QA issue 7: "Best week: 5 min over 1 day" on day one restates the day.
-  it('has no best week until two days of the map were practised', () => {
-    const one = practiceHeatmap([session(at(2026, 11, 24), { duration_seconds: 600 })], now);
-    expect(heatmapSummary(one)).toEqual({ weeksShown: 12, daysPractised: 1, bestWeek: null });
-    const two = practiceHeatmap(
-      [session(at(2026, 11, 24), { duration_seconds: 600 }), session(at(2026, 11, 25))],
-      now,
-    );
-    expect(heatmapSummary(two).bestWeek).toEqual({
-      start: new Date(2026, 10, 23),
-      seconds: 660,
-      days: 2,
-    });
-  });
-
-  it('counts the weeks shown, the days practised, and the best week', () => {
-    const weeks = practiceHeatmap(
-      [
-        session(at(2026, 11, 24), { duration_seconds: 25 * 60 }),
-        session(at(2026, 11, 25), { duration_seconds: 5 * 60 }),
-        session(at(2026, 11, 10), { duration_seconds: 20 * 60 }),
-        session(at(2026, 11, 12), { duration_seconds: 9 * 60 }),
-        session(at(2026, 11, 12, 20), { duration_seconds: 11 * 60 }),
-        session(at(2026, 6, 1)),
-        // Before the map.
-        session(at(2026, 5, 31), { duration_seconds: 9999 }),
-      ],
-      now,
-    );
-    expect(heatmapSummary(weeks)).toEqual({
-      weeksShown: 26,
-      daysPractised: 5,
-      bestWeek: { start: new Date(2026, 10, 9), seconds: 40 * 60, days: 2 },
-    });
-  });
-
-  it('keeps the earlier of two weeks as good', () => {
-    const weeks = practiceHeatmap(
-      [
-        session(at(2026, 11, 24), { duration_seconds: 600 }),
-        session(at(2026, 11, 3), { duration_seconds: 600 }),
-      ],
-      now,
-    );
-    expect(heatmapSummary(weeks).bestWeek).toEqual({
-      start: new Date(2026, 10, 2),
-      seconds: 600,
-      days: 1,
-    });
-  });
-
-  it('has no best week with nothing practised', () => {
-    expect(heatmapSummary(practiceHeatmap([], now))).toEqual({
-      weeksShown: 12,
-      daysPractised: 0,
-      bestWeek: null,
-    });
-  });
-});
-
-describe('heatmapMonths', () => {
-  const columns = (today: Date) =>
-    heatmapMonths(practiceHeatmap([], today, 26)).map(({ column, date }) => [
-      column,
-      date.getMonth(),
-    ]);
-
-  it('names each month at the first week that starts in it', () => {
-    // The map opens on Monday 1 June.
-    expect(columns(now)).toEqual([
-      [0, 5],
-      [5, 6],
-      [9, 7],
-      [14, 8],
-      [18, 9],
-      [22, 10],
-    ]);
-  });
-
-  it('drops the opening part-month when the next name would run into it', () => {
-    // The map opens on Monday 22 June; July starts two columns on.
-    expect(columns(at(2026, 12, 17))[0]).toEqual([2, 6]);
-    // Opening on 15 June leaves three columns: both fit.
-    expect(columns(at(2026, 12, 10)).slice(0, 2)).toEqual([
-      [0, 5],
-      [3, 6],
-    ]);
-  });
-});
-
-it.each([
-  [0, '0:00'],
-  [9, '0:09'],
-  [252, '4:12'],
-  [3600 + 4 * 60 + 12, '1:04:12'],
-])('clockLabel(%i) is %s', (seconds, label) => {
-  expect(clockLabel(seconds)).toBe(label);
-});
-
-// 17 QA issue 2: a 45-second session read "0 min" beside "1 day", and "<1" on its bar.
-it.each([
-  [0, '0 min'],
-  [1, '<1 min'],
-  [45, '<1 min'],
-  [59, '<1 min'],
-  [60, '1 min'],
-  [119, '1 min'],
-  [45 * 60, '45 min'],
-  [2 * 3600, '2 h'],
-  [2 * 3600 + 5 * 60 + 30, '2 h 5 min'],
-  [-5, '0 min'],
-])('minutesLabel(%i) is %s', (seconds, label) => {
-  expect(minutesLabel(seconds)).toBe(label);
-});
-
-it.each([
-  [0, '0'],
-  [45, '<1'],
-  [60, '1'],
-  [12 * 60 + 59, '12'],
-  // A bar counts in minutes however long the day: there is no room for "1 h 15 min" over it.
-  [75 * 60, '75'],
-])('barMinutesLabel(%i) is %s, agreeing with minutesLabel under an hour', (seconds, label) => {
-  expect(barMinutesLabel(seconds)).toBe(label);
-  if (seconds < 3600) expect(minutesLabel(seconds)).toBe(`${label} min`);
-});
-
 /** True when each key is the day after the one before it: no day skipped or repeated. */
 const consecutive = (keys: string[]) =>
   keys.every((key, i) => i === 0 || nextDayKey(keys[i - 1]!) === key);
 
 describe('a range boundary at midnight', () => {
   const sessions = [
-    session(new Date(2026, 10, 20, 0, 0, 0, 0), { repeats: 1 }),
-    session(new Date(2026, 10, 19, 23, 59, 59, 999), { repeats: 10 }),
+    session(new Date(2026, 10, 20, 0, 0, 0, 0), { duration_seconds: 1 }),
+    session(new Date(2026, 10, 19, 23, 59, 59, 999), { duration_seconds: 10 }),
   ];
 
   it('counts a session at the first instant of the range’s first day, and none a moment before', () => {
-    expect(statsTotals(sessions, [], 'week', now)).toMatchObject({ passes: 1, days: 1 });
-    expect(statsTotals(sessions, [], 'all', now)).toMatchObject({ passes: 11, days: 2 });
+    expect(statsTotals(sessions, [], 'week', now)).toMatchObject({ seconds: 1, days: 1 });
+    expect(statsTotals(sessions, [], 'all', now)).toMatchObject({ seconds: 11, days: 2 });
   });
 
   it('counts a loop finished at that instant in the week, and one a moment before only all time', () => {
@@ -691,14 +439,14 @@ describe.each([
       end: new Date(y, m - 1, d + 3),
     });
     const sessions = [
-      session(new Date(y, m - 1, d + 3, 0, 0), { repeats: 100 }),
-      session(new Date(y, m - 1, d + 2, 23, 59), { repeats: 1 }),
-      session(new Date(y, m - 1, d, 12), { repeats: 2 }),
-      session(new Date(y, m - 1, d - 4, 0, 0), { repeats: 4 }),
-      session(new Date(y, m - 1, d - 5, 23, 59), { repeats: 1000 }),
+      session(new Date(y, m - 1, d + 3, 0, 0), { duration_seconds: 100 }),
+      session(new Date(y, m - 1, d + 2, 23, 59), { duration_seconds: 1 }),
+      session(new Date(y, m - 1, d, 12), { duration_seconds: 2 }),
+      session(new Date(y, m - 1, d - 4, 0, 0), { duration_seconds: 4 }),
+      session(new Date(y, m - 1, d - 5, 23, 59), { duration_seconds: 1000 }),
     ];
-    expect(previousTotals(sessions, [], 'week', late)).toMatchObject({ passes: 7, days: 3 });
-    expect(statsTotals(sessions, [], 'week', late)).toMatchObject({ passes: 100 });
+    expect(previousTotals(sessions, [], 'week', late)).toMatchObject({ seconds: 7, days: 3 });
+    expect(statsTotals(sessions, [], 'week', late)).toMatchObject({ seconds: 100 });
   });
 
   it.each(changes)('the week and month start at midnight across the day %s', (_, [y, m, d]) => {
@@ -706,10 +454,10 @@ describe.each([
     expect(rangeStart('week', late)).toEqual(new Date(y, m - 1, d - 3));
     expect(rangeStart('month', late)).toEqual(new Date(y, m - 1, d + 3 - 29));
     const sessions = [
-      session(new Date(y, m - 1, d - 3, 0, 0), { repeats: 1 }),
-      session(new Date(y, m - 1, d - 4, 23, 59), { repeats: 10 }),
+      session(new Date(y, m - 1, d - 3, 0, 0), { duration_seconds: 1 }),
+      session(new Date(y, m - 1, d - 4, 23, 59), { duration_seconds: 10 }),
     ];
-    expect(statsTotals(sessions, [], 'week', late)).toMatchObject({ passes: 1, days: 1 });
+    expect(statsTotals(sessions, [], 'week', late)).toMatchObject({ seconds: 1, days: 1 });
   });
 });
 
@@ -733,15 +481,15 @@ describe.each([
       end: new Date(y, m - 1, d + 6),
     });
     const sessions = [
-      session(new Date(y, m - 1, d + 6, 0, 0), { repeats: 100 }),
-      session(new Date(y, m - 1, d + 5, 23, 59), { repeats: 1 }),
-      session(new Date(y, m - 1, d, 0, 30), { repeats: 2 }),
-      session(new Date(y, m - 1, d, 23, 30), { repeats: 4 }),
-      session(new Date(y, m - 1, d - 24, 0, 0), { repeats: 8 }),
-      session(new Date(y, m - 1, d - 25, 23, 59), { repeats: 1000 }),
+      session(new Date(y, m - 1, d + 6, 0, 0), { duration_seconds: 100 }),
+      session(new Date(y, m - 1, d + 5, 23, 59), { duration_seconds: 1 }),
+      session(new Date(y, m - 1, d, 0, 30), { duration_seconds: 2 }),
+      session(new Date(y, m - 1, d, 23, 30), { duration_seconds: 4 }),
+      session(new Date(y, m - 1, d - 24, 0, 0), { duration_seconds: 8 }),
+      session(new Date(y, m - 1, d - 25, 23, 59), { duration_seconds: 1000 }),
     ];
-    expect(previousTotals(sessions, [], 'month', late)).toMatchObject({ passes: 15, days: 3 });
-    expect(statsTotals(sessions, [], 'month', late)).toMatchObject({ passes: 100, days: 1 });
+    expect(previousTotals(sessions, [], 'month', late)).toMatchObject({ seconds: 15, days: 3 });
+    expect(statsTotals(sessions, [], 'month', late)).toMatchObject({ seconds: 100, days: 1 });
   });
 
   it.each(changes)(
@@ -769,10 +517,10 @@ describe('the change across a year’s end, in words', () => {
   // 3 January: the week began on 28 December, the month on 5 December.
   const january = at(2027, 1, 3, 9);
   const sessions = [
-    session(at(2027, 1, 2), { duration_seconds: 1800, repeats: 30 }),
-    session(at(2026, 12, 30), { duration_seconds: 600, repeats: 10 }),
-    session(at(2026, 12, 24), { duration_seconds: 3000, repeats: 5 }),
-    session(at(2026, 11, 20), { duration_seconds: 9000, repeats: 400 }),
+    session(at(2027, 1, 2), { duration_seconds: 1800 }),
+    session(at(2026, 12, 30), { duration_seconds: 600 }),
+    session(at(2026, 12, 24), { duration_seconds: 3000 }),
+    session(at(2026, 11, 20), { duration_seconds: 9000 }),
   ];
   const loops = [
     loop({ id: 'a', status: 'finished', finished_at: at(2026, 12, 31).toISOString() }),
@@ -783,11 +531,9 @@ describe('the change across a year’s end, in words', () => {
   it.each([
     ['seconds', 'week', '10 min less than the week before'],
     ['days', 'week', '1 more than the week before'],
-    ['passes', 'week', '35 more than the week before'],
     ['mastered', 'week', '1 fewer than the week before'],
     ['seconds', 'month', '1 h less than the month before'],
     ['days', 'month', '2 more than the month before'],
-    ['passes', 'month', '355 fewer than the month before'],
     ['mastered', 'month', '3 more than the month before'],
   ] as const)('%s for the %s: %s', (kind, range, label) => {
     const current = statsTotals(sessions, loops, range, january);

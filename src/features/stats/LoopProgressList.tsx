@@ -1,14 +1,15 @@
 import { useId, useState } from 'react';
 import { Link } from 'react-router';
 import { Icon } from '@/components/icons';
-import { focusRing, ghostButtonClass, quietButtonClass } from '@/components/styles';
+import { nameLinkClass, quietButtonClass } from '@/components/styles';
 import type { PracticeLoop } from '@/features/loops/practiceList';
-import type { PracticeSession } from '@/features/practice/sessions';
 import { loopPracticePath } from '@/lib/routes';
-import { Sparkline, SpeedChart } from './charts';
+import { ExpandButton } from './ExpandButton';
 import { LOOP_PROGRESS_SHOWN, loopProgress, speedChange, type LoopProgress } from './loopProgress';
-import { daysLabel } from './streak';
-import { minutesLabel } from './totals';
+import { Sparkline } from './Sparkline';
+import { SpeedChart } from './SpeedChart';
+import { daysLabel, minutesLabel } from './statLabels';
+import type { StatsData } from './statsData';
 
 /**
  * "Loop progress" (Unit 17): every loop that has been practised, with where
@@ -16,15 +17,7 @@ import { minutesLabel } from './totals';
  * A row's name goes to the loop's practice screen; its "Chart" opens the
  * loop's speed over its practice days under the row, one at a time.
  */
-export function LoopProgressList({
-  sessions,
-  loops,
-  now,
-}: {
-  sessions: readonly PracticeSession[];
-  loops: readonly PracticeLoop[];
-  now: Date;
-}) {
+export function LoopProgressList({ sessions, loops, now }: StatsData & { now: Date }) {
   const progress = loopProgress(sessions, loops);
   const [showingAll, setShowingAll] = useState(false);
   const [chartOf, setChartOf] = useState<string | null>(null);
@@ -57,17 +50,13 @@ export function LoopProgressList({
         ))}
       </ul>
       {hidden > 0 && (
-        // One button whose words change, so focus stays on it either way.
-        <button
-          type="button"
-          className={`${ghostButtonClass} -ml-4 self-start`}
-          aria-expanded={showingAll}
-          aria-controls={listId}
-          onClick={() => setShowingAll((all) => !all)}
+        <ExpandButton
+          expanded={showingAll}
+          controls={listId}
+          onToggle={() => setShowingAll((all) => !all)}
         >
-          <Icon name={showingAll ? 'chevronUp' : 'chevronDown'} />
           {showingAll ? 'Show fewer' : `Show all ${progress.length} loops`}
-        </button>
+        </ExpandButton>
       )}
     </>
   );
@@ -98,7 +87,7 @@ function LoopProgressRow({
             {finished && <Icon name="trophy" className="size-4 shrink-0 text-success" />}
             <Link
               to={loopPracticePath(loop.song_id, loop.id)}
-              className={`inline-flex min-h-touch max-w-full min-w-touch items-center rounded-sm wrap-anywhere text-ink hover:text-brand ${focusRing}`}
+              className={`${nameLinkClass} wrap-anywhere`}
             >
               {loop.name}
               {finished && <span className="sr-only">, mastered</span>}

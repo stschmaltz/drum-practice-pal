@@ -7,7 +7,7 @@
  */
 export const HEATMAP_BRAND_ALPHAS = [0.7, 0.8, 0.9, 1] as const;
 
-/** By heat level, 0 to 4 (`heatLevel` in totals.ts). Written out so Tailwind finds each class. */
+/** By heat level, 0 to 4 (`heatLevel` in heatmap.ts). Written out so Tailwind finds each class. */
 export const HEAT_CLASSES = [
   'fill-raised',
   'fill-brand/70',

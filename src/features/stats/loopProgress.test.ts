@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hoursInLocalDay, inTimeZone } from '@/test/timeZone';
-import { dailySpeeds, loopProgress, speedChangeLabel } from './loopProgress';
+import { dailySpeeds, loopProgress, speedChange } from './loopProgress';
 import type { StatsSession } from './totals';
 
 const at = (year: number, month: number, day: number, hour = 12, minute = 0) =>
@@ -158,7 +158,7 @@ describe('loopProgress', () => {
   });
 });
 
-describe('speedChangeLabel', () => {
+describe('speedChange', () => {
   const days = (count: number) =>
     Array.from({ length: count }, (_, index) => ({
       key: `2026-11-0${index + 1}`,
@@ -168,24 +168,25 @@ describe('speedChangeLabel', () => {
     }));
 
   it.each([
-    [70, 85, '70% → 85%, up 15'],
-    [90, 80, '90% → 80%, down 10'],
-    [80, 80, '80% → 80%, no change'],
-  ])('from %i to %i is "%s"', (startPercent, nowPercent, label) => {
+    [70, 85, '70% → 85%', 'up 15'],
+    [90, 80, '90% → 80%', 'down 10'],
+    [80, 80, '80% → 80%', 'no change'],
+  ])('from %i to %i is "%s, %s"', (startPercent, nowPercent, span, moved) => {
     expect(
-      speedChangeLabel({
+      speedChange({
         days: days(3),
         startPercent,
         nowPercent,
         change: nowPercent - startPercent,
       }),
-    ).toBe(label);
+    ).toEqual({ span, moved });
   });
 
   it('is the one speed after one practice day', () => {
-    expect(speedChangeLabel({ days: days(1), startPercent: 80, nowPercent: 80, change: 0 })).toBe(
-      '80%',
-    );
+    expect(speedChange({ days: days(1), startPercent: 80, nowPercent: 80, change: 0 })).toEqual({
+      span: '80%',
+      moved: null,
+    });
   });
 });
 
@@ -279,7 +280,7 @@ describe('loopProgress, ties and one day', () => {
     expect(others).toEqual([]);
     expect(only).toMatchObject({ startPercent: 80, nowPercent: 80, change: 0, seconds: 300 });
     expect(only?.days).toHaveLength(1);
-    expect(speedChangeLabel(only!)).toBe('80%');
+    expect(speedChange(only!)).toEqual({ span: '80%', moved: null });
   });
 
   it('orders loops last practised at the same instant the same way whatever order they come in', () => {
@@ -315,7 +316,7 @@ describe('loopProgress, ties and one day', () => {
       ],
       [active('a')],
     );
-    expect(speedChangeLabel(first!)).toBe('70% → 80%, up 10');
+    expect(speedChange(first!)).toEqual({ span: '70% → 80%', moved: 'up 10' });
   });
 });
 

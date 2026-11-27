@@ -4,23 +4,29 @@
  * leaves it to the browser.
  */
 
-/** "26 Nov"; "26 Nov 2025" for a day in another year than `now`. */
-export function shortDate(date: Date, now: Date, locale?: string): string {
+/** Day and short month; the year after them, and the weekday before, only when asked. */
+function dayMonthFormat(
+  locale: string | undefined,
+  { year, weekday = false }: { year: boolean; weekday?: boolean },
+): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat(locale, {
+    ...(weekday ? { weekday: 'short' } : {}),
     day: 'numeric',
     month: 'short',
-    ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
-  }).format(date);
+    ...(year ? { year: 'numeric' } : {}),
+  });
+}
+
+const inAnotherYear = (date: Date, than: Date) => date.getFullYear() !== than.getFullYear();
+
+/** "26 Nov"; "26 Nov 2025" for a day in another year than `now`. */
+export function shortDate(date: Date, now: Date, locale?: string): string {
+  return dayMonthFormat(locale, { year: inAnotherYear(date, now) }).format(date);
 }
 
 /** "Sat 14 Nov": a single day worth naming, with its weekday (punctuated as the locale does). */
 export function weekdayDate(date: Date, now: Date, locale?: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
-  }).format(date);
+  return dayMonthFormat(locale, { year: inAnotherYear(date, now), weekday: true }).format(date);
 }
 
 /** "3 Nov – 9 Nov", or the one date when both ends are the same day. */
@@ -37,10 +43,6 @@ export function dateSpan(start: Date, end: Date, now: Date, locale?: string): st
  * needs it: the two only place the line between them.
  */
 export function axisDates(first: Date, last: Date, locale?: string): [string, string] {
-  const format = new Intl.DateTimeFormat(locale, {
-    day: 'numeric',
-    month: 'short',
-    ...(first.getFullYear() === last.getFullYear() ? {} : { year: 'numeric' }),
-  });
+  const format = dayMonthFormat(locale, { year: inAnotherYear(first, last) });
   return [format.format(first), format.format(last)];
 }

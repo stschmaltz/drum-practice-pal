@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { barShare, songBarScale, timeBySong, type SongTimeLoop } from './songTime';
+import { barShare, otherSongsLabel, songBarScale, timeBySong, type SongTimeLoop } from './songTime';
 import type { StatsSession } from './totals';
 
 const at = (year: number, month: number, day: number, hour = 12) =>
@@ -24,6 +24,14 @@ const loop = (id: string, song_id: string, title = `Song ${song_id}`): SongTimeL
   id,
   song_id,
   song: { title },
+});
+
+it.each([
+  [0, 'Other'],
+  [1, 'Other (1 song)'],
+  [7, 'Other (7 songs)'],
+])('otherSongsLabel(%i) is "%s"', (songs, label) => {
+  expect(otherSongsLabel(songs)).toBe(label);
 });
 
 describe('timeBySong', () => {

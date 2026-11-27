@@ -4,7 +4,7 @@ import { buttonClass, ghostButtonClass } from '@/components/styles';
 import { usePracticeLoops } from '@/features/loops/useLoops';
 import { ratioToPercent } from '@/features/player/speed';
 import { sessionSummaryExtras } from '@/features/stats/sessionSummary';
-import { daysLabel } from '@/features/stats/streak';
+import { daysLabel } from '@/features/stats/statLabels';
 import { durationLabel, repeatsLabel, sessionFromRecord } from './sessions';
 import type { CompletedSession } from './usePracticeTracker';
 import { useAllSessions } from './useSessions';

@@ -4,7 +4,7 @@
  */
 import { ratioToPercent } from '@/features/player/speed';
 import { dateOfDayKey, dayKeyOfIso, type DayKey } from './days';
-import type { StatsLoop, StatsSession } from './totals';
+import { latestSessionTimes, type StatsLoop, type StatsSession } from './totals';
 
 export interface SpeedDay {
   key: DayKey;
@@ -71,11 +71,7 @@ export function loopProgress<L extends Pick<StatsLoop, 'id' | 'status'>>(
   sessions: readonly StatsSession[],
   loops: readonly L[],
 ): LoopProgress<L>[] {
-  const latest = new Map<string, number>();
-  for (const session of sessions) {
-    const time = Date.parse(session.started_at);
-    latest.set(session.loop_id, Math.max(latest.get(session.loop_id) ?? -Infinity, time));
-  }
+  const latest = latestSessionTimes(sessions);
   return loops
     .flatMap((loop) => {
       const days = dailySpeeds(sessions, loop.id);
@@ -103,22 +99,17 @@ export function loopProgress<L extends Pick<StatsLoop, 'id' | 'status'>>(
 }
 
 /**
- * A row's speed line: "70% → 85%, up 15", "90% → 80%, down 10",
- * "80% → 80%, no change", and just "80%" after one practice day, when there
- * is nothing yet to compare.
+ * A row's speed line in the two parts the row draws apart: the speeds
+ * ("70% → 85%") and how far they moved ("up 15", "down 10", "no change").
+ * After one practice day it is the one speed ("80%") and `moved` is null:
+ * there is nothing yet to compare.
  */
-export function speedChangeLabel(progress: SpeedChangeInput): string {
-  const { span, moved } = speedChange(progress);
-  return moved === null ? span : `${span}, ${moved}`;
-}
-
-type SpeedChangeInput = Pick<
-  LoopProgress<unknown>,
-  'days' | 'startPercent' | 'nowPercent' | 'change'
->;
-
-/** The two halves of `speedChangeLabel`, for a row that draws them apart: the speeds, and how far they moved. */
-export function speedChange({ days, startPercent, nowPercent, change }: SpeedChangeInput): {
+export function speedChange({
+  days,
+  startPercent,
+  nowPercent,
+  change,
+}: Pick<LoopProgress<unknown>, 'days' | 'startPercent' | 'nowPercent' | 'change'>): {
   span: string;
   moved: string | null;
 } {
