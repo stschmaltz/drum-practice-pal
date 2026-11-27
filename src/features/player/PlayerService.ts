@@ -476,14 +476,13 @@ export class PlayerService {
   }
 
   /**
-   * The metronome's sounds and subdivision. Not a live option: the engine
-   * rebuilds the song's MIDI for it, which would stop playback, so it is
-   * refused (false) while playing or counting in. See canChangeMetronomeVoice.
+   * The metronome's sounds and subdivision, at any time. The engine rebuilds the
+   * song's MIDI for it; while playing it starts again from the same tick and
+   * reports neither the stop nor the start, so to the service it is live like
+   * the other options (a short gap may be heard). Refused (false) once failed.
    */
   setMetronomeVoice(voice: MetronomeVoice): boolean {
-    if (this.disposed || isRunning(this.snapshot.status) || this.snapshot.status === 'error') {
-      return false;
-    }
+    if (this.disposed || this.snapshot.status === 'error') return false;
     if (isSameVoice(voice, this.snapshot.metronomeVoice)) return true;
     this.update({ metronomeVoice: voice });
     this.engine.setMetronomeVoice(voice);
