@@ -441,11 +441,10 @@ None left: each item was dealt with in 12 Build or moved to Unit 13 (see docs/un
 
 ### After 13: practice feedback
 
-Shane's first pass after the MVP (branch `practice-feedback`): the score takes the whole width with the loops as a sheet over it at every size; no per-loop target (100% always; the column stays, unused, until a later drop); the loop's speed saves itself as it is played; MuseScore General's drum kit layered over Sonivox for a snare that sounds like one.
+Shane's first pass after the MVP (branch `practice-feedback`): the score takes the whole width with the loops as a sheet over it at every size; no per-loop target (100% always, column dropped; not additive, which was fine with no users yet); the loop's speed saves itself as it is played; MuseScore General's drum kit layered over Sonivox for a snare that sounds like one.
 
 **Carried forward**
 
-- Drop `loops.target_ratio` (and its grants) in a later PR. The app stops using it here, but migrations must be additive (CI pushes them while Workers deploys the same commit), and a build or installed app from before this one still selects it. Drop it once this build has been live long enough that no client asks for the column.
 - The drum kit is MuseScore General's standard kit only (program 0). A song whose drum track uses another kit program plays Sonivox's kit for it. Listen at the kit; if the hi-hat or toms of Sonivox are better, the extraction can pick per note.
 
 ### 14 Songs with recordings

@@ -63,7 +63,7 @@ describe('columns', () => {
         .exec(migration)?.[1]
         ?.split(',')
         .map((column) => column.trim())
-        // Still granted, no longer written: every loop aims at 100%, and the column waits to be dropped.
+        // Dropped from the table since (20261127000000_drop_target_ratio.sql).
         .filter((column) => column !== 'target_ratio') ?? [];
 
     // Exactly the grant, status included: finish and reopen are edits of it.
