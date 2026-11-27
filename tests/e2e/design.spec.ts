@@ -25,7 +25,7 @@ import {
   openLoopHistory,
   overviewItem,
   playFor,
-  sessionComplete,
+  visitSummary,
   shortSessions,
 } from './practicePage';
 
@@ -125,12 +125,13 @@ test('the library, the song page with its loops, and the home page with a loop',
   await expectWellDrawn(page, 'practice');
   await expectFocusRings(page, 'practice');
 
-  // A short session, summed up in the sheet at the foot of the window (16 QA issue 4).
+  // A short session, summed up on the song's overview on the way out.
   await playButton(page).click();
   await playFor(page, 3_000);
-  await expect(sessionComplete(page)).toBeVisible();
-  await expectWellDrawn(page, 'practice, session complete');
-  await sessionComplete(page).getByRole('button', { name: 'Keep going' }).click();
+  await backTo(page, 'Groove 120').click();
+  await expect(visitSummary(page)).toContainText('Streak: 1 day');
+  await expectWellDrawn(page, 'song overview, practice summary');
+  await expectFocusRings(page, 'song overview, practice summary');
 
   await navLink(page, 'Stats').click();
   await expect(page.getByRole('heading', { name: 'Badges' })).toBeVisible();

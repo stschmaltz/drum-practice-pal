@@ -28,6 +28,7 @@ import {
   backTo,
   loopsOf,
   navLink,
+  nudge,
   openLoopHistory,
   openPractice,
   overviewItem,
@@ -37,12 +38,14 @@ import {
   playOn,
   recordSentSessions,
   sentSessions,
-  sessionComplete,
+  practiceProgress,
+  sessionCompleteLeftovers,
   sessionCount,
   sessionLogged,
   sessionsOf,
   setPageVisibility,
   shortSessions,
+  visitSummary,
 } from './practicePage';
 
 // Unit 09: practice sessions and progress. Loop play time is logged, a loop
@@ -227,10 +230,10 @@ test('on a phone on its side the practice bar is one row and leaves the score mo
   await playButton(page).click();
 });
 
-// 16 QA issue 4: Session complete came in above the score and pushed it down (215 px on a
-// phone), so a bar tapped as it came was the one below the finger. It comes, and goes, with
-// the score where it was.
-test('Session complete comes and goes without moving the score', async ({ page, user }) => {
+// The Session complete sheet came up at every pause (Shane, 2026-11-27: "buggy and annoying").
+// A pause that logs a session now shows nothing, moves nothing, and leaves focus on Play;
+// the header's time carries on from one session into the next.
+test('a pause shows nothing and the score stays put', async ({ page, user }) => {
   await shortSessions(page, 2);
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Still', firstBar: 1, lastBar: 2 });
@@ -245,16 +248,80 @@ test('Session complete comes and goes without moving the score', async ({ page, 
   const before = await scoreBox(page);
   await playButton(page).click();
 
-  await expect(sessionComplete(page)).toBeVisible();
-  await expect(sessionComplete(page)).toBeFocused();
+  // The session is in the database: this is the moment the sheet used to appear.
+  await sessionCount(user).toBe(1);
   await windowScrollSettled(page);
-  expect(await scoreBox(page)).toEqual(before);
-
-  await sessionComplete(page).getByRole('button', { name: 'Keep going' }).click();
-  await expect(sessionComplete(page)).toHaveCount(0);
+  await expect(sessionCompleteLeftovers(page)).toHaveCount(0);
+  await expect(sessionLogged(page)).toHaveCount(0);
+  await expect(visitSummary(page)).toHaveCount(0);
   await expect(playButton(page)).toBeFocused();
-  await windowScrollSettled(page);
   expect(await scoreBox(page)).toEqual(before);
+  await expect(practiceProgress(page)).toContainText(/0:0[3-5]/);
+
+  // A second session: the time counts the whole sitting, not from the last pause.
+  await playButton(page).click();
+  await playFor(page, 3_000);
+  await sessionCount(user).toBe(2);
+  await expect(practiceProgress(page)).toContainText(/0:0[6-9]|0:1\d/);
+  await expect(sessionCompleteLeftovers(page)).toHaveCount(0);
+});
+
+test('going back to the song sums the sitting up once, with its session in the database', async ({
+  page,
+  user,
+}) => {
+  await shortSessions(page, 2);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Fill', firstBar: 3, lastBar: 4 });
+  await saveNewLoop(page, { name: 'Other', firstBar: 7, lastBar: 8 });
+  await backTo(page, 'Groove 120').click();
+  await openPractice(page, 'Fill');
+
+  // Opened at 100%, left at 90%.
+  for (let i = 0; i < 2; i++) await nudge(page, 'Slower').click();
+  await expect(practiceSpeed(page)).toHaveText('90%');
+  await playButton(page).click();
+  await playFor(page, 3_000);
+  await sessionCount(user).toBe(1);
+
+  await backTo(page, 'Groove 120').click();
+  const summary = visitSummary(page);
+  await expect(summary).toBeVisible();
+  await expect(summary.getByRole('listitem')).toHaveText([/^Fill: [3-6] s, 100% → 90%$/]);
+  await expect(summary).toContainText('Streak: 1 day');
+  // What it says is what was logged.
+  const [session] = await sessionsOf(user);
+  expect(session?.speed_ratio).toBe(0.9);
+  expect(session?.duration_seconds).toBeGreaterThanOrEqual(3);
+  const fill = (await loopsOf(user)).find((loop) => loop.name === 'Fill');
+  expect(session?.loop_id).toBe(fill?.id);
+
+  // Filling in the streak moved nothing: the loops are where a tap would find them.
+  await expect(overviewItem(page, 'on the go', 'Fill')).toBeVisible();
+
+  // Dismiss takes it away, and focus goes to New loop.
+  await summary.getByRole('button', { name: 'Dismiss practice summary' }).click();
+  await expect(summary).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'New loop' })).toBeFocused();
+
+  // A loop opened and left without practice says nothing.
+  await openPractice(page, 'Other');
+  await backTo(page, 'Groove 120').click();
+  await expect(overviewList(page, 'on the go')).toBeVisible();
+  await expect(visitSummary(page)).toHaveCount(0);
+
+  // Shown once: practise again, see it, leave the overview and come back.
+  await openPractice(page, 'Other');
+  await playButton(page).click();
+  await playFor(page, 3_000);
+  await sessionCount(user).toBe(2);
+  await backTo(page, 'Groove 120').click();
+  await expect(visitSummary(page).getByRole('listitem')).toHaveText([/^Other: [3-6] s, 100%$/]);
+  await backTo(page, 'Songs').click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Songs' })).toBeVisible();
+  await page.goBack();
+  await expect(overviewList(page, 'on the go')).toBeVisible();
+  await expect(visitSummary(page)).toHaveCount(0);
 });
 
 test('Back and Forward walk the three levels; a loop key and an old ?loop= link replace their entry', async ({

@@ -45,6 +45,7 @@ import {
 import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
+import { readVisitSittings } from '@/features/practice/visitSittings';
 import { SongPage } from './SongPage';
 
 /** Unfolds the controls bar, which folds to a strip while playback runs. */
@@ -1297,13 +1298,14 @@ describe('SongPage loops', () => {
     await user.type(form().getByLabelText('Last bar'), '4');
     await user.click(form().getByRole('button', { name: 'Save loop' }));
 
-    // Still here, on an empty form that names what it saved and links to it.
-    expect(await form().findByTestId('loop-saved-note')).toHaveTextContent('Saved “Verse”.');
+    // Still here, on an empty form, under a note that names what it saved and links to it.
+    expect(await panel().findByText(/Saved “Verse”\./)).toBeInTheDocument();
+    expect(panel().getByTestId('loop-saved-note')).toHaveTextContent('Saved “Verse”.');
     expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG_A}/play`);
     expect(form().getByLabelText('Name')).toHaveValue('');
     expect(form().getByLabelText('First bar')).toHaveValue('');
     const [first] = loops.sent('insert') as Loop[];
-    expect(form().getByRole('link', { name: 'Practise it' })).toHaveAttribute(
+    expect(panel().getByRole('link', { name: 'Practise it' })).toHaveAttribute(
       'href',
       `/songs/${SONG_A}/loops/${first?.id}`,
     );
@@ -1313,7 +1315,7 @@ describe('SongPage loops', () => {
     await user.type(form().getByLabelText('First bar'), '9');
     await user.type(form().getByLabelText('Last bar'), '12');
     await user.click(form().getByRole('button', { name: 'Save loop' }));
-    expect(await form().findByText(/Saved “Chorus”/)).toBeInTheDocument();
+    expect(await panel().findByText(/Saved “Chorus”/)).toBeInTheDocument();
     const sent = loops.sent('insert') as Loop[];
     expect(sent.map((loop) => loop.name)).toEqual(['Verse', 'Chorus']);
     expect(sent[0]?.id).not.toBe(sent[1]?.id);
@@ -1657,6 +1659,18 @@ describe('SongPage practice sessions', () => {
     );
     expect(engine.pause).not.toHaveBeenCalled();
     expect(screen.getByTestId('jam-speed')).toHaveTextContent('60%');
+  });
+
+  it('keeps the sitting of a loop left from the panel, for the song’s overview to sum up', async () => {
+    serve({ loops: [verse, chorus] });
+    const { user } = await startVerse();
+    later(40);
+    await user.keyboard('{PageDown}');
+    await waitFor(() => expect(screen.getByTestId('active-loop')).toHaveTextContent('Chorus'));
+
+    expect(readVisitSittings()).toMatchObject([
+      { loopId: 'verse', loopName: 'Verse', playedSeconds: 40, endSpeedRatio: 0.8 },
+    ]);
   });
 
   it('logs nothing for a short go, and nothing for jam mode', async () => {

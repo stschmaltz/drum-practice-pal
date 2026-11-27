@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { onlineManager, QueryClient } from '@tanstack/react-query';
@@ -9,6 +10,7 @@ import { loopKeys } from '@/features/loops/loopKeys';
 import { offlineDb } from '@/features/offline/offlineDb';
 import { restoredCacheIsStale } from '@/features/offline/queryPersister';
 import type { EngineMount } from '@/features/player/playerEngine';
+import { readVisitSittings } from '@/features/practice/visitSittings';
 import type { Settings } from '@/features/settings/settingsForm';
 import { songFilePath } from '@/lib/schema';
 import {
@@ -22,6 +24,7 @@ import { FakePlayerEngine, startOfBar, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fa
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { historyBack, renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
 import { LoopPracticePage } from './LoopPracticePage';
+import { SongOverviewPage } from './SongOverviewPage';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -89,11 +92,17 @@ function serve(saved: Loop[] = [chorus, verse]) {
   );
 }
 
-function renderPracticeWithClient(loopId: string, queryClient?: QueryClient, before?: string[]) {
+function renderPracticeWithClient(
+  loopId: string,
+  queryClient?: QueryClient,
+  before?: string[],
+  /** The song's route, when a test wants the real overview there. */
+  songRoute: ReactNode = <Route path="/songs/:id" element={<RouteMarker name="song overview" />} />,
+) {
   const { queryClient: client } = renderRoutes(
     <>
       <Route path="/songs/:id/loops/:loopId" element={<LoopPracticePage />} />
-      <Route path="/songs/:id" element={<RouteMarker name="song overview" />} />
+      {songRoute}
     </>,
     { path: `/songs/${SONG}/loops/${loopId}`, queryClient, before },
   );
@@ -616,25 +625,52 @@ describe('LoopPracticePage', () => {
     await waitFor(() => expect(speed()).toHaveTextContent('71%'));
   });
 
-  describe('Session complete', () => {
+  describe('the sitting', () => {
     // Only the clock: the queries and Testing Library keep their real timers.
     beforeEach(() => vi.useFakeTimers({ toFake: ['Date'] }));
     afterEach(() => vi.useRealTimers());
 
-    /** Plays the loop for `seconds` (nudged 5% faster on the way) and pauses: a session is logged. */
-    async function practise(seconds: number) {
-      serve();
-      vi.setSystemTime(new Date(2026, 10, 26, 18));
-      const user = renderPractice(CHORUS_ID);
+    const progress = () => screen.getByTestId('practice-progress');
+    const at = (seconds: number) => vi.setSystemTime(new Date(2026, 10, 26, 18, 0, seconds));
+
+    /** Starts the loop playing at 18:00, with `serve()` already called. */
+    async function startPlaying(routes?: Parameters<typeof renderPracticeWithClient>[3]) {
+      at(0);
+      const { user } = renderPracticeWithClient(CHORUS_ID, undefined, undefined, routes);
       const engine = await loadPlayer();
       await waitFor(() => expect(speed()).toHaveTextContent('71%'));
       await user.click(playButton());
       act(() => engine.fire('stateChanged', { playing: true }));
-      await user.click(screen.getByRole('button', { name: 'Faster by 5%' }));
-      vi.setSystemTime(new Date(2026, 10, 26, 18, 0, seconds));
+      return { user, engine };
+    }
+    type Playing = Awaited<ReturnType<typeof startPlaying>>;
+
+    /** Pauses at `seconds` past 18:00. */
+    async function pauseAt({ user, engine }: Playing, seconds: number) {
+      at(seconds);
       await user.click(playButton());
       act(() => engine.fire('stateChanged', { playing: false }));
-      return user;
+    }
+
+    /** Presses Play at `seconds` past 18:00. */
+    async function playAt({ user, engine }: Playing, seconds: number) {
+      at(seconds);
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+    }
+
+    /** The loop reaches its end and wraps, that many times. */
+    const finishPasses = ({ engine }: Playing, count: number) => {
+      for (let pass = 0; pass < count; pass++) act(() => engine.fire('finished', undefined));
+    };
+
+    /** Plays the loop for `seconds` (nudged 5% faster on the way) and pauses. */
+    async function practise(seconds: number, routes?: Parameters<typeof startPlaying>[0]) {
+      serve();
+      const playing = await startPlaying(routes);
+      await playing.user.click(screen.getByRole('button', { name: 'Faster by 5%' }));
+      await pauseAt(playing, seconds);
+      return playing;
     }
 
     const sessionLogs = () =>
@@ -642,65 +678,6 @@ describe('LoopPracticePage', () => {
         ([call]) =>
           call.table === 'practice_sessions' && call.ops.some((op) => op.method === 'upsert'),
       );
-
-    it('sums up a logged session: time, passes, the speed it began and ended at, the streak', async () => {
-      await practise(45);
-
-      const summary = await screen.findByTestId('session-complete');
-      await waitFor(() => expect(sessionLogs()).toHaveLength(1));
-      expect(within(summary).getByRole('heading', { name: /Session complete/ })).toBeVisible();
-      expect(summary).toHaveTextContent('45 s');
-      expect(summary).toHaveTextContent('0 passes');
-      expect(summary).toHaveTextContent('71% → 76%');
-      expect(await within(summary).findByText('1 day')).toBeVisible();
-      // In place of the line the whole song shows.
-      expect(screen.queryByTestId('session-logged')).not.toBeInTheDocument();
-    });
-
-    it('"Keep going" closes it and stays on the loop', async () => {
-      const user = await practise(45);
-      const summary = await screen.findByTestId('session-complete');
-
-      await user.click(within(summary).getByRole('button', { name: 'Keep going' }));
-      expect(screen.queryByTestId('session-complete')).not.toBeInTheDocument();
-      expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${CHORUS_ID}`);
-    });
-
-    it('"Done" goes back to the song', async () => {
-      const user = await practise(45);
-      await user.click(
-        within(await screen.findByTestId('session-complete')).getByRole('button', { name: 'Done' }),
-      );
-      expect(await screen.findByText('At song overview')).toBeInTheDocument();
-    });
-
-    it('shows nothing for a stretch too short to log', async () => {
-      await practise(10);
-      expect(screen.getByTestId('practice-progress')).toHaveTextContent('0:10');
-      expect(screen.queryByTestId('session-complete')).not.toBeInTheDocument();
-      expect(sessionLogs()).toHaveLength(0);
-    });
-
-    /** Starts the loop playing at 18:00, with `serve()` already called. */
-    async function startPlaying() {
-      vi.setSystemTime(new Date(2026, 10, 26, 18));
-      const user = renderPractice(CHORUS_ID);
-      const engine = await loadPlayer();
-      await waitFor(() => expect(speed()).toHaveTextContent('71%'));
-      await user.click(playButton());
-      act(() => engine.fire('stateChanged', { playing: true }));
-      return { user, engine };
-    }
-
-    /** Pauses at `seconds` past 18:00. */
-    async function pauseAt(
-      { user, engine }: Awaited<ReturnType<typeof startPlaying>>,
-      seconds: number,
-    ) {
-      vi.setSystemTime(new Date(2026, 10, 26, 18, 0, seconds));
-      await user.click(playButton());
-      act(() => engine.fire('stateChanged', { playing: false }));
-    }
 
     /** Answers every session log through `answer`, leaving the other tables as served. After serve(). */
     function answerSessionLogs(answer: () => Promise<FakeResult>) {
@@ -712,75 +689,74 @@ describe('LoopPracticePage', () => {
       );
     }
 
-    it('takes focus as it appears, and "Keep going" hands it to Play', async () => {
-      serve();
-      const playing = await startPlaying();
-      await pauseAt(playing, 45);
+    it('a pause that logs a session shows nothing', async () => {
+      await practise(45);
 
-      const summary = await screen.findByTestId('session-complete');
-      await waitFor(() => expect(summary).toHaveFocus());
-      await playing.user.click(within(summary).getByRole('button', { name: 'Keep going' }));
-      await waitFor(() => expect(playButton()).toHaveFocus());
-    });
-
-    it('names a badge the session just earned, with the streak it made', async () => {
-      serve();
-      // Two days running before today: today's session makes three.
-      const earlier = [24, 25].map((day) => ({
-        id: `earlier-${day}`,
-        loop_id: VERSE_ID,
-        started_at: new Date(2026, 10, day, 19).toISOString(),
-        duration_seconds: 120,
-        speed_ratio: 1,
-        repeats: 2,
-      }));
-      const served = queryResult.getMockImplementation()!;
-      queryResult.mockImplementation(async (call) =>
-        call.table === 'practice_sessions' && call.ops.some((op) => op.method === 'select')
-          ? ok(earlier)
-          : served(call),
-      );
-      const playing = await startPlaying();
-      await pauseAt(playing, 45);
-
-      const summary = await screen.findByTestId('session-complete');
-      expect(await within(summary).findByText('3 days')).toBeVisible();
-      const earned = within(summary).getByRole('list', { name: 'Badges earned' });
-      expect(
-        within(earned)
-          .getAllByRole('listitem')
-          .map((item) => item.textContent),
-      ).toEqual(['3-day streak']);
-    });
-
-    it('waits for the log’s answer: Play again meanwhile, and the summary still comes when it lands', async () => {
-      serve();
-      let answerLog = () => {};
-      answerSessionLogs(
-        () =>
-          new Promise((resolve) => {
-            answerLog = () => resolve(ok(null));
-          }),
-      );
-      const playing = await startPlaying();
-      await pauseAt(playing, 45);
+      // The log went, and was answered: this is the moment the sheet used to come up.
       await waitFor(() => expect(sessionLogs()).toHaveLength(1));
       await settle();
       expect(screen.queryByTestId('session-complete')).not.toBeInTheDocument();
-
-      // Back to it before the answer: a new session opens.
-      await playing.user.click(playButton());
-      act(() => playing.engine.fire('stateChanged', { playing: true }));
-      act(() => answerLog());
-
-      const summary = await screen.findByTestId('session-complete');
-      expect(summary).toHaveTextContent('45 s');
-      // The new session runs on under it, untouched.
-      expect(playButton()).toHaveAccessibleName('Pause');
-      expect(playing.engine.pause).not.toHaveBeenCalledTimes(2);
+      expect(screen.queryByText(/Session complete/)).not.toBeInTheDocument();
+      expect(screen.queryByTestId('session-logged')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Keep going' })).not.toBeInTheDocument();
+      // Focus stays on what was pressed.
+      expect(playButton()).toHaveFocus();
+      expect(playButton()).toHaveAccessibleName('Play');
+      expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${CHORUS_ID}`);
     });
 
-    it('a refused log shows no summary but the notice; its "Try again" that lands shows it', async () => {
+    it('counts the time and passes of every session since the loop was opened', async () => {
+      serve();
+      const playing = await startPlaying();
+      finishPasses(playing, 1);
+      await pauseAt(playing, 45);
+      await waitFor(() => expect(sessionLogs()).toHaveLength(1));
+      expect(progress()).toHaveTextContent('0:45 · 1 pass');
+
+      // A minute's rest is no practice; then a second session.
+      await playAt(playing, 105);
+      finishPasses(playing, 2);
+      await pauseAt(playing, 145);
+      await waitFor(() => expect(sessionLogs()).toHaveLength(2));
+      expect(progress()).toHaveTextContent('1:25 · 3 passes');
+    });
+
+    it('counts the session still open on top of the ones logged', async () => {
+      serve();
+      const playing = await startPlaying();
+      await pauseAt(playing, 45);
+      await waitFor(() => expect(sessionLogs()).toHaveLength(1));
+
+      // Ten seconds more, too short to log: still part of the sitting.
+      await playAt(playing, 60);
+      finishPasses(playing, 1);
+      await pauseAt(playing, 70);
+      expect(progress()).toHaveTextContent('0:55 · 1 pass');
+      await settle();
+      expect(sessionLogs()).toHaveLength(1);
+    });
+
+    it('starts again when a loop key moves to another loop', async () => {
+      serve();
+      const playing = await startPlaying();
+      finishPasses(playing, 2);
+      await pauseAt(playing, 45);
+      expect(progress()).toHaveTextContent('0:45 · 2 passes');
+
+      await playing.user.keyboard('{ArrowLeft}');
+
+      await screen.findByRole('heading', { level: 1, name: 'Verse' });
+      await waitFor(() => expect(progress()).toHaveTextContent('Bars 1 to 2 · 0:00 · 0 passes'));
+    });
+
+    it('shows nothing and logs nothing for a stretch too short to log', async () => {
+      await practise(10);
+      expect(progress()).toHaveTextContent('0:10');
+      await settle();
+      expect(sessionLogs()).toHaveLength(0);
+    });
+
+    it('a refused log still says so, with its "Try again"', async () => {
       serve();
       let refusing = true;
       answerSessionLogs(async () =>
@@ -792,61 +768,125 @@ describe('LoopPracticePage', () => {
       await pauseAt(playing, 45);
 
       expect(await screen.findByText("Couldn't save your last practice session.")).toBeVisible();
-      await settle();
-      expect(screen.queryByTestId('session-complete')).not.toBeInTheDocument();
+      // Not logged, but played: the sitting counts it.
+      expect(progress()).toHaveTextContent('0:45');
 
       refusing = false;
       await playing.user.click(screen.getByRole('button', { name: 'Try again' }));
-      expect(await screen.findByTestId('session-complete')).toHaveTextContent('45 s');
+      await waitFor(() =>
+        expect(
+          screen.queryByText("Couldn't save your last practice session."),
+        ).not.toBeInTheDocument(),
+      );
     });
 
-    it('a session ended by the page being hidden is logged with keepalive and never summed up', async () => {
+    it('a session ended by the page being hidden still counts once the page is back', async () => {
       serve();
       const fetchMock = vi.fn(async () => new Response(null, { status: 201 }));
       vi.stubGlobal('fetch', fetchMock);
       try {
         const playing = await startPlaying();
-        vi.setSystemTime(new Date(2026, 10, 26, 18, 0, 45));
+        at(45);
         setVisibility('hidden');
         await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-        expect(fetchMock.mock.calls[0]).toEqual([
-          expect.stringContaining('practice_sessions'),
-          expect.objectContaining({ keepalive: true }),
-        ]);
 
+        // Twenty seconds in a pocket are nobody's practice.
+        at(65);
         setVisibility('visible');
-        await pauseAt(playing, 50);
-        await settle();
-        expect(screen.queryByTestId('session-complete')).not.toBeInTheDocument();
-        expect(sessionLogs()).toHaveLength(0);
+        await pauseAt(playing, 75);
+        expect(progress()).toHaveTextContent('0:55');
       } finally {
         vi.unstubAllGlobals();
         Reflect.deleteProperty(document, 'visibilityState');
       }
     });
 
-    it('nor when the keepalive failed and the log went again by the mutation once the page was back', async () => {
-      serve();
-      const fetchMock = vi.fn(async () => {
-        throw new TypeError('Failed to fetch');
-      });
-      vi.stubGlobal('fetch', fetchMock);
-      try {
+    describe('when the loop is left', () => {
+      it('going back to the song keeps the sitting: the loop, its time, passes and both speeds', async () => {
+        serve();
         const playing = await startPlaying();
-        vi.setSystemTime(new Date(2026, 10, 26, 18, 0, 45));
-        setVisibility('hidden');
-        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-        setVisibility('visible');
+        await playing.user.click(screen.getByRole('button', { name: 'Faster by 5%' }));
+        finishPasses(playing, 3);
+        await pauseAt(playing, 45);
+        await playAt(playing, 60);
+        await pauseAt(playing, 100);
 
-        // The fallback: the same session, sent through supabase-js, and logged.
+        await playing.user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+        expect(await screen.findByText('At song overview')).toBeInTheDocument();
+
+        expect(readVisitSittings()).toEqual([
+          {
+            songId: SONG,
+            loopId: CHORUS_ID,
+            loopName: 'Chorus fill',
+            beganAt: expect.any(Number) as number,
+            playedSeconds: 85,
+            repeats: 3,
+            startSpeedRatio: 0.708333,
+            endSpeedRatio: 0.76,
+          },
+        ]);
+        expect(readVisitSittings()[0]!.beganAt).toBeLessThanOrEqual(
+          new Date(2026, 10, 26, 18).getTime(),
+        );
+      });
+
+      it('leaving while it still plays counts the stretch that was sounding', async () => {
+        serve();
+        const playing = await startPlaying();
+        at(50);
+        await playing.user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+        expect(await screen.findByText('At song overview')).toBeInTheDocument();
+
+        expect(readVisitSittings()).toMatchObject([{ loopId: CHORUS_ID, playedSeconds: 50 }]);
+        // And the session is logged as it always was, by the screen's unmount.
         await waitFor(() => expect(sessionLogs()).toHaveLength(1));
-        await pauseAt(playing, 50);
-        await settle();
-        expect(screen.queryByTestId('session-complete')).not.toBeInTheDocument();
-      } finally {
-        vi.unstubAllGlobals();
-        Reflect.deleteProperty(document, 'visibilityState');
-      }
+      });
+
+      it('a sitting shorter than a session needs is not kept', async () => {
+        const { user } = await practise(10);
+        await user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+        expect(await screen.findByText('At song overview')).toBeInTheDocument();
+        expect(readVisitSittings()).toEqual([]);
+      });
+
+      it('another loop becoming the one open ends the sitting, and each loop has its own', async () => {
+        serve();
+        const playing = await startPlaying();
+        await pauseAt(playing, 45);
+        await playing.user.keyboard('{ArrowLeft}');
+        await screen.findByRole('heading', { level: 1, name: 'Verse' });
+
+        expect(readVisitSittings()).toMatchObject([
+          { loopId: CHORUS_ID, loopName: 'Chorus fill', playedSeconds: 45 },
+        ]);
+
+        await waitFor(() => expect(speed()).toHaveTextContent('100%'));
+        await playAt(playing, 60);
+        await pauseAt(playing, 100);
+        await playing.user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+        expect(await screen.findByText('At song overview')).toBeInTheDocument();
+
+        expect(readVisitSittings()).toMatchObject([
+          { loopId: CHORUS_ID, playedSeconds: 45, startSpeedRatio: 0.708333 },
+          { loopId: VERSE_ID, loopName: 'Verse', playedSeconds: 40, startSpeedRatio: 1 },
+        ]);
+      });
+
+      it("the song's overview sums the sitting up in the render that replaces the screen", async () => {
+        const { user } = await practise(
+          45,
+          <Route path="/songs/:id" element={<SongOverviewPage />} />,
+        );
+        await waitFor(() => expect(sessionLogs()).toHaveLength(1));
+
+        await user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+
+        // No waiting: it is there with the overview, not a frame after it.
+        const summary = screen.getByTestId('visit-summary');
+        expect(summary).toHaveTextContent('Chorus fill: 45 s, 71% → 76%');
+        expect(await within(summary).findByText('Streak: 1 day')).toBeVisible();
+      });
     });
   });
 
