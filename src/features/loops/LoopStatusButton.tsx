@@ -1,6 +1,7 @@
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { Icon } from '@/components/icons';
 import { quietButtonClass } from '@/components/styles';
+import { failureCopy } from '@/lib/errorCopy';
 import type { LoopStatus } from '@/lib/schema';
 import { statusButtonAttributes } from './loopFocus';
 import type { Loop } from './loopForm';
@@ -19,9 +20,12 @@ import { useSetLoopStatus } from './useLoops';
 export function LoopStatusButton({
   loop,
   onSet,
+  showError = true,
 }: {
   loop: Pick<Loop, 'id' | 'song_id' | 'name' | 'status'>;
   onSet?: (status: LoopStatus) => void;
+  /** False while another control of the same write says why it failed (the "Mark finished?" prompt). */
+  showError?: boolean;
 }) {
   const status = useSetLoopStatus(loop.song_id, loop.id);
   const finished = loop.status === 'finished';
@@ -47,10 +51,10 @@ export function LoopStatusButton({
         {finished ? 'Reopen' : 'Mark finished'}
         <span className="sr-only"> {loop.name}</span>
       </button>
-      {status.error && (
+      {showError && status.error && (
         // After the row's other buttons, whatever the button's own place in it.
         <div className="order-last basis-full">
-          <ErrorAlert>Couldn't change the loop: {status.error.message}</ErrorAlert>
+          <ErrorAlert>Couldn't change the loop. {failureCopy(status.error)}</ErrorAlert>
         </div>
       )}
     </>

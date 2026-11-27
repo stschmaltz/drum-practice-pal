@@ -44,13 +44,13 @@ export default defineConfig({
       workbox: {
         // The app shell, every JS chunk (alphaTab's lazy chunk, its worker and
         // worklet included), the music font and the soundfont the player loads.
-        // Not the Unit 01 spike's candidate soundfonts or the other font formats.
+        // Not the other font formats.
         globPatterns: [
           '**/*.{js,css,html,svg,png,ico,webmanifest}',
           'font/Bravura.{woff2,woff}',
           'soundfont/sonivox.sf2',
         ],
-        globIgnores: ['sf-candidates/**', 'font/Bravura.svg', '**/*.gp'],
+        globIgnores: ['font/Bravura.svg', '**/*.gp'],
         // alphaTab's chunk is ~1.3 MB and the soundfont 1.3 MB.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         // Any route of the SPA opens offline from the cached index.html. Only

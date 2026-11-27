@@ -15,7 +15,13 @@ import {
   type SessionRecord,
   type TrackerState,
 } from './sessionTracker';
-import { logSessionUnobserved, queueSession, sessionLogged, useLogSession } from './useSessions';
+import {
+  logSessionUnobserved,
+  queueSession,
+  sessionLogged,
+  sessionLoopGone,
+  useLogSession,
+} from './useSessions';
 
 /**
  * How a session that ended gets sent. `mutation`: the hook's mutation, for a
@@ -107,7 +113,6 @@ export function usePracticeTracker(
       void logSessionOnExit(token, userId, record).then((result) => {
         try {
           // Only reached when the page lived on: a hidden tab that came back.
-          // `loopGone` needs nothing: the loop's history went with it.
           if (result === 'failed') {
             // The hook's own mutation observer went with the screen; see `unobserved`.
             if (screenGone.current) void logSessionUnobserved(queryClient, userId, record);
@@ -118,6 +123,8 @@ export function usePracticeTracker(
           if (result === 'logged') {
             sessionLogged(queryClient, userId, record);
             setLastLogged(record);
+          } else {
+            sessionLoopGone(queryClient, userId);
           }
         } finally {
           // After the fallback has started: it is pending in the mutation cache from its

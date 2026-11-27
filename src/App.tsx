@@ -12,9 +12,6 @@ import { NotFoundPage } from '@/features/shell/NotFoundPage';
 import { supabaseConfigError } from '@/lib/supabase';
 
 // Lazy so alphaTab stays out of the main bundle until a player screen opens.
-const SpikePage = lazy(() =>
-  import('./features/spike/SpikePage').then((m) => ({ default: m.SpikePage })),
-);
 const SongPage = lazy(() =>
   import('./features/song/SongPage').then((m) => ({ default: m.SongPage })),
 );
@@ -38,15 +35,6 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      {/* Dev tool from Unit 01; no data, so it stays outside the auth guard. */}
-      <Route
-        path="/spike"
-        element={
-          <Suspense fallback={playerFallback}>
-            <SpikePage />
-          </Suspense>
-        }
-      />
       <Route
         element={
           <RequireAuth>

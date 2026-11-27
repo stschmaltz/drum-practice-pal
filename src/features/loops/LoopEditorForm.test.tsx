@@ -178,6 +178,8 @@ describe('LoopEditorForm for a new loop', () => {
     await fill(view, { first: '9', last: '12' });
     await view.user.type(view.target(), '120');
     expect(view.form.getByText('120% (108 BPM)')).toBeInTheDocument();
+    // Read out with the field, not only drawn beside it (Unit 13).
+    expect(view.target()).toHaveAccessibleDescription('120% (108 BPM)');
     // Not a whole percent: no BPM is made up for it.
     await view.user.type(view.target(), '.5');
     expect(view.form.queryByText(/BPM\)$/, { selector: 'span' })).not.toBeInTheDocument();
@@ -248,7 +250,11 @@ describe('LoopEditorForm for a new loop', () => {
     expect(view.form.getByText(message)).toBeInTheDocument();
     expect(view.firstBar()).toBeInvalid();
     expect(view.lastBar()).toBeInvalid();
+    // The one message is read out with both fields it is about.
+    expect(view.firstBar()).toHaveAccessibleDescription(message);
+    expect(view.lastBar()).toHaveAccessibleDescription(message);
     expect(view.name()).toBeValid();
+    expect(view.name()).not.toHaveAccessibleDescription();
     expect(view.table.sent('insert')).toEqual([]);
     expect(onSaved).not.toHaveBeenCalled();
   });
@@ -273,6 +279,7 @@ describe('LoopEditorForm for a new loop', () => {
 
     expect(view.form.getByText(message)).toBeInTheDocument();
     expect(view.name()).toBeInvalid();
+    expect(view.name()).toHaveAccessibleDescription(message);
     expect(view.table.sent('insert')).toEqual([]);
   });
 
@@ -286,6 +293,9 @@ describe('LoopEditorForm for a new loop', () => {
       view.form.getByText('Enter a target from 25 to 200%, or leave it empty.'),
     ).toBeInTheDocument();
     expect(view.target()).toBeInvalid();
+    expect(view.target()).toHaveAccessibleDescription(
+      /Enter a target from 25 to 200%, or leave it empty\./,
+    );
     expect(view.table.sent('insert')).toEqual([]);
   });
 
@@ -343,7 +353,7 @@ describe('LoopEditorForm for a new loop', () => {
     await view.user.click(view.save());
 
     expect(await view.form.findByRole('alert')).toHaveTextContent(
-      "Couldn't save the loop: end_bar 12 is past the last bar",
+      "Couldn't save the loop. Something went wrong. Try again.",
     );
     expect(onSaved).not.toHaveBeenCalled();
     expect(view.name()).toHaveValue('Second half');
@@ -353,6 +363,55 @@ describe('LoopEditorForm for a new loop', () => {
     await view.user.click(view.save());
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(view.table.rows().map((row) => row.name)).toEqual(['Second half']);
+  });
+
+  it('pressed again after a lost answer, saves one loop, under the one id', async () => {
+    const view = await renderForm();
+    view.table.loseNext('insert');
+    await fill(view, { first: '9', last: '12', name: 'Second half' });
+    await view.user.click(view.save());
+
+    expect(await view.form.findByRole('alert')).toHaveTextContent(
+      "Couldn't save the loop. The server couldn't be reached.",
+    );
+    expect(view.table.rows()).toHaveLength(1);
+
+    await view.user.click(view.save());
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(onSaved.mock.calls[0]?.[0]).toMatchObject({ name: 'Second half' });
+    const ids = view.table.sent('insert').map((row) => (row as { id: string }).id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(1);
+    expect(view.table.rows().map((row) => row.name)).toEqual(['Second half']);
+  });
+
+  // Unit 13 Test: what the server has wins over what was typed between the two presses
+  // (Build's decision), and the second press is locked like the first.
+  it('pressed again after a lost answer and an edit, keeps the loop the server has, locked meanwhile', async () => {
+    const view = await renderForm();
+    view.table.loseNext('insert');
+    await fill(view, { first: '9', last: '12', name: 'Second half' });
+    await view.user.click(view.save());
+    expect(await view.form.findByRole('alert')).toBeInTheDocument();
+
+    await view.user.type(view.name(), ' again');
+    const release = view.table.holdNext('insert');
+    await view.user.click(view.save());
+    await waitFor(() => expect(view.save()).toHaveTextContent('Saving…'));
+    expect(view.save()).toBeDisabled();
+    await view.user.type(view.name(), '!');
+    expect(view.name()).toHaveValue('Second half again');
+
+    release();
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(onSaved.mock.calls[0]?.[0]).toMatchObject({ name: 'Second half', end_bar: 12 });
+    expect(view.table.rows().map((row) => row.name)).toEqual(['Second half']);
+    expect(
+      view.queryClient
+        .getQueryData<Loop[]>(loopKeys.forSong('user-1', LOOP_SONG_ID))
+        ?.map((loop) => loop.name),
+    ).toEqual(['Second half']);
+    expect(view.form.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('an edit after a failed save takes the failure message away', async () => {
@@ -505,7 +564,7 @@ describe('LoopEditorForm editing a loop', () => {
     await view.user.click(view.save());
 
     expect(await view.form.findByRole('alert')).toHaveTextContent(
-      "Couldn't save the loop: permission denied",
+      "Couldn't save the loop. Something went wrong. Try again.",
     );
     expect(onSaved).not.toHaveBeenCalled();
     expect(view.name()).toHaveValue('Last chorus');

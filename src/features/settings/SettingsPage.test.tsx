@@ -73,7 +73,7 @@ describe('SettingsPage', () => {
     queryResult.mockResolvedValueOnce({ data: null, error: { message: 'Failed to fetch' } });
     const { user } = renderSettings();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't load your settings: Failed to fetch",
+      "Couldn't load your settings. Something went wrong. Try again.",
     );
 
     serveSettings(saved);
@@ -152,7 +152,7 @@ describe('SettingsPage', () => {
     await user.click(saveButton());
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't save your settings: Failed to fetch",
+      "Couldn't save your settings. Something went wrong. Try again.",
     );
     expect(screen.getByRole('radio', { name: '1 bar' })).toBeChecked();
     expect(saveButton()).toBeEnabled();
@@ -184,7 +184,7 @@ describe('SettingsPage', () => {
 
     await act(async () => finishSave({ data: null, error: { message: 'Failed to fetch' } }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't save your settings: Failed to fetch",
+      "Couldn't save your settings. Something went wrong. Try again.",
     );
     // Unlocked again, with the edit still there to retry or change.
     expect(screen.getByRole('radio', { name: '1 bar' })).toBeChecked();
@@ -328,6 +328,28 @@ describe('SettingsPage', () => {
       expect(readCharacterKeysOn()).toBe(false);
       expect(screen.getByText(/won’t keep this after the app is closed/)).toBeInTheDocument();
     });
+  });
+});
+
+// Unit 13 Test (04 QA issue 6): an inline error is read out with its field.
+describe('SettingsPage field errors', () => {
+  it('the volume error describes the volume slider, and nothing is sent', async () => {
+    // Out of range only if the stored row is (another client, an older build): the slider clamps.
+    serveSettings({ ...saved, metronome_volume: 1.5 });
+    const { user } = renderSettings();
+    const metronomeOn = await screen.findByRole('checkbox', {
+      name: 'Metronome on when playback starts',
+    });
+    expect(volume()).not.toHaveAccessibleDescription();
+
+    await user.click(metronomeOn);
+    await user.click(saveButton());
+
+    const message = await screen.findByText(/^Volume must be between/);
+    expect(volume()).toHaveAttribute('aria-invalid', 'true');
+    expect(volume()).toHaveAccessibleDescription(message.textContent ?? '');
+    await settle();
+    expect(writes()).toEqual([]);
   });
 });
 

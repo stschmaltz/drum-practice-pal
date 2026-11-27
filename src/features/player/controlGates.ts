@@ -16,14 +16,21 @@ export function canPlay(player: PlayerService | null, snapshot: PlayerSnapshot):
   return player !== null && isLoaded(snapshot.status);
 }
 
-/** Speed, metronome and count-in work before the song is ready; they only need the player. */
-export function canChangeOptions(player: PlayerService | null): player is PlayerService {
-  return player !== null;
+/**
+ * Speed, metronome and count-in work before the song is ready; they only need
+ * the player. Not after it has failed: nothing will play, and a control that
+ * still moves reads as a player that still works.
+ */
+export function canChangeOptions(
+  player: PlayerService | null,
+  snapshot: PlayerSnapshot,
+): player is PlayerService {
+  return player !== null && snapshot.status !== 'error';
 }
 
 /** Mute drums and Drums only, which need a drum track to act on. */
 export function canUseDrumToggles(player: PlayerService | null, snapshot: PlayerSnapshot): boolean {
-  return player !== null && snapshot.hasDrumTrack;
+  return canChangeOptions(player, snapshot) && snapshot.hasDrumTrack;
 }
 
 /**

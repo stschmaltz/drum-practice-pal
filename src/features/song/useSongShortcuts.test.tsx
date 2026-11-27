@@ -9,7 +9,7 @@ import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
-import { useSongShortcuts } from './useSongShortcuts';
+import { announcementText, useSongShortcuts } from './useSongShortcuts';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -268,6 +268,52 @@ describe('metronome, drums and count-in', () => {
     expect(view.engine.soundingTracks()).toEqual(sounding);
   });
 
+  it('after the player has failed, the speed, M, D, S and C change nothing, as their controls are off', async () => {
+    const view = await renderShortcuts();
+    act(() => view.engine.fire('error', { error: new Error('render') }));
+    const before = view.player.getSnapshot();
+
+    for (const k of ['ArrowUp', 'ArrowDown', 'm', 'd', 's', 'c']) view.key(k);
+    const after = view.player.getSnapshot();
+    expect(after.status).toBe('error');
+    expect(after).toMatchObject({
+      speedRatio: before.speedRatio,
+      metronomeOn: before.metronomeOn,
+      drumsMuted: before.drumsMuted,
+      drumsOnly: before.drumsOnly,
+      countInBars: before.countInBars,
+    });
+  });
+
+  it('says what each key changed, for a screen reader, and nothing for a key that changed nothing', async () => {
+    const view = await renderShortcuts(undefined, { drumTrackIndex: null });
+    const said = () => view.hook.result.current.shortcuts.announcement.text;
+    expect(said()).toBe('');
+
+    view.key('ArrowUp');
+    expect(said()).toBe('Speed 105%');
+    view.key('m');
+    expect(said()).toMatch(/^Metronome (on|off)$/);
+    view.key('c');
+    expect(said()).toBe('Count-in 1 bar');
+    // No drum track: D changes nothing, so the last thing said stands.
+    view.key('d');
+    expect(said()).toBe('Count-in 1 bar');
+  });
+
+  // 13 Review (13 QA issue 1): a live region whose text doesn't change isn't read again.
+  it('the same change said twice is still a change to the live region', async () => {
+    const view = await renderShortcuts();
+    const region = () => announcementText(view.hook.result.current.shortcuts.announcement);
+
+    view.key('m');
+    const first = region();
+    act(() => view.player.setMetronomeOn(!view.player.getSnapshot().metronomeOn));
+    view.key('m');
+    await waitFor(() => expect(region()).not.toBe(first));
+    expect(region().trim()).toBe(first.trim());
+  });
+
   it('C cycles the count-in: off, 1 bar, 2 bars, off', async () => {
     const view = await renderShortcuts();
     expect(view.player.getSnapshot().countInBars).toBe(0);
@@ -359,6 +405,17 @@ describe('switching loops', () => {
       visited.push(view.activeLoop());
     }
     expect(visited).toEqual(['intro', 'verse', 'outro', 'outro', 'verse', 'intro']);
+  });
+
+  // 13 Review (13 QA issue 1): the switch is said, with the loop's saved speed.
+  it('says which loop a key moved to', async () => {
+    const view = await renderShortcuts();
+    const said = () => view.hook.result.current.shortcuts.announcement.text;
+
+    view.key('PageDown');
+    await waitFor(() => expect(said()).toBe('Loop Intro, Speed 60%'));
+    view.key('PageDown');
+    await waitFor(() => expect(said()).toBe('Loop Verse, Speed 80%'));
   });
 
   it('two loop keys pressed with nothing awaited between them land two loops on', async () => {
@@ -463,6 +520,12 @@ describe('left and right in a song with no loops', () => {
     view.key('ArrowLeft');
     expect(view.player.getSnapshot().barNumber).toBe(2);
     expect(view.engine.seek).toHaveBeenLastCalledWith(startOfBar(2));
+  });
+
+  it('say the bar they stepped to', async () => {
+    const view = await renderShortcuts([]);
+    view.key('ArrowRight');
+    await waitFor(() => expect(view.hook.result.current.shortcuts.announcement.text).toBe('Bar 2'));
   });
 
   it('go nowhere before the first bar', async () => {

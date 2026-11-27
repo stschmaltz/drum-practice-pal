@@ -14,6 +14,7 @@ import {
   neighbourLoop,
   nextCountInBars,
   resolveShortcut,
+  shortcutAnnouncement,
   steppedBar,
   type Direction,
   type ShortcutAction,
@@ -35,6 +36,9 @@ interface SongShortcutInputs {
  */
 export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs) {
   const [helpOpen, setHelpOpen] = useState(false);
+  // What the last key changed, for a live region: the control it changed may be folded
+  // away or out of sight, and focus is elsewhere. `count` tells two equal sayings apart.
+  const [announcement, setAnnouncement] = useState<Announcement>({ text: '', count: 0 });
   const openHelp = useCallback(() => setHelpOpen(true), []);
   const closeHelp = useCallback(() => setHelpOpen(false), []);
 
@@ -79,7 +83,13 @@ export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs
         setHelpOpen((open) => !open);
         return;
       }
-      runShortcut(resolved.action, latest.current);
+      const { player } = latest.current;
+      const before = player?.getSnapshot();
+      const moved = runShortcut(resolved.action, latest.current);
+      if (player && before) {
+        const said = shortcutAnnouncement(before, player.getSnapshot(), moved);
+        if (said !== null) setAnnouncement((last) => ({ text: said, count: last.count + 1 }));
+      }
     };
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.key !== ' ' || !swallowSpaceKeyup) return;
@@ -95,50 +105,67 @@ export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs
     };
   }, []);
 
-  return { helpOpen, openHelp, closeHelp };
+  return { helpOpen, openHelp, closeHelp, announcement };
 }
 
+/** What the live region says; `count` goes up at every saying, equal or not. */
+export interface Announcement {
+  text: string;
+  count: number;
+}
+
+/**
+ * The live region's content. A region whose text doesn't change isn't read
+ * again, so every other saying ends in a no-break space, which screen readers
+ * don't speak: the same change twice (M, a click, M) is still heard twice.
+ */
+export function announcementText({ text, count }: Announcement): string {
+  return count % 2 === 1 ? `${text}\u00a0` : text;
+}
+
+/** Runs the action; returns where a loop key moved to, for the announcement. */
 function runShortcut(
   action: Exclude<ShortcutAction, 'help'>,
   { player, practice, loops }: SongShortcutInputs,
-): void {
-  if (!player) return;
+): string | null {
+  if (!player) return null;
   const snapshot = player.getSnapshot();
   switch (action) {
     case 'togglePlay':
       if (canPlay(player, snapshot)) player.togglePlay();
-      return;
+      return null;
     case 'speedUp':
     case 'speedDown':
-      if (!canChangeOptions(player)) return;
+      if (!canChangeOptions(player, snapshot)) return null;
       player.setSpeed(
         nudgeSpeedRatio(
           snapshot.speedRatio,
           action === 'speedUp' ? SPEED_STEP_PERCENT : -SPEED_STEP_PERCENT,
         ),
       );
-      return;
+      return null;
     case 'previousLoop':
     case 'nextLoop':
-      stepLoopOrBar(
+      return stepLoopOrBar(
         player,
         snapshot,
         { practice, loops },
         action === 'nextLoop' ? 'next' : 'previous',
       );
-      return;
     case 'metronome':
-      if (canChangeOptions(player)) player.setMetronomeOn(!snapshot.metronomeOn);
-      return;
+      if (canChangeOptions(player, snapshot)) player.setMetronomeOn(!snapshot.metronomeOn);
+      return null;
     case 'drumsMuted':
       if (canUseDrumToggles(player, snapshot)) player.setDrumsMuted(!snapshot.drumsMuted);
-      return;
+      return null;
     case 'drumsOnly':
       if (canUseDrumToggles(player, snapshot)) player.setDrumsOnly(!snapshot.drumsOnly);
-      return;
+      return null;
     case 'countIn':
-      if (canChangeOptions(player)) player.setCountInBars(nextCountInBars(snapshot.countInBars));
-      return;
+      if (canChangeOptions(player, snapshot)) {
+        player.setCountInBars(nextCountInBars(snapshot.countInBars));
+      }
+      return null;
   }
 }
 
@@ -149,34 +176,38 @@ function runShortcut(
  * speed (`openLoop`), as a link to it would: a key that switches never starts
  * sound on its own. A song with no loops steps a bar instead. Nothing while
  * the loop form is open (the score's taps are picking its bars then), or
- * before the song's loops have been read.
+ * before the song's loops have been read. Returns what it moved to, to be
+ * said ("Loop Verse", "Bar 5"), or null when it didn't move.
  */
 function stepLoopOrBar(
   player: PlayerService,
   snapshot: PlayerSnapshot,
   { practice, loops }: Pick<SongShortcutInputs, 'practice' | 'loops'>,
   direction: Direction,
-): void {
-  if (!canPlay(player, snapshot) || practice.editor !== null) return;
+): string | null {
+  if (!canPlay(player, snapshot) || practice.editor !== null) return null;
   // Not read yet (or the read failed): whether these keys mean loops or bars isn't known.
-  if (!loops) return;
+  if (!loops) return null;
 
   const order = loopsInPanelOrder(loops);
-  if (order.length === 0) {
-    stepBar(player, snapshot, direction);
-    return;
-  }
+  if (order.length === 0) return stepBar(player, snapshot, direction);
   const loop = neighbourLoop(order, practice.activeLoop?.id ?? null, direction);
-  if (!loop) return;
+  if (!loop) return null;
   if (isRunning(snapshot.status)) practice.playLoop(loop);
   else practice.openLoop(loop);
+  return `Loop ${loop.name}`;
 }
 
 /** A bar back or on, in a song with no loops. */
-function stepBar(player: PlayerService, snapshot: PlayerSnapshot, direction: Direction): void {
-  if (snapshot.barCount === null) return;
+function stepBar(
+  player: PlayerService,
+  snapshot: PlayerSnapshot,
+  direction: Direction,
+): string | null {
+  if (snapshot.barCount === null) return null;
   const bar = steppedBar(snapshot.barNumber ?? 1, snapshot.barCount, direction);
-  if (bar === null || !player.seekToBar(bar)) return;
+  if (bar === null || !player.seekToBar(bar)) return null;
   // A key isn't a tap on the score: the bar may be off screen (a no-op while playing).
   player.showBar(bar);
+  return `Bar ${bar}`;
 }

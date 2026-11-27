@@ -21,6 +21,7 @@ import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerServ
 import { ratioToPercent } from '@/features/player/speed';
 import { LoopHistory } from '@/features/practice/LoopHistory';
 import { lastPracticedLabel } from '@/features/practice/sessions';
+import { failureCopy } from '@/lib/errorCopy';
 import {
   findItemControl,
   isItemListed,
@@ -343,7 +344,7 @@ function FinishPrompt({
         </button>
       </div>
       {status.error && (
-        <ErrorAlert>Couldn't mark the loop finished: {status.error.message}</ErrorAlert>
+        <ErrorAlert>Couldn't mark the loop finished. {failureCopy(status.error)}</ErrorAlert>
       )}
     </div>
   );
@@ -577,7 +578,8 @@ function LoopListItem({
             {active ? 'Restart loop' : 'Play loop'}
             {named}
           </button>
-          <LoopStatusButton loop={loop} onSet={onStatusSet} />
+          {/* The prompt says why its own refused "Mark finished" failed: once is enough. */}
+          <LoopStatusButton loop={loop} onSet={onStatusSet} showError={!active?.askToFinish} />
           <OverflowMenu
             name={loop.name}
             // The button stands for what its menu holds: closing the edit form and "Keep it"
@@ -668,7 +670,9 @@ function ConfirmDelete({
       {!online && (
         <OfflineNote>You're offline. Loops can be deleted once you're back online.</OfflineNote>
       )}
-      {remove.isError && <ErrorAlert>Couldn't delete the loop: {remove.error.message}</ErrorAlert>}
+      {remove.isError && (
+        <ErrorAlert>Couldn't delete the loop. {failureCopy(remove.error)}</ErrorAlert>
+      )}
     </div>
   );
 }

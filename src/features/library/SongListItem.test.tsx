@@ -113,6 +113,8 @@ describe('SongListItem editing', () => {
 
     expect(screen.getByText('Give the song a title.')).toBeInTheDocument();
     expect(screen.getByLabelText('Title')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Title')).toHaveAccessibleDescription('Give the song a title.');
+    expect(screen.getByLabelText('Artist')).not.toHaveAccessibleDescription();
     expect(queryResult).not.toHaveBeenCalled();
   });
 
@@ -146,7 +148,9 @@ describe('SongListItem editing', () => {
     await user.type(screen.getByLabelText('Artist'), 's');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save the song: offline");
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't save the song. Something went wrong. Try again.",
+    );
     expect(screen.getByLabelText('Artist')).toHaveValue('Bands');
   });
 });
@@ -173,7 +177,9 @@ describe('SongListItem while a save is pending', () => {
     expect(updates()).toEqual([{ artist: 'Bands' }]);
 
     answer(fail('offline'));
-    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save the song: offline");
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't save the song. Something went wrong. Try again.",
+    );
     expect(artist).not.toHaveAttribute('readonly');
     expect(artist).toHaveValue('Bands');
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
@@ -215,7 +221,7 @@ describe('SongListItem deleting', () => {
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't delete the song: storage down",
+      "Couldn't delete the song. Something went wrong. Try again.",
     );
     expect(deletes()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Delete song' })).toBeEnabled();

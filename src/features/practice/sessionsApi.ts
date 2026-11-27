@@ -4,13 +4,11 @@
  */
 import { fetchAllPages } from '@/lib/fetchAllPages';
 import { keepaliveInsert } from '@/lib/keepaliveInsert';
+import { PG } from '@/lib/postgresCodes';
 import { supabase } from '@/lib/supabase';
 import { throwIfError, unwrap } from '@/lib/supabaseResult';
 import { sessionInsert, SESSION_SELECT, type PracticeSession } from './sessions';
 import type { SessionRecord } from './sessionTracker';
-
-/** Postgres: the loop the session names doesn't exist (any more). */
-const FOREIGN_KEY_VIOLATION = '23503';
 
 /**
  * `logged`: the row is there (now, or from an earlier send of the same id).
@@ -49,7 +47,7 @@ export async function logSession(userId: string, record: SessionRecord): Promise
   const result = await supabase
     .from('practice_sessions')
     .upsert(sessionInsert(userId, record), { onConflict: 'id', ignoreDuplicates: true });
-  if (result.error?.code === FOREIGN_KEY_VIOLATION) return 'loopGone';
+  if (result.error?.code === PG.FOREIGN_KEY_VIOLATION) return 'loopGone';
   throwIfError(result);
   return 'logged';
 }
@@ -71,5 +69,5 @@ export async function logSessionOnExit(
     accessToken,
   );
   if (result.ok) return 'logged';
-  return result.code === FOREIGN_KEY_VIOLATION ? 'loopGone' : 'failed';
+  return result.code === PG.FOREIGN_KEY_VIOLATION ? 'loopGone' : 'failed';
 }

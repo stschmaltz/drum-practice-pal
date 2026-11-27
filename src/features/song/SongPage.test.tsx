@@ -1964,6 +1964,42 @@ describe('SongPage practice sessions', () => {
     expect(playButton()).toHaveTextContent('Pause');
   });
 
+  it('drops "Practice logged" once its loop is deleted (09 QA issue 4)', async () => {
+    const { user, panel } = await playVerseFor(45);
+    expect(await screen.findByTestId('session-logged')).toHaveTextContent('of Verse at 80%.');
+
+    await chooseFromMenu(user, panel, 'Verse', 'Delete');
+    await user.click(panel.getByRole('button', { name: 'Delete loop' }));
+
+    await waitFor(() => expect(panel.queryByText('Verse')).not.toBeInTheDocument());
+    expect(screen.queryByTestId('session-logged')).not.toBeInTheDocument();
+  });
+
+  // Unit 13 Test: a loop deleted on another device. Its next session is refused (23503),
+  // which reads the loops again (sessionLoopGone): the page stops looping it, and the
+  // notice about its earlier session goes with it (09 QA issues 4 and 7).
+  it('a loop deleted on another device: its refused session reads the loops again, and the page lets it go', async () => {
+    const { pause, resume } = await playVerseFor(45);
+    expect(await screen.findByTestId('session-logged')).toHaveTextContent('of Verse at 80%.');
+    expect(screen.getByTestId('active-loop')).toHaveTextContent('Verse');
+
+    loops.setRows([]);
+    const answer = queryResult.getMockImplementation()!;
+    queryResult.mockImplementation(async (call) =>
+      call.table === 'practice_sessions'
+        ? { data: null, error: { message: 'violates foreign key constraint', code: '23503' } }
+        : answer(call),
+    );
+    await resume();
+    later(45);
+    await pause();
+
+    await waitFor(() => expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument());
+    expect(screen.queryByTestId('session-logged')).not.toBeInTheDocument();
+    expect(screen.queryByText("Couldn't save your last practice session.")).not.toBeInTheDocument();
+    expect(sessionsSent()).toHaveLength(2);
+  });
+
   it('counts the sessions it could not save, and Try again sends each of them', async () => {
     serve({ loops: [verse] });
     const sessionLogs = failSessionLogs();
@@ -2146,6 +2182,25 @@ describe('SongPage keyboard shortcuts', () => {
     expect(pressed('Metronome')).not.toBe(metronomeWas);
     expect(pressed('Mute drums')).toBe('false');
     expect(pressed('Drums only')).toBe('false');
+  });
+
+  // Unit 13 Test (10 Build): a key's change is read out wherever focus is.
+  it('says what each key changed in a polite status that is on the page from the start', async () => {
+    const { user } = await openSong();
+    const said = screen.getByTestId('shortcut-announcement');
+    expect(said).toHaveAttribute('role', 'status');
+    expect(said).toBeEmptyDOMElement();
+    document.body.focus();
+
+    await user.keyboard('d');
+    expect(said).toHaveTextContent('Drums muted');
+    await user.keyboard('s');
+    expect(said).toHaveTextContent('Drums unmuted, Drums only on');
+    await user.keyboard('{ArrowDown}');
+    expect(said).toHaveTextContent('Speed 95%');
+    // A click on the control is heard by its own control; only keys speak here.
+    await user.click(toggle('Drums only'));
+    expect(said).toHaveTextContent('Speed 95%');
   });
 });
 

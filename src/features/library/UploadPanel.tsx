@@ -5,15 +5,18 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { Icon } from '@/components/icons';
 import {
   buttonClass,
+  focusRing,
   linkClass,
   primaryButtonClass,
   primaryLabelOffClass,
 } from '@/components/styles';
+import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { songPath } from '@/lib/routes';
 import { GUITAR_PRO_EXTENSIONS } from './songFile';
 import { NO_DRUM_TRACK_NOTE } from './songMetadata';
 import { SongFileError, type UploadResult, type UploadStep } from './songsApi';
+import { UPLOAD_PICKER_ATTRIBUTES, UPLOAD_SECTION_ATTRIBUTES } from './uploadPicker';
 import { useUploadSong } from './useSongs';
 
 const STEP_LABELS: Record<UploadStep, string> = {
@@ -99,7 +102,11 @@ export function UploadPanel({
       className="relative flex flex-col gap-6"
       {...(compact && { 'data-testid': 'drop-zone', ...dropHandlers })}
     >
-      <section aria-labelledby="upload-heading" className="flex flex-col gap-3">
+      <section
+        aria-labelledby="upload-heading"
+        {...UPLOAD_SECTION_ATTRIBUTES}
+        className={`flex flex-col gap-3 rounded-card ${focusRing}`}
+      >
         <h2 id="upload-heading" className="sr-only">
           Add a song
         </h2>
@@ -185,6 +192,7 @@ function FilePicker({
       )}
       <input
         type="file"
+        {...UPLOAD_PICKER_ATTRIBUTES}
         className="sr-only"
         disabled={disabled}
         onChange={(event) => {
@@ -281,7 +289,7 @@ function UploadFailure({ error, fileName }: { error: Error; fileName: string | u
     <ErrorAlert>
       {error instanceof SongFileError
         ? `Couldn't add ${name}. ${error.message}`
-        : `Couldn't upload ${name}: ${error.message}`}
+        : `Couldn't upload ${name}. ${failureCopy(error)}`}
     </ErrorAlert>
   );
 }

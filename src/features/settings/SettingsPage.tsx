@@ -11,6 +11,7 @@ import {
   primaryButtonClass,
   sectionHeadingClass,
 } from '@/components/styles';
+import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
 import { SignOutButton } from '@/features/auth/SignOutButton';
 import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
@@ -45,7 +46,7 @@ export function SettingsPage() {
       // keeps the cached row, and unmounting the form would drop unsaved edits.
       settings.isLoadingError ? (
         <LoadErrorAlert onRetry={() => void settings.refetch()}>
-          Couldn't load your settings: {settings.error.message}
+          Couldn't load your settings. {failureCopy(settings.error)}
         </LoadErrorAlert>
       ) : (
         <SettingsForm saved={settings.data} />
@@ -143,7 +144,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
         <OfflineNote>You're offline. Settings can be saved once you're back online.</OfflineNote>
       )}
       {update.isError && (
-        <ErrorAlert>Couldn't save your settings: {update.error.message}</ErrorAlert>
+        <ErrorAlert>Couldn't save your settings. {failureCopy(update.error)}</ErrorAlert>
       )}
     </form>
   );
@@ -151,6 +152,7 @@ function SettingsForm({ saved }: { saved: Settings }) {
 
 function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
   const volumeId = useId();
+  const volumeErrorId = `${volumeId}-error`;
   const volumePercent = volumeToPercent(values.metronome_volume);
 
   return (
@@ -183,12 +185,15 @@ function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
           value={volumePercent}
           aria-valuetext={`${volumePercent}%`}
           aria-invalid={errors.metronome_volume ? true : undefined}
+          aria-describedby={errors.metronome_volume ? volumeErrorId : undefined}
           onChange={(event) =>
             edit({ metronome_volume: percentToVolume(event.target.valueAsNumber) })
           }
         />
         {errors.metronome_volume && (
-          <span className="text-sm text-danger">{errors.metronome_volume}</span>
+          <span id={volumeErrorId} className="text-sm text-danger">
+            {errors.metronome_volume}
+          </span>
         )}
       </div>
     </fieldset>

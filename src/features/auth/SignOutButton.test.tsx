@@ -29,7 +29,7 @@ describe('SignOutButton', () => {
     renderRoutes(<Route path="/" element={<SignOutButton />} />);
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't sign out: Failed to fetch",
+      "Couldn't sign out. Something went wrong. Try again.",
     );
   });
 });

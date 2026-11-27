@@ -238,11 +238,28 @@ describe('usePlayer layout', () => {
 });
 
 describe('usePlayer and the connection (Unit 11)', () => {
+  // The sound error can be drawn before React has run the effect that listens for `online`
+  // (passive effects come after paint, late on a slow runner), so wait for the listener before
+  // sending the event, or the test sends it to nobody.
+  afterEach(() => {
+    addListenerSpy?.mockRestore();
+    addListenerSpy = null;
+  });
+
+  let addListenerSpy: ReturnType<typeof vi.spyOn> | null = null;
+  function watchOnlineListener() {
+    const added = vi.spyOn(window, 'addEventListener');
+    addListenerSpy = added;
+    return () => waitFor(() => expect(added).toHaveBeenCalledWith('online', expect.any(Function)));
+  }
+
   it('loads sounds that failed again when the connection comes back, and stops listening on unmount', async () => {
     const engine = new FakePlayerEngine();
     engine.soundFont = Promise.reject(new Error('Failed to fetch'));
+    const listening = watchOnlineListener();
     const { unmount } = render(<Harness createEngine={fakeEngineFactory(engine)} />);
     expect(await screen.findByText('error soundFont')).toBeInTheDocument();
+    await listening();
 
     engine.soundFont = Promise.resolve();
     act(() => {
@@ -263,8 +280,10 @@ describe('usePlayer and the connection (Unit 11)', () => {
   it('a second `online` while the retry is on its way fetches nothing more', async () => {
     const engine = new FakePlayerEngine();
     engine.soundFont = Promise.reject(new Error('Failed to fetch'));
+    const listening = watchOnlineListener();
     render(<Harness createEngine={fakeEngineFactory(engine)} />);
     expect(await screen.findByText('error soundFont')).toBeInTheDocument();
+    await listening();
 
     engine.soundFont = new Promise(() => {});
     act(() => {

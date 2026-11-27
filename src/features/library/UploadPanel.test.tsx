@@ -178,7 +178,7 @@ describe('UploadPanel', () => {
     await user.upload(picker(), gpFile());
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't upload groove.gp: insert failed",
+      "Couldn't upload groove.gp. Something went wrong. Try again.",
     );
     expect(storageMethods()).toEqual(['upload', 'remove']);
   });
@@ -284,6 +284,73 @@ describe('UploadPanel', () => {
     await user.upload(picker(), gpFile());
     expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+// Unit 13 Test: the insert's answer lost on its way back (04 Review open issues 1 and 2).
+describe('UploadPanel when the save’s answer is lost', () => {
+  const dropped = (): FakeResult => fail('TypeError: Failed to fetch', '');
+  const isLookUp = (call: Parameters<typeof opArgs>[0]) =>
+    call.ops.some((op) => op.method === 'eq' && op.args[0] === 'id');
+
+  /** The insert lands but its answer is dropped; the look-up by id answers `lookUp`. */
+  function serveLostInsert(lookUp: Promise<FakeResult> | FakeResult) {
+    queryResult.mockImplementation(async (call) => {
+      if (opArgs(call, 'insert')) return dropped();
+      if (opArgs(call, 'range')) return ok([]);
+      if (isLookUp(call)) return lookUp;
+      return ok(null);
+    });
+  }
+
+  it('finds the saved song, says it was added and keeps its file; still "Saving" with no Cancel while it looks', async () => {
+    const lookUp = deferred();
+    serveLostInsert(lookUp.promise);
+    const user = renderPanel();
+    await user.upload(picker(), gpFile());
+
+    await waitFor(() => expect(queryResult.mock.calls.some(([call]) => isLookUp(call))).toBe(true));
+    expect(screen.getByText('Saving groove.gp…')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    expect(picker()).toBeDisabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    lookUp.resolve(ok(row()));
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open “Groove”' })).toHaveAttribute(
+      'href',
+      '/songs/song-1',
+    );
+    expect(storageMethods()).toEqual(['upload']);
+    expect(inserts()).toHaveLength(1);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('when the look-up fails too, says the song may be there and removes nothing', async () => {
+    serveLostInsert(dropped());
+    const user = renderPanel();
+    await user.upload(picker(), gpFile());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      "Couldn't upload groove.gp. The server couldn't be reached. Check the connection and try again. The song may have been added anyway: reload the library to see.",
+    );
+    expect(alert).not.toHaveTextContent('Failed to fetch');
+    expect(storageMethods()).toEqual(['upload']);
+    expect(picker()).toBeEnabled();
+  });
+
+  // Copilot review: the insert may still be running when the look-up finds nothing.
+  it('when the look-up finds no row, says the song may be there and removes nothing', async () => {
+    serveLostInsert(ok(null));
+    const user = renderPanel();
+    await user.upload(picker(), gpFile());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't upload groove.gp. The server couldn't be reached. Check the connection and try again. The song may have been added anyway: reload the library to see.",
+    );
+    expect(storageMethods()).toEqual(['upload']);
+    expect(picker()).toBeEnabled();
   });
 });
 

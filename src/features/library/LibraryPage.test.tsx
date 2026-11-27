@@ -3,13 +3,27 @@ import userEvent from '@testing-library/user-event';
 import { onlineManager } from '@tanstack/react-query';
 import { restoredCacheIsStale } from '@/features/offline/queryPersister';
 import { Route } from 'react-router';
-import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
+import {
+  opArgs,
+  queryResult,
+  resetFakeSupabase,
+  storageResult,
+  type FakeResult,
+} from '@/test/fakeSupabase';
 import { renderRoutes, settle, testQueryClient } from '@/test/render';
 import { LibraryPage } from './LibraryPage';
 import type { LibrarySong } from './songForm';
 import { songKeys } from './useSongs';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
+
+// Real parsing is covered by parseScore.test.ts; an upload here only needs to get under way.
+vi.mock('./parseScore', () => ({
+  parseScore: () => ({
+    ok: true,
+    metadata: { title: 'New', artist: '', originalTempo: 120, barCount: 16, drumTrackIndex: 0 },
+  }),
+}));
 
 const song = (id: string, overrides: Partial<LibrarySong>): LibrarySong => ({
   id,
@@ -100,7 +114,7 @@ describe('LibraryPage', () => {
     queryResult.mockResolvedValueOnce({ data: null, error: { message: 'network down' } });
     const { user } = renderLibrary();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't load your songs: network down",
+      "Couldn't load your songs. Something went wrong. Try again.",
     );
     serveLibrary(library);
     await user.click(screen.getByRole('button', { name: 'Try again' }));
@@ -205,7 +219,9 @@ describe('LibraryPage', () => {
     expect(screen.queryByText('No songs match your search.')).not.toBeInTheDocument();
 
     failSave();
-    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save the song: offline");
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't save the song. Something went wrong. Try again.",
+    );
     expect(screen.getByLabelText('Title')).toHaveValue('Intro Groove');
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -239,6 +255,100 @@ describe('LibraryPage', () => {
     );
   });
 
+  it('hands focus to the upload once the last song is deleted', async () => {
+    serveLibrary([library[0]!]);
+    const { user } = renderLibrary();
+    await screen.findByRole('list');
+    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await user.click(screen.getByRole('button', { name: 'Delete song' }));
+    expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Upload a Guitar Pro file')).toHaveFocus());
+  });
+
+  // Unit 13 Test: the hand-over waits for the song to leave; a refused delete keeps it, and focus.
+  it('a failed delete of the last song leaves focus on Delete song, and its retry hands it to the upload', async () => {
+    serveLibrary([library[0]!]);
+    storageResult.mockResolvedValueOnce({ data: null, error: { message: 'storage down' } });
+    const { user } = renderLibrary();
+    await screen.findByRole('list');
+    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    const confirm = screen.getByRole('button', { name: 'Delete song' });
+    await user.click(confirm);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't delete the song.");
+    await settle();
+    expect(shownTitles()).toEqual(['Halo']);
+    expect(confirm).toHaveFocus();
+
+    await user.click(confirm);
+    expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Upload a Guitar Pro file')).toHaveFocus());
+  });
+
+  // Copilot review: with the upload off, its file input can't take focus, and
+  // the hand-over was used up on it, leaving focus on <body>.
+  describe('the last song deleted while the upload is off', () => {
+    const uploadSection = () => screen.getByRole('region', { name: 'Add a song' });
+
+    it('hands focus to the upload section when the connection went meanwhile', async () => {
+      serveLibrary([library[0]!]);
+      let removeFile!: () => void;
+      storageResult.mockImplementationOnce(
+        () => new Promise((resolve) => (removeFile = () => resolve({ data: {}, error: null }))),
+      );
+      const { user } = renderLibrary();
+      await screen.findByRole('list');
+      await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+      await user.click(screen.getByRole('button', { name: 'Delete song' }));
+      await waitFor(() => expect(removeFile).toBeDefined());
+
+      act(() => onlineManager.setOnline(false));
+      await act(async () => removeFile());
+
+      expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
+      expect(screen.getByLabelText('Upload a Guitar Pro file')).toBeDisabled();
+      await waitFor(() => expect(uploadSection()).toHaveFocus());
+    });
+
+    it('hands focus to the upload section while an upload is under way', async () => {
+      serveLibrary([library[0]!]);
+      const answerLibrary = queryResult.getMockImplementation()!;
+      queryResult.mockImplementation(async (call) =>
+        call.ops.some((op) => op.method === 'eq' && op.args[0] === 'file_hash')
+          ? { data: null, error: null }
+          : answerLibrary(call),
+      );
+      // The file's upload never answers, so the upload stays pending.
+      storageResult.mockImplementation(async (call) =>
+        call.method === 'upload' ? new Promise<FakeResult>(() => {}) : { data: {}, error: null },
+      );
+      const { user } = renderLibrary();
+      await screen.findByRole('list');
+      await user.upload(
+        screen.getByLabelText('Upload a Guitar Pro file'),
+        new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2])], 'new.gp'),
+      );
+      expect(await screen.findByText('Uploading new.gp…')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+      await user.click(screen.getByRole('button', { name: 'Delete song' }));
+
+      expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
+      expect(screen.getByLabelText('Upload a Guitar Pro file')).toBeDisabled();
+      await waitFor(() => expect(uploadSection()).toHaveFocus());
+    });
+  });
+
+  it('hands focus to the search when the deleted song was the only one it showed', async () => {
+    serveLibrary(library);
+    const { user } = renderLibrary('/library?q=halo');
+    await screen.findByRole('list');
+    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await user.click(screen.getByRole('button', { name: 'Delete song' }));
+    expect(await screen.findByText('No songs match your search.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Search title or artist')).toHaveFocus());
+  });
+
   describe('focus after a rename that leaves the search (Copilot review)', () => {
     const rename = async (path: string, from: string, to: string) => {
       serveLibrary(library);
@@ -251,6 +361,16 @@ describe('LibraryPage', () => {
       await user.click(screen.getByRole('button', { name: 'Save' }));
       return user;
     };
+
+    // 13 Review: the hand-over lives in LibraryPage, which a Cancel alone doesn't re-render.
+    it('Cancel hands focus back to the song’s Edit, with nothing saved', async () => {
+      serveLibrary(library);
+      const { user } = renderLibrary();
+      await screen.findByRole('list');
+      await user.click(screen.getByRole('button', { name: 'Edit Halo' }));
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Edit Halo' })).toHaveFocus());
+    });
 
     it('goes to the search field when no song is left on show', async () => {
       await rename('/library?q=fill', 'Chorus Fill', 'Intro Groove');

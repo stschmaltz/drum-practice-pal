@@ -116,11 +116,38 @@ describe('PlayerControls transport', () => {
     expect(engine.stop).toHaveBeenCalledTimes(1);
   });
 
-  it('disables playback when the player is in error', () => {
+  it('disables playback and every option when the player is in error', () => {
     const { engine } = setup();
     act(() => engine.fire('error', { error: new Error('render') }));
-    expect(playButton()).toBeDisabled();
-    expect(backToStart()).toBeDisabled();
+    for (const control of [playButton(), backToStart(), speed(), metronome(), volume()]) {
+      expect(control).toBeDisabled();
+    }
+    expect(muteDrums()).toBeDisabled();
+    expect(drumsOnly()).toBeDisabled();
+  });
+
+  // Unit 13 Test: a failure while the song still loads (the soundfont refused) is the common one.
+  it('turns the options off for a failure before the song was ever ready, and a press changes nothing', async () => {
+    const { engine, player, user } = setup({ loaded: false });
+    expect(speed()).toBeEnabled();
+    act(() => engine.fire('error', { error: new Error('soundfont') }));
+    const before = player.getSnapshot();
+    expect(before.status).toBe('error');
+
+    for (const control of [speed(), metronome(), volume(), muteDrums(), drumsOnly()]) {
+      expect(control).toBeDisabled();
+    }
+    for (const radio of within(screen.getByRole('radiogroup', { name: 'Count-in' })).getAllByRole(
+      'radio',
+    )) {
+      expect(radio).toBeDisabled();
+    }
+    await user.click(screen.getByText('2 bars'));
+    await user.click(metronome());
+    expect(player.getSnapshot()).toMatchObject({
+      countInBars: before.countInBars,
+      metronomeOn: before.metronomeOn,
+    });
   });
 });
 

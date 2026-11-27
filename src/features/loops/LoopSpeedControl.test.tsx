@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DEFAULT_PLAYER_OPTIONS } from '@/features/player/playerOptions';
 import { initialPlayerSnapshot, type PlayerService } from '@/features/player/PlayerService';
@@ -104,6 +104,29 @@ describe('LoopSpeedControl readout', () => {
     }
     // The percent alone, until a tempo is known.
     expect(screen.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 80%');
+  });
+
+  // Unit 13 Test (05 QA issue 3): after a player failure the speed is off here as in the controls bar.
+  it('turns its fields and nudges off once the player has failed', async () => {
+    const view = await renderControl(before);
+    act(() => view.engine.fire('error', { error: new Error('soundfont') }));
+    expect(view.percent()).toBeDisabled();
+    expect(view.bpm()).toBeDisabled();
+    for (const button of screen.getAllByRole('button', { name: /^(Slower|Faster) by/ })) {
+      expect(button).toBeDisabled();
+    }
+  });
+
+  it('a speed being typed when the player fails is not set when the field lets go of it', async () => {
+    const view = await renderControl(before);
+    await view.user.clear(view.percent());
+    await view.user.type(view.percent(), '60');
+    act(() => view.engine.fire('error', { error: new Error('soundfont') }));
+
+    // The field commits on blur, which a disabled field still sends on its way out.
+    fireEvent.blur(view.percent());
+    expect(view.player.getSnapshot().speedRatio).toBe(0.8);
+    expect(view.percent()).toHaveValue('80');
   });
 
   it('waits for the score before offering BPM, and fills it in once loaded', async () => {
@@ -307,7 +330,7 @@ describe('LoopSpeedControl Save speed', () => {
     await view.user.click(view.save());
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't save the speed: permission denied",
+      "Couldn't save the speed. Something went wrong. Try again.",
     );
     await waitFor(() => expect(view.saved()).toHaveTextContent('Saved: 80% (96 BPM)'));
     expect(view.percent()).toHaveValue('85');

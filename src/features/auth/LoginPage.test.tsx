@@ -75,13 +75,16 @@ describe('LoginPage', () => {
   it('shows why the email could not be sent and keeps the email form', async () => {
     fakeSupabase.auth.signInWithOtp.mockResolvedValue({
       data: null,
-      error: { message: 'Email rate limit exceeded' },
+      error: {
+        message: 'Email rate limit exceeded',
+        code: 'over_email_send_rate_limit',
+      },
     });
     const user = renderLogin();
     await sendEmail(user, 'drummer@drumpal.test');
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't send the email: Email rate limit exceeded",
+      "Couldn't send the email. Too many emails were asked for. Wait a minute, then try again.",
     );
     expect(screen.getByLabelText('Email')).toBeInTheDocument();
   });
@@ -107,10 +110,30 @@ describe('LoginPage', () => {
     expect(fakeSupabase.auth.verifyOtp).not.toHaveBeenCalled();
   });
 
+  // Unit 13 Test: without a connection Auth's client says "Failed to fetch"; the page never does.
+  it('says the server could not be reached when the email request never got there', async () => {
+    fakeSupabase.auth.signInWithOtp.mockResolvedValue({
+      data: null,
+      // As supabase-js's auth client builds it.
+      error: Object.assign(new Error('Failed to fetch'), {
+        name: 'AuthRetryableFetchError',
+        status: 0,
+      }),
+    });
+    const user = renderLogin();
+    await sendEmail(user, 'drummer@drumpal.test');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      "Couldn't send the email. The server couldn't be reached. Check the connection and try again.",
+    );
+    expect(alert).not.toHaveTextContent('Failed to fetch');
+  });
+
   it('says when a code is rejected', async () => {
     fakeSupabase.auth.verifyOtp.mockResolvedValue({
       data: null,
-      error: { message: 'Token has expired or is invalid' },
+      error: { message: 'Token has expired or is invalid', code: 'otp_expired' },
     });
     const user = renderLogin();
     await sendEmail(user, 'drummer@drumpal.test');
@@ -118,7 +141,7 @@ describe('LoginPage', () => {
     await user.click(screen.getByRole('button', { name: 'Sign in with code' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "That code didn't work: Token has expired or is invalid",
+      "That code didn't work. It's wrong, has expired or was already used. Check it, or ask for a new email.",
     );
   });
 

@@ -269,7 +269,9 @@ describe('finishing and reopening from the home page', () => {
     refuse();
 
     await waitFor(() => expect(listed()).toEqual(['Chorus fill']));
-    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't change the loop: nope");
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't change the loop. Something went wrong. Try again.",
+    );
     expect(table.rows()[0]?.status).toBe('active');
   });
 });

@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useLocation, useSearchParams } from 'react-router';
 import { useAuth } from '@/lib/auth';
+import { signInFailureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { FullPageMessage } from '@/components/FullPageMessage';
@@ -49,7 +50,7 @@ export function LoginPage() {
   };
 
   const sendError = sendEmail.error && (
-    <ErrorAlert>Couldn't send the email: {sendEmail.error.message}</ErrorAlert>
+    <ErrorAlert>Couldn't send the email. {signInFailureCopy(sendEmail.error)}</ErrorAlert>
   );
 
   return (
@@ -203,7 +204,7 @@ function CodeStep({
           {verifyCode.isPending ? 'Checking…' : 'Sign in with code'}
         </button>
         {verifyCode.error && (
-          <ErrorAlert>That code didn't work: {verifyCode.error.message}</ErrorAlert>
+          <ErrorAlert>That code didn't work. {signInFailureCopy(verifyCode.error)}</ErrorAlert>
         )}
       </form>
       <div className="flex flex-wrap gap-2 text-sm">

@@ -10,8 +10,10 @@ import {
   nextCountInBars,
   resolveShortcut,
   SHORTCUT_ACTIONS,
+  shortcutAnnouncement,
   shortcutHelp,
   steppedBar,
+  type AnnouncedOptions,
   type KeyPress,
   type ShortcutContext,
 } from './shortcuts';
@@ -333,5 +335,53 @@ describe('steppedBar', () => {
     expect(steppedBar(1, 16, 'previous')).toBeNull();
     expect(steppedBar(16, 16, 'next')).toBeNull();
     expect(steppedBar(1, 1, 'next')).toBeNull();
+  });
+});
+
+describe('shortcutAnnouncement', () => {
+  const options: AnnouncedOptions = {
+    speedRatio: 1,
+    metronomeOn: false,
+    drumsMuted: false,
+    drumsOnly: false,
+    countInBars: 0,
+  };
+
+  it.each([
+    [{ speedRatio: 1.05 }, 'Speed 105%'],
+    [{ speedRatio: 0.95 }, 'Speed 95%'],
+    [{ metronomeOn: true }, 'Metronome on'],
+    [{ drumsMuted: true }, 'Drums muted'],
+    [{ drumsOnly: true }, 'Drums only on'],
+    [{ countInBars: 1 as const }, 'Count-in 1 bar'],
+    [{ countInBars: 2 as const }, 'Count-in 2 bars'],
+  ])('says what changed: %o', (change, said) => {
+    expect(shortcutAnnouncement(options, { ...options, ...change })).toBe(said);
+  });
+
+  it('says both when one key changes two (Drums only turns Mute drums off)', () => {
+    expect(
+      shortcutAnnouncement(
+        { ...options, drumsMuted: true },
+        { ...options, drumsMuted: false, drumsOnly: true },
+      ),
+    ).toBe('Drums unmuted, Drums only on');
+  });
+
+  it('says the way back too', () => {
+    const on = { ...options, metronomeOn: true, drumsOnly: true, countInBars: 2 as const };
+    expect(shortcutAnnouncement(on, options)).toBe('Metronome off, Drums only off, Count-in off');
+  });
+
+  it('says where a loop key moved first, alone or with what came with it', () => {
+    expect(shortcutAnnouncement(options, options, 'Bar 5')).toBe('Bar 5');
+    expect(shortcutAnnouncement(options, { ...options, speedRatio: 0.8 }, 'Loop Verse')).toBe(
+      'Loop Verse, Speed 80%',
+    );
+  });
+
+  it('says nothing when nothing changed, or only below what the percent shows', () => {
+    expect(shortcutAnnouncement(options, options)).toBeNull();
+    expect(shortcutAnnouncement(options, { ...options, speedRatio: 1.001 })).toBeNull();
   });
 });

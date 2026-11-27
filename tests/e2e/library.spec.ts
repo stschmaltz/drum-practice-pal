@@ -5,6 +5,7 @@ import type { Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
 import { fixtures } from '../fixtures/sources.ts';
 import { expect, signIn, test, type E2eUser } from './auth';
+import { songRows, userFiles } from './libraryPage';
 
 // Unit 04: upload, dedupe, refuse bad files, edit, delete, search and sort.
 
@@ -19,22 +20,6 @@ async function upload(page: Page, file: string | { name: string; buffer: Buffer 
       ? file
       : { name: file.name, mimeType: 'application/octet-stream', buffer: file.buffer },
   );
-}
-
-async function songRows(user: E2eUser) {
-  const { data, error } = await admin
-    .from('songs')
-    .select('id, title, artist, original_tempo, bar_count, drum_track_index, file_path')
-    .eq('user_id', user.id);
-  if (error) throw error;
-  return data;
-}
-
-/** One page is enough: each test uploads a handful of files at most. */
-async function userFiles(user: E2eUser) {
-  const { data, error } = await admin.storage.from('gp-files').list(user.id, { limit: 1000 });
-  if (error) throw error;
-  return data.map((file) => file.name);
 }
 
 test('uploads a Guitar Pro file with its metadata, and warns on a duplicate', async ({

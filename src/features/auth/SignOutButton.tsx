@@ -9,6 +9,7 @@ import {
   useHasUnsentWrites,
 } from '@/features/offline/unsentWrites';
 import { useSignedInUser } from '@/lib/auth';
+import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { useSignOut } from './useAuthActions';
 
@@ -53,7 +54,7 @@ export function SignOutButton({ className = buttonClass }: { className?: string 
           </OfflineNote>
         )
       )}
-      {signOut.error && <ErrorAlert>Couldn't sign out: {signOut.error.message}</ErrorAlert>}
+      {signOut.error && <ErrorAlert>Couldn't sign out. {failureCopy(signOut.error)}</ErrorAlert>}
     </div>
   );
 }
