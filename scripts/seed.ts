@@ -11,6 +11,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TablesInsert } from '../src/lib/database.types.ts';
 import { DEV_PASSWORD } from '../src/features/auth/devPassword.ts';
+import { isLocalSupabaseUrl } from '../src/lib/supabaseConfig.ts';
+import { localSupabaseEnv } from './local-supabase.ts';
 import { GP_FILES_BUCKET, songFilePath } from '../src/lib/schema.ts';
 import { drumTrackIndex, loadScoreFile, tempoAtBar } from '../tests/unit/score-helpers.ts';
 import {
@@ -113,12 +115,17 @@ async function deleteUserByEmail(admin: DbClient, email: string) {
   if (error) throw error;
 }
 
-async function createSeedUser(admin: DbClient, email: string): Promise<string> {
-  // The dev password lets the dev server's "Dev: sign in" button skip the email.
+async function createSeedUser(
+  admin: DbClient,
+  email: string,
+  withDevPassword: boolean,
+): Promise<string> {
+  // The dev password lets the dev server's "Dev: sign in" button skip the email. Only on
+  // the local stack: it is public, so a hosted project's accounts never get it.
   const { data, error } = await admin.auth.admin.createUser({
     email,
     email_confirm: true,
-    password: DEV_PASSWORD,
+    ...(withDevPassword && { password: DEV_PASSWORD }),
   });
   if (error) throw error;
   return data.user.id;
@@ -183,10 +190,12 @@ async function seedLoop(admin: DbClient, userId: string, songId: string, loop: S
 
 async function main() {
   const admin = createAdminClient();
+  // Decided once, before any account is touched (see createSeedUser).
+  const local = isLocalSupabaseUrl(localSupabaseEnv().url);
 
   for (const user of seedUsers) {
     await deleteUserByEmail(admin, user.email);
-    const userId = await createSeedUser(admin, user.email);
+    const userId = await createSeedUser(admin, user.email, local);
     const titles: string[] = [];
     for (const song of user.songs) {
       const { songId, title } = await seedSong(admin, userId, song.fixture);

@@ -40,7 +40,7 @@ export async function fetchLoopSessions(
 
 /** Every session of the user, oldest first: the Stats page works everything out from these. */
 export async function fetchAllSessions(userId: string): Promise<PracticeSession[]> {
-  return fetchAllPages(async (from, to) =>
+  const rows = await fetchAllPages(async (from, to) =>
     unwrap(
       await supabase
         .from('practice_sessions')
@@ -53,6 +53,20 @@ export async function fetchAllSessions(userId: string): Promise<PracticeSession[
       'practice sessions',
     ),
   );
+  return uniqueById(rows);
+}
+
+/**
+ * Pages are read by offset, one request each. A session logged between two of
+ * them with an earlier start (a replay from the outbox) moves every later row
+ * along by one, so the next page starts with the last row of the page before:
+ * counted twice, it would double its time and passes on the Stats page. The
+ * first copy of each id is kept. The row that slipped in is not in this read;
+ * `sessionLogged` adds it to the cache and invalidates, which reads again.
+ */
+export function uniqueById<T extends { id: string }>(rows: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true)));
 }
 
 /**

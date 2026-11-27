@@ -9,6 +9,7 @@ import type { Song } from '@/features/library/songForm';
 import { songKeys } from '@/features/library/useSongs';
 import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
 import { sessionKeys } from '@/features/practice/sessionKeys';
+import type { PracticeSession } from '@/features/practice/sessions';
 import { useSignedInUser } from '@/lib/auth';
 import { queuedWriteRetry } from '@/lib/network';
 import { sendRefreshingToken } from '@/lib/tokenRefresh';
@@ -381,8 +382,16 @@ export function useDeleteLoop(songId: string) {
       );
       // Its practice history went with it (cascade).
       queryClient.removeQueries({ queryKey: sessionKeys.forLoop(user.id, loopId) });
-      // Its sessions went with it: the streak and the Stats page count them no more.
-      void queryClient.invalidateQueries({ queryKey: sessionKeys.every(user.id) });
+      // Its sessions went with it: the streak and the Stats page count them no more. Taken
+      // out of the cache here, not left to the refetch: if that read fails or the connection
+      // drops, the deleted history would still be counted, and persisted for offline. A read
+      // already on its way is from before the delete, so it is cancelled first.
+      const everyKey = sessionKeys.every(user.id);
+      void queryClient.cancelQueries({ queryKey: everyKey });
+      queryClient.setQueryData<PracticeSession[]>(everyKey, (sessions) =>
+        sessions?.filter((session) => session.loop_id !== loopId),
+      );
+      void queryClient.invalidateQueries({ queryKey: everyKey });
     },
     onSettled: () => invalidateWhenIdle(queryClient, user.id),
   });
