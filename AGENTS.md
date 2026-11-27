@@ -80,6 +80,7 @@ docs/
 ## Supabase
 
 - Schema changes are new files in `supabase/migrations/` (`npx supabase migration new <name>`), never edits to applied ones. Then `npm run db:reset`, `npm run db:types`, and commit the regenerated types. CI fails if they drift.
+- CI's `migrate` job pushes every migration to the hosted project when it reaches `main`, at about the moment Workers Builds deploys that build, so a migration must be additive: the build before it has to keep working on the new schema. Anything that renames or drops what the live build reads takes two releases (docs/release.md, section 2). A migration whose check existing rows could fail gets its SQL check in release.md, run before merging.
 - Every table has `user_id` and owner-only RLS (`user_id = (select auth.uid())`). Child tables reference their parent by `(id, user_id)` so a row can't point at another user's parent.
 - Supabase's default privileges give `anon` and `authenticated` full access to every new public table and function. So every migration that creates one must, in the same file: enable RLS on the table, `revoke all ... from anon, authenticated`, then grant only what's needed (column-level `grant update (col, ...)` where only some columns are client-editable). For functions, `revoke execute ... from public, anon, authenticated` unless clients must call it. `anon` gets nothing. See the end of `20261122000000_schema.sql`.
 - Storage: private bucket `gp-files`, objects at `{user_id}/{song_id}.gp`. Build paths with `songFilePath()` from `src/lib/schema.ts`; policies reject any other shape.
