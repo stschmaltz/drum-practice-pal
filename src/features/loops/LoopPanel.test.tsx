@@ -352,8 +352,8 @@ describe('LoopPanel playing a loop', () => {
       barNumber: 9,
     });
     // Marked in its own item, which holds its speed control: not a second card for it.
-    const card = within(view.panel.getByRole('region', { name: 'Practicing Late' }));
-    expect(view.item('Late').getByRole('region', { name: 'Practicing Late' })).toBeInTheDocument();
+    const card = within(view.panel.getByRole('region', { name: 'Practising Late' }));
+    expect(view.item('Late').getByRole('region', { name: 'Practising Late' })).toBeInTheDocument();
     expect(view.item('Late').getByText('Now looping')).toBeInTheDocument();
     expect(view.panel.getAllByText('Late', { selector: 'p' })).toHaveLength(1);
     expect(card.getByLabelText('BPM')).toHaveValue('45');
@@ -569,7 +569,7 @@ describe('LoopPanel bringing a paused loop’s first bar on screen', () => {
   async function saveTypedLoop(view: View, first: string, last: string) {
     await typeNewLoop(view, { first, last, name: 'Typed' });
     await view.press('Save loop');
-    await view.panel.findByRole('region', { name: 'Practicing Typed' });
+    await view.panel.findByRole('region', { name: 'Practising Typed' });
   }
 
   it('a loop saved from typed bars while paused scrolls to its first bar, and only once saved', async () => {
@@ -579,7 +579,7 @@ describe('LoopPanel bringing a paused loop’s first bar on screen', () => {
     expect(view.engine.scrollToBar).not.toHaveBeenCalled();
 
     await view.press('Save loop');
-    await view.panel.findByRole('region', { name: 'Practicing Typed' });
+    await view.panel.findByRole('region', { name: 'Practising Typed' });
 
     expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
     expect(view.player.getSnapshot()).toMatchObject({
@@ -639,7 +639,7 @@ describe('LoopPanel bringing a paused loop’s first bar on screen', () => {
     await view.press('Edit Typed');
     await view.user.type(view.panel.getByLabelText('Name'), ' two');
     await view.press('Save loop');
-    await view.panel.findByRole('region', { name: 'Practicing Typed two' });
+    await view.panel.findByRole('region', { name: 'Practising Typed two' });
 
     expect(view.engine.scrollToBar).not.toHaveBeenCalled();
     expect(view.engine.seek).not.toHaveBeenCalled();
@@ -670,7 +670,7 @@ describe('LoopPanel new and edited loops', () => {
 
     await waitFor(() => expect(view.names()).toEqual(['Intro', 'Fill', 'Late']));
     expect(view.item('Fill').getByText('Bars 6 to 7 · 90% (108 BPM)')).toBeInTheDocument();
-    expect(view.panel.getByRole('region', { name: 'Practicing Fill' })).toBeInTheDocument();
+    expect(view.panel.getByRole('region', { name: 'Practising Fill' })).toBeInTheDocument();
     expect(view.player.getSnapshot()).toMatchObject({
       range: { startBar: 6, endBar: 7 },
       looping: true,
@@ -743,7 +743,7 @@ describe('LoopPanel new and edited loops', () => {
     await view.press('Save loop');
 
     await waitFor(() => expect(view.names()).toEqual(['Intro', 'Later']));
-    expect(view.panel.getByRole('region', { name: 'Practicing Intro' })).toBeInTheDocument();
+    expect(view.panel.getByRole('region', { name: 'Practising Intro' })).toBeInTheDocument();
     expect(view.player.getSnapshot()).toMatchObject({
       range: { startBar: 1, endBar: 4 },
       highlight: { startBar: 1, endBar: 4 },
@@ -758,7 +758,7 @@ describe('LoopPanel new and edited loops', () => {
     await rename(view, 'Opening');
     await view.press('Save loop');
 
-    expect(await view.panel.findByRole('region', { name: 'Practicing Opening' })).toBeVisible();
+    expect(await view.panel.findByRole('region', { name: 'Practising Opening' })).toBeVisible();
     expect(view.header()).toHaveTextContent('Loop: Opening');
     expect(view.panel.getByRole('button', { name: 'Restart loop Opening' })).toBeInTheDocument();
   });
@@ -835,7 +835,7 @@ describe('LoopPanel deleting a loop', () => {
     await view.user.click(confirmFor(view, 'Late').getByRole('button', { name: 'Delete loop' }));
 
     await waitFor(() => expect(view.names()).toEqual(['Intro']));
-    expect(view.panel.getByRole('region', { name: 'Practicing Intro' })).toBeInTheDocument();
+    expect(view.panel.getByRole('region', { name: 'Practising Intro' })).toBeInTheDocument();
     expect(view.player.getSnapshot().range).toEqual({ startBar: 1, endBar: 4 });
   });
 
@@ -1295,10 +1295,10 @@ describe('LoopPanel history', () => {
     await view.panel.findByRole('button', { name: 'More actions for Late' });
 
     expect(view.item('Late').getByTestId('loop-last-practiced')).toHaveTextContent(
-      'Last practiced today',
+      'Last practised today',
     );
     expect(view.item('Intro').getByTestId('loop-last-practiced')).toHaveTextContent(
-      'Not practiced yet',
+      'Not practised yet',
     );
   });
 });

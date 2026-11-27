@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
@@ -10,6 +10,7 @@ import { barsLabel, hasReachedTarget, type Loop } from '@/features/loops/loopFor
 import { PracticeSpeed } from '@/features/loops/PracticeSpeed';
 import { useLoopPractice } from '@/features/loops/useLoopPractice';
 import { useLoops } from '@/features/loops/useLoops';
+import { canPlayLoopPractice, type PlayGate } from '@/features/player/controlGates';
 import { PlayerControls, PlayPauseButton } from '@/features/player/PlayerControls';
 import type { PlayerOptions } from '@/features/player/playerOptions';
 import { isRunning } from '@/features/player/PlayerService';
@@ -176,7 +177,13 @@ function PracticePlayer({
     practice.activeLoop !== null,
   );
   useUrlFollowsLoop(song.id, loopId, practice.activeLoop?.id ?? null);
-  const shortcuts = useSongShortcuts({ player, practice, loops: loops.data });
+  const loopOpen = practice.activeLoop !== null;
+  // One gate for the button and Space: until the loop is open a Play would play the whole song.
+  const playGate = useCallback<PlayGate>(
+    (current, currentSnapshot) => canPlayLoopPractice(current, currentSnapshot, loopOpen),
+    [loopOpen],
+  );
+  const shortcuts = useSongShortcuts({ player, practice, loops: loops.data, playGate });
   const running = isRunning(snapshot.status);
   useJamMode(
     player,
@@ -241,7 +248,7 @@ function PracticePlayer({
       >
         <PracticeSpeed songId={song.id} loop={loop} player={player} snapshot={snapshot} />
         <span className="contents" {...PRACTICE_PLAY_ATTRIBUTES}>
-          <PlayPauseButton player={player} snapshot={snapshot} round />
+          <PlayPauseButton player={player} snapshot={snapshot} round gate={playGate} />
         </span>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">

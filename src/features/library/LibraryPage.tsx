@@ -19,7 +19,7 @@ import { findUploadPicker } from './uploadPicker';
 import { useSongs } from './useSongs';
 
 const SORT_LABELS: Record<LibrarySort, string> = {
-  practiced: 'Recently practiced',
+  practiced: 'Recently practised',
   added: 'Recently added',
 };
 

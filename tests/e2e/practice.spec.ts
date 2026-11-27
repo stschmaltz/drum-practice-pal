@@ -12,13 +12,18 @@ import {
   exitLoop,
 } from './loopsPage';
 import {
+  boxOf,
   chooseCountIn,
   chooseCountInMode,
   openFixture,
   playButton,
   recordedStatuses,
   recordStatuses,
+  scoreBox,
+  scoreSettled,
   status,
+  viewport,
+  windowScrollSettled,
 } from './playerPage';
 import {
   backTo,
@@ -33,6 +38,7 @@ import {
   playOn,
   recordSentSessions,
   sentSessions,
+  sessionComplete,
   sessionCount,
   sessionLogged,
   sessionsOf,
@@ -136,11 +142,11 @@ test('hitting the target asks "Mark finished?", and finish and reopen move the l
   await expect(overviewList(page, 'on the go')).toHaveCount(0);
   const finished = overviewItem(page, 'mastered', 'Fill');
   await expect(finished).toContainText('Bars 3 to 4 · 90%');
-  await expect(finished).toContainText('Last practiced today');
+  await expect(finished).toContainText('Last practised today');
 
   await finished.getByRole('button', { name: 'More actions for Fill' }).click();
   await page.getByRole('menuitem', { name: 'Reopen' }).click();
-  await expect(overviewItem(page, 'on the go', 'Fill')).toContainText('Last practiced today');
+  await expect(overviewItem(page, 'on the go', 'Fill')).toContainText('Last practised today');
   await expect(overviewList(page, 'mastered')).toHaveCount(0);
   await expect
     .poll(async () => (await loopsOf(user))[0])
@@ -175,7 +181,7 @@ test('a song lists its loops by last practised and opens one on its practice scr
     .evaluateAll((items) => items.map((item) => item.querySelector('p')?.textContent));
   expect(names).toEqual(['Late one', 'First saved']);
   await expect(overviewItem(page, 'on the go', 'Late one')).toContainText('Bars 9 to 10 · 70%');
-  await expect(overviewItem(page, 'on the go', 'Late one')).toContainText('Last practiced today');
+  await expect(overviewItem(page, 'on the go', 'Late one')).toContainText('Last practised today');
 
   // Its practice screen opens on the loop at its saved speed: one tap in, then Play.
   await openPractice(page, 'Late one');
@@ -190,6 +196,65 @@ test('a song lists its loops by last practised and opens one on its practice scr
   await playFor(page, 3_000);
   await sessionCount(user).toBe(2);
   expect((await sessionsOf(user)).every((session) => session.speed_ratio === 0.7)).toBe(true);
+});
+
+// 14 QA issue 7: at 844 x 390 the practice bar took 157 px of the 390 while playing. In a short
+// window it is one row, its buttons still 44 px or more.
+test('on a phone on its side the practice bar is one row and leaves the score most of the height', async ({
+  page,
+  user,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'phone', 'a phone turned on its side');
+  await page.setViewportSize({ width: 844, height: 390 });
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Sideways', firstBar: 1, lastBar: 2 });
+  await backTo(page, 'Groove 120').click();
+  await openPractice(page, 'Sideways');
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  const bar = page.getByTestId('practice-bar');
+  await windowScrollSettled(page);
+  const { height } = await boxOf(bar, 'practice bar');
+  expect(height).toBeLessThanOrEqual(90);
+  for (const button of await bar.getByRole('button').all()) {
+    const box = await boxOf(button, 'practice bar button');
+    const name = (await button.getAttribute('aria-label')) ?? (await button.innerText());
+    expect(Math.min(box.width, box.height), name).toBeGreaterThanOrEqual(44);
+  }
+  // The speed's words on full speed are still there for a screen reader.
+  await expect(page.getByTestId('practice-to-full-speed')).toHaveText('Full speed');
+  await playButton(page).click();
+});
+
+// 14 QA issue 4: Session complete came in above the score and pushed it down (215 px on a
+// phone), so a bar tapped as it came was the one below the finger. It comes, and goes, with
+// the score where it was.
+test('Session complete comes and goes without moving the score', async ({ page, user }) => {
+  await shortSessions(page, 2);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Still', firstBar: 1, lastBar: 2 });
+  await backTo(page, 'Groove 120').click();
+  await openPractice(page, 'Still');
+  await viewport(page).scrollIntoViewIfNeeded();
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await page.waitForTimeout(3_000);
+  await scoreSettled(page);
+  const before = await scoreBox(page);
+  await playButton(page).click();
+
+  await expect(sessionComplete(page)).toBeVisible();
+  await expect(sessionComplete(page)).toBeFocused();
+  await windowScrollSettled(page);
+  expect(await scoreBox(page)).toEqual(before);
+
+  await sessionComplete(page).getByRole('button', { name: 'Keep going' }).click();
+  await expect(sessionComplete(page)).toHaveCount(0);
+  await expect(playButton(page)).toBeFocused();
+  await windowScrollSettled(page);
+  expect(await scoreBox(page)).toEqual(before);
 });
 
 test('Back and Forward walk the three levels; a loop key and an old ?loop= link replace their entry', async ({

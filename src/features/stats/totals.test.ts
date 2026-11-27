@@ -4,6 +4,7 @@ import { nextDayKey } from './days';
 import {
   clockLabel,
   dailyPractice,
+  hasPracticeHistory,
   heatLevel,
   minutesLabel,
   practiceHeatmap,
@@ -40,6 +41,18 @@ const loop = (overrides: Partial<StatsLoop>): StatsLoop => ({
   status: 'active',
   finished_at: null,
   ...overrides,
+});
+
+describe('hasPracticeHistory', () => {
+  it('is false with no session and no finished loop, active loops or not', () => {
+    expect(hasPracticeHistory([], [])).toBe(false);
+    expect(hasPracticeHistory([], [loop({})])).toBe(false);
+  });
+
+  it('is true with one session, or one loop finished without any', () => {
+    expect(hasPracticeHistory([session(now)], [])).toBe(true);
+    expect(hasPracticeHistory([], [loop({ status: 'finished', finished_at: null })])).toBe(true);
+  });
 });
 
 describe('ranges', () => {

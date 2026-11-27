@@ -33,7 +33,13 @@ export function PracticeSpeed({
   const percent = ratioToPercent(ratio);
 
   return (
-    <div role="group" aria-label="Loop speed" className="flex flex-col gap-1">
+    // In a short window (`short`, a phone on its side) one row: the nudges and the speed, then
+    // Save speed; the words on full speed stay for screen readers.
+    <div
+      role="group"
+      aria-label="Loop speed"
+      className="flex flex-col gap-1 short:flex-row short:flex-wrap short:items-center short:gap-x-4"
+    >
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -46,7 +52,7 @@ export function PracticeSpeed({
         </button>
         <p className="flex min-w-0 flex-col items-center tabular-nums">
           <span
-            className="text-4xl font-bold leading-none md:text-5xl"
+            className="text-4xl font-bold leading-none md:text-5xl short:text-3xl"
             data-testid="practice-speed"
           >
             {percent}%
@@ -65,7 +71,7 @@ export function PracticeSpeed({
           +
         </button>
       </div>
-      <p className="text-sm text-ink-soft" data-testid="practice-to-full-speed">
+      <p className="text-sm text-ink-soft short:sr-only" data-testid="practice-to-full-speed">
         {fullSpeedLabel(percent)}
       </p>
       <div className="flex flex-wrap items-center gap-x-3">

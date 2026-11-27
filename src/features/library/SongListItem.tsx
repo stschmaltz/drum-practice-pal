@@ -5,6 +5,7 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { Icon } from '@/components/icons';
+import { OverflowMenu } from '@/components/OverflowMenu';
 import { ProgressRing } from '@/components/ProgressMarks';
 import {
   buttonClass,
@@ -14,12 +15,11 @@ import {
   inputClass,
   labelClass,
   primaryButtonClass,
-  quietButtonClass,
 } from '@/components/styles';
 import {
   findItemControl,
   itemAttributes,
-  itemControlAttributes,
+  itemMenuAttributes,
   type ItemControl,
 } from '@/lib/itemFocus';
 import { songPath } from '@/lib/routes';
@@ -99,28 +99,29 @@ export function SongListItem({
           }}
         />
       ) : (
-        <SongSummary song={song} mastery={mastery} />
-      )}
-      {mode === 'view' && (
-        <div className="relative z-10 -ml-3 flex flex-wrap gap-1 self-start pl-13">
-          <button
-            type="button"
-            className={quietButtonClass}
-            {...itemControlAttributes(song.id, 'edit')}
-            onClick={() => setMode('edit')}
-          >
-            <Icon name="edit" className="size-4" />
-            Edit<span className="sr-only"> {song.title}</span>
-          </button>
-          <button
-            type="button"
-            className={quietButtonClass}
-            {...itemControlAttributes(song.id, 'delete')}
-            onClick={() => setMode('confirm-delete')}
-          >
-            <Icon name="trash" className="size-4" />
-            Delete<span className="sr-only"> {song.title}</span>
-          </button>
+        <div className="flex items-start gap-2">
+          <SongSummary song={song} mastery={mastery} />
+          {/* Quiet secondary actions in "More" (14 QA issue 3), as the song's loop rows have
+              them. Its button stands for Edit and Delete in the focus hand-overs
+              (`findItemControl` falls back to it), and sits above the stretched link. */}
+          {mode === 'view' && (
+            <div className="relative z-10 shrink-0">
+              <OverflowMenu
+                name={song.title}
+                buttonAttributes={itemMenuAttributes(song.id)}
+                items={[
+                  { id: 'edit', label: 'Edit', icon: 'edit', onSelect: () => setMode('edit') },
+                  {
+                    id: 'delete',
+                    label: 'Delete',
+                    icon: 'trash',
+                    danger: true,
+                    onSelect: () => setMode('confirm-delete'),
+                  },
+                ]}
+              />
+            </div>
+          )}
         </div>
       )}
       {mode === 'confirm-delete' && (
@@ -137,7 +138,7 @@ export function SongListItem({
 function SongSummary({ song, mastery }: { song: LibrarySong; mastery: Mastery | null }) {
   const line = [song.artist, mastery ? masteryLine(mastery) : null].filter(Boolean).join(' · ');
   return (
-    <div className="flex items-start gap-3">
+    <div className="flex min-w-0 flex-1 items-start gap-3">
       <ProgressRing
         fraction={mastery ? masteryFraction(mastery) : 0}
         empty={mastery === null || mastery.total === 0}

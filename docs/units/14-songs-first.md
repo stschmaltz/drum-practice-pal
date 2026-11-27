@@ -172,3 +172,65 @@ Plain rows with dividers and one ring or bar per item: yes, on Songs and the ove
 ### Verdict
 
 PASS, with one major issue (1) for Build to decide on; no blockers.
+
+## Build (QA fix round 1)
+
+Fixes for Test bug 1 and QA issue 1, then QA issues 3 to 8, which Shane added to this round (3, 5 and 6 first, then 4, 7 and 8). Each change has a test that failed before it: the component tests against the code before the change, and the new e2e checks against QA's build of the old code, still served on 4193 (the Session complete check failed there with the score 214 px lower, the landscape bar check with a 157 px bar, the New loop check with bar 1 under the sheet). `docs/product.md` doesn't exist, so the walk-through is against the plan's Unit 14 section. A drummer on day one with a song: New loop on a phone now shows the bars to tap, and Stats says there is nothing yet and points to Songs. One missing a piece (a cached list, the fresh read not back): Play waits for the loop instead of playing the whole song. One offline: nothing here adds a network step. The songs list's menu offers Edit and Delete offline as the buttons did, and their form and question stay off with their notes. Nothing forces an order or adds a chore.
+
+### Summary
+
+- **Test bug 1: Play before the loop is open.** `canPlayLoopPractice(player, snapshot, loopOpen)` in `controlGates.ts` is `canPlay`, and either the loop is open or playback is already running, so Pause always works. `PlayPauseButton` takes a `gate` (a `PlayGate`, `canPlay` by default) and `useSongShortcuts` a `playGate` (same default) for Space. The practice screen builds one gate from `practice.activeLoop !== null` and gives it to both. Loop keys still open a loop in that window, as the Build note had it: they go by `canPlay`, and the loop they open makes Play available.
+- **QA issue 1: New loop and Edit from the overview, on a phone.** A form opened by `?new=1` / `?edit=` opens the sheet one render later (an effect sets the panel open). `useScoreOnScreen`'s `picking-bars` scroll ran in the render before, when the page didn't yet have the open sheet's room at its end. The window couldn't scroll, so it stayed at the top with the score under the sheet. `SongPage` now asks for `picking-bars` on `pickingBars && loopPanel.open`, so the scroll runs in the commit that draws the room. The panel's own "New loop" is pressed with the sheet already open, which is why that path worked.
+- **QA issue 3: a song row's Edit and Delete in "More".** `SongListItem` draws an `OverflowMenu` (Edit, then Delete as `danger`) beside the summary, above the stretched title link. Its button carries `itemMenuAttributes(song.id)`, so every hand-over that looked for the row's Edit or Delete (`findItemControl`) lands on "More": Cancel, a save, "Keep it", and a neighbour's delete. The inline delete question is unchanged.
+- **QA issue 5: Stats with no practice.** When `hasPracticeHistory(sessions, loops)` (`totals.ts`) is false, the page draws one `EmptyState` (chart icon, "No practice yet…", a "Go to Songs" link) in place of the totals, charts and badges. It is true with a session, or with a loop marked finished, which needs no session. Decision: no locked badges below the empty state; ten locked badges at 0 were the clutter QA named.
+- **QA issue 6: the heatmap.** Practised days are four brand steps (`fill-brand/70`, `/80`, `/90`, `fill-brand`) and empty days `fill-raised`. Every brand step is at least 3:1 against the page (canvas and surface) and against an empty cell; the lowest is 3.44:1 against `raised`. Today is ringed in `ink` in the gap round its cell, on a practised or an empty day; the viewBox has room for the edge cells, and the legend has a "Today" swatch. The steps live in `heatmapShades.ts`, which has no imports so the node token test can read it, with a test keeping the classes equal to the alphas. This is the one place the brand marks something that isn't an action or what is playing (AGENTS.md's colour roles), at Shane's call.
+- **QA issue 4: Session complete moved the score.** It is now a sheet fixed at the foot of the window, placed as the loop sheet is: above the phone's tab bar, right of the sidebar from 768 px, at most 70dvh, scrolling inside. Nothing in the page's flow moves when it comes or goes. Its focus works as before: it takes focus, and Keep going hands focus to Play. While it is up it covers the lower part of the score, as the loop sheet does.
+- **QA issue 7: the practice bar in phone landscape.** A `short` variant (`@custom-variant short (@media (max-height: 30rem))` in `index.css`, in rem) lays `PracticeSpeed` out in one row: the percent at `text-3xl`, the "n% to full speed" line `sr-only`, and the round Play at `size-14` (56 px). At 844x390 while playing the bar is at most 90 px, down from 157; every button in it is 44 px or more.
+- **QA issue 8: one spelling.** The UI's verb is "practise": 10 strings on screen used it against 4 for "practice", and the British spelling matches the rest of the copy. The four strings changed are "Recently practised", "Last practised …", "Not practised yet" and the playing loop's region "Practising {name}". Identifiers, `?sort=practiced` and `last_practiced_at` keep their names, so a saved URL still works.
+
+### Files touched
+
+- Gate: `src/features/player/controlGates.ts` (+ test), `PlayerControls.tsx` (`gate`, `short:size-14`), `src/features/song/useSongShortcuts.ts` (`playGate`), `LoopPracticePage.tsx` (+ test). In the test the `it.fails` now passes as a plain test, the test pinning today's behaviour is gone, a Space case is added, and `loadPlayer({ beforeTheLoop })` serves the test whose read is held.
+- Score above the sheet: `src/features/song/SongPage.tsx` (+ test, "New loop / Edit from the overview brings the score on screen once the sheet is open"), `tests/e2e/loop-scroll.spec.ts` (the overview's New loop and Edit at every size and on a phone in landscape: bar 1 is on show with nothing over it, and a tap on it picks it).
+- Songs list: `src/features/library/SongListItem.tsx`, `SongListItem.test.tsx`, `LibraryPage.test.tsx` (new "keeps each song's Edit and Delete in its More menu"), `src/test/songActions.ts` (new), `tests/e2e/libraryPage.ts` (`chooseSongAction`), `library.spec.ts` (its "anywhere on its card" press moves to the row's lower right corner, clear of "More"), `offline.spec.ts`.
+- Stats: `src/features/stats/StatsPage.tsx` (+ test: the empty state, a loop mastered with no session, the heatmap's ring and fills), `totals.ts` (+ test, `hasPracticeHistory`), `charts.tsx`, `heatmapShades.ts` (+ test, new), `tests/unit/designTokens.test.ts` (every heatmap step against canvas, surface and raised; `ink` against canvas and surface).
+- Session complete and the bar: `src/features/practice/SessionComplete.tsx`, `src/features/loops/PracticeSpeed.tsx`, `src/index.css`, `tests/e2e/practice.spec.ts` ("Session complete comes and goes without moving the score", "on a phone on its side the practice bar is one row…"), `tests/e2e/design.spec.ts` (now audits Stats with no practice and the practice screen with Session complete up, then Stats with a session).
+- Spelling: `LibraryPage.tsx`, `sessions.ts`, `LoopPanel.tsx`, and the tests that pinned the old words (`LoopPanel.test.tsx`, `sessions.test.ts`, `library.spec.ts`, `practice.spec.ts`, `loop-scroll.spec.ts`).
+- `AGENTS.md`: the gate, `short`, the sheet's scroll, Session complete as a sheet, the heatmap and the empty Stats, the songs list's menu, the spelling.
+
+### Async windows and inputs
+
+- **Practice screen, sounds in before the loop is open** (the Build's first window). Play is off. Space does nothing, but the key is still taken, so the page doesn't scroll. A loop key opens the loop it chose, as before. Once the fresh read opens the loop, Play and Space play its range at its saved speed. Playback can't start in this window any more; if it is already running (a loop key pressed while playing keeps it running), Pause stays available.
+- **Jam page opened by `?new=1` / `?edit=`.** The score is scrolled up above the sheet in the commit where both the form and the panel are open. Closing the sheet with the form open and opening it again scrolls the score up again; it didn't before, when the scroll was keyed on the form alone. Closing it while playing with the form open hands `scoreOnScreen` to `playing`, which scrolls only if the box isn't fully on show.
+- **Session complete.** Its windows are unchanged (it still waits for the session's answer); only where it is drawn changed.
+- The songs list's menu, the empty Stats and the heatmap add no async work.
+
+### Decisions
+
+- `PlayGate` is a function, not a `loopOpen` prop, so another screen with its own precondition passes its own, and the button and its key can't disagree.
+- Stats' empty state replaces the badges too (above). With a loop marked finished and no session, the stats still show, because its mastered count is real.
+- The brand on the heatmap is Shane's call over Unit 12's rule that the brand marks actions only.
+- Session complete is a bottom sheet rather than a reserved slot: a slot sized for the summary would leave 215 px of empty page on a phone the rest of the time.
+
+### Known gaps
+
+- `loop-scroll.spec.ts`'s two phone count-in cases ("Play loop with a 1-bar / 2-bar count-in…") fail at 390x844. They fail the same way with this round's `SongPage` change reverted (run on a fresh build), so they come from before this round. They fail when run alone too, so they are not the load flake the Build note suspected. `chooseCountIn`'s click on the count-in label never lands: Playwright reports the sticky jam bar, and then the open loop sheet's header (left open by `saveNewLoop`), intercepting it. Not one of this round's issues, so not touched. Next: a Build fix for the step (close the sheet and bring the controls clear of the sticky bar before `chooseCountIn`), or a look at whether Unit 14's layout moved the count-in under them.
+- Session complete now covers the lower part of the score (on a phone the controls bar too) until Keep going or Done.
+- Not checked on a real phone: the landscape bar, the sheet over the score, the heatmap's orange in a dim room.
+
+### Manual verify steps
+
+1. Phone (390x844): from a song's overview, press New loop. The jam page opens with the sheet up and the score's first line above it; tap two bars. Do the same from a loop row's More, Edit. Turn the phone (844x390) and repeat.
+2. Practice screen with the loops cached and a slow network (DevTools throttling): Play stays off and Space does nothing until the loop's speed shows; then both play the loop.
+3. In the console, `window.__drumPalMinSessionSeconds = 2`; practise a few seconds and pause. Session complete rises from the foot of the window and the score doesn't move; Keep going puts focus on Play.
+4. 844x390, practice screen, press Play: the bar is one row (−, speed, +, Save speed, Play).
+5. Songs list: each row has one "More" holding Edit and Delete. Delete's question is inline, and Keep it puts focus back on More.
+6. Stats as a new user: one "No practice yet" card with Go to Songs. With practice: practised days in orange on the heatmap, empty days grey, today ringed.
+
+### Checks
+
+- `npm run check`: green (typecheck, lint, format, 4,639 passed, 2 skipped).
+- e2e on fresh builds (`E2E_PORT` 4195 and 4197, this worktree's stack on 54421), at phone, tablet and desktop:
+  - design, stats, library, practice and journey: 94 passed and 8 skipped in the first run, which failed 6. Those were two specs at three sizes each, both from this round's changes: the library's press on the row's top right corner, now where "More" is, and the design audit opening Stats for a user with no session, now the empty state. Both specs were updated, and their rerun passed at all three sizes (6 of 6).
+  - loop-scroll, loops, shortcuts and offline: 145 passed, 18 skipped, 2 failed (the two phone count-in cases under Known gaps).
+- Not run: the full `npm run e2e`.

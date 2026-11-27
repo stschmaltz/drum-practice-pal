@@ -7,7 +7,8 @@
  */
 import { ratioToPercent } from '@/features/player/speed';
 import { barRects, linePoints, niceCeiling, pathOf, speedAxis } from './chartScale';
-import type { HeatLevel, HeatmapDay, PracticeDay, SpeedPoint } from './totals';
+import { HEAT_CLASSES } from './heatmapShades';
+import type { HeatmapDay, PracticeDay, SpeedPoint } from './totals';
 import { minutesLabel } from './totals';
 
 const dayFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
@@ -94,17 +95,10 @@ export function DailyMinutesChart({ days }: { days: readonly PracticeDay[] }) {
   );
 }
 
-/** The shade of a day by its level: none, then four steps of the quiet blue. */
-const HEAT_CLASSES: Record<HeatLevel, string> = {
-  0: 'fill-raised',
-  1: 'fill-selected-line/30',
-  2: 'fill-selected-line/55',
-  3: 'fill-selected-line/80',
-  4: 'fill-selected-line',
-};
-
 const CELL = 10;
 const CELL_GAP = 3;
+/** Today's outline sits in the gap around its cell, so it shows on an empty and a full day alike. */
+const TODAY_RING = 1.5;
 
 /** Practice days for the last 26 weeks, a column a week, Monday at the top. */
 export function PracticeHeatmap({ weeks }: { weeks: readonly (readonly HeatmapDay[])[] }) {
@@ -118,34 +112,65 @@ export function PracticeHeatmap({ weeks }: { weeks: readonly (readonly HeatmapDa
     <figure className="flex flex-col gap-2">
       <div className="overflow-x-auto">
         <svg
-          viewBox={`0 0 ${width} ${height}`}
+          // Room for today's ring round a cell on the edge.
+          viewBox={`${-TODAY_RING * 2} ${-TODAY_RING * 2} ${width + TODAY_RING * 4} ${height + TODAY_RING * 4}`}
           role="img"
           aria-label={summary}
           className="h-auto w-full min-w-80 max-w-xl"
           data-testid="practice-heatmap"
         >
           {weeks.map((week, column) =>
-            week.map((day, row) =>
-              day.future ? null : (
-                <rect
-                  key={day.key}
-                  x={column * (CELL + CELL_GAP)}
-                  y={row * (CELL + CELL_GAP)}
-                  width={CELL}
-                  height={CELL}
-                  rx="2"
-                  className={`${HEAT_CLASSES[day.level]} ${day.today ? 'stroke-ink' : ''}`}
-                  strokeWidth={day.today ? 1.5 : undefined}
-                  data-level={day.level}
-                />
-              ),
-            ),
+            week.map((day, row) => {
+              if (day.future) return null;
+              const x = column * (CELL + CELL_GAP);
+              const y = row * (CELL + CELL_GAP);
+              return (
+                <g key={day.key}>
+                  <rect
+                    x={x}
+                    y={y}
+                    width={CELL}
+                    height={CELL}
+                    rx="2"
+                    className={HEAT_CLASSES[day.level]}
+                    data-level={day.level}
+                  />
+                  {day.today && (
+                    <rect
+                      x={x - TODAY_RING / 2 - 0.5}
+                      y={y - TODAY_RING / 2 - 0.5}
+                      width={CELL + TODAY_RING + 1}
+                      height={CELL + TODAY_RING + 1}
+                      rx="3"
+                      className="fill-none stroke-ink"
+                      strokeWidth={TODAY_RING}
+                      data-testid="heatmap-today"
+                    />
+                  )}
+                </g>
+              );
+            }),
           )}
         </svg>
       </div>
-      <figcaption className="flex items-center gap-2 text-sm text-ink-muted">
+      <figcaption className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-muted">
         {summary}
         <span aria-hidden="true" className="ml-auto flex items-center gap-1">
+          <svg viewBox="0 0 14 14" className="size-3.5">
+            <rect width="10" height="10" x="2" y="2" rx="2" className="fill-raised" />
+            <rect
+              width="12.5"
+              height="12.5"
+              x="0.75"
+              y="0.75"
+              rx="3"
+              className="fill-none stroke-ink"
+              strokeWidth={TODAY_RING}
+            />
+          </svg>
+          Today
+        </span>
+        <span aria-hidden="true" className="flex items-center gap-1">
           Less
           {([0, 1, 2, 3, 4] as const).map((level) => (
             <svg key={level} viewBox="0 0 10 10" className="size-2.5">

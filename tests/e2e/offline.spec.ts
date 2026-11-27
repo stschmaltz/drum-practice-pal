@@ -14,6 +14,7 @@ import {
   saveNewLoop,
   saveSpeedButton,
 } from './loopsPage';
+import { chooseSongAction } from './libraryPage';
 import { openFixture, openSongOverview, playButton } from './playerPage';
 import {
   backTo,
@@ -409,10 +410,10 @@ test('offline, a loop opens from the home page and every control that needs the 
 
   // The songs list: no edits or deletes.
   await navLink(page, 'Songs').click();
-  await page.getByRole('button', { name: 'Edit Groove 120' }).click();
+  await chooseSongAction(page, 'Groove 120', 'Edit');
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Cancel' }).click();
-  await page.getByRole('button', { name: 'Delete Groove 120' }).click();
+  await chooseSongAction(page, 'Groove 120', 'Delete');
   await expect(page.getByRole('button', { name: 'Delete song' })).toBeDisabled();
 
   expect(writes.sent).toEqual([]);

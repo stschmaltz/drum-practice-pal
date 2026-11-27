@@ -165,12 +165,12 @@ describe('practiceDayInSentence and lastPracticedLabel', () => {
   });
 
   it('says when a loop was last practiced, or that it never was', () => {
-    expect(lastPracticedLabel(null, now)).toBe('Not practiced yet');
+    expect(lastPracticedLabel(null, now)).toBe('Not practised yet');
     expect(lastPracticedLabel(local(2026, 11, 22, 8).toISOString(), now)).toBe(
-      'Last practiced yesterday',
+      'Last practised yesterday',
     );
     expect(lastPracticedLabel(local(2026, 11, 2).toISOString(), now, 'en-GB')).toBe(
-      'Last practiced 2 Nov',
+      'Last practised 2 Nov',
     );
   });
 });

@@ -5,7 +5,7 @@ import type { Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
 import { fixtures } from '../fixtures/sources.ts';
 import { expect, signIn, test, type E2eUser } from './auth';
-import { songRows, userFiles } from './libraryPage';
+import { chooseSongAction, songRows, userFiles } from './libraryPage';
 
 // Unit 04: upload, dedupe, refuse bad files, edit, delete, search and sort.
 
@@ -108,7 +108,7 @@ test('edits title and artist, searches, sorts and deletes', async ({ user, page 
   await page.getByLabel('Sort by').selectOption('added');
   await expect(titles).toHaveText(['Waltz 3-4', 'Groove 120']);
 
-  await page.getByRole('button', { name: 'Edit Groove 120' }).click();
+  await chooseSongAction(page, 'Groove 120', 'Edit');
   await page.getByLabel('Title', { exact: true }).fill('  Back Beat ');
   await page.getByLabel('Artist', { exact: true }).fill('The Band');
   await page.getByRole('button', { name: 'Save' }).click();
@@ -124,9 +124,9 @@ test('edits title and artist, searches, sorts and deletes', async ({ user, page 
   const songs = await songRows(user);
   expect(songs.find((song) => song.title === 'Back Beat')?.artist).toBe('The Band');
 
-  await page.getByRole('button', { name: 'Delete Waltz 3-4' }).click();
+  await chooseSongAction(page, 'Waltz 3-4', 'Delete');
   await page.getByRole('button', { name: 'Keep it' }).click();
-  await page.getByRole('button', { name: 'Delete Waltz 3-4' }).click();
+  await chooseSongAction(page, 'Waltz 3-4', 'Delete');
   await page.getByRole('button', { name: 'Delete song' }).click();
   await expect(titles).toHaveText(['Back Beat']);
   expect((await songRows(user)).map((song) => song.title)).toEqual(['Back Beat']);
@@ -254,7 +254,7 @@ test('sorts by recent practice, and deleting a song removes its file, loops and 
   const songs = await songRows(user);
   const groove = songs.find((song) => song.title === 'Groove 120')!;
   const waltz = songs.find((song) => song.title === 'Waltz 3-4')!;
-  // Groove was added first but practiced last, so it leads "Recently practiced".
+  // Groove was added first but practiced last, so it leads "Recently practised".
   await addPractice(user, waltz.id, '2026-11-20T10:00:00Z');
   await addPractice(user, groove.id, '2026-11-21T10:00:00Z');
   await page.reload();
@@ -266,7 +266,7 @@ test('sorts by recent practice, and deleting a song removes its file, loops and 
   expect(await childRows('loops', user)).toHaveLength(2);
   expect(await childRows('practice_sessions', user)).toHaveLength(2);
 
-  await page.getByRole('button', { name: 'Delete Groove 120' }).click();
+  await chooseSongAction(page, 'Groove 120', 'Delete');
   await page.getByRole('button', { name: 'Delete song' }).click();
   await expect(titles).toHaveText(['Waltz 3-4']);
 
@@ -301,11 +301,12 @@ test('once there are songs, a song opens from anywhere on its card, and a file d
   await page.getByRole('list').dispatchEvent('drop', { dataTransfer });
   await expect(page.getByRole('status').filter({ hasText: 'Added “Waltz 3-4”.' })).toBeVisible();
 
-  // A press on the card away from its title (near its top right corner) opens the song.
+  // A press on the card away from its title (near its lower right corner, below its More
+  // menu's button at the top right) opens the song.
   const card = page.getByRole('listitem').filter({ hasText: 'Groove 120' });
   await card.scrollIntoViewIfNeeded();
   const box = await card.boundingBox();
   if (!box) throw new Error('No card');
-  await page.mouse.click(box.x + box.width - 12, box.y + 12);
+  await page.mouse.click(box.x + box.width - 12, box.y + box.height - 6);
   await expect(page.getByRole('heading', { level: 1, name: 'Groove 120' })).toBeVisible();
 });

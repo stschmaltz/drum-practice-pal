@@ -19,7 +19,7 @@ import {
   type CountInMode,
 } from '@/lib/schema';
 import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_SHORT_LABELS } from './countInLabels';
-import { canChangeOptions, canPlay, canUseDrumToggles } from './controlGates';
+import { canChangeOptions, canPlay, canUseDrumToggles, type PlayGate } from './controlGates';
 import { isRunning, type PlayerService, type PlayerSnapshot } from './PlayerService';
 import { percentToRatio, ratioToPercent, SPEED_STEP_PERCENT } from './speed';
 
@@ -67,16 +67,22 @@ export function PlayPauseButton({
   player,
   snapshot,
   round = false,
-}: PlayerViewProps & { round?: boolean }) {
+  gate = canPlay,
+}: PlayerViewProps & {
+  round?: boolean;
+  /** When the button is on; the screen's Space key goes by the same gate. */
+  gate?: PlayGate;
+}) {
   const running = isRunning(snapshot.status);
   const shape = round
-    ? 'size-16 shrink-0 rounded-full! px-0! md:size-20'
+    ? // Smaller in a short window (a phone on its side), still past the 44 px target.
+      'size-16 shrink-0 rounded-full! px-0! md:size-20 short:size-14'
     : 'min-w-24 md:min-w-28 md:text-lg';
   return (
     <button
       type="button"
       className={`${primaryButtonClass} ${shape}`}
-      disabled={!canPlay(player, snapshot)}
+      disabled={!gate(player, snapshot)}
       // No await before this: iOS only starts audio inside the tap itself.
       onClick={() => player?.togglePlay()}
     >

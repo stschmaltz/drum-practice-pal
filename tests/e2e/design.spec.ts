@@ -11,8 +11,23 @@ import {
   textSpillingOutOf,
 } from './designPage';
 import { loopItem, loopPanel, openLoopPanel, saveNewLoop } from './loopsPage';
-import { controls, chooseCountIn, openFixture, playButton, viewport } from './playerPage';
-import { backTo, navLink, openLoopHistory, overviewItem } from './practicePage';
+import {
+  controls,
+  chooseCountIn,
+  openFixture,
+  openSongOverview,
+  playButton,
+  viewport,
+} from './playerPage';
+import {
+  backTo,
+  navLink,
+  openLoopHistory,
+  overviewItem,
+  playFor,
+  sessionComplete,
+  shortSessions,
+} from './practicePage';
 
 // Unit 12: what the visual design promises, measured on every screen at the
 // phone, tablet and desktop sizes. Behaviour is the other specs' subject; they
@@ -69,6 +84,8 @@ test('the library, the song page with its loops, and the home page with a loop',
   user,
   page,
 }) => {
+  test.setTimeout(90_000);
+  await shortSessions(page, 2);
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await expectWellDrawn(page, 'song, jam');
   await expectFocusRings(page, 'song, jam');
@@ -95,10 +112,25 @@ test('the library, the song page with its loops, and the home page with a loop',
   await expectWellDrawn(page, 'song overview');
   await expectFocusRings(page, 'song overview');
 
+  // No practice yet: Stats is one card pointing to Songs (14 QA issue 5).
+  await navLink(page, 'Stats').click();
+  await expect(page.getByText(/^No practice yet/)).toBeVisible();
+  await expectWellDrawn(page, 'stats, no practice');
+  await expectFocusRings(page, 'stats, no practice');
+
+  await navLink(page, 'Songs').click();
+  await openSongOverview(page, 'Groove 120');
   await page.getByRole('link', { name: 'Practise Verse' }).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await expectWellDrawn(page, 'practice');
   await expectFocusRings(page, 'practice');
+
+  // A short session, summed up in the sheet at the foot of the window (14 QA issue 4).
+  await playButton(page).click();
+  await playFor(page, 3_000);
+  await expect(sessionComplete(page)).toBeVisible();
+  await expectWellDrawn(page, 'practice, session complete');
+  await sessionComplete(page).getByRole('button', { name: 'Keep going' }).click();
 
   await navLink(page, 'Stats').click();
   await expect(page.getByRole('heading', { name: 'Badges' })).toBeVisible();

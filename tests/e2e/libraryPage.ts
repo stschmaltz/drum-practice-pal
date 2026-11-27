@@ -1,5 +1,16 @@
+import type { Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
 import type { E2eUser } from './auth';
+
+/** On the songs list, a song row's Edit or Delete, from its "More" menu (14 QA issue 3). */
+export async function chooseSongAction(
+  page: Page,
+  title: string,
+  action: 'Edit' | 'Delete',
+): Promise<void> {
+  await page.getByRole('button', { name: `More actions for ${title}` }).click();
+  await page.getByRole('menuitem', { name: action }).click();
+}
 
 // The library's rows and files as the database has them, by the service role.
 

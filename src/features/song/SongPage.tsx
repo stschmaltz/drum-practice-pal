@@ -187,7 +187,11 @@ function SongPlayer({
       // The count-in counter sits over the score, so the score comes on screen for it too. Keyed on
       // the fold rather than on running, so Hide controls brings it back as well: the user had
       // scrolled up to that button, and in phone landscape kept still the score was off the window.
-      scoreOnScreen: pickingBars ? 'picking-bars' : fold.folded ? 'playing' : null,
+      // Picking bars waits for the panel to be open: the open sheet's room at the page's end is
+      // what lets the window scroll the score up above it (14 QA issue 1: a form opened by
+      // `?new=1` opens the sheet in the next render, and a scroll before that went nowhere).
+      scoreOnScreen:
+        pickingBars && loopPanel.open ? 'picking-bars' : fold.folded ? 'playing' : null,
     },
   );
   // A soundfont failure still leaves readable notation; these leave an empty white box.

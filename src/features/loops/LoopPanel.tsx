@@ -511,7 +511,7 @@ function LoopListItem({
         </p>
       </div>
       {active && (
-        <section aria-label={`Practicing ${loop.name}`} className="flex flex-col gap-3">
+        <section aria-label={`Practising ${loop.name}`} className="flex flex-col gap-3">
           <LoopSpeedControl songId={songId} loop={loop} player={player} snapshot={snapshot} />
           {active.askToFinish && (
             <FinishPrompt

@@ -72,6 +72,18 @@ export function statsTotals(
   };
 }
 
+/**
+ * Whether there is anything to show: a session, or a loop marked finished
+ * (which can happen without one). Without either every number is 0 and every
+ * chart empty, and the page says so instead (14 QA issue 5).
+ */
+export function hasPracticeHistory(
+  sessions: readonly StatsSession[],
+  loops: readonly StatsLoop[],
+): boolean {
+  return sessions.length > 0 || loops.some((loop) => loop.status === 'finished');
+}
+
 /** Play time per local day. */
 function secondsByDay(sessions: readonly StatsSession[]): Map<DayKey, number> {
   const byDay = new Map<DayKey, number>();

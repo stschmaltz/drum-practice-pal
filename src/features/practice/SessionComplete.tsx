@@ -11,7 +11,8 @@ import { useAllSessions } from './useSessions';
 
 /**
  * Sums up a session logged while the practice screen stayed (Unit 14), in
- * place of the "Practice logged" line: play time, passes, the speed it began
+ * place of the "Practice logged" line, as a sheet over the foot of the window
+ * so nothing on the page moves: play time, passes, the speed it began
  * and ended at, the streak, and any badge it just earned. The streak and the
  * badges wait for every session and loop to be read (offline, on a device
  * that never read them, they are left out). Focus goes to it, so a screen
@@ -44,7 +45,11 @@ export function SessionComplete({
       tabIndex={-1}
       aria-labelledby="session-complete-heading"
       data-testid="session-complete"
-      className="flex flex-col gap-3 border-y border-success-line py-3 focus:outline-none motion-safe:animate-fade-in"
+      // A sheet at the foot of the window, not a block above the score (14 QA issue 4): in the
+      // page's flow it pushed the score down about 215 px on a phone as it came, so a bar
+      // tapped then was the one below the finger. Placed as the loop sheet is: above the
+      // phone's tab bar, and right of the sidebar from 768 px.
+      className="fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-20 flex max-h-[70dvh] flex-col gap-3 overflow-y-auto rounded-t-card border-t border-success-line bg-surface p-4 shadow-sheet focus:outline-none motion-safe:animate-fade-in md:right-gutter md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+var(--spacing-gutter))] md:border-x"
     >
       <h2 id="session-complete-heading" className="flex items-center gap-2 text-lg font-bold">
         <Icon name="check" className="text-success" />

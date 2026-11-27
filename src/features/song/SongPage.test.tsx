@@ -775,6 +775,46 @@ describe('SongPage jam mode', () => {
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
     });
 
+    // 14 QA issue 1: the overview's "New loop" opens the form and, a render later, the sheet that
+    // holds it, whose room at the page's end is what lets the window bring the score above it.
+    // A scroll before that went nowhere, and on a phone the sheet covered all of the score.
+    const VERSE_ID = '00000000-0000-4000-8000-00000000f00d';
+    it.each([
+      ['New loop', '?new=1'],
+      ['Edit', `?edit=${VERSE_ID}`],
+    ])(
+      '%s from the overview brings the score on screen once the sheet is open',
+      async (_, query) => {
+        // A phone: the form is in the bottom sheet, which starts closed. (jsdom has no matchMedia;
+        // the panel then goes by the width.)
+        vi.stubGlobal('innerWidth', 390);
+        try {
+          serve({ loops: [loopOfSongA(VERSE_ID, { name: 'Verse', start_bar: 5, end_bar: 8 })] });
+          const sheetOpenAtScroll: (string | null | undefined)[] = [];
+          scrollIntoView.mockImplementation(() => {
+            sheetOpenAtScroll.push(
+              screen
+                .getByTestId('loop-panel')
+                .querySelector(':scope > button[aria-controls]')
+                ?.getAttribute('aria-expanded'),
+            );
+          });
+          renderSong(`${SONG_A}${query}`);
+          await loadPlayer();
+          expect(await screen.findByRole('form')).toBeInTheDocument();
+
+          await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+          expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByTestId('score-viewport'));
+          expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'start' }));
+          expect(sheetOpenAtScroll).toEqual(['true']);
+          await settle();
+          expect(scrollIntoView).toHaveBeenCalledTimes(1);
+        } finally {
+          vi.unstubAllGlobals();
+        }
+      },
+    );
+
     // 12 QA after QA fix round 2, issue 1: Hide controls is pressed after scrolling up to it,
     // and in phone landscape the score kept still there was below the window.
     it('Hide controls brings the score back on screen; Show controls leaves the page alone', async () => {

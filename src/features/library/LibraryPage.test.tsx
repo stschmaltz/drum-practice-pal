@@ -11,6 +11,7 @@ import {
   type FakeResult,
 } from '@/test/fakeSupabase';
 import { renderRoutes, settle, testQueryClient } from '@/test/render';
+import { chooseSongAction, moreButton } from '@/test/songActions';
 import { LibraryPage } from './LibraryPage';
 import type { LibrarySong } from './songForm';
 import { songKeys } from './useSongs';
@@ -193,7 +194,7 @@ describe('LibraryPage', () => {
     serveLibrary(library);
     const { user } = renderLibrary();
     await screen.findByRole('list');
-    await user.click(screen.getByRole('button', { name: 'Edit Chorus Fill' }));
+    await chooseSongAction(user, 'Chorus Fill', 'Edit');
     await user.clear(screen.getByLabelText('Title'));
     await user.type(screen.getByLabelText('Title'), 'Intro Fill');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -214,7 +215,7 @@ describe('LibraryPage', () => {
     );
     const { user, queryClient } = renderLibrary('/library?q=fill');
     await screen.findByRole('list');
-    await user.click(screen.getByRole('button', { name: 'Edit Chorus Fill' }));
+    await chooseSongAction(user, 'Chorus Fill', 'Edit');
     await user.clear(screen.getByLabelText('Title'));
     await user.type(screen.getByLabelText('Title'), 'Intro Groove');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -246,7 +247,7 @@ describe('LibraryPage', () => {
     serveLibrary(library);
     const { user } = renderLibrary();
     await screen.findByRole('list');
-    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await chooseSongAction(user, 'Halo', 'Delete');
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
     await waitFor(() => expect(shownTitles()).toEqual(['Waltz 3-4', 'Chorus Fill']));
   });
@@ -258,19 +259,17 @@ describe('LibraryPage', () => {
     const before = shownTitles();
     const index = before.indexOf('Halo');
     const next = before[index + 1] ?? before[index - 1];
-    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await chooseSongAction(user, 'Halo', 'Delete');
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
     await waitFor(() => expect(shownTitles()).not.toContain('Halo'));
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: `Delete ${next}` })).toHaveFocus(),
-    );
+    await waitFor(() => expect(moreButton(`${next}`)).toHaveFocus());
   });
 
   it('hands focus to the upload once the last song is deleted', async () => {
     serveLibrary([library[0]!]);
     const { user } = renderLibrary();
     await screen.findByRole('list');
-    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await chooseSongAction(user, 'Halo', 'Delete');
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
     expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText('Upload a Guitar Pro file')).toHaveFocus());
@@ -282,7 +281,7 @@ describe('LibraryPage', () => {
     storageResult.mockResolvedValueOnce({ data: null, error: { message: 'storage down' } });
     const { user } = renderLibrary();
     await screen.findByRole('list');
-    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await chooseSongAction(user, 'Halo', 'Delete');
     const confirm = screen.getByRole('button', { name: 'Delete song' });
     await user.click(confirm);
 
@@ -309,7 +308,7 @@ describe('LibraryPage', () => {
       );
       const { user } = renderLibrary();
       await screen.findByRole('list');
-      await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+      await chooseSongAction(user, 'Halo', 'Delete');
       await user.click(screen.getByRole('button', { name: 'Delete song' }));
       await waitFor(() => expect(removeFile).toBeDefined());
 
@@ -341,7 +340,7 @@ describe('LibraryPage', () => {
       );
       expect(await screen.findByText('Uploading new.gp…')).toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+      await chooseSongAction(user, 'Halo', 'Delete');
       await user.click(screen.getByRole('button', { name: 'Delete song' }));
 
       expect(await screen.findByText(/No songs yet/)).toBeInTheDocument();
@@ -354,7 +353,7 @@ describe('LibraryPage', () => {
     serveLibrary(library);
     const { user } = renderLibrary('/library?q=halo');
     await screen.findByRole('list');
-    await user.click(screen.getByRole('button', { name: 'Delete Halo' }));
+    await chooseSongAction(user, 'Halo', 'Delete');
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
     expect(await screen.findByText('No songs match your search.')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText('Search title or artist')).toHaveFocus());
@@ -365,7 +364,7 @@ describe('LibraryPage', () => {
       serveLibrary(library);
       const { user } = renderLibrary(path);
       await screen.findByRole('list');
-      await user.click(screen.getByRole('button', { name: `Edit ${from}` }));
+      await chooseSongAction(user, `${from}`, 'Edit');
       const title = screen.getByLabelText('Title');
       await user.clear(title);
       await user.type(title, to);
@@ -378,9 +377,9 @@ describe('LibraryPage', () => {
       serveLibrary(library);
       const { user } = renderLibrary();
       await screen.findByRole('list');
-      await user.click(screen.getByRole('button', { name: 'Edit Halo' }));
+      await chooseSongAction(user, 'Halo', 'Edit');
       await user.click(screen.getByRole('button', { name: 'Cancel' }));
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Edit Halo' })).toHaveFocus());
+      await waitFor(() => expect(moreButton('Halo')).toHaveFocus());
     });
 
     it('goes to the search field when no song is left on show', async () => {
@@ -397,22 +396,18 @@ describe('LibraryPage', () => {
       const before = shownTitles();
       const index = before.indexOf('Waltz 3-4');
       const next = before[index + 1] ?? before[index - 1];
-      await user.click(screen.getByRole('button', { name: 'Edit Waltz 3-4' }));
+      await chooseSongAction(user, 'Waltz 3-4', 'Edit');
       const artist = screen.getByLabelText('Artist');
       await user.clear(artist);
       await user.type(artist, 'Someone');
       await user.click(screen.getByRole('button', { name: 'Save' }));
       await waitFor(() => expect(shownTitles()).not.toContain('Waltz 3-4'));
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: `Edit ${next}` })).toHaveFocus(),
-      );
+      await waitFor(() => expect(moreButton(`${next}`)).toHaveFocus());
     });
 
     it('stays on the song’s own Edit when it still matches', async () => {
       await rename('/library?q=fill', 'Chorus Fill', 'Chorus Fill 2');
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: 'Edit Chorus Fill 2' })).toHaveFocus(),
-      );
+      await waitFor(() => expect(moreButton('Chorus Fill 2')).toHaveFocus());
     });
   });
 });
@@ -463,7 +458,7 @@ describe('LibraryPage layout (12 UX pass)', () => {
     expect(screen.getByLabelText('Upload a Guitar Pro file')).toBeInTheDocument();
   });
 
-  it('opens a song from anywhere on its card: one link stretched over it, with Edit and Delete apart from it', async () => {
+  it('opens a song from anywhere on its card: one link stretched over it, with its More menu apart from it', async () => {
     serveLibrary(library);
     renderLibrary();
     await screen.findByRole('heading', { name: 'Your songs (3)' });
@@ -475,12 +470,31 @@ describe('LibraryPage layout (12 UX pass)', () => {
     expect(card).toHaveClass('relative');
     expect(links[0]?.className).toMatch(/after:absolute/);
     expect(links[0]?.className).toMatch(/after:inset-0/);
-    // Not nested: the buttons are siblings of the link, raised above its stretched area.
-    for (const name of ['Edit Halo', 'Delete Halo']) {
-      const button = within(card).getByRole('button', { name });
-      expect(links[0]).not.toContainElement(button);
-      expect(button.parentElement).toHaveClass('relative', 'z-10');
-    }
+    // Not nested: the menu is beside the link, raised above its stretched area.
+    const more = within(card).getByRole('button', { name: 'More actions for Halo' });
+    expect(links[0]).not.toContainElement(more);
+    expect(more.closest('.relative.z-10')).not.toBeNull();
+    expect(more.closest('.relative.z-10')).not.toBe(card);
+  });
+
+  // 14 QA issue 3: one quiet "More" per row, as the song's loop rows have, not two text buttons.
+  it('keeps each song’s Edit and Delete in its More menu', async () => {
+    serveLibrary(library);
+    const { user } = renderLibrary();
+    await screen.findByRole('heading', { name: 'Your songs (3)' });
+    const card = screen.getAllByRole('listitem')[0] as HTMLElement;
+    expect(
+      within(card)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['More actions for Halo']);
+
+    await user.click(moreButton('Halo'));
+    expect(
+      within(card)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Edit', 'Delete']);
   });
 
   it('lays the songs out as plain rows between dividers (Unit 14), not cards', async () => {

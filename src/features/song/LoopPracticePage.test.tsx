@@ -111,13 +111,18 @@ const playButton = () => screen.getByRole('button', { name: /^(Play|Pause)$/ });
 const speed = () => screen.getByTestId('practice-speed');
 const location = () => screen.getByTestId('location');
 
-async function loadPlayer() {
+/**
+ * Loads the score and sounds. Waits for Play to be on unless `beforeTheLoop`: then the loops
+ * read is held, and Play stays off until the loop is open (14 Test bug 1).
+ */
+async function loadPlayer({ beforeTheLoop = false } = {}) {
   await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
   const engine = engines[0]!;
   act(() =>
     engine.finishLoading({ barCount: 16, trackCount: 3, barTempos: TEMPO_CHANGE_BAR_TEMPOS }),
   );
-  await waitFor(() => expect(playButton()).toBeEnabled());
+  if (beforeTheLoop) await settle();
+  else await waitFor(() => expect(playButton()).toBeEnabled());
   return engine;
 }
 
@@ -448,7 +453,7 @@ describe('LoopPracticePage', () => {
     });
   });
 
-  describe('Play before the loop is open (Unit 14 known gap, 14 Test bug 1)', () => {
+  describe('Play before the loop is open (14 Test bug 1)', () => {
     /** The sounds are in, from a list cached on an earlier visit, while the fresh read is held. */
     async function soundsInBeforeTheRead() {
       serve();
@@ -469,50 +474,42 @@ describe('LoopPracticePage', () => {
       return { user, engine, release };
     }
 
-    it('today: Play then starts the whole song, and the loop opens under it without stopping', async () => {
+    it('stays off while the fresh loops read is on its way, then plays the loop', async () => {
       const { user, engine, release } = await soundsInBeforeTheRead();
-      expect(playButton()).toBeEnabled();
-      await user.click(playButton());
-      act(() => engine.fire('stateChanged', { playing: true }));
-      expect(engine.play).toHaveBeenCalledTimes(1);
-      // No range: the whole song.
-      expect(engine.setPlaybackRange).not.toHaveBeenCalledWith(
-        expect.objectContaining({ startTick: startOfBar(9) }),
-      );
+
+      // The sounds are in; the loop isn't open yet. Play is off.
+      expect(playButton()).toBeDisabled();
 
       release();
       await waitFor(() => expect(speed()).toHaveTextContent('71%'));
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.click(playButton());
+      expect(engine.play).toHaveBeenCalledTimes(1);
       expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
         startTick: startOfBar(9),
         endTick: startOfBar(13),
       });
-      expect(engine.pause).not.toHaveBeenCalled();
-      expect(playButton()).toHaveAccessibleName('Pause');
+      expect(engine.setSpeed).toHaveBeenLastCalledWith(0.708333);
     });
 
-    // What it should do. Fails today on its first assertion; drop `.fails` once fixed.
-    it.fails(
-      'should stay off while the fresh loops read is on its way, then play the loop',
-      async () => {
-        const { user, engine, release } = await soundsInBeforeTheRead();
+    it('takes Space but plays nothing in that window, and Space plays the loop once it is open', async () => {
+      const { user, engine, release } = await soundsInBeforeTheRead();
 
-        // The sounds are in; the loop isn't open yet. Neither the button nor Space may play.
-        expect(playButton()).toBeDisabled();
-        await user.keyboard(' ');
-        expect(engine.play).not.toHaveBeenCalled();
+      // Focus on the page, not the disabled button: the key alone has to refuse.
+      expect(document.activeElement).toBe(document.body);
+      await user.keyboard(' ');
+      await settle();
+      expect(engine.play).not.toHaveBeenCalled();
 
-        release();
-        await waitFor(() => expect(speed()).toHaveTextContent('71%'));
-        await waitFor(() => expect(playButton()).toBeEnabled());
-        await user.click(playButton());
-        expect(engine.play).toHaveBeenCalledTimes(1);
-        expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
-          startTick: startOfBar(9),
-          endTick: startOfBar(13),
-        });
-        expect(engine.setSpeed).toHaveBeenLastCalledWith(0.708333);
-      },
-    );
+      release();
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.keyboard(' ');
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(9),
+        endTick: startOfBar(13),
+      });
+    });
   });
 
   describe('a loop deleted on another device', () => {
@@ -583,12 +580,13 @@ describe('LoopPracticePage', () => {
       queryClient.setQueryData(loopsKey, [{ ...chorus, speed_ratio: 1 }, verse]);
       const release = loops.holdNext('select');
       renderPractice(CHORUS_ID, queryClient);
-      await loadPlayer();
+      await loadPlayer({ beforeTheLoop: true });
       expect(speed()).toHaveTextContent('100%');
 
       release();
 
       await waitFor(() => expect(speed()).toHaveTextContent('71%'));
+      await waitFor(() => expect(playButton()).toBeEnabled());
     });
 
     it('opens on a cold start offline, from the restored cache', async () => {

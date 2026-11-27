@@ -11,6 +11,7 @@ import {
   type FakeResult,
 } from '@/test/fakeSupabase';
 import { renderRoutes, settle } from '@/test/render';
+import { chooseSongAction, moreButton } from '@/test/songActions';
 import type { Mastery } from '@/features/loops/mastery';
 import type { LibrarySong } from './songForm';
 import { SongListItem } from './SongListItem';
@@ -81,7 +82,7 @@ describe('SongListItem editing', () => {
       ok({ ...song, ...(opArgs(call, 'update')?.[0] as object) }),
     );
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     const title = screen.getByLabelText('Title');
     expect(title).toHaveValue('Groove');
     expect(screen.getByLabelText('Artist')).toHaveValue('Band');
@@ -101,7 +102,7 @@ describe('SongListItem editing', () => {
 
   it('refuses a blank title without sending anything', async () => {
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     await user.clear(screen.getByLabelText('Title'));
     await user.type(screen.getByLabelText('Title'), '   ');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -116,7 +117,7 @@ describe('SongListItem editing', () => {
   it('allows clearing the artist', async () => {
     queryResult.mockResolvedValue(ok({ ...song, artist: '' }));
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     await user.clear(screen.getByLabelText('Artist'));
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(updates()).toEqual([{ artist: '' }]));
@@ -124,14 +125,14 @@ describe('SongListItem editing', () => {
 
   it('closes without a request when nothing changed, and Cancel discards the draft', async () => {
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     await user.type(screen.getByLabelText('Title'), ' edited');
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     expect(screen.getByLabelText('Title')).toHaveValue('Groove');
     expect(queryResult).not.toHaveBeenCalled();
   });
@@ -139,7 +140,7 @@ describe('SongListItem editing', () => {
   it('keeps the form open with an error when the save fails', async () => {
     queryResult.mockResolvedValue(fail('offline'));
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     await user.type(screen.getByLabelText('Artist'), 's');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -155,7 +156,7 @@ describe('SongListItem while a save is pending', () => {
     let answer!: (result: FakeResult) => void;
     queryResult.mockReturnValueOnce(new Promise<FakeResult>((resolve) => (answer = resolve)));
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     await user.type(screen.getByLabelText('Artist'), 's');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -184,7 +185,7 @@ describe('SongListItem while a save is pending', () => {
 describe('SongListItem deleting', () => {
   it('asks first, and "Keep it" deletes nothing', async () => {
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Delete Groove' }));
+    await chooseSongAction(user, 'Groove', 'Delete');
     const confirm = screen.getByRole('group', { name: 'Delete Groove' });
     expect(confirm).toHaveTextContent(
       'Delete “Groove”? Its loops and practice history are deleted too.',
@@ -198,7 +199,7 @@ describe('SongListItem deleting', () => {
   it('removes the file, then the row', async () => {
     queryResult.mockResolvedValue(ok(null));
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Delete Groove' }));
+    await chooseSongAction(user, 'Groove', 'Delete');
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
 
     await waitFor(() => expect(deletes()).toHaveLength(1));
@@ -212,7 +213,7 @@ describe('SongListItem deleting', () => {
   it('shows a failed delete and keeps the row when the file can’t be removed', async () => {
     storageResult.mockResolvedValueOnce(fail('storage down'));
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Delete Groove' }));
+    await chooseSongAction(user, 'Groove', 'Delete');
     await user.click(screen.getByRole('button', { name: 'Delete song' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -229,11 +230,11 @@ describe('SongListItem focus as its controls replace one another', () => {
 
   it('Edit hands focus to the form, and Cancel back to Edit', async () => {
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     await waitFor(() => expect(form()).toHaveFocus());
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit Groove' })).toHaveFocus());
+    await waitFor(() => expect(moreButton('Groove')).toHaveFocus());
   });
 
   it('a saved edit hands focus back to Edit', async () => {
@@ -241,22 +242,20 @@ describe('SongListItem focus as its controls replace one another', () => {
       ok({ ...song, ...(opArgs(call, 'update')?.[0] as object) }),
     );
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     await user.type(screen.getByLabelText('Title'), ' two');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     // The item's song is a fixed prop here, so its name stays "Groove".
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit Groove' })).toHaveFocus());
+    await waitFor(() => expect(moreButton('Groove')).toHaveFocus());
   });
 
   it('Delete hands focus to the question, and "Keep it" back to Delete', async () => {
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Delete Groove' }));
+    await chooseSongAction(user, 'Groove', 'Delete');
     await waitFor(() => expect(screen.getByRole('group', { name: 'Delete Groove' })).toHaveFocus());
 
     await user.click(screen.getByRole('button', { name: 'Keep it' }));
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Delete Groove' })).toHaveFocus(),
-    );
+    await waitFor(() => expect(moreButton('Groove')).toHaveFocus());
   });
 });
 
@@ -266,7 +265,7 @@ describe('SongListItem offline', () => {
       ok({ ...song, ...(opArgs(call, 'update')?.[0] as object) }),
     );
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Edit Groove' }));
+    await chooseSongAction(user, 'Groove', 'Edit');
     await user.clear(screen.getByLabelText('Title'));
     await user.type(screen.getByLabelText('Title'), 'Back Beat');
     act(() => onlineManager.setOnline(false));
@@ -289,7 +288,7 @@ describe('SongListItem offline', () => {
   it('turns "Delete song" off with a reason while offline', async () => {
     queryResult.mockResolvedValue(ok(null));
     const user = renderItem();
-    await user.click(screen.getByRole('button', { name: 'Delete Groove' }));
+    await chooseSongAction(user, 'Groove', 'Delete');
     act(() => onlineManager.setOnline(false));
     const remove = screen.getByRole('button', { name: 'Delete song' });
     expect(remove).toBeDisabled();

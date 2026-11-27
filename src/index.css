@@ -1,6 +1,14 @@
 @import 'tailwindcss';
 
 /*
+ * A short window: a phone on its side (390 px tall). The practice screen's
+ * sticky bar draws one row there, so the score keeps most of the height
+ * (14 QA issue 7). In rem, like the width breakpoints, so it follows the
+ * browser's default font size.
+ */
+@custom-variant short (@media (max-height: 30rem));
+
+/*
  * Design tokens (Unit 12). Every colour the app uses is one of these: the
  * default palette is switched off below, so `text-sky-400` and the like draw
  * nothing, and tests/unit/designTokens.test.ts fails on any palette class or

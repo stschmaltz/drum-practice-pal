@@ -49,9 +49,9 @@ const loops = [
   },
 ];
 
-function serve() {
+function serve(served: { sessions: unknown[]; loops: unknown[] } = { sessions, loops }) {
   queryResult.mockImplementation(async (call) =>
-    call.table === 'practice_sessions' ? ok(sessions) : ok(loops),
+    call.table === 'practice_sessions' ? ok(served.sessions) : ok(served.loops),
   );
 }
 
@@ -108,6 +108,22 @@ describe('StatsPage', () => {
     ).toBeInTheDocument();
   });
 
+  // 14 QA issue 6: practised days on the brand, empty ones a quiet cell, and today ringed.
+  it('marks today on the heatmap whether or not it was practised, and fills practised days', async () => {
+    serve({ sessions: sessions.filter((each) => each.id !== 's1'), loops });
+    renderStats();
+    const heatmap = await screen.findByTestId('practice-heatmap');
+    expect(within(heatmap).getAllByTestId('heatmap-today')).toHaveLength(1);
+    const cells = Array.from(heatmap.querySelectorAll('rect[data-level]'));
+    // Today wasn't practised in this list; yesterday and 20 days ago were.
+    const practised = cells.filter((cell) => cell.getAttribute('data-level') !== '0');
+    expect(practised).toHaveLength(2);
+    for (const cell of practised) expect(cell.getAttribute('class')).toMatch(/fill-brand/);
+    for (const cell of cells.filter((each) => each.getAttribute('data-level') === '0')) {
+      expect(cell.getAttribute('class')).toBe('fill-raised');
+    }
+  });
+
   it('lists the badges, earned ones marked and locked ones with their progress', async () => {
     serve();
     renderStats();
@@ -119,6 +135,27 @@ describe('StatsPage', () => {
     expect(byLabel('First loop mastered')).toHaveTextContent('Earned');
     expect(byLabel('7-day streak')).not.toHaveAttribute('data-earned');
     expect(byLabel('7-day streak')).toHaveTextContent('2 of 7 days in a row');
+  });
+
+  // 14 QA issue 5: a new user's Stats was a page of zeros and empty charts.
+  describe('with no practice yet', () => {
+    it('says so, with a way to Songs, in place of zeros and empty charts', async () => {
+      serve({ sessions: [], loops: [] });
+      renderStats();
+      expect(await screen.findByText(/No practice yet/)).toBeVisible();
+      expect(screen.getByRole('link', { name: 'Go to Songs' })).toHaveAttribute('href', '/');
+      expect(screen.queryByTestId('stats-totals')).not.toBeInTheDocument();
+      expect(screen.queryByRole('img')).not.toBeInTheDocument();
+      expect(screen.queryByRole('list', { name: 'Badges' })).not.toBeInTheDocument();
+    });
+
+    it('still shows the stats for loops mastered without a session', async () => {
+      serve({ sessions: [], loops });
+      renderStats('/stats?range=all');
+      await screen.findByTestId('stats-totals');
+      expect(total('total-mastered')).toBe('1');
+      expect(screen.queryByText(/No practice yet/)).not.toBeInTheDocument();
+    });
   });
 
   it('says so offline with nothing cached', async () => {

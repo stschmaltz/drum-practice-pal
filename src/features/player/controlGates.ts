@@ -4,7 +4,13 @@
  * (Unit 10). A control and its key must never disagree about whether a press
  * would do anything.
  */
-import { isLoaded, showsScoreBars, type PlayerService, type PlayerSnapshot } from './PlayerService';
+import {
+  isLoaded,
+  isRunning,
+  showsScoreBars,
+  type PlayerService,
+  type PlayerSnapshot,
+} from './PlayerService';
 
 /**
  * Whether playback can start: the song is loaded (or already running). Not
@@ -15,6 +21,23 @@ import { isLoaded, showsScoreBars, type PlayerService, type PlayerSnapshot } fro
 export function canPlay(player: PlayerService | null, snapshot: PlayerSnapshot): boolean {
   return player !== null && isLoaded(snapshot.status);
 }
+
+/**
+ * Play/Pause on a loop's practice screen (its button and Space). The sounds
+ * can be in before the loop is open (a cached list, the fresh read not back),
+ * and a Play then would play the whole song with no range (14 Test bug 1), so
+ * starting also waits for the loop. Pausing never does.
+ */
+export function canPlayLoopPractice(
+  player: PlayerService | null,
+  snapshot: PlayerSnapshot,
+  loopOpen: boolean,
+): boolean {
+  return canPlay(player, snapshot) && (loopOpen || isRunning(snapshot.status));
+}
+
+/** How a screen decides whether its Play/Pause can be pressed: `canPlay`, or a stricter one. */
+export type PlayGate = (player: PlayerService | null, snapshot: PlayerSnapshot) => boolean;
 
 /**
  * Speed, metronome and count-in work before the song is ready; they only need

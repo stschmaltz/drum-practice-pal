@@ -1,23 +1,25 @@
 import { useId, useState, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { Icon } from '@/components/icons';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { ProgressBar } from '@/components/ProgressMarks';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
-import { inputClass, labelClass, sectionHeadingClass } from '@/components/styles';
+import { inputClass, labelClass, linkClass, sectionHeadingClass } from '@/components/styles';
 import type { PracticeLoop } from '@/features/loops/practiceList';
 import { usePracticeLoops } from '@/features/loops/useLoops';
 import type { PracticeSession } from '@/features/practice/sessions';
 import { useAllSessions } from '@/features/practice/useSessions';
 import { failureCopy } from '@/lib/errorCopy';
 import { waitsForNetwork } from '@/lib/network';
+import { SONGS_PATH } from '@/lib/routes';
 import { badgeProgress, type BadgeProgress } from './badges';
 import { DailyMinutesChart, PracticeHeatmap, SpeedChart } from './charts';
 import { currentStreak } from './streak';
 import {
   dailyPractice,
+  hasPracticeHistory,
   minutesLabel,
   practiceHeatmap,
   speedHistory,
@@ -63,6 +65,20 @@ export function StatsPage() {
     );
   } else if (!sessions.data || !loops.data) {
     body = <LoadingLine>Loading your stats…</LoadingLine>;
+  } else if (!hasPracticeHistory(sessions.data, loops.data)) {
+    // 14 QA issue 5: not four zeros, empty charts and ten locked badges.
+    body = (
+      <EmptyState
+        icon="chart"
+        action={
+          <Link to={SONGS_PATH} className={linkClass}>
+            Go to Songs
+          </Link>
+        }
+      >
+        No practice yet. Your stats start with your first session: open a song and practise a loop.
+      </EmptyState>
+    );
   } else {
     body = <Stats sessions={sessions.data} loops={loops.data} />;
   }
