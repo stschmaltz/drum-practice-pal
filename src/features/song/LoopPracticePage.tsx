@@ -321,7 +321,9 @@ function PracticePlayer({
           <h1 className="truncate text-xl font-bold tracking-tight lg:text-2xl" title={loop.name}>
             {loop.name}
           </h1>
-          <p className="truncate text-sm text-ink-muted tabular-nums">
+          {/* In a short window (a phone on its side) the line is only read out: with it the
+              band was 105 px of a 390 px window, and the score needs the height more. */}
+          <p className="truncate text-sm text-ink-muted tabular-nums short:sr-only">
             <span data-testid="practice-progress">
               {barsLabel(loop.start_bar, loop.end_bar)} · {clockLabel(progress?.playedSeconds ?? 0)}{' '}
               · {repeatsLabel(progress?.repeats ?? 0)}
