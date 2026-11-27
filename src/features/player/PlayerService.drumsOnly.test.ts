@@ -15,7 +15,7 @@ import {
   setupCountIn,
   START_DELAY_MS,
 } from '@/test/countInPlayer';
-import { FakePlayerEngine, straightBars } from '@/test/fakePlayerEngine';
+import { FakePlayerEngine, straightBars, trackNamesOf } from '@/test/fakePlayerEngine';
 import { COMMON_TIME, type Meter } from './countIn';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
 import { PlayerService } from './PlayerService';
@@ -108,7 +108,7 @@ describe('Drums only on songs of other shapes', () => {
 describe('Drums only around loading', () => {
   const loadedEvent = (trackCount = 3) => ({
     barCount: 16,
-    trackCount,
+    trackNames: trackNamesOf(trackCount),
     barTempos: Array<number>(16).fill(120),
     barMeters: Array<Meter>(16).fill(COMMON_TIME),
   });

@@ -7,6 +7,7 @@ import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { randomUuid } from '@/lib/randomUuid';
 import {
+  barCountLabel,
   changedLoopDetails,
   EMPTY_LOOP_FORM,
   formBarRange,
@@ -29,6 +30,10 @@ type DetailFields = Pick<LoopFormValues, 'name'>;
  * score (tap the first bar then the last, or drag with a mouse) or from the
  * two number fields; the page holds them in `editor` so the score can
  * highlight them. A new loop saves at the speed playing now.
+ *
+ * `layout`: `panel` in the loop panel; `bar` for the practice screen's "Save
+ * as loop" sheet, where the fields share a row and the button says what it
+ * does there.
  */
 export function LoopEditorForm({
   songId,
@@ -41,6 +46,7 @@ export function LoopEditorForm({
   onSavingChange,
   onSaved,
   onCancel,
+  layout = 'panel',
 }: {
   songId: string;
   barCount: number;
@@ -54,7 +60,9 @@ export function LoopEditorForm({
   onSavingChange: (saving: boolean) => void;
   onSaved: (saved: Loop) => void;
   onCancel: () => void;
+  layout?: 'panel' | 'bar';
 }) {
+  const inBar = layout === 'bar';
   const create = useCreateLoop(songId);
   const update = useUpdateLoop(songId);
   const mutation = loop ? update : create;
@@ -142,43 +150,51 @@ export function LoopEditorForm({
       <p className="text-sm text-ink-soft" aria-live="polite" data-testid="loop-bars-hint">
         {hint}
       </p>
-      <div className="flex flex-col gap-1">
-        <div className="flex gap-2">
-          <Field
-            label="First bar"
-            value={values.startBar}
-            invalid={errors.bars !== undefined}
-            describedBy={errors.bars !== undefined ? barsErrorId : undefined}
-            readOnly={saving}
-            inputMode="numeric"
-            className="w-24"
-            onChange={(startBar) => editBars({ startBar })}
-          />
-          <Field
-            label="Last bar"
-            value={values.endBar}
-            invalid={errors.bars !== undefined}
-            describedBy={errors.bars !== undefined ? barsErrorId : undefined}
-            readOnly={saving}
-            inputMode="numeric"
-            className="w-24"
-            onChange={(endBar) => editBars({ endBar })}
-          />
+      {/* In the bar the bars and the name share a row, wrapping on a phone. */}
+      <div className={inBar ? 'flex flex-wrap items-start gap-x-3 gap-y-2' : 'contents'}>
+        <div className="flex flex-col gap-1">
+          <div className="flex gap-2">
+            <Field
+              label="First bar"
+              value={values.startBar}
+              invalid={errors.bars !== undefined}
+              describedBy={errors.bars !== undefined ? barsErrorId : undefined}
+              readOnly={saving}
+              inputMode="numeric"
+              className={inBar ? 'w-20' : 'w-24'}
+              onChange={(startBar) => editBars({ startBar })}
+            />
+            <Field
+              label="Last bar"
+              value={values.endBar}
+              invalid={errors.bars !== undefined}
+              describedBy={errors.bars !== undefined ? barsErrorId : undefined}
+              readOnly={saving}
+              inputMode="numeric"
+              className={inBar ? 'w-20' : 'w-24'}
+              onChange={(endBar) => editBars({ endBar })}
+            />
+          </div>
+          {/* Live as the fields change or bars are picked; nothing while they make no range. */}
+          <p className="min-h-5 text-sm text-ink-muted" data-testid="loop-bar-count">
+            {barCountLabel(range)}
+          </p>
+          {errors.bars && (
+            <span id={barsErrorId} className="text-sm text-danger">
+              {errors.bars}
+            </span>
+          )}
         </div>
-        {errors.bars && (
-          <span id={barsErrorId} className="text-sm text-danger">
-            {errors.bars}
-          </span>
-        )}
+        <Field
+          label="Name"
+          value={values.name}
+          error={errors.name}
+          readOnly={saving}
+          placeholder="Chorus fill"
+          rootClassName={inBar ? 'min-w-40 flex-1' : undefined}
+          onChange={(name) => edit({ name })}
+        />
       </div>
-      <Field
-        label="Name"
-        value={values.name}
-        error={errors.name}
-        readOnly={saving}
-        placeholder="Chorus fill"
-        onChange={(name) => edit({ name })}
-      />
       {!loop && (
         <p className="text-sm text-ink-muted" data-testid="loop-new-speed">
           Saves at the speed playing now: {speedLabel(snapshot.speedRatio, tempo)}.
@@ -186,7 +202,7 @@ export function LoopEditorForm({
       )}
       <div className="flex flex-wrap gap-2">
         <button type="submit" className={primaryButtonClass} disabled={saving || !online}>
-          {saving ? 'Saving…' : 'Save loop'}
+          {saving ? 'Saving…' : inBar ? 'Save as loop' : 'Save loop'}
         </button>
         <button type="button" className={buttonClass} disabled={saving} onClick={onCancel}>
           Cancel
@@ -217,6 +233,7 @@ function Field({
   inputMode,
   placeholder,
   className = '',
+  rootClassName,
   note,
   onChange,
 }: {
@@ -232,6 +249,8 @@ function Field({
   inputMode?: 'numeric';
   placeholder?: string;
   className?: string;
+  /** For the field's box with its label, where it shares a row. */
+  rootClassName?: string;
   /** Shown beside the field: what the value works out to. */
   note?: string;
   onChange: (value: string) => void;
@@ -241,7 +260,7 @@ function Field({
   const noteId = `${id}-note`;
   const descriptions = [error ? errorId : describedBy, note ? noteId : undefined].filter(Boolean);
   return (
-    <div className="flex flex-col gap-1">
+    <div className={`flex flex-col gap-1 ${rootClassName ?? ''}`}>
       <label htmlFor={id} className={labelClass}>
         {label}
       </label>

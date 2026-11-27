@@ -2,6 +2,7 @@ import { SPEED_RATIO_MAX, SPEED_RATIO_MIN } from '@/lib/schema';
 import {
   bpmToRatio,
   clampSpeedRatio,
+  nudgeSpeedBpm,
   nudgeSpeedRatio,
   parseSpeedBpm,
   parseSpeedPercent,
@@ -121,6 +122,35 @@ describe('nudgeSpeedRatio', () => {
     expect(nudgeSpeedRatio(1.98, 5)).toBe(SPEED_RATIO_MAX);
     expect(nudgeSpeedRatio(0.26, -5)).toBe(SPEED_RATIO_MIN);
     expect(nudgeSpeedRatio(SPEED_RATIO_MAX, 1)).toBe(SPEED_RATIO_MAX);
+  });
+});
+
+describe('nudgeSpeedBpm', () => {
+  it.each([
+    // From the BPM on show, to the exact ratio of the next whole BPM.
+    [1, 120, 1, 1.008333],
+    [1, 120, -1, 0.991667],
+    [0.708333, 120, 1, 0.716667],
+    [0.708333, 120, -1, 0.7],
+    [0.5, 90, 1, 0.511111],
+  ])('%f of %i BPM by %i BPM is %f', (ratio, tempo, delta, expected) => {
+    expect(nudgeSpeedBpm(ratio, tempo, delta)).toBeCloseTo(expected, 6);
+  });
+
+  it('lands on a whole BPM even from a ratio between two', () => {
+    // 0.7042 of 120 is 84.5 BPM, shown as 85: one faster is 86, not 85.5.
+    const ratio = nudgeSpeedBpm(0.7042, 120, 1);
+    expect(ratio === null ? null : ratio * 120).toBeCloseTo(86, 3);
+  });
+
+  it('stops at the bounds', () => {
+    expect(nudgeSpeedBpm(SPEED_RATIO_MAX, 120, 1)).toBe(SPEED_RATIO_MAX);
+    expect(nudgeSpeedBpm(SPEED_RATIO_MIN, 120, -1)).toBe(SPEED_RATIO_MIN);
+  });
+
+  it('has no answer without a tempo, or below 1 BPM', () => {
+    expect(nudgeSpeedBpm(1, 0, 1)).toBeNull();
+    expect(nudgeSpeedBpm(0.25, 2, -1)).toBeNull();
   });
 });
 

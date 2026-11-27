@@ -1,6 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
-import { ErrorAlert } from '@/components/ErrorAlert';
-import { OfflineNote } from '@/components/OfflineNote';
+import { useRef, useState } from 'react';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { Icon } from '@/components/icons';
 import { OverflowMenu } from '@/components/OverflowMenu';
@@ -8,11 +6,8 @@ import { EmptyState, LoadingLine } from '@/components/StatusMessages';
 import {
   activeCardClass,
   buttonClass,
-  dangerButtonClass,
-  dangerPanelClass,
   focusRing,
   ghostButtonClass,
-  inlineIconClass,
   primaryButtonClass,
   sectionHeadingClass,
 } from '@/components/styles';
@@ -20,7 +15,6 @@ import { canPickBars, canPlay } from '@/features/player/controlGates';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { LoopHistory } from '@/features/practice/LoopHistory';
 import { lastPracticedLabel } from '@/features/practice/sessions';
-import { failureCopy } from '@/lib/errorCopy';
 import {
   findItemControl,
   isItemListed,
@@ -29,7 +23,7 @@ import {
   itemMenuAttributes,
   neighbourAfterLeaving,
 } from '@/lib/itemFocus';
-import { isOnline, useOnline, waitsForNetwork } from '@/lib/network';
+import { waitsForNetwork } from '@/lib/network';
 import type { LoopStatus } from '@/lib/schema';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
@@ -47,14 +41,17 @@ import {
   loopsInPanelOrder,
   type Loop,
 } from './loopForm';
+import { ConfirmDeleteLoop } from './ConfirmDeleteLoop';
+import { FinishPrompt } from './FinishPrompt';
 import { LoopEditorForm } from './LoopEditorForm';
 import { speedLabel } from './loopLabels';
 import { editorOnPanel } from './loopPanelContent';
 import { LoopSpeedControl } from './LoopSpeedControl';
 import { LoopStatusButton } from './LoopStatusButton';
 import { playLoopClosesPanel } from './useLoopPanelOpen';
-import { useDeleteLoop, useLoops, useSetLoopStatus } from './useLoops';
+import type { useLoops } from './useLoops';
 import type { LoopPractice } from './useLoopPractice';
+import { useSpeedMovedSinceChosen } from './useSpeedMovedSinceChosen';
 
 interface LoopPanelProps {
   songId: string;
@@ -67,6 +64,19 @@ interface LoopPanelProps {
   onOpenChange: (open: boolean) => void;
   /** For the `aria-controls` of a toggle the page places elsewhere (beside the status line, from 1024 px). */
   bodyId: string;
+  /** What a save or Cancel of the loop form leads to, when not the panel's own default. */
+  outcome?: LoopFormOutcome;
+}
+
+/**
+ * Where the app goes after the loop form saves or is cancelled. Without these
+ * a new loop becomes the loop playing here, and an edit or a Cancel leaves the
+ * page as it was.
+ */
+export interface LoopFormOutcome {
+  onCreated?: (loop: Loop) => void;
+  onEdited?: (loop: Loop) => void;
+  onCancelled?: () => void;
 }
 
 /**
@@ -86,6 +96,7 @@ export function LoopPanel({
   open,
   onOpenChange,
   bodyId,
+  outcome,
 }: LoopPanelProps) {
   const count = loops.data?.length ?? 0;
 
@@ -142,6 +153,7 @@ export function LoopPanel({
           practice={practice}
           loops={loops}
           onPlayLoop={playLoop}
+          outcome={outcome}
         />
       </div>
     </aside>
@@ -150,7 +162,7 @@ export function LoopPanel({
 
 type LoopPanelBodyProps = Pick<
   LoopPanelProps,
-  'songId' | 'player' | 'snapshot' | 'practice' | 'loops'
+  'songId' | 'player' | 'snapshot' | 'practice' | 'loops' | 'outcome'
 > & {
   /** "Play loop" or "Restart loop" was pressed. Runs inside the tap: iOS only starts audio there. */
   onPlayLoop: (loop: Loop) => void;
@@ -174,22 +186,13 @@ function LoopPanelBody({
   practice,
   loops,
   onPlayLoop,
+  outcome,
 }: LoopPanelBodyProps) {
   const { editedLoop, activeLoop } = practice;
   // "Not yet" to "Mark finished?", for the loop at the speed it was asked about:
   // saving a faster speed asks again. Here, not in the card, which the form replaces.
   const [declinedFinish, setDeclinedFinish] = useState<string | null>(null);
-  // Whether the playing loop's saved speed has moved since it was chosen: one worked up to
-  // 100% is asked about, one saved there and never practised isn't. Set during render, so
-  // the render that brings a new loop or a new speed already reads it.
-  const activeId = activeLoop?.id ?? null;
-  const activeRatio = activeLoop?.speed_ratio ?? null;
-  const [chosen, setChosen] = useState({ loopId: activeId, ratio: activeRatio, moved: false });
-  if (chosen.loopId !== activeId) {
-    setChosen({ loopId: activeId, ratio: activeRatio, moved: false });
-  } else if (!chosen.moved && activeRatio !== chosen.ratio) {
-    setChosen({ ...chosen, moved: true });
-  }
+  const speedMoved = useSpeedMovedSinceChosen(activeLoop);
   // The form replaces the list, and with it the button that opened it; focus goes back there.
   const focusWhenReady = useFocusWhenReady();
   const formOpener = useRef<LoopFormOpener | null>(null);
@@ -243,10 +246,18 @@ function LoopPanelBody({
         onSavingChange={practice.setEditorSaving}
         onSaved={(saved) => {
           closeForm();
+          if (editedLoop) {
+            outcome?.onEdited?.(saved);
+            return;
+          }
           // A new loop is what the user wants to practice next; an edit leaves playback as it is.
-          if (!editedLoop) practice.selectLoop(saved.id);
+          if (outcome?.onCreated) outcome.onCreated(saved);
+          else practice.selectLoop(saved.id);
         }}
-        onCancel={closeForm}
+        onCancel={() => {
+          closeForm();
+          outcome?.onCancelled?.();
+        }}
       />
     );
   }
@@ -278,8 +289,7 @@ function LoopPanelBody({
         onDeletePressed={followDelete}
         askToFinish={
           activeLoop !== null &&
-          chosen.loopId === activeLoop.id &&
-          shouldAskToFinish(activeLoop, chosen.moved) &&
+          shouldAskToFinish(activeLoop, speedMoved) &&
           declinedFinish !== finishQuestionKey(activeLoop)
         }
         onDeclineFinish={() => {
@@ -304,57 +314,6 @@ function DeletedLoopNotice({ onBack }: { onBack: () => void }) {
       <button type="button" className={buttonClass} onClick={onBack}>
         Back to loops
       </button>
-    </div>
-  );
-}
-
-/**
- * Asks whether a loop that has reached full speed is done. It only
- * asks: a loop is never finished for the user, and "Not yet" leaves it as it is.
- */
-function FinishPrompt({
-  songId,
-  loop,
-  onDecline,
-  onFinished,
-}: {
-  songId: string;
-  loop: Loop;
-  onDecline: () => void;
-  onFinished: () => void;
-}) {
-  const status = useSetLoopStatus(songId, loop.id);
-  return (
-    <div
-      role="group"
-      aria-label="Mark finished?"
-      data-testid="finish-prompt"
-      className="flex flex-col gap-2 rounded-control border border-success-line bg-success-soft p-3 motion-safe:animate-fade-in"
-    >
-      <p className="text-sm text-ink">
-        <Icon name="check" className={`${inlineIconClass} size-4 text-success`} />
-        You're playing it at full speed. Mark this loop finished?
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={primaryButtonClass}
-          // Locked like the list's status button (`LoopStatusButton`), which says why.
-          aria-disabled={status.isPending || undefined}
-          onClick={() => {
-            if (status.setStatus('finished')) onFinished();
-          }}
-        >
-          <Icon name="check" />
-          Mark finished
-        </button>
-        <button type="button" className={ghostButtonClass} onClick={onDecline}>
-          Not yet
-        </button>
-      </div>
-      {status.error && (
-        <ErrorAlert>Couldn't mark the loop finished. {failureCopy(status.error)}</ErrorAlert>
-      )}
     </div>
   );
 }
@@ -552,7 +511,7 @@ function LoopListItem({
         </p>
       </div>
       {active && (
-        <section aria-label={`Practicing ${loop.name}`} className="flex flex-col gap-3">
+        <section aria-label={`Practising ${loop.name}`} className="flex flex-col gap-3">
           <LoopSpeedControl loop={loop} player={player} snapshot={snapshot} />
           {active.askToFinish && (
             <FinishPrompt
@@ -565,7 +524,7 @@ function LoopListItem({
         </section>
       )}
       {confirmingDelete ? (
-        <ConfirmDelete
+        <ConfirmDeleteLoop
           songId={songId}
           loop={loop}
           onCancel={keepIt}
@@ -620,67 +579,5 @@ function LoopListItem({
       )}
       {showingHistory && <LoopHistory loopId={loop.id} loopName={loop.name} tempo={tempo} />}
     </li>
-  );
-}
-
-/** Inline, like deleting a song: no modal, and not optimistic. */
-function ConfirmDelete({
-  songId,
-  loop,
-  onCancel,
-  onDeletePressed,
-}: {
-  songId: string;
-  loop: Loop;
-  onCancel: () => void;
-  onDeletePressed: () => void;
-}) {
-  const remove = useDeleteLoop(songId);
-  const online = useOnline();
-  // In place of the Delete button that asked: the question is read out, and Tab reaches its buttons.
-  const groupRef = useRef<HTMLDivElement>(null);
-  useEffect(() => groupRef.current?.focus({ preventScroll: true }), []);
-
-  return (
-    <div
-      ref={groupRef}
-      tabIndex={-1}
-      role="group"
-      aria-label={`Delete ${loop.name}`}
-      className={`${dangerPanelClass} flex flex-col gap-2 focus:outline-none`}
-    >
-      <p className="text-ink">
-        Delete “{loop.name}”? Its practice history is deleted too. This can't be undone.
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={dangerButtonClass}
-          disabled={remove.isPending || !online}
-          onClick={() => {
-            if (!isOnline()) return;
-            remove.mutate(loop.id);
-            onDeletePressed();
-          }}
-        >
-          <Icon name="trash" />
-          {remove.isPending ? 'Deleting…' : 'Delete loop'}
-        </button>
-        <button
-          type="button"
-          className={buttonClass}
-          disabled={remove.isPending}
-          onClick={onCancel}
-        >
-          Keep it
-        </button>
-      </div>
-      {!online && (
-        <OfflineNote>You're offline. Loops can be deleted once you're back online.</OfflineNote>
-      )}
-      {remove.isError && (
-        <ErrorAlert>Couldn't delete the loop. {failureCopy(remove.error)}</ErrorAlert>
-      )}
-    </div>
   );
 }

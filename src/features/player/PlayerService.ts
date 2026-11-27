@@ -25,6 +25,13 @@ import type { LayoutChoice } from './layout';
 import type { PlayerEngine } from './playerEngine';
 import { isSameVoice, type MetronomeVoice } from './metronomeSounds';
 import { clampVolume, effectiveMetronomeVolume, type PlayerOptions } from './playerOptions';
+
+/**
+ * The drum track's level over the file's own (1). The kit was really quiet in
+ * the mix under guitars and bass (Shane, 2026-11-27); alphaTab doesn't cap a
+ * channel's volume. Tune by ear here.
+ */
+export const DRUM_TRACK_GAIN = 2.5;
 import { PLAYER_SOUND_FONT_URLS } from './soundFont';
 import { clampSpeedRatio } from './speed';
 import { orderedBars } from './tapGesture';
@@ -81,6 +88,19 @@ export function isSameBarRange(a: BarRange | null, b: BarRange | null): boolean 
   return a.startBar === b.startBar && a.endBar === b.endBar;
 }
 
+/** One track in the mixer: by index, with its name and the mute the user chose for it. */
+export interface TrackMix {
+  index: number;
+  name: string;
+  /**
+   * The mute chosen for this track (the drum track's is Mute drums). Drums
+   * only silences every other track over it without changing it.
+   */
+  muted: boolean;
+  /** The song's drum track, which Mute drums and Drums only act on. */
+  drums: boolean;
+}
+
 export interface PlayerSnapshot extends PlayerOptions {
   status: PlayerStatus;
   error: PlayerError | null;
@@ -100,6 +120,10 @@ export interface PlayerSnapshot extends PlayerOptions {
   looping: boolean;
   /** The bars marked on the score: a drawing only, set by the screen (see setHighlight). */
   highlight: BarRange | null;
+  /** The bars the score draws, or null for all of them (see setVisibleBars). */
+  visibleBars: BarRange | null;
+  /** The score's tracks for the mixer; empty until the score has loaded. */
+  tracks: readonly TrackMix[];
   /** The count-in beat sounding now; null outside a count-in and before its first click. */
   countIn: CountInBeat | null;
 }
@@ -144,6 +168,8 @@ export interface PlayerServiceConfig {
   unlockAudio?: () => void;
   /** Where count-in clicks sound; tests pass a fake. */
   clicks?: ClickOutput;
+  /** The bars the score starts drawn with (see setVisibleBars); the whole score when absent. */
+  visibleBars?: BarRange | null;
 }
 
 /** What the player shows before it has loaded anything, also used while the engine starts. */
@@ -169,6 +195,8 @@ export function initialPlayerSnapshot(
     range: null,
     looping: false,
     highlight: null,
+    visibleBars: null,
+    tracks: [],
     countIn: null,
   };
 }
@@ -215,7 +243,8 @@ export class PlayerService {
    * next startEngine().
    */
   private playCalledOff = false;
-  private trackCount = 0;
+  /** The loaded score's track names, by index; empty until it has loaded. */
+  private trackNames: readonly string[] = [];
   /** The engine was last sent Drums only's mutes, which it keeps until every track is sent again. */
   private engineHoldsDrumsOnly = false;
   private soundFontRequested = false;
@@ -234,6 +263,8 @@ export class PlayerService {
       this.mutedTracks.set(this.drumTrackIndex, this.snapshot.drumsMuted);
     }
     this.wireEngine();
+    // Before any load, so the first drawing is already the bars asked for.
+    if (config.visibleBars) this.setVisibleBars(config.visibleBars);
   }
 
   // --- React store contract (useSyncExternalStore) ---
@@ -265,18 +296,23 @@ export class PlayerService {
     this.barMeters = [];
     this.lastTick = null;
     this.pendingSeek = null;
-    this.trackCount = 0;
+    this.trackNames = [];
     this.update({
       status: 'loading',
       error: null,
       barCount: null,
       barNumber: null,
       barTempo: null,
+      tracks: [],
     });
     this.wakeLock.setActive(false);
     this.requestSoundFont();
     // Before the score, so the first MIDI already has the right clicks.
     this.engine.setMetronomeVoice(this.snapshot.metronomeVoice);
+    // The part being practised sits on top of the band, not level with it.
+    if (this.drumTrackIndex !== null) {
+      this.engine.setTrackVolume(this.drumTrackIndex, DRUM_TRACK_GAIN);
+    }
     if (!this.engine.loadScore(bytes, [this.drumTrackIndex ?? 0])) this.fail('score');
   }
 
@@ -521,12 +557,17 @@ export class PlayerService {
     if (this.disposed) return;
     this.mutedTracks.set(trackIndex, muted);
     if (trackIndex !== this.drumTrackIndex) {
+      this.update(this.tracksPatch());
       this.applyTrackMute(trackIndex);
       return;
     }
     // Muted drums with everything else silenced would be a song with no sound.
     const leavesDrumsOnly = muted && this.snapshot.drumsOnly;
-    this.update(leavesDrumsOnly ? { drumsMuted: muted, drumsOnly: false } : { drumsMuted: muted });
+    this.update({
+      drumsMuted: muted,
+      ...(leavesDrumsOnly && { drumsOnly: false }),
+      ...this.tracksPatch(),
+    });
     if (leavesDrumsOnly) this.applyEveryTrackMute();
     else this.applyTrackMute(trackIndex);
   }
@@ -545,7 +586,9 @@ export class PlayerService {
     if (this.disposed || this.drumTrackIndex === null) return;
     if (drumsOnly === this.snapshot.drumsOnly) return;
     if (drumsOnly) this.mutedTracks.set(this.drumTrackIndex, false);
-    this.update(drumsOnly ? { drumsOnly, drumsMuted: false } : { drumsOnly });
+    this.update(
+      drumsOnly ? { drumsOnly, drumsMuted: false, ...this.tracksPatch() } : { drumsOnly },
+    );
     this.applyEveryTrackMute();
   }
 
@@ -568,6 +611,25 @@ export class PlayerService {
     this.applyHighlight();
   }
 
+  /**
+   * Draws only these bars of the score (1-based, inclusive), or the whole
+   * score for null: the practice screen shows its loop and a bar either side.
+   * A drawing only, like setHighlight: what plays, the playback position and
+   * the range are untouched, so it is live. Bars outside it can't be tapped
+   * (they aren't drawn), and a showBar for one is a no-op.
+   */
+  setVisibleBars(visibleBars: BarRange | null): void {
+    if (this.disposed) return;
+    if (isSameBarRange(this.snapshot.visibleBars, visibleBars)) return;
+    this.update({ visibleBars });
+    this.engine.setVisibleBars(
+      visibleBars && {
+        startBarIndex: visibleBars.startBar - 1,
+        endBarIndex: visibleBars.endBar - 1,
+      },
+    );
+  }
+
   // --- Teardown ---
 
   /** Stops sound, releases the wake lock and alphaTab's worker and audio. Safe to call twice. */
@@ -587,12 +649,17 @@ export class PlayerService {
   private wireEngine(): void {
     // Every handler checks `disposed`: alphaTab's worker can still post after destroy().
     const engine = this.engine;
-    engine.on('scoreLoaded', ({ barCount, trackCount, barTempos, barMeters }) => {
+    engine.on('scoreLoaded', ({ barCount, trackNames, barTempos, barMeters }) => {
       if (this.disposed) return;
-      this.trackCount = trackCount;
+      this.trackNames = trackNames;
       this.barTempos = barTempos;
       this.barMeters = barMeters;
-      this.update({ barCount, barNumber: 1, barTempo: tempoAtBar(barTempos, 1) });
+      this.update({
+        barCount,
+        barNumber: 1,
+        barTempo: tempoAtBar(barTempos, 1),
+        ...this.tracksPatch(),
+      });
       this.applyMutes();
     });
     engine.on('ticksReady', ({ bars }) => {
@@ -863,8 +930,8 @@ export class PlayerService {
 
   /** For Drums only going on or off, which changes tracks that have no mute on record. */
   private applyEveryTrackMute(): void {
-    if (this.trackCount === 0) return;
-    for (let trackIndex = 0; trackIndex < this.trackCount; trackIndex++) {
+    if (this.trackNames.length === 0) return;
+    for (let trackIndex = 0; trackIndex < this.trackNames.length; trackIndex++) {
       this.applyTrackMute(trackIndex);
     }
     this.engineHoldsDrumsOnly = this.snapshot.drumsOnly;
@@ -872,8 +939,31 @@ export class PlayerService {
 
   /** Tracks the loaded score doesn't have yet are skipped; applyMutes sends them once it does. */
   private applyTrackMute(trackIndex: number): void {
-    if (trackIndex >= this.trackCount) return;
+    if (trackIndex >= this.trackNames.length) return;
     this.engine.setTrackMuted(trackIndex, this.isTrackSilenced(trackIndex));
+  }
+
+  /**
+   * The mixer's view of the loaded score's tracks (the mute on record, not
+   * Drums only's), as a patch for update(): empty when nothing in it changed,
+   * since a new array would notify subscribers for nothing.
+   */
+  private tracksPatch(): { tracks?: TrackMix[] } {
+    const tracks = this.trackNames.map((name, index) => ({
+      index,
+      // A file may leave a track unnamed; the mixer still needs words for its switch.
+      name: name.trim() || `Track ${index + 1}`,
+      muted: this.mutedTracks.get(index) ?? false,
+      drums: index === this.drumTrackIndex,
+    }));
+    const current = this.snapshot.tracks;
+    const same =
+      tracks.length === current.length &&
+      tracks.every((track, index) => {
+        const was = current[index];
+        return was?.name === track.name && was.muted === track.muted && was.drums === track.drums;
+      });
+    return same ? {} : { tracks };
   }
 
   /** What the engine should have for a track: Drums only wins over the mute on record. */

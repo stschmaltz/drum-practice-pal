@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useMatch } from 'react-router';
+import { Link, Outlet, useLocation } from 'react-router';
 import { Wordmark } from '@/components/Brand';
 import { Icon } from '@/components/icons';
 import { focusRing, ghostButtonClass } from '@/components/styles';
@@ -6,7 +6,8 @@ import { SignOutButton } from '@/features/auth/SignOutButton';
 import { OfflineBanner } from '@/features/offline/OfflineBanner';
 import { useOutboxReplay } from '@/features/offline/useOutboxReplay';
 import { useSignedInUser } from '@/lib/auth';
-import { NAV_ITEMS } from './navItems';
+import { showsScore } from '@/lib/routes';
+import { isNavItemActive, NAV_ITEMS } from './navItems';
 
 // Bottom tabs below 768 px (md), a sidebar from there up: the same split the
 // player uses for page vs horizontal layout.
@@ -14,9 +15,9 @@ export function AppShell() {
   const user = useSignedInUser();
   // Writes an earlier page queued and never heard back about go once the user is known.
   useOutboxReplay();
-  // The song page is the score, the app's most important spot: it takes the whole
-  // width beside the sidebar. Other pages keep a readable line length.
-  const fullWidth = useMatch('/songs/:id') !== null;
+  // The score is the app's most important spot: a screen that draws it takes the
+  // whole width beside the sidebar. Other pages keep a readable line length.
+  const fullWidth = showsScore(useLocation().pathname);
 
   return (
     <div className="min-h-dvh md:flex">
@@ -94,15 +95,19 @@ function AccountLine({ email }: { email: string }) {
 
 /** The main nav's links; each nav styles them its own way. */
 function NavLinks({ linkClass }: { linkClass: (isActive: boolean) => string }) {
-  return NAV_ITEMS.map((item) => (
-    <NavLink
-      key={item.to}
-      to={item.to}
-      end={item.end}
-      className={({ isActive }) => linkClass(isActive)}
-    >
-      <Icon name={item.icon} />
-      {item.label}
-    </NavLink>
-  ));
+  const { pathname } = useLocation();
+  return NAV_ITEMS.map((item) => {
+    const active = isNavItemActive(item, pathname);
+    return (
+      <Link
+        key={item.to}
+        to={item.to}
+        aria-current={active ? 'page' : undefined}
+        className={linkClass(active)}
+      >
+        <Icon name={item.icon} />
+        {item.label}
+      </Link>
+    );
+  });
 }

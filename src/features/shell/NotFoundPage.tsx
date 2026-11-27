@@ -7,7 +7,7 @@ export function NotFoundPage() {
     <div className="flex flex-col gap-3">
       <PageHeader title="Page not found">There's nothing at this address.</PageHeader>
       <Link to="/" className={`${linkClass} self-start`}>
-        Go to On the go
+        Go to Songs
       </Link>
     </div>
   );

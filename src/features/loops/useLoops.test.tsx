@@ -639,6 +639,27 @@ describe('the home page list (usePracticeLoops)', () => {
     expect(view.queryClient.getQueryData(sessionKeys.forLoop('user-1', 'a'))).toBeUndefined();
     expect(view.queryClient.getQueryData(sessionKeys.forLoop('user-1', 'b'))).toEqual([]);
   });
+
+  // Copilot review on #30: only invalidated, the deleted history stayed counted (and
+  // persisted) whenever the refetch after the delete failed.
+  it("a deleted loop's sessions leave the Stats cache at once, even when the refetch fails", async () => {
+    const view = await renderLoaded([loopRow('a'), loopRow('b')]);
+    const everyKey = sessionKeys.every('user-1');
+    view.queryClient.setQueryData(everyKey, [
+      { id: 's1', loop_id: 'a' },
+      { id: 's2', loop_id: 'b' },
+      { id: 's3', loop_id: 'a' },
+    ]);
+    // The delete answers; every read after it fails.
+    queryResult.mockResolvedValueOnce(ok(null));
+    queryResult.mockResolvedValue({ data: null, error: { message: 'boom', code: '500' } });
+
+    act(() => view.result.current.remove.mutate('a'));
+    await waitFor(() => expect(view.result.current.remove.isSuccess).toBe(true));
+
+    expect(view.queryClient.getQueryData(everyKey)).toEqual([{ id: 's2', loop_id: 'b' }]);
+    expect(view.queryClient.getQueryState(everyKey)?.isInvalidated).toBe(true);
+  });
 });
 
 describe('a new loop and the home page list', () => {

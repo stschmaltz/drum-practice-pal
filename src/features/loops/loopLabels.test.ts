@@ -1,4 +1,4 @@
-import { speedLabel, targetProgress } from './loopLabels';
+import { speedLabel } from './loopLabels';
 
 describe('speedLabel', () => {
   it.each([
@@ -13,19 +13,5 @@ describe('speedLabel', () => {
 
   it('gives only the percent until the tempo is known', () => {
     expect(speedLabel(0.85, null)).toBe('85%');
-  });
-});
-
-describe('targetProgress', () => {
-  it.each([
-    [0.5, 50, 0.5, false],
-    [1, 100, 1, true],
-    [1.2, 120, 1, true],
-    [0.25, 25, 0.25, false],
-    // 99.5% shows as 100%, so it has reached full speed.
-    [0.995, 100, 1, true],
-    [0.704, 70, 0.7, false],
-  ])('%f is %i%% of full speed', (speed, speedPercent, fraction, reached) => {
-    expect(targetProgress(speed)).toEqual({ speedPercent, targetPercent: 100, fraction, reached });
   });
 });

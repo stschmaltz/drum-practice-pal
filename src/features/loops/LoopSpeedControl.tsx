@@ -1,7 +1,6 @@
-import { useId, useState, type KeyboardEvent } from 'react';
+import { useId } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { buttonClass, inputClass, labelClass } from '@/components/styles';
-import { canChangeOptions } from '@/features/player/controlGates';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import {
   nudgeSpeedRatio,
@@ -13,14 +12,15 @@ import { bpmAtSpeed } from '@/features/player/tempo';
 import { failureCopy } from '@/lib/errorCopy';
 import type { Loop } from './loopForm';
 import { LOOP_SPEED_ATTRIBUTES } from './loopFocus';
-import { useLoopSpeedSaves } from './useLoops';
+import { useLoopSpeed } from './useLoopSpeed';
+import { useTypedValue } from './useTypedValue';
 
 /** The nudge buttons, in percent. */
 const NUDGES = [-5, -1, 1, 5] as const;
 
 /**
  * The playing loop's speed as % and BPM, each editable, with nudge buttons.
- * Changes go to the player at once, and the song page saves them to the loop
+ * Changes go to the player at once, and the screen saves them to the loop
  * as they happen (`useSaveLoopSpeed`); this shows how that is going. BPM
  * is the speed times the tempo at the loop's first bar, never stored; a typed
  * BPM sets the exact ratio it implies.
@@ -34,16 +34,7 @@ export function LoopSpeedControl({
   player: PlayerService | null;
   snapshot: PlayerSnapshot;
 }) {
-  const saves = useLoopSpeedSaves(loop.id);
-  const canSetSpeed = canChangeOptions(player, snapshot);
-  // Null until the score has loaded; the BPM field waits for it.
-  const tempo = player?.tempoAtBar(loop.start_bar) ?? null;
-  const ratio = snapshot.speedRatio;
-
-  const setSpeed = (next: number | null) => {
-    if (next === null || !canChangeOptions(player, snapshot)) return;
-    player.setSpeed(next);
-  };
+  const { saves, canSetSpeed, tempo, ratio, setSpeed } = useLoopSpeed(loop, player, snapshot);
 
   return (
     <div
@@ -94,11 +85,7 @@ export function LoopSpeedControl({
   );
 }
 
-/**
- * A text field that shows `value` and reports what was typed when the user
- * leaves it or presses Enter (Escape puts the value back). Committing per
- * keystroke would turn "8" on the way to "85" into the slowest speed.
- */
+/** A text field that shows `value` and reports what was typed on Enter or on leaving it (useTypedValue). */
 function CommitField({
   label,
   value,
@@ -111,19 +98,7 @@ function CommitField({
   onCommit: (text: string) => void;
 }) {
   const id = useId();
-  // What is being typed; null shows the current value.
-  const [typed, setTyped] = useState<string | null>(null);
-
-  const commit = () => {
-    if (typed === null) return;
-    setTyped(null);
-    onCommit(typed);
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') commit();
-    if (event.key === 'Escape') setTyped(null);
-  };
+  const { typed, change, commit, onKeyDown } = useTypedValue(onCommit);
 
   return (
     <div className="flex flex-col gap-1">
@@ -137,7 +112,7 @@ function CommitField({
         autoComplete="off"
         value={typed ?? value}
         disabled={disabled}
-        onChange={(event) => setTyped(event.target.value)}
+        onChange={(event) => change(event.target.value)}
         onBlur={commit}
         onKeyDown={onKeyDown}
       />

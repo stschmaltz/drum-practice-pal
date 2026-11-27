@@ -64,6 +64,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       # Signed-in specs need Auth and REST; Mailpit catches the sign-in emails the login form sends.
       - run: npx supabase start -x studio,imgproxy,edge-runtime,logflare,vector,realtime,supavisor
+      # stats.spec.ts reads the seed user's sessions (Unit 16's acceptance).
+      - run: npm run db:seed
       - run: npm run e2e -- --shard=${{ matrix.shard }}/6
       - uses: actions/upload-artifact@v7
         if: failure()

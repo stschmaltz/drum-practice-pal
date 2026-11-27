@@ -21,6 +21,7 @@ import {
   DEFAULT_METRONOME_VOICE,
   freeChannel,
   isSameVoice,
+  metronomeChannelGain,
   metronomeKeys,
   metronomeNotes,
   PERCUSSION_CHANNEL,
@@ -77,6 +78,21 @@ export function createAlphaTabEngine({
     },
   });
 
+  // A render asked for here (bars to draw, layout) hasn't finished: the bounds are the last
+  // drawing's, so a scroll would aim at where a bar was. Registered before anything else
+  // listens to postRenderFinished, so it is cleared before the service hears `rendered`.
+  let redrawing = false;
+  api.postRenderFinished.on(() => {
+    redrawing = false;
+  });
+  /** Applies changed display settings: drawn again now if there is a score, else at its load. */
+  const redraw = () => {
+    api.updateSettings();
+    if (!api.score) return;
+    redrawing = true;
+    api.render();
+  };
+
   // Read afresh each time: the bounds change with every layout, and are null until the first.
   const staffSystems = () => api.boundsLookup?.staffSystems ?? [];
   const stopWatchingPointer = watchScorePointer(element, scrollElement, staffSystems, taps);
@@ -86,11 +102,44 @@ export function createAlphaTabEngine({
   // renders, in case bars further down only get their bounds then.
   api.postRenderFinished.on(highlight.draw);
   api.renderer.partialRenderFinished.on(highlight.draw);
+  // Before the metronome writes, so it sees the cymbals' channel as taken.
+  let cymbalChannel: number | null = null;
+  api.midiLoad.on((file) => {
+    cymbalChannel = liftCymbals(file);
+  });
   const metronome = createMetronomeTrack(api);
   api.midiLoad.on(metronome.write);
   api.midiLoaded.on(metronome.applyVolume);
   api.midiLoaded.on(metronome.midiReloaded);
   api.playerReady.on(metronome.applyVolume);
+  // Track levels (the drum boost) are channel volumes the synth forgets with each
+  // new MIDI, as it does the metronome's: sent again at the same two moments.
+  const trackVolumes = new Map<number, number>();
+  const mutedTracks = new Set<number>();
+  const applyTrackVolumes = () => {
+    if (!api.player) return;
+    for (const [trackIndex, volume] of trackVolumes) {
+      const track = api.score?.tracks[trackIndex];
+      if (track) api.changeTrackVolume([track], volume);
+    }
+    // The cymbals' channel belongs to no track, so alphaTab's track mute and
+    // volume never reach it: it follows the drum track's from here.
+    if (cymbalChannel === null) return;
+    const drums = api.score?.tracks.find(
+      (track) => track.playbackInfo.primaryChannel === PERCUSSION_CHANNEL,
+    );
+    if (!drums) return;
+    const drumVolume = trackVolumes.get(drums.index) ?? drums.playbackInfo.volume / 16;
+    api.player.setChannelVolume(
+      cymbalChannel,
+      mutedTracks.has(drums.index) ? 0 : drumVolume * CYMBAL_GAIN,
+    );
+  };
+  api.midiLoaded.on(applyTrackVolumes);
+  // alphaTab 1.9 sets every rendered track back to the file's own volume right
+  // after it fires playerReady (its readyForPlayback handler), which undid the
+  // boost. A microtask runs after that handler, so ours is the last word.
+  api.playerReady.on(() => queueMicrotask(applyTrackVolumes));
 
   return {
     on(event, handler) {
@@ -123,8 +172,18 @@ export function createAlphaTabEngine({
       const mode = toLayoutMode(next);
       if (api.settings.display.layoutMode === mode) return;
       api.settings.display.layoutMode = mode;
-      api.updateSettings();
-      api.render();
+      redraw();
+    },
+
+    setVisibleBars(range) {
+      const display = api.settings.display;
+      // alphaTab counts from bar 1, and -1 bars is all of them.
+      const startBar = range ? range.startBarIndex + 1 : 1;
+      const barCount = range ? range.endBarIndex - range.startBarIndex + 1 : -1;
+      if (display.startBar === startBar && display.barCount === barCount) return;
+      display.startBar = startBar;
+      display.barCount = barCount;
+      redraw();
     },
 
     play() {
@@ -161,8 +220,16 @@ export function createAlphaTabEngine({
       metronome.setVoice(voice);
     },
     setTrackMuted(trackIndex, muted) {
+      if (muted) mutedTracks.add(trackIndex);
+      else mutedTracks.delete(trackIndex);
       const track = api.score?.tracks[trackIndex];
       if (track) api.changeTrackMute([track], muted);
+      // The cymbals follow the drum track's mute.
+      applyTrackVolumes();
+    },
+    setTrackVolume(trackIndex, volume) {
+      trackVolumes.set(trackIndex, volume);
+      applyTrackVolumes();
     },
     setPlaybackRange(range) {
       api.playbackRange = range ? { startTick: range.startTick, endTick: range.endTick } : null;
@@ -174,6 +241,7 @@ export function createAlphaTabEngine({
       highlight.show(range);
     },
     scrollToBar(barIndex) {
+      if (redrawing) return false;
       return scrollBoxToBar(element, scrollElement, staffSystems(), barIndex);
     },
     destroy() {
@@ -394,7 +462,7 @@ function subscribe<K extends keyof EngineEvents>(
       api.scoreLoaded.on((score) =>
         emit({
           barCount: score.masterBars.length,
-          trackCount: score.tracks.length,
+          trackNames: score.tracks.map((track) => track.name),
           barTempos: barStartTempos(score),
           barMeters: barMeters(score),
         }),
@@ -495,7 +563,7 @@ function createMetronomeTrack(api: alphaTab.AlphaTabApi) {
   const applyVolume = () => {
     // alphaTab's own metronome stays silent: its ticks are gone from the MIDI anyway.
     api.metronomeVolume = 0;
-    if (channel !== null) api.player?.setChannelVolume(channel, volume);
+    if (channel !== null) api.player?.setChannelVolume(channel, metronomeChannelGain(volume));
   };
 
   return {
@@ -574,6 +642,52 @@ function createMetronomeTrack(api: alphaTab.AlphaTabApi) {
       return true;
     },
   };
+}
+
+/**
+ * GM keys of the crashes, rides, splash and china. In MuseScore General's kit
+ * (public/drumkit) they come out some ten times quieter than its snare and
+ * forty times quieter than its kick, so a crash was lost under the band.
+ */
+export const CYMBAL_KEYS: ReadonlySet<number> = new Set([49, 51, 52, 53, 55, 57, 59]);
+
+/** The cymbals' channel volume over the drum track's. Tune by ear here. */
+export const CYMBAL_GAIN = 6;
+
+/**
+ * Moves the drum channel's cymbal notes to a channel of their own that plays
+ * the same kit, so they can be turned up apart from the rest of it (a channel
+ * volume is the only gain alphaTab's synth has; velocity tops out at 127).
+ * Returns that channel, or null for a song with no cymbal notes. It leans on
+ * the same two synth facts as writeMetronome below: the kit on another channel
+ * by bank select, and samples loaded only for keys seen on the drum channel.
+ */
+export function liftCymbals(file: alphaTab.midi.MidiFile): number | null {
+  const { midi } = alphaTab;
+  const used = new Set<number>();
+  const cymbalNotes: alphaTab.midi.NoteEvent[] = [];
+  for (const track of file.tracks) {
+    for (const event of track.events) {
+      if (!('channel' in event) || typeof event.channel !== 'number') continue;
+      used.add(event.channel);
+      const isNote = event instanceof midi.NoteOnEvent || event instanceof midi.NoteOffEvent;
+      if (isNote && event.channel === PERCUSSION_CHANNEL && CYMBAL_KEYS.has(event.noteKey)) {
+        cymbalNotes.push(event);
+      }
+    }
+  }
+  const target = file.tracks[0];
+  if (!target || cymbalNotes.length === 0) return null;
+  const channel = freeChannel(used);
+  const keys = new Set(cymbalNotes.map((note) => note.noteKey));
+  for (const note of cymbalNotes) note.channel = channel;
+  target.events.unshift(
+    ...[...keys].map((key) => new midi.NoteOnEvent(0, 0, PERCUSSION_CHANNEL, key, 0)),
+    new midi.ControlChangeEvent(0, 0, channel, midi.ControllerType.BankSelectCoarse, 1),
+    new midi.ControlChangeEvent(0, 0, channel, midi.ControllerType.BankSelectFine, 0),
+    new midi.ProgramChangeEvent(0, 0, channel, 0),
+  );
+  return channel;
 }
 
 /**

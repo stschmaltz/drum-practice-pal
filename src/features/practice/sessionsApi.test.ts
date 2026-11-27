@@ -7,7 +7,13 @@ import {
   type QueryCall,
 } from '@/test/fakeSupabase';
 import { SESSION_SELECT, type PracticeSession } from './sessions';
-import { fetchLoopSessions, logSession, logSessionOnExit } from './sessionsApi';
+import {
+  fetchAllSessions,
+  fetchLoopSessions,
+  logSession,
+  logSessionOnExit,
+  uniqueById,
+} from './sessionsApi';
 import type { SessionRecord } from './sessionTracker';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -63,6 +69,33 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('fetchAllSessions', () => {
+  // Copilot review on #30: a session replayed between two page requests, with an earlier
+  // start, moves the rows along, and the next page begins with the last row of the page
+  // before. Counted twice it doubled its time and passes on the Stats page.
+  it('keeps one copy of a session that two pages both returned', async () => {
+    const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => session(`p1-${i}`));
+    const repeated = firstPage[PAGE_SIZE - 1]!;
+    queryResult
+      .mockResolvedValueOnce(ok(firstPage))
+      .mockResolvedValueOnce(ok([repeated, session('last')]));
+
+    const sessions = await fetchAllSessions(USER);
+
+    expect(sessions).toHaveLength(PAGE_SIZE + 1);
+    expect(sessions.filter((each) => each.id === repeated.id)).toHaveLength(1);
+    expect(sessions.at(-1)?.id).toBe('last');
+  });
+
+  it('uniqueById keeps the first copy and the order', () => {
+    expect(uniqueById([{ id: 'a' }, { id: 'b' }, { id: 'a' }, { id: 'c' }])).toEqual([
+      { id: 'a' },
+      { id: 'b' },
+      { id: 'c' },
+    ]);
+  });
 });
 
 describe('fetchLoopSessions', () => {

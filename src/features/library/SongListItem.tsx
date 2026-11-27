@@ -5,21 +5,21 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { Icon } from '@/components/icons';
+import { OverflowMenu } from '@/components/OverflowMenu';
+import { ProgressRing } from '@/components/ProgressMarks';
 import {
   buttonClass,
-  cardClass,
   dangerButtonClass,
   dangerPanelClass,
   focusRing,
   inputClass,
   labelClass,
   primaryButtonClass,
-  quietButtonClass,
 } from '@/components/styles';
 import {
   findItemControl,
   itemAttributes,
-  itemControlAttributes,
+  itemMenuAttributes,
   type ItemControl,
 } from '@/lib/itemFocus';
 import { songPath } from '@/lib/routes';
@@ -32,21 +32,22 @@ import {
   type SongEdit,
   type SongEditErrors,
 } from './songForm';
+import { masteryFraction, masteryLine, type Mastery } from '@/features/loops/mastery';
 import { NO_DRUM_TRACK_NOTE } from './songMetadata';
 import { useDeleteSong, useUpdateSong } from './useSongs';
 
 type Mode = 'view' | 'edit' | 'confirm-delete';
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
-const formatDay = (timestamp: string) => dateFormat.format(new Date(timestamp));
-
 export function SongListItem({
   song,
+  mastery,
   onEditingChange,
   onEditClosed,
   onDeletePressed,
 }: {
   song: LibrarySong;
+  /** Its loops' mastery; null while the loops are still being read. */
+  mastery: Mastery | null;
   /**
    * The edit form closed (saved or cancelled). A saved rename can take the song
    * out of the list's search, and its Edit button with it, so the list hands
@@ -81,10 +82,11 @@ export function SongListItem({
   }, [editing, song.id, onEditingChange]);
 
   return (
-    // relative: the title's link stretches over the whole card (its ::after), and the item's
-    // buttons and its delete question sit above that (relative z-10), so nothing is nested.
+    // A plain row between the list's dividers (Unit 16). relative: the title's link stretches
+    // over the whole row (its ::after), and the row's buttons and its delete question sit above
+    // that (relative z-10), so nothing is nested.
     <li
-      className={`${cardClass} relative flex flex-col gap-3 p-4 transition-colors duration-150 hover:border-line-strong`}
+      className="relative flex flex-col gap-2 py-3 transition-colors duration-150 hover:bg-surface"
       {...itemAttributes(song.id)}
     >
       {editing ? (
@@ -97,28 +99,29 @@ export function SongListItem({
           }}
         />
       ) : (
-        <SongSummary song={song} />
-      )}
-      {mode === 'view' && (
-        <div className="relative z-10 flex flex-wrap gap-1 self-start">
-          <button
-            type="button"
-            className={quietButtonClass}
-            {...itemControlAttributes(song.id, 'edit')}
-            onClick={() => setMode('edit')}
-          >
-            <Icon name="edit" className="size-4" />
-            Edit<span className="sr-only"> {song.title}</span>
-          </button>
-          <button
-            type="button"
-            className={quietButtonClass}
-            {...itemControlAttributes(song.id, 'delete')}
-            onClick={() => setMode('confirm-delete')}
-          >
-            <Icon name="trash" className="size-4" />
-            Delete<span className="sr-only"> {song.title}</span>
-          </button>
+        <div className="flex items-start gap-2">
+          <SongSummary song={song} mastery={mastery} />
+          {/* Quiet secondary actions in "More" (16 QA issue 3), as the song's loop rows have
+              them. Its button stands for Edit and Delete in the focus hand-overs
+              (`findItemControl` falls back to it), and sits above the stretched link. */}
+          {mode === 'view' && (
+            <div className="relative z-10 shrink-0">
+              <OverflowMenu
+                name={song.title}
+                buttonAttributes={itemMenuAttributes(song.id)}
+                items={[
+                  { id: 'edit', label: 'Edit', icon: 'edit', onSelect: () => setMode('edit') },
+                  {
+                    id: 'delete',
+                    label: 'Delete',
+                    icon: 'trash',
+                    danger: true,
+                    onSelect: () => setMode('confirm-delete'),
+                  },
+                ]}
+              />
+            </div>
+          )}
         </div>
       )}
       {mode === 'confirm-delete' && (
@@ -132,39 +135,38 @@ export function SongListItem({
   );
 }
 
-function SongSummary({ song }: { song: LibrarySong }) {
+function SongSummary({ song, mastery }: { song: LibrarySong; mastery: Mastery | null }) {
+  const line = [song.artist, mastery ? masteryLine(mastery) : null].filter(Boolean).join(' · ');
   return (
-    <div className="flex flex-col gap-1">
-      {/* The whole card opens the song: one link, its hit area stretched over the card
-          by ::after (the item is `relative`), rather than a link wrapping the buttons. */}
-      <Link
-        to={songPath(song.id)}
-        className={`inline-flex min-h-touch max-w-full items-center self-start rounded-sm text-lg font-semibold wrap-anywhere text-ink after:absolute after:inset-0 after:rounded-card after:content-[''] hover:text-brand ${focusRing}`}
-      >
-        {song.title}
-      </Link>
-      {song.artist && <p className="break-words text-ink-soft">{song.artist}</p>}
-      <p className="text-sm text-ink-muted">
-        {song.bar_count} bars · {formatTempo(song.original_tempo)} BPM · added{' '}
-        {formatDay(song.created_at)}
-        {' · '}
-        {song.last_practiced_at
-          ? `practiced ${formatDay(song.last_practiced_at)}`
-          : 'not practiced yet'}
-      </p>
-      {song.drum_track_index === null && (
-        <p className="flex items-start gap-2 text-sm text-warning">
-          <Icon name="alert" className="mt-0.5 size-4" />
-          {NO_DRUM_TRACK_NOTE}
-        </p>
-      )}
+    <div className="flex min-w-0 flex-1 items-start gap-3">
+      <ProgressRing
+        fraction={mastery ? masteryFraction(mastery) : 0}
+        empty={mastery === null || mastery.total === 0}
+        className="mt-1.5 size-10"
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* The whole row opens the song: one link, its hit area stretched over the row
+            by ::after (the item is `relative`), rather than a link wrapping the buttons. */}
+        <Link
+          to={songPath(song.id)}
+          className={`inline-flex min-h-touch max-w-full items-center self-start rounded-sm text-lg font-semibold wrap-anywhere text-ink after:absolute after:inset-0 after:content-[''] hover:text-brand ${focusRing}`}
+        >
+          {song.title}
+        </Link>
+        {line && (
+          <p className="-mt-1.5 text-sm wrap-anywhere text-ink-muted" data-testid="song-line">
+            {line}
+          </p>
+        )}
+        {song.drum_track_index === null && (
+          <p className="mt-1 flex items-start gap-2 text-sm text-warning">
+            <Icon name="alert" className="mt-0.5 size-4" />
+            {NO_DRUM_TRACK_NOTE}
+          </p>
+        )}
+      </div>
     </div>
   );
-}
-
-/** Whole BPM unless the file says otherwise, e.g. 92.5. */
-function formatTempo(tempo: number): string {
-  return Number.isInteger(tempo) ? String(tempo) : tempo.toFixed(1);
 }
 
 function EditSongForm({ song, onDone }: { song: LibrarySong; onDone: () => void }) {

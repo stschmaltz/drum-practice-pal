@@ -1,8 +1,9 @@
 /**
- * The loops lists of the home page: what is on the go and what is finished,
- * across every song. Pure: the columns, the row type and the order. The speed
- * shows as a percent only there, because BPM needs the tempo at the loop's
- * first bar, which is in the song's file and not in a row.
+ * Every loop of the user with its song's name (the Songs list's mastery
+ * rings, the Stats page), and the order a song's overview lists its loops in.
+ * Pure: the columns, the row type and the order. Outside the player a speed
+ * shows as a percent only, because BPM needs the tempo at the loop's first
+ * bar, which is in the song's file and not in a row.
  */
 import type { LoopStatus } from '@/lib/schema';
 import type { Loop } from './loopForm';
@@ -16,14 +17,6 @@ export const PRACTICE_LOOP_SELECT =
 
 /** A loop with the song it belongs to. */
 export type PracticeLoop = Loop & { song: { title: string; artist: string } };
-
-export const PRACTICE_TABS = ['active', 'finished'] as const satisfies readonly LoopStatus[];
-export type PracticeTab = (typeof PRACTICE_TABS)[number];
-
-/** For a tab taken from the URL: anything unknown is the first tab. */
-export function practiceTabFrom(value: string | null): PracticeTab {
-  return PRACTICE_TABS.find((tab) => tab === value) ?? 'active';
-}
 
 const time = (iso: string | null) => (iso === null ? null : Date.parse(iso));
 
@@ -41,7 +34,7 @@ type Sortable = Pick<Loop, 'id' | 'status' | 'finished_at' | 'last_practiced_at'
  * first; one finished a moment ago, whose time the server hasn't sent back
  * yet, leads.
  */
-export function practiceLoopsFor<T extends Sortable>(loops: readonly T[], tab: PracticeTab): T[] {
+export function practiceLoopsFor<T extends Sortable>(loops: readonly T[], tab: LoopStatus): T[] {
   const newestFirst = (a: T, b: T) =>
     Date.parse(b.created_at) - Date.parse(a.created_at) || a.id.localeCompare(b.id);
   const listed = loops.filter((loop) => loop.status === tab);

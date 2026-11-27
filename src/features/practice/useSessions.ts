@@ -6,7 +6,12 @@ import { useSignedInUser } from '@/lib/auth';
 import { queuedWriteRetry } from '@/lib/network';
 import { sendRefreshingToken } from '@/lib/tokenRefresh';
 import { sessionKeys } from './sessionKeys';
-import { fetchLoopSessions, logSession, type LogSessionResult } from './sessionsApi';
+import {
+  fetchAllSessions,
+  fetchLoopSessions,
+  logSession,
+  type LogSessionResult,
+} from './sessionsApi';
 import { sessionFromRecord, type PracticeSession } from './sessions';
 import type { SessionRecord } from './sessionTracker';
 
@@ -16,6 +21,15 @@ export function useLoopSessions(loopId: string) {
   return useQuery({
     queryKey: sessionKeys.forLoop(user.id, loopId),
     queryFn: () => fetchLoopSessions(user.id, loopId),
+  });
+}
+
+/** Every session of the user, oldest first: the streak, the Stats page and the badges. */
+export function useAllSessions() {
+  const user = useSignedInUser();
+  return useQuery({
+    queryKey: sessionKeys.every(user.id),
+    queryFn: () => fetchAllSessions(user.id),
   });
 }
 
@@ -34,6 +48,14 @@ export function sessionLogged(queryClient: QueryClient, userId: string, record: 
       : sessions,
   );
   void queryClient.invalidateQueries({ queryKey: historyKey });
+  // The streak and the totals count it at once, as the Session complete summary does.
+  const everyKey = sessionKeys.every(userId);
+  queryClient.setQueryData<PracticeSession[]>(everyKey, (sessions) =>
+    sessions && !sessions.some((session) => session.id === record.id)
+      ? [...sessions, sessionFromRecord(record)]
+      : sessions,
+  );
+  void queryClient.invalidateQueries({ queryKey: everyKey });
   refetchLoopsWhenIdle(queryClient, userId);
   if (queryClient.isMutating({ mutationKey: songKeys.writes(userId) }) === 0) {
     void queryClient.invalidateQueries({ queryKey: songKeys.forUser(userId) });

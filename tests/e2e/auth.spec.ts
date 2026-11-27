@@ -3,10 +3,15 @@ import { appUrl, expect, signIn, signInEmailFor, test } from './auth';
 // Unit 03: auth guard, magic-link and code sign-in, sign-out, responsive nav.
 
 test('a guarded deep link returns to itself after the magic link', async ({ user, page }) => {
-  await page.goto('/library');
-  await expect(page).toHaveURL(/\/login\?next=%2Flibrary$/);
-  await signIn(page, user, '/library');
-  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await page.goto('/stats');
+  await expect(page).toHaveURL(/\/login\?next=%2Fstats$/);
+  await signIn(page, user, '/stats');
+  await expect(page.getByRole('heading', { name: 'Stats' })).toBeVisible();
+
+  // The library of earlier builds is the songs list now, its search and sort kept.
+  await page.goto('/library?sort=added');
+  await expect(page).toHaveURL(/\/\?sort=added$/);
+  await expect(page.getByRole('heading', { name: 'Songs' })).toBeVisible();
 });
 
 test('signs in with the emailed code', async ({ user, page }) => {
@@ -46,13 +51,13 @@ test('nav is bottom tabs on phone and a sidebar from 768 px', async ({ user, pag
     expect(box?.x).toBeLessThan(size.width / 4);
   }
 
-  await nav.getByRole('link', { name: 'Library' }).click();
-  await expect(page).toHaveURL(/\/library$/);
-  await expect(nav.getByRole('link', { name: 'Library' })).toHaveAttribute('aria-current', 'page');
+  await nav.getByRole('link', { name: 'Stats' }).click();
+  await expect(page).toHaveURL(/\/stats$/);
+  await expect(nav.getByRole('link', { name: 'Stats' })).toHaveAttribute('aria-current', 'page');
   await nav.getByRole('link', { name: 'Settings' }).click();
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-  await nav.getByRole('link', { name: 'On the go' }).click();
-  await expect(page.getByRole('heading', { name: 'On the go' })).toBeVisible();
+  await nav.getByRole('link', { name: 'Songs' }).click();
+  await expect(page.getByRole('heading', { name: 'Songs' })).toBeVisible();
 });
 
 test('sign-out returns to login and guards the app again', async ({ user, page }) => {
@@ -68,9 +73,9 @@ test('the session survives a reload, and /login sends a signed-in user on', asyn
   user,
   page,
 }) => {
-  await signIn(page, user, '/library');
+  await signIn(page, user, '/stats');
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Stats' })).toBeVisible();
   await page.goto('/login?next=%2Fsettings');
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
@@ -106,8 +111,8 @@ test('signing out on one device leaves the other signed in', async ({ user, brow
 
     await phone.reload();
     await expect(phone.getByRole('heading', { name: 'Settings' })).toBeVisible();
-    await phone.getByRole('link', { name: 'Library' }).first().click();
-    await expect(phone.getByRole('heading', { name: 'Library' })).toBeVisible();
+    await phone.getByRole('link', { name: 'Stats' }).first().click();
+    await expect(phone.getByRole('heading', { name: 'Stats' })).toBeVisible();
   } finally {
     await other.close();
   }
@@ -117,8 +122,8 @@ test('an unknown address shows not found inside the shell', async ({ user, page 
   await signIn(page, user, '/');
   await page.goto('/no-such-page');
   await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
-  await page.getByRole('link', { name: 'Go to On the go' }).click();
-  await expect(page.getByRole('heading', { name: 'On the go' })).toBeVisible();
+  await page.getByRole('link', { name: 'Go to Songs' }).click();
+  await expect(page.getByRole('heading', { name: 'Songs' })).toBeVisible();
 });
 
 // 12 UX pass, Test: straight to the one field with a mouse or trackpad; on a touch screen

@@ -1,4 +1,4 @@
-import { canChangeOptions, canPlay, canUseDrumToggles } from './controlGates';
+import { canChangeOptions, canPlay, canPlayLoopPractice, canUseDrumToggles } from './controlGates';
 import { DEFAULT_PLAYER_OPTIONS } from './playerOptions';
 import { initialPlayerSnapshot, type PlayerService, type PlayerStatus } from './PlayerService';
 
@@ -46,5 +46,24 @@ describe('canPlay', () => {
     ['error', false],
   ])('under %s is %s', (status, can) => {
     expect(canPlay(player, snapshot(status))).toBe(can);
+  });
+});
+
+describe('canPlayLoopPractice', () => {
+  it.each<[PlayerStatus, boolean, boolean]>([
+    // 16 Test bug 1: the sounds are in before the loop is open; Play would play the whole song.
+    ['ready', false, false],
+    ['ready', true, true],
+    ['loading', true, false],
+    ['error', true, false],
+    // Already running: Pause stays reachable whatever the loop.
+    ['playing', false, true],
+    ['countingIn', false, true],
+  ])('under %s with the loop open %s is %s', (status, loopOpen, can) => {
+    expect(canPlayLoopPractice(player, snapshot(status), loopOpen)).toBe(can);
+  });
+
+  it('is false with no player', () => {
+    expect(canPlayLoopPractice(null, snapshot('ready'), true)).toBe(false);
   });
 });

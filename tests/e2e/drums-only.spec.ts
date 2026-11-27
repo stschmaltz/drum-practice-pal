@@ -7,6 +7,7 @@ import {
   fixture,
   muteDrumsButton,
   openFixture,
+  openSongPlayer,
   playButton,
   showControls,
 } from './playerPage';
@@ -159,7 +160,7 @@ test('drums only pressed before the sounds have loaded holds once the song is re
   page,
 }) => {
   await recordSynthMessages(page);
-  await signIn(page, user, '/library');
+  await signIn(page, user, '/');
   await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture('multi-track'));
   await expect(page.getByRole('status').filter({ hasText: 'Added “Multi Track”.' })).toBeVisible();
 
@@ -173,7 +174,7 @@ test('drums only pressed before the sounds have loaded holds once the song is re
     await route.continue();
   });
 
-  await page.getByRole('list').getByRole('link', { name: 'Multi Track' }).click();
+  await openSongPlayer(page, 'Multi Track');
   await expect(drumsOnlyButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(playButton(page)).toBeDisabled();
   await drumsOnlyButton(page).click();
@@ -210,9 +211,9 @@ test('drums only is off again when the song is opened again, with nothing muted'
   expectOnlyDrumsSounding(await mutedChannels(page));
   expect(await synthCount(page)).toBe(1);
 
-  // Back to the library and in again, without a page load: a new player in the same tab.
+  // Back to the song and in again, without a page load: a new player in the same tab.
   await page.goBack();
-  await page.getByRole('list').getByRole('link', { name: 'Multi Track' }).click();
+  await page.getByRole('link', { name: 'Play whole song' }).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
 
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');
@@ -242,4 +243,37 @@ test('a song that is only drums plays on with drums only on', async ({ user, pag
   expect(await transportCommands(page)).toBe(transportBefore);
   await expect(playButton(page)).toHaveText('Pause');
   await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThan(barBefore);
+});
+
+// Unit 16, Shane's first try: the track mixer mutes one track on its own, live.
+test('the track mixer mutes one track mid-play and brings it back, with no restart', async ({
+  user,
+  page,
+}) => {
+  await recordSynthMessages(page);
+  await openFixture(page, user, 'multi-track', 'Multi Track');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect.poll(() => barNumber(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+  const transportBefore = await transportCommands(page);
+  expect(transportBefore).toBeGreaterThan(0);
+
+  await showControls(page);
+  await page.locator('summary', { hasText: /^Tracks/ }).click();
+  const mixer = page.getByRole('group', { name: 'Tracks' });
+  await expect(mixer.getByRole('button')).toHaveCount(3);
+  await mixer.getByRole('button', { name: 'Bass' }).click();
+  await expect(mixer.getByRole('button', { name: 'Bass' })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  const muted = await mutedChannels(page);
+  // The bass's own channels, and neither the drums nor the guitar's.
+  expect(muted).toHaveLength(2);
+  expect(muted).not.toContain(DRUM_CHANNEL);
+
+  await mixer.getByRole('button', { name: 'Bass' }).click();
+  expect(await mutedChannels(page)).toEqual([]);
+  expect(await transportCommands(page)).toBe(transportBefore);
+  await expect(playButton(page)).toHaveText('Pause');
 });

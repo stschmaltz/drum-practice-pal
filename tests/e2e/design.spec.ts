@@ -11,8 +11,23 @@ import {
   textSpillingOutOf,
 } from './designPage';
 import { loopItem, loopPanel, openLoopPanel, saveNewLoop } from './loopsPage';
-import { controls, chooseCountIn, openFixture, playButton, viewport } from './playerPage';
-import { homeItem, navLink, openLoopHistory } from './practicePage';
+import {
+  controls,
+  chooseCountIn,
+  openFixture,
+  openSongOverview,
+  playButton,
+  viewport,
+} from './playerPage';
+import {
+  backTo,
+  navLink,
+  openLoopHistory,
+  overviewItem,
+  playFor,
+  sessionComplete,
+  shortSessions,
+} from './practicePage';
 
 // Unit 12: what the visual design promises, measured on every screen at the
 // phone, tablet and desktop sizes. Behaviour is the other specs' subject; they
@@ -50,7 +65,7 @@ test('the login page', async ({ page }) => {
 
 test('the home page, settings and a missing page, before any song', async ({ user, page }) => {
   await signIn(page, user, '/');
-  await expect(page.getByRole('link', { name: /library/i }).last()).toBeVisible();
+  await expect(page.getByText('No songs yet.', { exact: false })).toBeVisible();
   await expect(page.getByText(/Loading/)).toHaveCount(0);
   await expectWellDrawn(page, 'home, empty');
   await expectFocusRings(page, 'home, empty');
@@ -69,6 +84,8 @@ test('the library, the song page with its loops, and the home page with a loop',
   user,
   page,
 }) => {
+  test.setTimeout(90_000);
+  await shortSessions(page, 2);
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await expectWellDrawn(page, 'song, jam');
   await expectFocusRings(page, 'song, jam');
@@ -90,12 +107,37 @@ test('the library, the song page with its loops, and the home page with a loop',
   await page.keyboard.press('Escape');
   await expect(shortcutDialog(page)).toHaveCount(0);
 
-  await navLink(page, 'On the go').click();
-  await expect(homeItem(page, 'Verse')).toBeVisible();
-  await expectWellDrawn(page, 'home, a loop');
-  await expectFocusRings(page, 'home, a loop');
+  await backTo(page, 'Groove 120').click();
+  await expect(overviewItem(page, 'on the go', 'Verse')).toBeVisible();
+  await expectWellDrawn(page, 'song overview');
+  await expectFocusRings(page, 'song overview');
 
-  await navLink(page, 'Library').click();
+  // No practice yet: Stats is one card pointing to Songs (16 QA issue 5).
+  await navLink(page, 'Stats').click();
+  await expect(page.getByText(/^No practice yet/)).toBeVisible();
+  await expectWellDrawn(page, 'stats, no practice');
+  await expectFocusRings(page, 'stats, no practice');
+
+  await navLink(page, 'Songs').click();
+  await openSongOverview(page, 'Groove 120');
+  await page.getByRole('link', { name: 'Practise Verse' }).click();
+  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+  await expectWellDrawn(page, 'practice');
+  await expectFocusRings(page, 'practice');
+
+  // A short session, summed up in the sheet at the foot of the window (16 QA issue 4).
+  await playButton(page).click();
+  await playFor(page, 3_000);
+  await expect(sessionComplete(page)).toBeVisible();
+  await expectWellDrawn(page, 'practice, session complete');
+  await sessionComplete(page).getByRole('button', { name: 'Keep going' }).click();
+
+  await navLink(page, 'Stats').click();
+  await expect(page.getByRole('heading', { name: 'Badges' })).toBeVisible();
+  await expectWellDrawn(page, 'stats');
+  await expectFocusRings(page, 'stats');
+
+  await navLink(page, 'Songs').click();
   await expect(page.getByRole('main').getByRole('link', { name: 'Groove 120' })).toBeVisible();
   await expectWellDrawn(page, 'library');
   // The upload's file input is sr-only: its ring was judged on the label that shows it.
@@ -130,7 +172,7 @@ test('icons are hidden from screen readers and every control keeps its words', a
   }
   await expect(bar.getByRole('radiogroup', { name: 'When to count in' })).toHaveCount(0);
   await expect(playButton(page)).toHaveAccessibleName('Play');
-  for (const name of ['On the go', 'Library', 'Settings']) {
+  for (const name of ['Songs', 'Stats', 'Settings']) {
     await expect(
       page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name, exact: true }),
     ).toBeVisible();
@@ -305,10 +347,10 @@ test('a long unbroken loop name wraps inside the loop panel and on the home page
     });
   expect(lines, 'the name wraps').toBeGreaterThan(1);
 
-  await navLink(page, 'On the go').click();
-  const home = homeItem(page, name);
-  await expect(home).toBeVisible();
-  expect(await textSpillingOutOf(home), 'home item').toEqual([]);
+  await backTo(page, 'Groove 120').click();
+  const row = overviewItem(page, 'on the go', name);
+  await expect(row).toBeVisible();
+  expect(await textSpillingOutOf(row), 'overview row').toEqual([]);
   expect((await auditScreen(page)).overflow).toEqual([]);
 });
 

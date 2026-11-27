@@ -30,7 +30,7 @@ describe('PlayerService out-of-turn engine events', () => {
     service.load(bytes);
     engine.fire('scoreLoaded', {
       barCount: 16,
-      trackCount: 3,
+      trackNames: ['Drums', 'Bass', 'Guitar'],
       barTempos: Array(16).fill(120),
       barMeters: Array(16).fill(COMMON_TIME),
     });

@@ -77,7 +77,8 @@ function applyLoopRange(player: PlayerService, range: BarRange | null): void {
  * - While the form is open (`editor`), taps on the score pick bars instead of
  *   seeking; the screen turns jam mode's seek off for as long (`editor !== null`).
  * - A mouse drag across bars picks a range, opening the form for a new loop
- *   if none is open.
+ *   if none is open (unless `dragOpensForm` is false: the practice screen
+ *   picks bars only once "Show whole song" has opened the form).
  * - The score highlights the form's bars while it is open, otherwise the
  *   playing loop's.
  */
@@ -85,6 +86,18 @@ export function useLoopPractice(
   player: PlayerService | null,
   snapshot: PlayerSnapshot,
   loops: readonly Loop[] | undefined,
+  {
+    dragOpensForm = true,
+    previewPickedBars = false,
+  }: {
+    dragOpensForm?: boolean;
+    /**
+     * While the form is open, a whole range picked on the score is what plays
+     * (the practice screen's "Show whole song": hear a new loop before saving
+     * it). Closing the form goes back to the active loop's bars.
+     */
+    previewPickedBars?: boolean;
+  } = {},
 ) {
   const [activeLoopId, setActiveLoopId] = useState<string | null>(null);
   const [editor, setEditor] = useState<LoopEditor | null>(null);
@@ -101,21 +114,24 @@ export function useLoopPractice(
 
   // --- The playing loop ---
 
-  const activeStart = activeLoop?.start_bar ?? null;
-  const activeEnd = activeLoop?.end_bar ?? null;
-  // Keeps the player on the active loop's saved bars: after an edit of its
-  // range (here or on another device), a loop selected by id before its row
-  // was in the list, and back to the whole song once it is deleted or exited.
+  // A whole range picked in the open form, played instead of the loop (previewPickedBars).
+  const preview = previewPickedBars && editor !== null && !editor.awaitingEnd ? editorRange : null;
+  const playedStart = preview?.startBar ?? activeLoop?.start_bar ?? null;
+  const playedEnd = preview?.endBar ?? activeLoop?.end_bar ?? null;
+  // Keeps the player on the active loop's saved bars (or the picked bars it
+  // previews): after an edit of its range (here or on another device), a loop
+  // selected by id before its row was in the list, and back to the whole song
+  // once it is deleted or exited.
   useEffect(() => {
     if (!player || barCount === null) return;
     const wanted =
-      activeStart !== null && activeEnd !== null
-        ? { startBar: activeStart, endBar: activeEnd }
+      playedStart !== null && playedEnd !== null
+        ? { startBar: playedStart, endBar: playedEnd }
         : null;
     if (isSameBarRange(player.getSnapshot().range, wanted)) return;
     if (wanted && !isValidBarRange(wanted.startBar, wanted.endBar, barCount)) return;
     applyLoopRange(player, wanted);
-  }, [player, barCount, activeStart, activeEnd]);
+  }, [player, barCount, playedStart, playedEnd]);
 
   const playLoop = useCallback(
     (loop: Loop) => {
@@ -213,6 +229,8 @@ export function useLoopPractice(
         setEditor((open) => withPickedBars(open, range, false));
         return;
       }
+      // Here a drag only picks the bars of a form already open.
+      if (!dragOpensForm) return;
       // The form opens on release: opening it mid-drag would move the score under the pointer.
       if (!done) {
         setDragPreview(range);
@@ -223,13 +241,13 @@ export function useLoopPractice(
       if (startBar === endBar) return;
       setEditor({ loopId: null, bars: barFieldsOf(range), awaitingEnd: false, saving: false });
     });
-  }, [player, editorOpen]);
+  }, [player, editorOpen, dragOpensForm]);
 
   // --- The highlight ---
 
-  const highlight = editorOpen
-    ? editorRange
-    : (dragPreview ?? (activeLoop ? rangeOf(activeLoop) : null));
+  const activeRange = activeLoop ? rangeOf(activeLoop) : null;
+  // An open form shows its bars; until any are picked, the loop playing stays marked.
+  const highlight = editorOpen ? (editorRange ?? activeRange) : (dragPreview ?? activeRange);
   const highlightStart = highlight?.startBar ?? null;
   const highlightEnd = highlight?.endBar ?? null;
   useEffect(() => {

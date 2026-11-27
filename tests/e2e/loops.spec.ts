@@ -198,10 +198,13 @@ test('a mouse drag across bars picks them for a new loop, and never seeks', asyn
   // The click that ends a drag is not a tap: playback stayed on bar 2.
   await expect(status(page)).toHaveText('Bar 2 of 16');
 
-  // Right to left gives the same range the right way round.
-  await page.mouse.move(bar3.x, bar3.y);
+  // Right to left gives the same range the right way round. Measured again: the open form
+  // brings the score up above the sheet (Unit 16, `scoreOnScreen: 'picking-bars'`).
+  const again2 = await cursorBarPoint(page);
+  const again3 = await nextBarPoint(page);
+  await page.mouse.move(again3.x, again3.y);
   await page.mouse.down();
-  await page.mouse.move(bar2.x, bar2.y, { steps: 8 });
+  await page.mouse.move(again2.x, again2.y, { steps: 8 });
   await page.mouse.up();
   await expect(firstBarField(page)).toHaveValue('2');
   await expect(lastBarField(page)).toHaveValue('3');

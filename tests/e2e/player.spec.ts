@@ -15,6 +15,7 @@ import {
   layoutForWidth,
   muteDrumsButton,
   openFixture,
+  openSongPlayer,
   playButton,
   recordedStatuses,
   recordStatuses,
@@ -207,10 +208,10 @@ test('leaving the song page mid-play releases the player', async ({ user, page }
 
   await page
     .getByRole('navigation', { name: 'Main' })
-    .getByRole('link', { name: 'Library' })
+    .getByRole('link', { name: 'Songs' })
     .first()
     .click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Songs' })).toBeVisible();
 
   await expect.poll(() => audioContextStates(page)).not.toContain('running');
   expect(await audioContextStates(page)).not.toHaveLength(0);
@@ -237,7 +238,7 @@ test('a damaged file in Storage shows the score error, not a stray score', async
     .upload(song.file_path, junk, { upsert: true, contentType: 'application/octet-stream' });
   if (replaced.error) throw replaced.error;
 
-  await page.goto(`/songs/${song.id}`);
+  await page.goto(`/songs/${song.id}/play`);
 
   await expect(page.getByRole('alert')).toHaveText(
     "This song couldn't be shown or played. Try reloading, or upload the file again.",
@@ -559,12 +560,12 @@ test('scroll anchoring is off only on the song page, left while playing and open
   await expect(controls(page).getByRole('button', { name: 'Show controls' })).toBeVisible();
 
   for (let visit = 0; visit < 2; visit++) {
-    await navLink(page, 'Library').click();
+    await navLink(page, 'Songs').click();
     const song = page.getByRole('list').getByRole('link', { name: 'Groove 120' });
     await expect(song).toBeVisible();
     expect(await anchoringOf(page), `visit ${visit}: library`).toEqual(['auto', 'auto']);
 
-    await song.click();
+    await openSongPlayer(page, 'Groove 120');
     await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
     expect(await anchoringOf(page), `visit ${visit}: song again`).toEqual(['none', 'none']);
     await playButton(page).click();

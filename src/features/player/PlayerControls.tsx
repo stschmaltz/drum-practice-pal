@@ -24,6 +24,7 @@ import {
   canChangeOptions,
   canPlay,
   canUseDrumToggles,
+  type PlayGate,
 } from './controlGates';
 import { MetronomeVoiceFields } from './MetronomeVoiceFields';
 import { metronomeVoiceSummary } from './metronomeSounds';
@@ -61,21 +62,40 @@ interface PlayerControlsProps extends PlayerViewProps {
    * one speed control on screen, not two that look alike.
    */
   onShowLoopSpeed?: (() => void) | null;
+  /** False where the screen has a speed control of its own (the practice screen's). */
+  showSpeed?: boolean;
 }
 
-/** Play/Pause. Part of `PlayerControls` unless the screen places it itself. */
-export function PlayPauseButton({ player, snapshot }: PlayerViewProps) {
+/**
+ * Play/Pause. Part of `PlayerControls` unless the screen places it itself.
+ * `round`: the practice screen's one big round button, its word left to
+ * screen readers (the name stays "Play" / "Pause").
+ */
+export function PlayPauseButton({
+  player,
+  snapshot,
+  round = false,
+  gate = canPlay,
+}: PlayerViewProps & {
+  round?: boolean;
+  /** When the button is on; the screen's Space key goes by the same gate. */
+  gate?: PlayGate;
+}) {
   const running = isRunning(snapshot.status);
+  const shape = round
+    ? // Smaller in a short window (a phone on its side), still past the 44 px target.
+      'size-16 shrink-0 rounded-full! px-0! md:size-20 short:size-14'
+    : 'min-w-24 md:min-w-28 md:text-lg';
   return (
     <button
       type="button"
-      className={`${primaryButtonClass} min-w-24 md:min-w-28 md:text-lg`}
-      disabled={!canPlay(player, snapshot)}
+      className={`${primaryButtonClass} ${shape}`}
+      disabled={!gate(player, snapshot)}
       // No await before this: iOS only starts audio inside the tap itself.
       onClick={() => player?.togglePlay()}
     >
-      <Icon name={running ? 'pause' : 'play'} className="size-6" />
-      {running ? 'Pause' : 'Play'}
+      <Icon name={running ? 'pause' : 'play'} className={round ? 'size-8' : 'size-6'} />
+      <span className={round ? 'sr-only' : undefined}>{running ? 'Pause' : 'Play'}</span>
     </button>
   );
 }
@@ -101,6 +121,7 @@ export function PlayerControls({
   showPlayButton = true,
   fold,
   onShowLoopSpeed = null,
+  showSpeed = true,
 }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist
   // (and are off once it has failed).
@@ -183,7 +204,7 @@ export function PlayerControls({
             : 'flex flex-wrap items-center gap-x-4 gap-y-1 lg:min-w-80 lg:flex-1'
         }
       >
-        {onShowLoopSpeed ? (
+        {!showSpeed ? null : onShowLoopSpeed ? (
           <LoopSpeedButton
             speedRatio={snapshot.speedRatio}
             compact={folded}
@@ -217,6 +238,8 @@ export function PlayerControls({
       )}
 
       {!folded && <MetronomeVoiceControls player={player} snapshot={snapshot} />}
+
+      {!folded && <TrackMixer player={player} snapshot={snapshot} />}
 
       {fold?.canFold && <FoldToggle folded={folded} onFoldedChange={fold.onFoldedChange} />}
     </section>
@@ -422,9 +445,7 @@ function MetronomeVoiceControls({ player, snapshot }: PlayerViewProps) {
     // Closed by default: chosen once in a while, and open it would push the score
     // a screen down on a phone. Native details, so it needs no state or keys.
     <details className="group text-sm lg:basis-full">
-      <summary
-        className={`${ghostButtonClass} w-fit cursor-pointer list-none [&::-webkit-details-marker]:hidden`}
-      >
+      <summary className={disclosureSummaryClass}>
         <Icon name="metronome" />
         Metronome sounds
         <span className="text-ink-muted">{metronomeVoiceSummary(voice)}</span>
@@ -441,6 +462,59 @@ function MetronomeVoiceControls({ player, snapshot }: PlayerViewProps) {
     </details>
   );
 }
+
+/**
+ * Each of the song's tracks on or off, by name, for this player only: nothing
+ * is saved, and every track is on when a song opens. Live, like the other
+ * options. The drum track's switch is Mute drums; Drums only silences the
+ * others over their switches without changing them, and says so.
+ */
+function TrackMixer({ player, snapshot }: PlayerViewProps) {
+  const { tracks, drumsOnly } = snapshot;
+  // One track has nothing to mix: Mute drums, or the song itself, covers it.
+  if (tracks.length < 2) return null;
+  const onCount = tracks.filter((track) => !track.muted).length;
+  const disabled = !canChangeOptions(player, snapshot);
+  return (
+    // Closed by default, as the metronome's sounds are: open it pushes the score down.
+    <details className="group text-sm lg:basis-full">
+      <summary className={disclosureSummaryClass}>
+        <Icon name="controls" />
+        Tracks
+        <span className="text-ink-muted">
+          {onCount} of {tracks.length} on
+        </span>
+        <Icon name="chevronDown" className="size-4 group-open:rotate-180" />
+      </summary>
+      <div role="group" aria-label="Tracks" className="flex flex-col gap-2 pt-2">
+        <div className="flex flex-wrap gap-2">
+          {tracks.map((track) => (
+            <button
+              key={track.index}
+              type="button"
+              aria-pressed={!track.muted}
+              disabled={disabled}
+              onClick={() => player?.setTrackMuted(track.index, !track.muted)}
+              className={`${toolButtonClass(!track.muted, { inline: true })} max-w-full`}
+            >
+              <ToggleMark on={!track.muted} inline />
+              {/* A name from the file, which can be one long word. */}
+              <span className="min-w-0 wrap-anywhere">{track.name}</span>
+            </button>
+          ))}
+        </div>
+        {drumsOnly && tracks.some((track) => !track.drums) && (
+          <p className="text-ink-soft">
+            Drums only is on: the other tracks are silent until it's off.
+          </p>
+        )}
+      </div>
+    </details>
+  );
+}
+
+/** A closed-by-default disclosure's summary in the bar, drawn as a quiet button. */
+const disclosureSummaryClass = `${ghostButtonClass} w-fit cursor-pointer list-none [&::-webkit-details-marker]:hidden`;
 
 /** The words (and icon) before a control in the bar. */
 const controlLabelClass = 'flex items-center gap-2 whitespace-nowrap text-ink-soft';

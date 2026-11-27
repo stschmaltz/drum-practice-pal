@@ -35,12 +35,29 @@ export const speedSlider = (page: Page) => controls(page).getByRole('slider', { 
 export const status = (page: Page) => page.getByTestId('player-status');
 export const viewport = (page: Page) => page.getByTestId('score-viewport');
 
-/** Uploads a fixture through the library and opens its song page. */
+/** From the songs list (`/`), a song's overview: its loops, and the ways into the player. */
+export async function openSongOverview(page: Page, title: string) {
+  await page.getByRole('main').getByRole('list').getByRole('link', { name: title }).click();
+  await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+}
+
+/**
+ * From the songs list (`/`), the song's overview and then "Play whole song":
+ * jam mode, where the earlier units' specs run (Unit 16 put it a level down).
+ */
+export async function openSongPlayer(page: Page, title: string) {
+  await openSongOverview(page, title);
+  await page.getByRole('link', { name: 'Play whole song' }).click();
+  await expect(page).toHaveURL(/\/songs\/[^/]+\/play$/);
+}
+
+/** Uploads a fixture on the songs list and opens it in jam mode (`/songs/:id/play`). */
 export async function openFixture(page: Page, user: E2eUser, name: string, title: string) {
-  await signIn(page, user, '/library');
+  await signIn(page, user, '/');
   await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture(name));
   await expect(page.getByRole('status').filter({ hasText: `Added “${title}”.` })).toBeVisible();
-  await page.getByRole('list').getByRole('link', { name: title }).click();
+  await openSongPlayer(page, title);
   await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
   // Enabled once the score, MIDI and soundfont are all in.
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
@@ -202,13 +219,24 @@ export const checkedCountInMode = (page: Page) => countInModeGroup(page).locator
 const COUNT_IN_LABELS = { 0: 'Off', 1: '1 bar', 2: '2 bars' } as const;
 const COUNT_IN_MODE_LABELS = { start: 'At the start', every_repeat: 'Every repeat' } as const;
 
+/**
+ * Brings a control to the middle of the window before a click. Playwright
+ * scrolls a target only just into view, which on a phone can be under the
+ * sticky Play bar or the loop sheet's header: the click then never lands
+ * (two phone cases of loop-scroll.spec.ts timed out on it in CI).
+ */
+async function clearOfStickyBars(target: Locator): Promise<void> {
+  await target.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+}
+
 /** Chooses the count-in's bars in the controls bar, opening the bar first if playback folded it. */
 export async function chooseCountIn(page: Page, bars: 0 | 1 | 2): Promise<void> {
   await showControls(page);
-  await countInGroup(page)
+  const option = countInGroup(page)
     .locator('label')
-    .filter({ hasText: new RegExp(`^${COUNT_IN_LABELS[bars]}$`) })
-    .click();
+    .filter({ hasText: new RegExp(`^${COUNT_IN_LABELS[bars]}$`) });
+  await clearOfStickyBars(option);
+  await option.click();
   await expect(checkedCountIn(page)).toHaveValue(String(bars));
 }
 
@@ -218,10 +246,11 @@ export async function chooseCountInMode(
   mode: keyof typeof COUNT_IN_MODE_LABELS,
 ): Promise<void> {
   await showControls(page);
-  await countInModeGroup(page)
+  const option = countInModeGroup(page)
     .locator('label')
-    .filter({ hasText: new RegExp(`^${COUNT_IN_MODE_LABELS[mode]}$`) })
-    .click();
+    .filter({ hasText: new RegExp(`^${COUNT_IN_MODE_LABELS[mode]}$`) });
+  await clearOfStickyBars(option);
+  await option.click();
   await expect(checkedCountInMode(page)).toHaveValue(mode);
 }
 

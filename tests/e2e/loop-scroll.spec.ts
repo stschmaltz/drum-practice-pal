@@ -38,10 +38,12 @@ import {
   scrollScoreToStart,
   status,
   viewport,
+  scoreSettled,
   windowScrollSettled,
   type Box,
   type Point,
 } from './playerPage';
+import { backTo, overviewItem } from './practicePage';
 
 // Unit 08, QA fix round 1: on a phone "Play loop" closes the sheet, and the score
 // box scrolls to the bar a count-in counts into, or a paused loop starts on.
@@ -313,7 +315,7 @@ test('the panel after Play loop: the sheet closed; reopened it has the playing l
   // Opened again while it plays: the playing loop and its speed control, at its saved speed.
   await recordStatuses(page);
   await openLoopPanel(page);
-  await expect(loopPanel(page).getByRole('region', { name: 'Practicing First' })).toBeVisible();
+  await expect(loopPanel(page).getByRole('region', { name: 'Practising First' })).toBeVisible();
   await expect(loopSpeed(page)).toBeVisible();
   await expect(loopPercentField(page)).toHaveValue('80');
   await expect(loopBpmField(page)).toHaveValue('96');
@@ -328,7 +330,7 @@ test('the panel after Play loop: the sheet closed; reopened it has the playing l
   await playLoopButton(page, 'Second').click();
   await expectLooping(page, 'Second', 'Bars 5 to 6');
   await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'true');
-  await expect(loopPanel(page).getByRole('region', { name: 'Practicing Second' })).toBeVisible();
+  await expect(loopPanel(page).getByRole('region', { name: 'Practising Second' })).toBeVisible();
   await expect(loopPercentField(page)).toHaveValue('100');
   await expect(loopPanel(page).getByRole('button', { name: 'Restart loop Second' })).toBeVisible();
   await playLoopButton(page, 'Second').click();
@@ -682,3 +684,62 @@ test('paused: a loop saved from typed bars, another one, and its bars edited eac
   await page.waitForTimeout(300);
   expect(await scoreScroll(page)).toEqual(settled);
 });
+
+/**
+ * Whether the middle of the bar under alphaTab's cursor (bar 1 on a fresh
+ * page) is in the window and nothing is over it: a tap there picks the bar.
+ */
+async function cursorBarTappable(page: Page): Promise<{ point: Point; tappable: boolean }> {
+  await scoreSettled(page);
+  const cursor = await barCursorBox(page);
+  const point = { x: cursor.x + cursor.width / 2, y: cursor.y + cursor.height / 2 };
+  const tappable = await page.evaluate(
+    ({ x, y }) =>
+      y >= 0 &&
+      y <= window.innerHeight &&
+      document.elementFromPoint(x, y)?.closest('[data-testid="score-viewport"]') != null,
+    point,
+  );
+  return { point, tappable };
+}
+
+// 16 QA issue 1: the overview's "New loop" and a row's Edit open the jam page with the loop form
+// in the sheet, which asks for taps on the score; on a phone the page stayed at its top and the
+// sheet covered all of the score. The score's first line comes on screen above the sheet.
+for (const turned of [false, true]) {
+  for (const link of ['New loop', 'Edit'] as const) {
+    const where = turned ? ' on a phone in landscape' : '';
+    test(`the overview's ${link} opens the form with the score's bars on show to tap${where}`, async ({
+      user,
+      page,
+    }, testInfo) => {
+      const touch = testInfo.project.use.hasTouch === true;
+      if (turned) {
+        test.skip(testInfo.project.name !== 'phone', 'a phone turned on its side');
+        await page.setViewportSize({ width: 844, height: 390 });
+      }
+      await openFixture(page, user, 'groove-120', 'Groove 120');
+      if (link === 'Edit') await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+      await backTo(page, 'Groove 120').click();
+      await expect(page.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+
+      if (link === 'New loop') {
+        await page.getByRole('link', { name: 'New loop' }).click();
+      } else {
+        await overviewItem(page, 'on the go', 'Verse')
+          .getByRole('button', { name: 'More actions for Verse' })
+          .click();
+        await page.getByRole('menuitem', { name: 'Edit' }).click();
+      }
+      await expect(loopForm(page)).toBeVisible({ timeout: 20_000 });
+      await expect(viewport(page).locator('svg').first()).toBeAttached();
+
+      const { point, tappable } = await cursorBarTappable(page);
+      expect(tappable, `bar 1 at ${point.x}, ${point.y}`).toBe(true);
+      // And the tap is heard: it picks the bar.
+      if (touch) await page.touchscreen.tap(point.x, point.y);
+      else await page.mouse.click(point.x, point.y);
+      await expect(firstBarField(page)).toHaveValue('1');
+    });
+  }
+}

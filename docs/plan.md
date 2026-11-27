@@ -173,6 +173,7 @@ Handoff notes written before the Visual design unit was added call the release u
 | 13  | Polish and release                          | all        |
 | 14  | Songs with recordings                       | 13         |
 | 15  | Play-along player, markers, recording loops | 14         |
+| 16  | Songs first and practice progress           | 13         |
 
 ### 00 Scaffold, conventions, CI, preview deploys
 
@@ -449,6 +450,8 @@ Shane's first pass after the MVP (branch `practice-feedback`): the score takes t
 
 ### 14 Songs with recordings
 
+**Next after Unit 16's PR** (Shane, 2026-11-27). Not built yet.
+
 **Goal:** any song can be played along to with the real recording, at any point in learning it, whether or not it has a tab. Written to `docs/product.md`.
 
 **For whom and when** (jobs 1, 4 and 5 there; job 2 is Unit 15):
@@ -527,7 +530,7 @@ Nothing here waits for loops to be finished, and nothing needs a tab.
 
 **Carried forward**
 
-None yet.
+- From 16 (built before this unit; docs/units/14-songs-first.md): the library is now the Songs list at `/` and the On the go home page is gone. "A song's library card" is a row of the Songs list, and "the home page's Songs tab" has no home page to go on: the Songs list is already every song, recently practised first. The song page is now an overview (`/songs/:id`, no player), with the tab at `/songs/:id/play` and each loop's practice screen at `/songs/:id/loops/:loopId`. Walk the scope against these screens again with `/design` before Build.
 
 ### 15 Play-along player, markers and loops on a recording
 
@@ -543,6 +546,45 @@ None yet.
 - To check first: whether `setPlaybackRate` takes rates between the 0.25 steps (if not, a recording loop's speeds are 25, 50, 75, 100%, and the UI says so); how exact `seekTo` is at a loop's seam; whether any of it survives a locked iPhone
 
 **Later, undesigned:** a rough offset between a tab and a recording (bar 1 at 0:07) so a bar loop can jump the video to about the right place and a marker can suggest its bars; a "Down" mark and repertoire view if the Songs tab gets long; adding a song by sharing from the YouTube or Spotify app (`share_target`, Android only).
+
+**Carried forward**
+
+- From 16: loops are listed on a song's overview and counted on the Stats page, not on a home page; a loop on a recording joins them there, and its practice screen is the place to copy (`LoopPracticePage`).
+
+### 16 Songs first and practice progress
+
+Numbered 16 when main was merged in: main had taken 14 and 15 for recordings while this unit was being built. It was built first, so 14 and 15 build on its screens (see their Carried forward). Its handoff note keeps its first name, `docs/units/14-songs-first.md`.
+
+**Goal:** organise the app the way practice happens: songs, then a song's loops, then practising one loop, with light game-like feedback on progress and a Stats tab. Shane signed off on the "songs first, minimal" mockup on 2026-11-26: plain rows with dividers, one ring or bar per item, one main action per screen; no level names, no cards around list items.
+
+- **Navigation:** Songs · Stats · Settings (bottom tabs below `md`, sidebar from `md`, as now). `/` is the Songs list; the library merges into it (upload by picker and drop, search, sort, edit, delete all kept). `/library` redirects to `/`. The On the go page goes; a finished loop is shown as mastered inside its song.
+- **Songs list (`/`):** one row per song: a mastery ring (finished loops of all its loops; a dashed ring with no loops; a full ring and "Mastered" when every loop is finished) and one line under the name ("2 of 4 loops mastered", "No loops yet"). Recently practised first by default. The header carries the streak as a flame and a number of days, hidden at 0. Upload is a quiet link-style action, not a big drop box once songs exist.
+- **Song overview (`/songs/:id`):** title, artist and "n of m mastered". The loops: active ones first (last practised first), then finished ones below with a trophy. An active loop's row shows its name, bars and saved speed as a percent, a thin bar of that speed towards full speed (100%), and a round play button that opens its practice screen. Edit, history and delete stay in the row's More menu. "New loop" and "Play whole song" are quiet actions. This screen doesn't load alphaTab or the file (percent only, as the home page does today).
+- **Practice screen (`/songs/:id/loops/:loopId`):** the player set to the loop (range, looping, saved speed), as `useLoopPractice.openLoop` does now. On it: the loop's name, one muted line with the session's play time and passes, the score, the speed in large type with BPM and "n% to full speed", nudge buttons and "Save speed", and one big Play/Pause. Count-in, metronome, drum toggles, keyboard shortcuts and the "Mark finished?" prompt keep working; the loop keys switch to the song's other loops (the URL follows with `replace`). Back goes to the song.
+- **Play whole song (`/songs/:id/play`):** today's jam mode. "New loop" opens it with the bar picker open; after the save, the app goes to the new loop's practice screen.
+- **Old links:** `/songs/:id?loop=<id>` redirects to that loop's practice screen (`loopPracticePath` changes to the new path), so bookmarks and links from earlier builds still work.
+- **Session complete:** when a session is logged while the practice screen stays, a summary replaces the "Practice logged" note: play time, passes, speed at the start and the end, the streak in days, and any badge the session just earned. "Keep going" closes it; "Done" goes back to the song. The start speed comes from the tracker (it isn't stored). Not shown for a session logged by leaving the page.
+- **Stats (`/stats`):** a Week / Month / All time choice (in the URL) over: practice time, days practised, loop passes, loops mastered; minutes per day for the last 14 days with today marked; a heatmap of practice days for the last 26 weeks; speed over time for a chosen loop (each session's speed); and the badges, earned ones in colour and locked ones with their progress. Charts are SVG drawn by the app on the design tokens (no chart library), each with a text alternative.
+- **Data:** everything is derived on the client from the user's sessions and loops; nothing new is stored and there is no migration. Every session of the user is read with `fetchAllPages`. Streaks, totals and badges are pure modules (`src/features/stats/`): a streak is consecutive local calendar days with at least one logged session, ending today or yesterday. The badge list is fixed in code (streaks of 3, 7 and 30 days; 1, 10 and 50 hours; 100 and 1,000 passes; first loop mastered; 5 loops mastered; a song with every loop mastered), each with its progress.
+- **Not in this unit:** XP or levels, a daily minutes goal (it would need a `user_settings` column), anything that reads or writes `target_ratio` (dropped after 13, in "practice feedback": "full speed" is always 100%).
+- Offline: every new screen reads from the persisted cache like the others, and the Stats page says so when it has nothing cached.
+
+**From Shane's first try (2026-11-27), in this unit before Readability:**
+
+- **Practice screen: focused, with the whole song a toggle away.** The score opens showing only the loop's bars (and a bar either side for context), so nothing else invites a tap. A "Show whole song" toggle draws the whole score; there, tapping or dragging across bars picks a new range and a "Save as loop" bar (name, then save) appears on the screen itself, with no backing out to the song; saving opens the new loop's practice screen (`replace`). Tapping a bar outside the loop never seeks out of it.
+- **Speed controls on the practice screen:** keep the round ±5%, and add ±1 BPM steps, typing an exact BPM (tap the BPM) and typing an exact percent (tap the big percent). Each change is saved as it is made, as the nudges are (`useSaveLoopSpeed`), stored as a ratio (`bpmToRatio`).
+- **Track mixer:** a per-track mute list (each track by name, on or off) in the controls bar on both player screens, every track on at open, live like the other options (`setTrackMuted`, which Drums only and Mute drums already respect). Not saved per song in this unit.
+- **Bar count in the loop form:** the loop form (the jam page's panel and the practice screen's "Save as loop" sheet) says how many bars its range covers ("5 bars", "1 bar"), live as the fields change or bars are picked, and nothing while the fields make no range (`barCountLabel`).
+- **Practice screen header (Shane's review of the build):** one sticky band. From 1024 px three columns: back, name and a meta line (bars · time · passes · bar n of N) left; the speed stepper (a pill: its ends ±5%, the percent over the BPM, each tapped to type, quiet ±1 BPM either side of the BPM, a thin bar to full speed under it) on the band's centre; Show whole song, Shortcuts and Play right. Below 1024 px (a phone, and a tablet beside the sidebar) the stepper is a centred row under the name and Play; in a `short` window one row.
+- **In the whole-song view the toggle reads "Show the loop"** (it names what a press shows next), the loop stays highlighted until other bars are picked, and a whole range picked there is what plays, so a new loop is heard before it is saved (`useLoopPractice`'s `previewPickedBars`); "Show the loop" or Cancel goes back to the loop's own bars. Time played on picked bars still counts to the loop being practised.
+- **The metronome's slider reaches 3 times louder** (`metronomeChannelGain`), and **a loop's name on the song overview opens it**, as its play button does.
+- **The metronome's sounds change while playing** (done: the engine rebuilds its MIDI and carries on; AGENTS.md, Metronome sounds).
+- **Local testing:** "Dev: sign in" on the dev server's login page (done; AGENTS.md, App shell).
+- **Song links and the YouTube player are not in this unit:** they are Unit 14, built next, after this unit's PR.
+
+**Acceptance:** at all three sizes a user goes Songs → a song → a loop's practice screen → practises → sees Session complete → Done is back on the song, and the e2e journey covers it; on the practice screen the score shows only the loop until "Show whole song", where a new loop can be saved without leaving the screen; the speed can be set by ±1 BPM, a typed BPM and a typed percent; each track can be muted on its own while playing; Stats' totals for the seed user equal sums over their sessions in the database; an old `?loop=` link opens the loop's practice screen; the player, loop, offline and shortcut specs still pass on the new routes.
+
+**Test focus:** streak, totals and badge maths with local-time dates (a DST change, midnight, a gap of one day); routes and redirects; the Session complete summary. **QA focus:** back and forward through the three levels, deep links, offline, 50 songs and 30 loops in one song, empty states, a phone in landscape. **Human check:** Shane signs off on the screenshots, then practises with the new flow for a week.
 
 **Carried forward**
 
@@ -593,7 +635,7 @@ The handoff notes record none of these as done; delete a row once it is. Everyth
 - Practice routines (sequence of loops)
 - Stats: speed over time, weekly practice time, streaks
 - Setlists built on jam mode
-- Full track mixer
+- Full track mixer (volumes, saved per song; per-track mute is in Unit 16)
 - Remember jam speed per song
 - Notes per loop
 - Custom shortcut and pedal mapping

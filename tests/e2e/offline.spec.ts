@@ -2,7 +2,6 @@
 import type { BrowserContext, Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
 import {
-  expectLooping,
   chooseLoopAction,
   commit,
   playLoopButton,
@@ -14,11 +13,14 @@ import {
   saveLoopButton,
   saveNewLoop,
 } from './loopsPage';
-import { openFixture, playButton } from './playerPage';
+import { chooseSongAction } from './libraryPage';
+import { openFixture, openSongOverview, playButton } from './playerPage';
 import {
-  homeItem,
+  backTo,
   loopsOf,
   navLink,
+  openPractice,
+  overviewItem,
   playFor,
   sessionCount,
   sessionsOf,
@@ -232,7 +234,7 @@ test('a start without a connection keeps the user signed in when the access toke
     }
   });
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Songs' })).toBeVisible();
   await expect(page.getByText(/No songs yet/)).toBeVisible();
   await expect(page).not.toHaveURL(/\/login/);
 
@@ -350,20 +352,26 @@ test('offline, a loop opens from the home page and every control that needs the 
   await persistedCacheHolds(page, 'Verse');
   // Each screen read once online, so the cache kept for offline has it.
   await page.goto('/');
-  await expect(homeItem(page, 'Verse')).toBeVisible();
+  await openSongOverview(page, 'Groove 120');
+  await expect(overviewItem(page, 'on the go', 'Verse')).toBeVisible();
   await page.goto('/settings');
   await expect(page.getByRole('button', { name: 'Save settings' })).toBeVisible();
-  await page.goto('/library');
+  await page.goto('/');
   await expect(page.getByRole('list').getByRole('link', { name: 'Groove 120' })).toBeVisible();
   await persistedCacheHolds(page, 'metronome_volume');
   await persistedCacheHolds(page, 'Verse');
 
-  // A cold start offline, on the home page, then one tap into practice.
+  // A cold start offline, on the songs list, then the song and one tap into practice.
   await writes.goingOffline();
   await page.goto('/');
   await expect(banner(page)).toContainText("You're offline.");
-  await homeItem(page, 'Verse').getByRole('link', { name: 'Practice Verse' }).click();
-  await expectLooping(page, 'Verse');
+  await openSongOverview(page, 'Groove 120');
+  await openPractice(page, 'Verse');
+  await expect(page.getByTestId('practice-progress')).toContainText('Bars 5 to 6');
+
+  // Back to the whole song, where the loop panel is.
+  await backTo(page, 'Groove 120').click();
+  await page.getByRole('link', { name: 'Play whole song' }).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
 
   // Loops can't be created or deleted offline.
@@ -398,12 +406,12 @@ test('offline, a loop opens from the home page and every control that needs the 
     page.getByRole('main').getByText("You can sign out once you're back online."),
   ).toBeVisible();
 
-  // The library: no edits or deletes.
-  await navLink(page, 'Library').click();
-  await page.getByRole('button', { name: 'Edit Groove 120' }).click();
+  // The songs list: no edits or deletes.
+  await navLink(page, 'Songs').click();
+  await chooseSongAction(page, 'Groove 120', 'Edit');
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Cancel' }).click();
-  await page.getByRole('button', { name: 'Delete Groove 120' }).click();
+  await chooseSongAction(page, 'Groove 120', 'Delete');
   await expect(page.getByRole('button', { name: 'Delete song' })).toBeDisabled();
 
   expect(writes.sent).toEqual([]);

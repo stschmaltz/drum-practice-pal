@@ -38,6 +38,37 @@ export async function fetchLoopSessions(
   );
 }
 
+/** Every session of the user, oldest first: the Stats page works everything out from these. */
+export async function fetchAllSessions(userId: string): Promise<PracticeSession[]> {
+  const rows = await fetchAllPages(async (from, to) =>
+    unwrap(
+      await supabase
+        .from('practice_sessions')
+        .select(SESSION_SELECT)
+        .eq('user_id', userId)
+        // A total order, so pages don't overlap or skip rows.
+        .order('started_at')
+        .order('id')
+        .range(from, to),
+      'practice sessions',
+    ),
+  );
+  return uniqueById(rows);
+}
+
+/**
+ * Pages are read by offset, one request each. A session logged between two of
+ * them with an earlier start (a replay from the outbox) moves every later row
+ * along by one, so the next page starts with the last row of the page before:
+ * counted twice, it would double its time and passes on the Stats page. The
+ * first copy of each id is kept. The row that slipped in is not in this read;
+ * `sessionLogged` adds it to the cache and invalidates, which reads again.
+ */
+export function uniqueById<T extends { id: string }>(rows: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true)));
+}
+
 /**
  * Logs a session. The id is the tracker's, and a row that already has it is
  * left alone ("on conflict do nothing"), so a retry after a lost response

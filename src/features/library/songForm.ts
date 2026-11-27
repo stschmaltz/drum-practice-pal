@@ -96,3 +96,11 @@ export function revertSongEdit<T extends SongEdit>(
   }
   return reverted;
 }
+
+/** "16 bars · 120 BPM": a song's facts from its file, tempo whole unless the file says otherwise (92.5). */
+export function songFactsLabel(song: Pick<Song, 'bar_count' | 'original_tempo'>): string {
+  const tempo = Number.isInteger(song.original_tempo)
+    ? String(song.original_tempo)
+    : song.original_tempo.toFixed(1);
+  return `${song.bar_count} bars · ${tempo} BPM`;
+}

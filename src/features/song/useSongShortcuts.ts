@@ -2,7 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { loopsInPanelOrder, type Loop } from '@/features/loops/loopForm';
 import type { LoopPractice } from '@/features/loops/useLoopPractice';
 import { readCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
-import { canChangeOptions, canPlay, canUseDrumToggles } from '@/features/player/controlGates';
+import {
+  canChangeOptions,
+  canPlay,
+  canUseDrumToggles,
+  type PlayGate,
+} from '@/features/player/controlGates';
 import {
   isRunning,
   type PlayerService,
@@ -24,6 +29,8 @@ interface SongShortcutInputs {
   player: PlayerService | null;
   practice: LoopPractice;
   loops: readonly Loop[] | undefined;
+  /** Space's gate, the same one the screen's Play/Pause button takes (`canPlay` unless given). */
+  playGate?: PlayGate;
 }
 
 /**
@@ -34,7 +41,12 @@ interface SongShortcutInputs {
  * the last render's: two presses before React has drawn the first still add up.
  * Everything runs inside the key press, so Space can start audio on iOS.
  */
-export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs) {
+export function useSongShortcuts({
+  player,
+  practice,
+  loops,
+  playGate = canPlay,
+}: SongShortcutInputs) {
   const [helpOpen, setHelpOpen] = useState(false);
   // What the last key changed, for a live region: the control it changed may be folded
   // away or out of sight, and focus is elsewhere. `count` tells two equal sayings apart.
@@ -43,9 +55,9 @@ export function useSongShortcuts({ player, practice, loops }: SongShortcutInputs
   const closeHelp = useCallback(() => setHelpOpen(false), []);
 
   // Read by the listener at each press, so it is installed once and never sees an old render.
-  const latest = useRef({ player, practice, loops, helpOpen });
+  const latest = useRef({ player, practice, loops, playGate, helpOpen });
   useLayoutEffect(() => {
-    latest.current = { player, practice, loops, helpOpen };
+    latest.current = { player, practice, loops, playGate, helpOpen };
   });
 
   useEffect(() => {
@@ -126,13 +138,13 @@ export function announcementText({ text, count }: Announcement): string {
 /** Runs the action; returns where a loop key moved to, for the announcement. */
 function runShortcut(
   action: Exclude<ShortcutAction, 'help'>,
-  { player, practice, loops }: SongShortcutInputs,
+  { player, practice, loops, playGate = canPlay }: SongShortcutInputs,
 ): string | null {
   if (!player) return null;
   const snapshot = player.getSnapshot();
   switch (action) {
     case 'togglePlay':
-      if (canPlay(player, snapshot)) player.togglePlay();
+      if (playGate(player, snapshot)) player.togglePlay();
       return null;
     case 'speedUp':
     case 'speedDown':

@@ -111,6 +111,7 @@ const PATHS = {
   ),
   controls: <path d="M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4" />,
   plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
   keyboard: (
     <>
       <rect x="2.5" y="6" width="19" height="12" rx="2" />
@@ -129,6 +130,23 @@ const PATHS = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7.5v5.5M12 16.5h.01" />
+    </>
+  ),
+  flame: (
+    <path d="M12 3c.5 3.5 4.5 5.5 4.5 10a4.5 4.5 0 0 1-9 0c0-2 1-3.5 2.2-4.6.2 1.6 1 2.6 2 3.1C11.2 8.5 11.5 5.5 12 3z" />
+  ),
+  trophy: (
+    <>
+      <path d="M8 4h8v5a4 4 0 0 1-8 0z" />
+      <path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7M10 17h4v3h-4z" />
+    </>
+  ),
+  chart: <path d="M4 20h16M7 16v-5M12 16V6M17 16v-8" />,
+  music: (
+    <>
+      <path d="M9 18V5l11-2v13" />
+      <circle cx="6.5" cy="18" r="2.5" />
+      <circle cx="17.5" cy="16" r="2.5" />
     </>
   ),
   chevronUp: <path d="m6 15 6-6 6 6" />,

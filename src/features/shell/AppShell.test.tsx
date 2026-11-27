@@ -9,10 +9,12 @@ vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fake
 
 const routes = (
   <Route element={<AppShell />}>
-    <Route index element={<RouteMarker name="On the go" />} />
-    <Route path="library" element={<RouteMarker name="Library" />} />
+    <Route index element={<RouteMarker name="Songs" />} />
+    <Route path="stats" element={<RouteMarker name="Stats" />} />
     <Route path="settings" element={<RouteMarker name="Settings" />} />
     <Route path="songs/:id" element={<RouteMarker name="Song" />} />
+    <Route path="songs/:id/loops/:loopId" element={<RouteMarker name="Practice" />} />
+    <Route path="no-such-page" element={<RouteMarker name="Not found" />} />
   </Route>
 );
 
@@ -26,27 +28,26 @@ beforeEach(resetFakeSupabase);
 
 describe('AppShell', () => {
   it('renders the current page inside the shell', () => {
-    renderRoutes(routes, { path: '/library' });
-    expect(screen.getByRole('main')).toHaveTextContent('At Library');
+    renderRoutes(routes, { path: '/stats' });
+    expect(screen.getByRole('main')).toHaveTextContent('At Stats');
   });
 
-  it('links to On the go, Library and Settings in each nav', () => {
+  it('links to Songs, Stats and Settings in each nav', () => {
     renderRoutes(routes, { path: '/' });
     expect(navs()).toHaveLength(2);
     for (const nav of navs()) {
       const links = within(nav).getAllByRole('link');
-      expect(links.map((link) => link.textContent)).toEqual(['On the go', 'Library', 'Settings']);
-      expect(links.map((link) => link.getAttribute('href'))).toEqual([
-        '/',
-        '/library',
-        '/settings',
-      ]);
+      expect(links.map((link) => link.textContent)).toEqual(['Songs', 'Stats', 'Settings']);
+      expect(links.map((link) => link.getAttribute('href'))).toEqual(['/', '/stats', '/settings']);
     }
   });
 
   it.each([
-    ['/', 'On the go'],
-    ['/library', 'Library'],
+    ['/', 'Songs'],
+    // A song's screens are a level below Songs.
+    ['/songs/abc', 'Songs'],
+    ['/songs/abc/loops/def', 'Songs'],
+    ['/stats', 'Stats'],
     ['/settings', 'Settings'],
   ])('marks only the current page as active at %s', (path, label) => {
     renderRoutes(routes, { path });
@@ -59,7 +60,7 @@ describe('AppShell', () => {
   });
 
   it('marks no tab active on a page outside the nav', () => {
-    renderRoutes(routes, { path: '/songs/abc' });
+    renderRoutes(routes, { path: '/no-such-page' });
     for (const nav of navs()) {
       expect(within(nav).queryByRole('link', { current: 'page' })).not.toBeInTheDocument();
     }
@@ -91,9 +92,9 @@ describe('AppShell account line (12 UX pass)', () => {
   });
 
   it('marks the current page in the selected colour with an edge, not the brand', () => {
-    renderRoutes(routes, { path: '/library' });
+    renderRoutes(routes, { path: '/stats' });
     for (const nav of navs()) {
-      const current = within(nav).getByRole('link', { name: 'Library' });
+      const current = within(nav).getByRole('link', { name: 'Stats' });
       expect(current).toHaveAttribute('aria-current', 'page');
       expect(current.className).toMatch(/selected-line/);
       expect(current.className).not.toMatch(/text-brand/);

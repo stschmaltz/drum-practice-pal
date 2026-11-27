@@ -2,7 +2,7 @@
 /**
  * Locators and steps for practice sessions and the home page (Unit 09), used
  * by practice.spec.ts: what the database holds for a user, the "Practice
- * logged" notice, a loop's history, the On the go and Finished lists, and the
+ * logged" notice, a loop's history, a song overview's lists (Unit 16), and the
  * ways a spec shortens, watches and interrupts a session.
  */
 import type { Locator, Page } from '@playwright/test';
@@ -37,25 +37,41 @@ export async function loopsOf(user: E2eUser) {
   return data;
 }
 
+/** The practice screen's speed in large type, its round nudges (each saved as made) and Session complete (Unit 16). */
+export const practiceSpeed = (page: Page) => page.getByTestId('practice-speed');
+export const nudge = (page: Page, which: 'Slower' | 'Faster') =>
+  page.getByRole('button', { name: `${which} by 5%` });
+export const sessionComplete = (page: Page) => page.getByTestId('session-complete');
+
+/** From a song's overview, a loop's round play button: its practice screen, ready for Play. */
+export async function openPractice(page: Page, loopName: string): Promise<void> {
+  await page.getByRole('link', { name: `Practise ${loopName}` }).click();
+  await expect(page.getByRole('heading', { level: 1, name: loopName })).toBeVisible();
+  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+}
+
+/** The way back up a level, "← Song title", above a screen's title. */
+export const backTo = (page: Page, title: string) =>
+  page.getByRole('main').getByRole('link', { name: title, exact: true });
+
 /** The song page's "Practice logged: …" line. */
 export const sessionLogged = (page: Page) => page.getByTestId('session-logged');
 
 /** The bottom tabs on a phone, the sidebar from 768 px; only one is on show. */
-export const navLink = (page: Page, name: 'On the go' | 'Library' | 'Settings') =>
+export const navLink = (page: Page, name: 'Songs' | 'Stats' | 'Settings') =>
   page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name });
 
-export const homeTab = (page: Page, name: 'On the go' | 'Finished') =>
-  page.getByRole('group', { name: 'Loops to show' }).getByRole('button', { name });
-
 /**
- * The home page's list of the tab on show. By its name, never just "the list
- * in main": the song page's loop panel is a list in main too, and is still
- * there for a moment after a nav link is pressed.
+ * A song overview's list of loops: those on the go, or the mastered ones. By
+ * its name, never just "a list in main": the jam page's loop panel is a list
+ * in main too, and is still there for a moment after a link is pressed.
  */
-export const homeList = (page: Page) =>
-  page.getByRole('main').getByRole('list', { name: /^(On the go|Finished)$/ });
-export const homeItem = (page: Page, name: string) =>
-  homeList(page).getByRole('listitem').filter({ hasText: name });
+export const overviewList = (page: Page, which: 'on the go' | 'mastered') =>
+  page
+    .getByRole('main')
+    .getByRole('list', { name: which === 'on the go' ? 'Loops on the go' : 'Mastered loops' });
+export const overviewItem = (page: Page, which: 'on the go' | 'mastered', name: string) =>
+  overviewList(page, which).getByRole('listitem').filter({ hasText: name });
 
 /** Opens a loop's history in the panel (opening the panel first) and returns it. */
 export async function openLoopHistory(page: Page, loopName: string): Promise<Locator> {

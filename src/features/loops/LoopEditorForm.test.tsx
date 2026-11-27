@@ -127,6 +127,20 @@ afterEach(() => {
 });
 
 describe('LoopEditorForm for a new loop', () => {
+  it('says how many bars the range covers, live, and nothing while it is no range', async () => {
+    const view = await renderForm();
+    const count = () => screen.getByTestId('loop-bar-count');
+    expect(count()).toHaveTextContent('');
+    await fill(view, { first: '5' });
+    expect(count()).toHaveTextContent('');
+    await fill(view, { last: '9' });
+    expect(count()).toHaveTextContent('5 bars');
+    await replace(view, view.lastBar(), '5');
+    expect(count()).toHaveTextContent('1 bar');
+    await replace(view, view.lastBar(), '3');
+    expect(count()).toHaveTextContent('');
+  });
+
   it('starts empty, labelled as a new loop, asking for the first bar', async () => {
     const view = await renderForm();
     expect(screen.getByRole('form', { name: 'New loop' })).toBeInTheDocument();

@@ -13,7 +13,7 @@ import {
   openLoopPanel,
   saveLoopButton,
 } from './loopsPage';
-import { fixture, metronomeButton, openFixture, playButton } from './playerPage';
+import { fixture, metronomeButton, openFixture, openSongPlayer, playButton } from './playerPage';
 import { loopsOf } from './practicePage';
 
 // Unit 13 Test: the carried-forward fixes a user meets on a flaky connection,
@@ -38,7 +38,7 @@ test('an upload whose save answer is lost is still added, with its file', async 
   page,
   user,
 }) => {
-  await signIn(page, user, '/library');
+  await signIn(page, user, '/');
   const lost = await loseFirstAnswer(page, 'songs', 'POST');
 
   await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture('groove-120'));
@@ -51,7 +51,7 @@ test('an upload whose save answer is lost is still added, with its file', async 
   expect(await userFiles(user)).toEqual([`${songs[0]!.id}.gp`]);
 
   // The song plays: its file is the one kept, not one removed by a rollback.
-  await page.getByRole('list').getByRole('link', { name: 'Groove 120' }).click();
+  await openSongPlayer(page, 'Groove 120');
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
 });
 

@@ -9,6 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SCORE_COLORS } from '../../src/features/player/scoreTheme';
+import { HEATMAP_BRAND_ALPHAS } from '../../src/features/stats/heatmapShades';
 import {
   AA_NON_TEXT,
   AA_TEXT,
@@ -75,6 +76,12 @@ const NON_TEXT_PAIRS: [part: string, on: string[]][] = [
   ['score-range', ['score-paper']],
   // The focus ring on a toggle that is on.
   ['focus', ['selected']],
+  // Unit 16's progress marks and charts: a mastered ring or full bar, today's bar, the
+  // full-speed line, against the page and the track they sit on.
+  ['success', ['canvas', 'surface', 'line']],
+  ['selected-line', ['line']],
+  // The heatmap's ring round today, drawn in the gap beside the cells (16 QA issue 6).
+  ['ink', ['canvas', 'surface']],
 ];
 
 describe('token contrast', () => {
@@ -128,6 +135,22 @@ describe('token contrast on see-through surfaces', () => {
     expect(contrastRatio(hex(text), blend(hex(top), alpha, hex(under)))).toBeGreaterThanOrEqual(
       AA_TEXT,
     );
+  });
+
+  // 16 QA issue 6: every practised step of the heatmap (brand over the page) against the page
+  // and the page's panels, and against an empty day's cell beside it.
+  it.each(
+    HEATMAP_BRAND_ALPHAS.flatMap((alpha) =>
+      (['canvas', 'surface'] as const).flatMap((page) =>
+        (['canvas', 'surface', 'raised'] as const).map(
+          (against) => [alpha * 100, page, against, alpha] as const,
+        ),
+      ),
+    ),
+  )('heatmap brand/%s over %s against %s meets 3:1', (_label, page, against, alpha) => {
+    const cell = blend(hex('brand'), alpha, hex(page));
+    const next = against === 'raised' ? hex('raised') : hex(page);
+    expect(contrastRatio(cell, next)).toBeGreaterThanOrEqual(AA_NON_TEXT);
   });
 
   it('blends as the browser does', () => {

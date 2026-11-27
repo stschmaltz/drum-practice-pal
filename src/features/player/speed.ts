@@ -3,6 +3,7 @@
  * loops.speed_ratio bounds so a speed played here can always be saved.
  */
 import { SPEED_RATIO_MAX, SPEED_RATIO_MIN } from '@/lib/schema';
+import { bpmAtSpeed } from './tempo';
 
 /** The speed slider moves in whole steps of this many percent. */
 export const SPEED_STEP_PERCENT = 5;
@@ -50,6 +51,15 @@ export function bpmToRatio(bpm: number, tempo: number): number | null {
  */
 export function nudgeSpeedRatio(ratio: number, percentDelta: number): number {
   return percentToRatio(ratioToPercent(ratio) + percentDelta);
+}
+
+/**
+ * Moves the speed by whole BPM from the BPM on show (`bpmAtSpeed`), to the
+ * exact ratio of the new BPM at `tempo`: 85 BPM of 120 up one is 86 BPM,
+ * 0.716667, never a whole percent. Clamped; null without a tempo or below 1 BPM.
+ */
+export function nudgeSpeedBpm(ratio: number, tempo: number, bpmDelta: number): number | null {
+  return bpmToRatio(bpmAtSpeed(tempo, ratio) + bpmDelta, tempo);
 }
 
 /** A typed percentage ("85", "85%", " 85.4 ") as a ratio, or null when it isn't a positive number. */

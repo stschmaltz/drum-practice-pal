@@ -64,6 +64,22 @@ export function metronomeVoiceSummary(voice: MetronomeVoice): string {
   return parts.join(', ');
 }
 
+/**
+ * The metronome channel's mix volume at the top of the slider. At 1 the click
+ * was too quiet over a full band (Shane, 2026-11-27); alphaTab's channel volume
+ * has no upper bound, so the slider's 0 to 1 maps to 0 to this.
+ */
+export const METRONOME_MAX_GAIN = 3;
+
+/**
+ * The channel volume for a slider value (0 to 1, as stored). Squared, so the
+ * lower half stays fine-grained for quiet practice and the top end gets loud.
+ */
+export function metronomeChannelGain(volume: number): number {
+  const clamped = Math.min(1, Math.max(0, volume));
+  return METRONOME_MAX_GAIN * clamped * clamped;
+}
+
 /** 0 to 127. Beats keep alphaTab's own tick velocity (95), so the level of the default is unchanged. */
 export const ACCENT_VELOCITY = 127;
 export const BEAT_VELOCITY = 95;

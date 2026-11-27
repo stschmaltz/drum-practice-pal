@@ -112,10 +112,10 @@ export function practiceDateLabel(iso: string, now: Date, locale?: string): stri
   });
 }
 
-/** "Last practiced today", "Last practiced 12 Nov", or "Not practiced yet" for a loop with no session. */
+/** "Last practised today", "Last practised 12 Nov", or "Not practised yet" for a loop with no session. */
 export function lastPracticedLabel(iso: string | null, now: Date, locale?: string): string {
-  if (iso === null) return 'Not practiced yet';
-  return `Last practiced ${practiceDayInSentence(iso, now, locale)}`;
+  if (iso === null) return 'Not practised yet';
+  return `Last practised ${practiceDayInSentence(iso, now, locale)}`;
 }
 
 /** practiceDateLabel for the middle of a sentence: "today" and "yesterday", while a date keeps its capital. */

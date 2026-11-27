@@ -1,44 +1,18 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-  type Ref,
-  type RefObject,
-} from 'react';
-import { Link, useParams } from 'react-router';
-import { ErrorAlert } from '@/components/ErrorAlert';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { PageHeader } from '@/components/PageHeader';
-import { Icon } from '@/components/icons';
-import { LoadErrorAlert } from '@/components/LoadErrorAlert';
-import { EmptyState, LoadingLine } from '@/components/StatusMessages';
-import {
-  buttonClass,
-  dangerCardClass,
-  ghostButtonClass,
-  inlineIconClass,
-  linkClass,
-} from '@/components/styles';
 import type { Song } from '@/features/library/songForm';
-import { useSong, useSongFile } from '@/features/library/useSongs';
 import type { Loop } from '@/features/loops/loopForm';
 import { findLoopSpeed } from '@/features/loops/loopFocus';
-import { LoopPanel } from '@/features/loops/LoopPanel';
+import { LoopPanel, type LoopFormOutcome } from '@/features/loops/LoopPanel';
 import { panelShowsLoopSpeed } from '@/features/loops/loopPanelContent';
 import { useLoopPanelOpen } from '@/features/loops/useLoopPanelOpen';
-import { useLoopPractice } from '@/features/loops/useLoopPractice';
+import { useLoopPractice, type LoopPractice } from '@/features/loops/useLoopPractice';
 import { useLoops } from '@/features/loops/useLoops';
 import { useSaveLoopSpeed } from '@/features/loops/useSaveLoopSpeed';
-import { CountInCounter } from '@/features/player/CountInCounter';
+import { canPickBars } from '@/features/player/controlGates';
 import { PlayerControls, PlayPauseButton } from '@/features/player/PlayerControls';
-import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
-import {
-  DEFAULT_PLAYER_OPTIONS,
-  playerOptionsFromSettings,
-  type PlayerOptions,
-} from '@/features/player/playerOptions';
+import type { PlayerOptions } from '@/features/player/playerOptions';
 import {
   isRunning,
   type PlayerService,
@@ -47,117 +21,123 @@ import {
 import { ratioToPercent } from '@/features/player/speed';
 import { bpmAtSpeed } from '@/features/player/tempo';
 import { usePlayer } from '@/features/player/usePlayer';
-import { durationLabel } from '@/features/practice/sessions';
-import { usePracticeTracker, type PracticeTracker } from '@/features/practice/usePracticeTracker';
+import { usePracticeTracker } from '@/features/practice/usePracticeTracker';
 import { ShortcutOverlay } from '@/features/shortcuts/ShortcutOverlay';
-import { useSettings } from '@/features/settings/useSettings';
-import { useOnline, waitsForNetwork } from '@/lib/network';
 import { isUuid } from '@/lib/randomUuid';
+import { EDIT_LOOP_PARAM, loopPracticePath, NEW_LOOP_PARAM, songPath } from '@/lib/routes';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
+import {
+  fullBleedBarClass,
+  PlayerStatusLine,
+  ScoreBox,
+  SessionNotice,
+  ShortcutsButton,
+} from './playerScreen';
+import { useHeightOf } from './useHeightOf';
+import { SongFileGate } from './SongFileGate';
+import { BackLink, SongGate } from './SongGate';
 import { useControlsFold } from './useControlsFold';
 import { useJamMode } from './useJamMode';
-import { useRequestedLoop } from './useRequestedLoop';
 import { announcementText, useSongShortcuts } from './useSongShortcuts';
 import { useStaysOnScreen } from './useStaysOnScreen';
 
 /**
- * /songs/:id. Lazy-loaded from App.tsx with the player. Opens in jam mode
- * (Unit 06): the whole song with a following cursor, tap a bar to go there,
- * and the speed and BPM at the current bar, with the count-in (Unit 07)
- * counted over the score. Loops (Unit 08) sit beside it: a saved bar range
- * plays on repeat at its saved speed, and while the loop form is open a tap
- * on the score picks a bar instead of seeking. Time spent playing a loop is
- * logged as practice sessions (Unit 09), and `?loop=<id>` opens the page on
- * that loop, which is how the home page's lists link here. Keys and pedals
+ * /songs/:id/play, "Play whole song". Lazy-loaded from App.tsx with the
+ * player. Jam mode (Unit 06): the whole song with a following cursor, tap a
+ * bar to go there, and the speed and BPM at the current bar, with the
+ * count-in (Unit 07) counted over the score. Loops (Unit 08) are a sheet over it: a
+ * saved bar range plays on repeat at its saved speed, and while the loop form
+ * is open a tap on the score picks a bar instead of seeking. Time spent
+ * playing a loop is logged as practice sessions (Unit 09). Keys and pedals
  * (Unit 10) work the player and switch loops; `?` lists them.
+ *
+ * `?new=1` (the song overview's "New loop") opens the loop form for a new
+ * loop, and its save goes on to that loop's practice screen; `?edit=<id>`
+ * (a loop's Edit on the overview) opens it on that loop, and its save or
+ * Cancel goes back to the song (Unit 16).
  */
 export function SongPage() {
   const { id = '' } = useParams();
-  const validId = isUuid(id);
-  const song = useSong(id, { enabled: validId });
-
-  if (!validId || song.data === null) return <SongNotFound />;
-  if (waitsForNetwork(song)) {
-    return (
-      <OfflineMessage>
-        This song hasn't been opened on this device yet, so it can't be played offline.
-      </OfflineMessage>
-    );
-  }
-  if (song.isPending) return <LoadingLine>Loading song…</LoadingLine>;
-  if (song.isLoadingError) {
-    return (
-      <LoadErrorAlert onRetry={() => void song.refetch()}>Couldn't load this song.</LoadErrorAlert>
-    );
-  }
-
-  return <SongScreen song={song.data} />;
+  return <SongGate songId={id}>{(song) => <SongScreen song={song} />}</SongGate>;
 }
 
 function SongScreen({ song }: { song: Song }) {
   return (
     <div className="flex flex-col gap-4">
+      <BackLink to={songPath(song.id)}>{song.title}</BackLink>
       <PageHeader title={song.title}>{song.artist || null}</PageHeader>
-      <SongBody song={song} />
+      <SongFileGate song={song}>
+        {({ fileBytes, initialOptions }) => (
+          <SongPlayer
+            // A new song means a new player: usePlayer reads its inputs once. That
+            // also opens every song at 100%, whatever speed the last one was at.
+            key={song.id}
+            songId={song.id}
+            fileBytes={fileBytes}
+            drumTrackIndex={song.drum_track_index}
+            initialOptions={initialOptions}
+          />
+        )}
+      </SongFileGate>
     </div>
   );
 }
 
-/** Waits for the file and settings, then opens the player. */
-function SongBody({ song }: { song: Song }) {
-  const file = useSongFile(song.id);
-  const settings = useSettings();
-  // Settings are waited for only before the player first opens: usePlayer reads them
-  // once. Opened offline on the defaults, the settings read that starts on reconnect
-  // (pending, now fetching) must not take the playing song off the page.
-  const [playerOpenedFor, setPlayerOpenedFor] = useState<string | null>(null);
-  const playerOpened = playerOpenedFor === song.id;
+/** The loop form a link asked for: a new loop, or an edit of one. */
+type LinkedLoopForm = { kind: 'new' } | { kind: 'edit'; loopId: string };
 
-  // isLoadingError, not isError: a failed background refetch keeps the bytes, so a playing song stays mounted.
-  if (file.isLoadingError) {
-    return (
-      <LoadErrorAlert onRetry={() => void file.refetch()}>
-        Couldn't download this song's file. Check your connection and try again.
-      </LoadErrorAlert>
-    );
-  }
-  if (waitsForNetwork(file)) {
-    return (
-      <OfflineMessage>
-        This song's file isn't on this device yet. Open the song once while online to play it
-        offline.
-      </OfflineMessage>
-    );
-  }
-  // Settings that can't be fetched offline give way to the defaults, like a failed fetch.
-  if (file.isPending || (settings.isPending && !waitsForNetwork(settings) && !playerOpened)) {
-    return <LoadingLine>Downloading the song…</LoadingLine>;
-  }
-  // Remembered during render, so the next render already knows (React's "state from
-  // the previous render" pattern); per song, since another song's file is waited for again.
-  if (!playerOpened) setPlayerOpenedFor(song.id);
+function linkedLoopFormOf(params: URLSearchParams): LinkedLoopForm | null {
+  if (params.get(NEW_LOOP_PARAM) !== null) return { kind: 'new' };
+  const loopId = params.get(EDIT_LOOP_PARAM);
+  return loopId !== null && isUuid(loopId) ? { kind: 'edit', loopId } : null;
+}
 
-  return (
-    <>
-      {settings.isLoadingError && (
-        <p className="flex items-start gap-2 text-sm text-warning">
-          <Icon name="alert" className="mt-0.5 size-4" />
-          Couldn't load your settings, so the player is using the defaults.
-        </p>
-      )}
-      <SongPlayer
-        // A new song means a new player: usePlayer reads its inputs once. That
-        // also opens every song at 100%, whatever speed the last one was at.
-        key={song.id}
-        songId={song.id}
-        fileBytes={file.data}
-        drumTrackIndex={song.drum_track_index}
-        initialOptions={
-          settings.data ? playerOptionsFromSettings(settings.data) : DEFAULT_PLAYER_OPTIONS
-        }
-      />
-    </>
-  );
+/**
+ * Opens the loop form a link asked for, once the score's bars are known (and,
+ * for an edit, the song's loops), and says where its save and Cancel lead.
+ * Read once, when the page opens: the parameters stay in the URL, but a form
+ * the user closes isn't opened again.
+ */
+function useLinkedLoopForm(
+  songId: string,
+  snapshot: PlayerSnapshot,
+  practice: LoopPractice,
+  loops: readonly Loop[] | undefined,
+): LoopFormOutcome | undefined {
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const [linked] = useState(() => linkedLoopFormOf(params));
+  const opened = useRef(false);
+  const ready = canPickBars(snapshot);
+  const { openEditor } = practice;
+
+  const formOpen = practice.editor !== null;
+  useEffect(() => {
+    if (!linked || opened.current || !ready) return;
+    // The user got there first (a drag across bars opens the form): theirs stays.
+    if (formOpen) {
+      opened.current = true;
+      return;
+    }
+    if (linked.kind === 'new') {
+      opened.current = openEditor(null);
+      return;
+    }
+    if (!loops) return;
+    opened.current = true;
+    const loop = loops.find((listed) => listed.id === linked.loopId);
+    // Not one of this song's loops (deleted since, say): jam mode as it is.
+    if (loop) openEditor(loop);
+  }, [linked, ready, loops, openEditor, formOpen]);
+
+  if (!linked) return undefined;
+  const backToSong = () => void navigate(songPath(songId), { replace: true });
+  return {
+    // Replaced, so Back from the practice screen goes to the song, not to the form.
+    onCreated: (loop) => void navigate(loopPracticePath(songId, loop.id), { replace: true }),
+    onEdited: backToSong,
+    onCancelled: backToSong,
+  };
 }
 
 function SongPlayer({
@@ -188,13 +168,9 @@ function SongPlayer({
   const loops = useLoops(songId);
   const practice = useLoopPractice(player, snapshot, loops.data);
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
+  // Every change of the playing loop's speed is saved as it is made (no "Save speed").
   useSaveLoopSpeed(songId, practice.activeLoop, snapshot.speedRatio);
-  useRequestedLoop(
-    player !== null && snapshot.barCount !== null,
-    loops,
-    practice.openLoop,
-    practice.activeLoop !== null,
-  );
+  const linkedForm = useLinkedLoopForm(songId, snapshot, practice, loops.data);
   const shortcuts = useSongShortcuts({ player, practice, loops: loops.data });
   const loopPanel = useLoopPanelOpen();
   const { setOpen: setLoopPanelOpen } = loopPanel;
@@ -212,7 +188,11 @@ function SongPlayer({
       // The count-in counter sits over the score, so the score comes on screen for it too. Keyed on
       // the fold rather than on running, so Hide controls brings it back as well: the user had
       // scrolled up to that button, and in phone landscape kept still the score was off the window.
-      scoreOnScreen: pickingBars ? 'picking-bars' : fold.folded ? 'playing' : null,
+      // Picking bars waits for the panel to be open: the open sheet's room at the page's end is
+      // what lets the window scroll the score up above it (16 QA issue 1: a form opened by
+      // `?new=1` opens the sheet in the next render, and a scroll before that went nowhere).
+      scoreOnScreen:
+        pickingBars && loopPanel.open ? 'picking-bars' : fold.folded ? 'playing' : null,
     },
   );
   // A soundfont failure still leaves readable notation; these leave an empty white box.
@@ -223,7 +203,7 @@ function SongPlayer({
     : snapshot.barTempo;
   // The controls bar's slider gives way to the playing loop's own speed control: this shows it.
   const showLoopSpeed = () => {
-    // Open already (the column), nothing re-renders to run a hand-over: focus it now.
+    // Open already, nothing re-renders to run a hand-over: focus it now.
     if (loopPanel.open) {
       findLoopSpeed()?.focus();
       return;
@@ -243,8 +223,7 @@ function SongPlayer({
       style={{ '--jam-bar-height': `${stickyBarHeight}px` } as CSSProperties}
     >
       <JamBar ref={stickyBarRef} player={player} snapshot={snapshot} tempo={readoutTempo} />
-      {/* Above the two columns: beside the panel the controls would be squeezed. Folded
-          while playing, it is a strip that sticks under the sticky bar. */}
+      {/* Folded while playing, the controls are a strip that sticks under the sticky bar. */}
       <div
         ref={controlsRef}
         // No style prop: useStaysOnScreen writes the room it holds as this element's bottom margin.
@@ -283,6 +262,7 @@ function SongPlayer({
         open={loopPanel.open}
         onOpenChange={setLoopPanelOpen}
         bodyId={loopPanel.bodyId}
+        outcome={linkedForm}
       />
       <ShortcutOverlay open={shortcuts.helpOpen} onClose={shortcuts.closeHelp} />
       {/* On the page from the start: a live region added with its text is often not read. */}
@@ -292,142 +272,6 @@ function SongPlayer({
     </div>
   );
 }
-
-/**
- * An element's height, kept up to date as it wraps or the safe area changes:
- * the folded controls stick right under the sticky bar, at this offset.
- */
-function useHeightOf(ref: RefObject<HTMLElement | null>): number {
-  const [height, setHeight] = useState(0);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const measure = () => setHeight(Math.ceil(element.getBoundingClientRect().height));
-    measure();
-    // jsdom has no ResizeObserver; the one measure above is all a test needs.
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [ref]);
-  return height;
-}
-
-/**
- * Opens the shortcut overlay, which `?` also does. From 768 px only: a tablet
- * or laptop is where a keyboard is likely, and the phone's row has no room.
- */
-function ShortcutsButton({ onOpen }: { onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      className={`max-md:hidden ${ghostButtonClass} whitespace-nowrap`}
-      aria-haspopup="dialog"
-      onClick={onOpen}
-    >
-      <Icon name="keyboard" />
-      Shortcuts
-    </button>
-  );
-}
-
-/** The scrolling box alphaTab renders the score into, with the count-in counter over it. */
-function ScoreBox({
-  scrollRef,
-  scoreRef,
-  snapshot,
-  hidden,
-}: {
-  scrollRef: Ref<HTMLDivElement>;
-  scoreRef: Ref<HTMLDivElement>;
-  snapshot: PlayerSnapshot;
-  hidden: boolean;
-}) {
-  return (
-    // The counter covers the score box without scrolling with what's inside it.
-    <div className="relative">
-      <CountInCounter snapshot={snapshot} />
-      {/* Both layouts scroll inside this box, so the cursor's auto-scroll is one code path. */}
-      <div
-        ref={scrollRef}
-        data-testid="score-viewport"
-        // Hidden, not unmounted: alphaTab keeps its elements until the player is disposed.
-        hidden={hidden}
-        // jam-score: the cursor, highlight and tap styles in index.css. The bottom scroll
-        // margin keeps the box clear of the loop sheet's header (and on a phone the
-        // fixed tab bar under it) when playback scrolls it into view; the column from
-        // lg covers nothing (useJamMode sets the top one from the sticky bar's height).
-        // Below 768 px the score is one line of music scrolling sideways, so the box is as tall
-        // as that line (alphaTab sizes it) rather than a fixed height of blank paper under it.
-        // At least as tall as the count-in number drawn over it.
-        className="jam-score relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:h-[60dvh] md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))]"
-      >
-        <div ref={scoreRef} />
-      </div>
-    </div>
-  );
-}
-
-/**
- * What became of the last practice session: logged, kept on the device until
- * the connection is back, or refused with a way to send it again. Above the
- * score, because below 1024 px the loop panel is a closed sheet while practising.
- */
-function SessionNotice({
-  tracker,
-  loops,
-}: {
-  tracker: PracticeTracker;
-  loops: readonly Loop[] | undefined;
-}) {
-  const { lastLogged, unsaved, waiting, retryUnsaved } = tracker;
-  const online = useOnline();
-  if (unsaved.length > 0) {
-    return (
-      <div
-        role="alert"
-        className={`${dangerCardClass} flex flex-wrap items-center gap-x-4 gap-y-2 py-1 pr-1 pl-3`}
-      >
-        <p className="flex flex-1 items-start gap-2 text-sm text-danger">
-          <Icon name="alert" className="mt-0.5 size-4" />
-          {unsaved.length === 1
-            ? "Couldn't save your last practice session."
-            : `Couldn't save your last ${unsaved.length} practice sessions.`}
-        </p>
-        <button type="button" className={buttonClass} onClick={retryUnsaved}>
-          Try again
-        </button>
-      </div>
-    );
-  }
-  if (waiting.length > 0 && !online) {
-    return (
-      <p
-        role="status"
-        className="flex items-start gap-2 text-sm text-ink-muted"
-        data-testid="session-waiting"
-      >
-        <Icon name="offline" className="mt-0.5 size-4 text-warning" />
-        Practice saved on this device. It's logged when you're back online.
-      </p>
-    );
-  }
-  if (!lastLogged) return null;
-  const loopName = loops?.find((loop) => loop.id === lastLogged.loopId)?.name;
-  // Deleted since (here or on another device): the notice would be about nothing on show.
-  if (loops !== undefined && loopName === undefined) return null;
-  return (
-    <p role="status" className="text-sm text-ink-muted" data-testid="session-logged">
-      <Icon name="check" className={`${inlineIconClass} size-4 text-success`} />
-      Practice logged: {durationLabel(lastLogged.durationSeconds)}
-      {loopName !== undefined && <> of {loopName}</>} at {ratioToPercent(lastLogged.speedRatio)}%.
-    </p>
-  );
-}
-
-/** A bar that sticks at the top of the window, full-bleed over the page gutter. */
-const fullBleedBarClass =
-  'z-10 -mx-4 border-b border-line bg-canvas px-4 md:-mx-gutter md:px-gutter';
 
 /**
  * The readout and Play/Pause, sticky at the top of the window so both stay on
@@ -491,50 +335,6 @@ function ReadoutValue({
       <dd className="text-readout md:text-4xl md:font-bold" data-testid={testId}>
         {children}
       </dd>
-    </div>
-  );
-}
-
-/** The player's error as fixed copy, otherwise where playback is. */
-function PlayerStatusLine({ snapshot }: { snapshot: PlayerSnapshot }) {
-  if (snapshot.status === 'error' && snapshot.error) {
-    return <ErrorAlert>{PLAYER_ERROR_MESSAGES[snapshot.error]}</ErrorAlert>;
-  }
-  return (
-    <p className="text-sm text-ink-muted" aria-live="polite" data-testid="player-status">
-      {snapshot.status === 'loading'
-        ? 'Loading the score and sounds…'
-        : `Bar ${snapshot.barNumber ?? 1} of ${snapshot.barCount ?? '?'}`}
-      {snapshot.status === 'countingIn' && ' · Counting in…'}
-    </p>
-  );
-}
-
-function OfflineMessage({ children }: { children: ReactNode }) {
-  return (
-    <EmptyState
-      icon="offline"
-      action={
-        <Link to="/library" className={linkClass}>
-          Go to Library
-        </Link>
-      }
-    >
-      <span className="block font-semibold text-warning">You're offline.</span>
-      {children}
-    </EmptyState>
-  );
-}
-
-function SongNotFound() {
-  return (
-    <div className="flex flex-col gap-3">
-      <PageHeader title="Song not found">
-        This song isn't in your library. It may have been deleted.
-      </PageHeader>
-      <Link to="/library" className={`${linkClass} self-start`}>
-        Go to Library
-      </Link>
     </div>
   );
 }
