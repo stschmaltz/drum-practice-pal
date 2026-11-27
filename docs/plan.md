@@ -616,6 +616,7 @@ Shane after using Unit 16's Stats page (2026-11-27): the idea is good, but the c
 - A session stores only the speed it ended at (`sessionTracker`), so a session of ten minutes at 80% that ends on a nudge to 100% is still logged at 100%. The chart's per-day rule softens it; logging the speed with the most play time in the session would fix it at the source.
 - From 17 Build: the song overview's loop-name link was under 44 px wide for a short name on Windows fonts (`design.spec.ts`, "song overview"); 17 Build gave it `min-w-touch`. If Unit 16's branch lands another fix, keep one. (docs/units/17-stats.md, Known gaps)
 - From 17 Build: a loop practised on hundreds of days draws every point of its chart but labels only those with room; decide in QA ("a year of history") whether the chart should show the last few months instead. "Other" is its own row for a single sixth song. (docs/units/17-stats.md, Known gaps)
+- From 17 Test: the practice-days heatmap has no visually hidden table of its days (each day's minutes are a `<title>` inside the `img`, which a screen reader doesn't reach), against AGENTS.md's rule for charts; a day with only a session under a minute reads "<1" on its bar, "0 min" in the table and "0 min over 1 day" in the caption; a total is written in the browser's locale and its change line in English. (docs/units/17-stats.md, Test, Bugs found)
 
 ## Open human checks
 

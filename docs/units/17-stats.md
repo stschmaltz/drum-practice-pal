@@ -104,3 +104,72 @@ None added. The page has no mutation, timer or effect: it renders from two queri
 5. Badges: four earned, three next up, "Show all badges" shows the other four and the button keeps focus.
 6. At 390 px wide nothing scrolls sideways; a loop with a very long name wraps.
 7. A new account: the one empty state.
+
+## Test
+
+### After the merge of main
+
+`npm run check` was green as merged (133 files, 4841 tests): the merge broke nothing, and nothing was changed for it.
+
+### What was added
+
+No app code changed, and no test id was needed (Build's cover every number). Counts are tests added; a table row in three zones counts once per zone.
+
+**Pure modules** (appended to Build's files, 57 tests):
+
+- `loopProgress.test.ts` (17): the per-day rule's edges: a three-way tie goes to the slowest; two tries at 100% that add up to the time at 80% are still 80%; one second more at the faster speed wins (the slower only settles a tie); a day wholly at 100% is 100%; 23:59 and 00:01 are two points; a month's and a year's end; another loop's long session decides nothing. In London, New York and Sydney, on the 23-hour and the 25-hour day: the day's first and last half hour are one point, the minutes either side of its midnights two more. `loopProgress`: one session ever (no change, "80%"), loops last practised at the same instant keep one order, the latest session orders (not the first or the longest), and "now" ignores a last-day try at 100%.
+- `records.test.ts` (11): the earliest of three equal days and sessions in either order; two equal sessions begun at the same instant; beaten by one second; midnight splits a best day and joins a streak; one session on the last minute of a year; the changed-clock day summed as one day inside a three-day streak, in the three zones.
+- `songTime.test.ts` (5): a single sixth song is "Other" with one song; a tie at the fifth place is cut by title whatever order the loops come in; a song with no time in the period is out of the rows, out of Other and out of the total; Other holds songs past the fifth and unknown loops together, counting only the songs; the week and month start at midnight across a year's end.
+- `badges.test.ts` (4): exactly three left (nothing behind "Show all"), four left, share against amount, and every unearned badge in exactly one of the two lists.
+- `totals.test.ts` (20): the month before is thirty whole days with a change of clocks inside it, and a week that began on the changed day counts all of it, each in the three zones and both directions; the change lines in words across a year's end, for all four totals, week and month.
+
+**Components** (`StatsPage.test.tsx`, 19 tests, in "StatsPage, edges" and "BadgeSection"):
+
+- One session ever: every section's words (totals and their "more than the week before", "On a 1-day streak. Your longest yet.", one song bar, "80%" with no arrow, the one-day chart, records with one date and the loop's name, "None earned yet" and the three next up in order).
+- Loop progress: exactly six rows have no "Show all" and seven have "Show all 7 loops"; "Show fewer" takes a chart away with its row and one chart at a time still holds after; the open chart and the expanded list survive a change of period.
+- The windows in Build's list: a read that brings a new practice day redraws the open chart, its button still the same element, expanded and focused; a loop deleted elsewhere (loop and sessions gone) takes its row and open chart, leaving the other row closed and usable; a loop gone from the list while its sessions are still cached keeps its time under "Other", the bars adding up to the total, and the record without a name.
+- Where the time went: "Other (1 song)", which is not a link; a song with no time in the week is absent and comes back for the month.
+- Reads (Build had none of these): "Loading your stats…" until both lists are in, with no zeros and no empty state meanwhile; a failed first read says so in fixed copy (never the error's message) and "Try again" reads only the list that failed; a failed later read keeps the page (the query is asserted to be `error` with its rows first).
+- What a screen reader gets: every `svg` on the page with a chart open and every badge shown is an `img` whose name has a number in it, or is hidden; every number's element is outside `aria-hidden`; a song's bar is hidden beside its minutes; an unearned badge says so and how far along; a mastered loop's link says "mastered"; the two-week table has every day once, "Today" last, and the minutes drawn over the bars; the speed table has a row per point with date, percent and minutes, and the Chart button's `aria-controls` holds the chart.
+- `BadgeSection` on its own: every badge earned (no "Next up", no button), three left (no button), four left (one behind the button), none earned.
+
+**e2e** (`tests/e2e/stats.spec.ts`, 2 tests x 3 sizes): "after one session ever" (the same numbers through the real page, against the database rows, with no overflow), and "seven songs and loops": five songs then "Other (2 songs)" for all time and "Other (1 song)" for the week (the seventh song has no time in it), six loops then "Show all 7 loops" by keyboard with focus kept, one chart at a time, the chart and list kept through a change of period, both tables present, no sideways scroll or spilled text with everything open at each size, "Show fewer" taking the chart away, and a song's bar going to the song.
+
+### Checked that each test bites
+
+38 one-line breaks of the app code, each run against `src/features/stats` and put back (the scripts are not kept): the tie going to the faster speed, the slower always winning, days keyed in UTC (speeds and totals), loop order without the id or by the earliest session, other loops counted, a record matched rather than beaten or needing a margin, the later of two equal sessions, six songs shown, ties not by title, unknown loops dropped, the period ignored, the period before and the range start stepped by 24 hours, "less" and "fewer" swapped, next up by amount or four of them, "Show all" at six, charts not exclusive, an arrow after one day, `isError` for `isLoadingError`, a retry that reads both lists, the error's message shown, "Other (1 songs)", a missing loop's name printed, the song bar, sparkline and speed chart exposed or unnamed, the tables missing "Today" or the minutes, the badges' button always drawn, "not earned yet" unsaid, the streak line's "longest yet", the loading branch, a row remounted on a new day, and the list reset by the period. Every one failed at least one test, and every new test failed under at least one break.
+
+### Review checklist
+
+- **1 Interleavings:** the page has no write and no timer; its windows are the two reads. Tested: a read landing with a chart open, a loop leaving with its chart open, the two lists out of step, a failed read over data, a failed first read and its retry, one list in before the other.
+- **2 Gates:** "Show all n loops" only past six, "Show all badges" only past three, both by component test at the boundary.
+- **3 Gestures:** none (buttons and links).
+- **4 Round trips:** nothing is written. Comparisons on what is shown were Build's; the year-end table adds the words for each total.
+- **5 Validated paths:** focus stays on each disclosure (the same element, asserted after a refetch and by keyboard in e2e). A stale open-chart id matches nothing once its loop is gone.
+- **6 What is drawn:** the text alternatives above; overflow with everything open at three sizes.
+- **7 Hygiene:** the new e2e fixtures check every `error`; "Show fewer" is found with `exact: true` after the first run matched "Show fewer badges" too.
+
+### Bugs found
+
+None that changes a number. Three things for QA and Review to judge, none fixed (each is a design call or more than a few lines):
+
+1. **The heatmap has no table of its days.** AGENTS.md says every chart is an `img` with a summary plus a visually hidden table of its numbers. `PracticeHeatmap` has the summary and its caption (days practised, best week), but each day's minutes are only a `<title>` inside the `img`, which a screen reader does not reach. Repro: open Stats with a screen reader, or look for a table under "Practice days": there is none. It was so in Unit 16 too. A table of the practised days only (not all 182) would do it.
+2. **A day under a minute reads three ways.** A session can be 30 to 59 seconds. For a day with only that: its bar in "Last two weeks" is labelled "<1", its table row says "0 min", the caption counts it ("0 min over 1 of the last 14 days"), and the totals say "0 min" over "1" day. Repro: one 45-second session today, open Stats (read from the code, not run). Consistent with whole minutes everywhere, but "0 min over 1 day" reads oddly.
+3. **Two number formats.** A total is written with the browser's locale (`toLocaleString()`), its change line always in English (`toLocaleString('en')`). In a German browser 1,234 passes would read "1.234" over "1,234 more than the week before". Repro: 1,000 passes or more in a period, browser language not English (read from the code, not run). One line to fix either way; left for whoever decides which.
+
+### Not covered
+
+- The speed chart with hundreds of points (Build's known gap, QA's "a year of history"): `labelledIndexes` has Build's tests; nothing here draws 365 points.
+- Offline with the lists cached (the page reading the persisted cache): Unit 16's pattern and specs cover the mechanism; only "offline with nothing cached" is tested on this page.
+- Tablet and desktop for everything outside `stats.spec.ts` and the design spec's Stats test: the full e2e suite was not run, by instruction. `npm run test:db` was not run.
+- Dates are written in the machine's locale; tests match their shape, not their words.
+- By ear and by eye: nothing here says the page is motivating.
+
+### How to verify
+
+`npm run check`. Then, with this worktree's stack up: `E2E_PORT=4183 npx playwright test tests/e2e/stats.spec.ts`, and the design spec's Stats part with `E2E_PORT=4183 npx playwright test tests/e2e/design.spec.ts -g "the library, the song page"`.
+
+### Results
+
+- `npm run check`: green, 4917 passed and 2 skipped (4841 before this stage: 76 added).
+- e2e, phone, tablet and desktop: `stats.spec.ts` 15 of 15 passed (5 tests x 3), `design.spec.ts` "the library, the song page with its loops…" 3 of 3.

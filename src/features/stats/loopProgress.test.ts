@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { hoursInLocalDay, inTimeZone } from '@/test/timeZone';
 import { dailySpeeds, loopProgress, speedChangeLabel } from './loopProgress';
 import type { StatsSession } from './totals';
 
@@ -186,4 +187,173 @@ describe('speedChangeLabel', () => {
       '80%',
     );
   });
+});
+
+// Unit 17 Test: the rule's edges. "Most play time" is the rule; "slower" only settles a tie.
+describe('dailySpeeds, ties and edges', () => {
+  it('gives a three-way tie to the slowest', () => {
+    expect(
+      speeds([
+        session(at(2026, 11, 3, 9), { speed_ratio: 1, duration_seconds: 200 }),
+        session(at(2026, 11, 3, 10), { speed_ratio: 0.6, duration_seconds: 200 }),
+        session(at(2026, 11, 3, 11), { speed_ratio: 0.8, duration_seconds: 200 }),
+      ]),
+    ).toEqual([['2026-11-03', 60, 600]]);
+  });
+
+  it('ties on summed time: two tries at 100% that add up to the time at 80% are still a day at 80%', () => {
+    expect(
+      speeds([
+        session(at(2026, 11, 3, 9), { speed_ratio: 1, duration_seconds: 150 }),
+        session(at(2026, 11, 3, 10), { speed_ratio: 0.8, duration_seconds: 300 }),
+        session(at(2026, 11, 3, 11), { speed_ratio: 1, duration_seconds: 150 }),
+      ]),
+    ).toEqual([['2026-11-03', 80, 600]]);
+  });
+
+  it('goes to the faster speed once it has one second more: the slower only wins a tie', () => {
+    expect(
+      speeds([
+        session(at(2026, 11, 3, 9), { speed_ratio: 0.8, duration_seconds: 300 }),
+        session(at(2026, 11, 3, 10), { speed_ratio: 1, duration_seconds: 301 }),
+      ]),
+    ).toEqual([['2026-11-03', 100, 601]]);
+  });
+
+  it('a day spent at full speed is a day at full speed', () => {
+    expect(
+      speeds([
+        session(at(2026, 11, 3, 9), { speed_ratio: 1, duration_seconds: 600 }),
+        session(at(2026, 11, 3, 10), { speed_ratio: 0.8, duration_seconds: 60 }),
+      ]),
+    ).toEqual([['2026-11-03', 100, 660]]);
+  });
+
+  it('keeps each side of midnight to its own day: 23:59 at 80% and a try at 00:01 are two points', () => {
+    expect(
+      speeds([
+        session(at(2026, 11, 3, 23, 59), { speed_ratio: 0.8, duration_seconds: 600 }),
+        session(at(2026, 11, 4, 0, 1), { speed_ratio: 1, duration_seconds: 60 }),
+      ]),
+    ).toEqual([
+      ['2026-11-03', 80, 600],
+      ['2026-11-04', 100, 60],
+    ]);
+  });
+
+  it('runs across the end of a month and of a year, oldest first', () => {
+    expect(
+      speeds([
+        session(at(2027, 1, 1, 0, 0), { speed_ratio: 0.9 }),
+        session(at(2026, 12, 31, 23, 59), { speed_ratio: 0.85 }),
+        session(at(2026, 11, 30), { speed_ratio: 0.7 }),
+        session(at(2026, 12, 1), { speed_ratio: 0.75 }),
+      ]).map(([key, percent]) => [key, percent]),
+    ).toEqual([
+      ['2026-11-30', 70],
+      ['2026-12-01', 75],
+      ['2026-12-31', 85],
+      ['2027-01-01', 90],
+    ]);
+  });
+
+  it('takes the other loops’ time out of the day: a long session on another loop decides nothing', () => {
+    expect(
+      speeds([
+        session(at(2026, 11, 3, 9), { speed_ratio: 0.8, duration_seconds: 120 }),
+        session(at(2026, 11, 3, 10), { speed_ratio: 1, duration_seconds: 60 }),
+        session(at(2026, 11, 3, 11), { speed_ratio: 1, duration_seconds: 3000, loop_id: 'b' }),
+      ]),
+    ).toEqual([['2026-11-03', 80, 180]]);
+  });
+});
+
+describe('loopProgress, ties and one day', () => {
+  const active = (id: string) => ({ id, status: 'active' as const });
+
+  it('after one session ever: one day, start and now the same, no change', () => {
+    const [only, ...others] = loopProgress(
+      [session(at(2026, 11, 3), { speed_ratio: 0.8, duration_seconds: 300 })],
+      [active('a')],
+    );
+    expect(others).toEqual([]);
+    expect(only).toMatchObject({ startPercent: 80, nowPercent: 80, change: 0, seconds: 300 });
+    expect(only?.days).toHaveLength(1);
+    expect(speedChangeLabel(only!)).toBe('80%');
+  });
+
+  it('orders loops last practised at the same instant the same way whatever order they come in', () => {
+    const together = [
+      session(at(2026, 11, 3), { loop_id: 'b' }),
+      session(at(2026, 11, 3), { loop_id: 'a' }),
+      session(at(2026, 11, 3), { loop_id: 'c' }),
+    ];
+    const order = (loops: { id: string; status: 'active' }[]) =>
+      loopProgress(together, loops).map((each) => each.loop.id);
+    expect(order([active('c'), active('a'), active('b')])).toEqual(['a', 'b', 'c']);
+    expect(order([active('b'), active('c'), active('a')])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('goes by a loop’s latest session, not its first or its longest', () => {
+    const progress = loopProgress(
+      [
+        session(at(2026, 11, 1), { loop_id: 'a', duration_seconds: 5000 }),
+        session(at(2026, 11, 9), { loop_id: 'a' }),
+        session(at(2026, 11, 8), { loop_id: 'b' }),
+      ],
+      [active('b'), active('a')],
+    );
+    expect(progress.map((each) => each.loop.id)).toEqual(['a', 'b']);
+  });
+
+  it('“now” is the last day’s working speed: a try at 100% after that day’s work does not move it', () => {
+    const [first] = loopProgress(
+      [
+        session(at(2026, 11, 1), { speed_ratio: 0.7, duration_seconds: 300 }),
+        session(at(2026, 11, 2, 9), { speed_ratio: 0.8, duration_seconds: 600 }),
+        session(at(2026, 11, 2, 10), { speed_ratio: 1, duration_seconds: 60 }),
+      ],
+      [active('a')],
+    );
+    expect(speedChangeLabel(first!)).toBe('70% → 80%, up 10');
+  });
+});
+
+// As in streak.test.ts: zones that change their clocks, whatever the machine's is.
+describe.each([
+  ['Europe/London', [2026, 10, 25], [2026, 3, 29]],
+  ['America/New_York', [2026, 11, 1], [2026, 3, 8]],
+  ['Australia/Sydney', [2026, 4, 5], [2026, 10, 4]],
+] as const)('dailySpeeds in %s', (zone, fallBack, springForward) => {
+  inTimeZone(zone);
+
+  it.each([
+    ['the clocks go back', fallBack],
+    ['the clocks go forward', springForward],
+  ] as const)(
+    'is one point for the day %s, and one each for the days either side',
+    (_, [y, m, d]) => {
+      expect(hoursInLocalDay(new Date(y, m - 1, d, 12))).not.toBe(24);
+      const days = dailySpeeds(
+        [
+          session(new Date(y, m - 1, d - 1, 23, 59), { speed_ratio: 0.6 }),
+          // First and last half hour of the changed day: 23 or 25 hours apart, one day.
+          session(new Date(y, m - 1, d, 0, 30), { speed_ratio: 0.8, duration_seconds: 600 }),
+          session(new Date(y, m - 1, d, 23, 30), { speed_ratio: 1, duration_seconds: 60 }),
+          session(new Date(y, m - 1, d + 1, 0, 1), { speed_ratio: 0.9 }),
+        ],
+        'a',
+      );
+      expect(days.map((day) => [day.percent, day.seconds])).toEqual([
+        [60, 60],
+        [80, 660],
+        [90, 60],
+      ]);
+      expect(days.map((day) => day.date)).toEqual([
+        new Date(y, m - 1, d - 1),
+        new Date(y, m - 1, d),
+        new Date(y, m - 1, d + 1),
+      ]);
+    },
+  );
 });

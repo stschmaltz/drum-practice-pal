@@ -121,3 +121,87 @@ describe('timeBySong', () => {
     expect(time.totalSeconds).toBe(420);
   });
 });
+
+// Unit 17 Test: the cut at five, and what a period leaves out.
+describe('timeBySong, the sixth song and the period', () => {
+  const songs = (count: number) =>
+    Array.from({ length: count }, (_, index) => loop(`l${index}`, `s${index}`, `Song ${index}`));
+  const firstFive = ['Song 0', 'Song 1', 'Song 2', 'Song 3', 'Song 4'];
+
+  it('makes a single sixth song "Other" with one song in it', () => {
+    const six = songs(6);
+    const time = timeBySong(
+      six.map((each, index) => session(each.id, at(2026, 11, 25), (6 - index) * 60)),
+      six,
+      'week',
+      now,
+    );
+    expect(time.songs.map((song) => song.title)).toEqual(firstFive);
+    expect(time.other).toEqual({ songs: 1, seconds: 60 });
+  });
+
+  it('cuts a tie at the fifth place by title, the same whatever order the loops come in', () => {
+    const six = songs(6);
+    const sessions = six.map((each) => session(each.id, at(2026, 11, 25), 60));
+    const forwards = timeBySong(sessions, six, 'week', now);
+    const backwards = timeBySong([...sessions].reverse(), [...six].reverse(), 'week', now);
+    expect(forwards.songs.map((song) => song.title)).toEqual(firstFive);
+    expect(backwards).toEqual(forwards);
+  });
+
+  it('leaves a song with no time in the period out of the rows, out of Other and out of the total', () => {
+    const six = songs(6);
+    const sessions = [
+      ...six.slice(0, 5).map((each) => session(each.id, at(2026, 11, 25), 120)),
+      // The sixth song, and plenty of it, but a month ago.
+      session('l5', at(2026, 10, 20), 9000),
+    ];
+    const week = timeBySong(sessions, six, 'week', now);
+    expect(week.songs).toHaveLength(5);
+    expect(week.other).toBeNull();
+    expect(week.totalSeconds).toBe(600);
+    // All time it leads, and the last of the five that tie is the one song in Other.
+    const all = timeBySong(sessions, six, 'all', now);
+    expect(all.songs[0]).toMatchObject({ title: 'Song 5', seconds: 9000 });
+    expect(all.other).toEqual({ songs: 1, seconds: 120 });
+  });
+
+  it('counts songs past the fifth and sessions of unknown loops in one Other, naming only the songs', () => {
+    const seven = songs(7);
+    const time = timeBySong(
+      [
+        ...seven.map((each, index) => session(each.id, at(2026, 11, 25), (7 - index) * 60)),
+        session('gone', at(2026, 11, 25), 30),
+      ],
+      seven,
+      'week',
+      now,
+    );
+    expect(time.other).toEqual({ songs: 2, seconds: 120 + 60 + 30 });
+    expect(
+      time.songs.reduce((total, song) => total + song.seconds, 0) + (time.other?.seconds ?? 0),
+    ).toBe(time.totalSeconds);
+  });
+
+  it('starts the week and the month at midnight across the end of a year', () => {
+    const january = at(2027, 1, 3, 9);
+    const sessions = [
+      session('verse', new Date(2026, 11, 28, 0, 0), 100),
+      session('verse', new Date(2026, 11, 27, 23, 59), 1000),
+      session('fill', new Date(2026, 11, 5, 0, 0), 10),
+      session('fill', new Date(2026, 11, 4, 23, 59), 5000),
+    ];
+    const list = [loop('verse', 'x'), loop('fill', 'y')];
+    expect(timeBySong(sessions, list, 'week', january)).toMatchObject({
+      songs: [{ songId: 'x', seconds: 100 }],
+      totalSeconds: 100,
+    });
+    expect(timeBySong(sessions, list, 'month', january)).toMatchObject({
+      songs: [
+        { songId: 'x', seconds: 1100 },
+        { songId: 'y', seconds: 10 },
+      ],
+      totalSeconds: 1110,
+    });
+  });
+});

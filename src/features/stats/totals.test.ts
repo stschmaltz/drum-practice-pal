@@ -549,3 +549,86 @@ describe.each([
     expect(statsTotals(sessions, [], 'week', late)).toMatchObject({ passes: 1, days: 1 });
   });
 });
+
+// Unit 17 Test: the month's comparison through a change of clocks, and a year's end.
+describe.each([
+  ['Europe/London', [2026, 10, 25], [2026, 3, 29]],
+  ['America/New_York', [2026, 11, 1], [2026, 3, 8]],
+  ['Australia/Sydney', [2026, 4, 5], [2026, 10, 4]],
+] as const)('the month before, in %s', (zone, fallBack, springForward) => {
+  inTimeZone(zone);
+  const changes = [
+    ['the clocks go back', fallBack],
+    ['the clocks go forward', springForward],
+  ] as const;
+
+  it.each(changes)('is thirty whole days with the day %s inside it', (_, [y, m, d]) => {
+    // This month began six days after the change, so the change is in the month before.
+    const late = new Date(y, m - 1, d + 35, 23, 30);
+    expect(previousRange('month', late)).toEqual({
+      start: new Date(y, m - 1, d - 24),
+      end: new Date(y, m - 1, d + 6),
+    });
+    const sessions = [
+      session(new Date(y, m - 1, d + 6, 0, 0), { repeats: 100 }),
+      session(new Date(y, m - 1, d + 5, 23, 59), { repeats: 1 }),
+      session(new Date(y, m - 1, d, 0, 30), { repeats: 2 }),
+      session(new Date(y, m - 1, d, 23, 30), { repeats: 4 }),
+      session(new Date(y, m - 1, d - 24, 0, 0), { repeats: 8 }),
+      session(new Date(y, m - 1, d - 25, 23, 59), { repeats: 1000 }),
+    ];
+    expect(previousTotals(sessions, [], 'month', late)).toMatchObject({ passes: 15, days: 3 });
+    expect(statsTotals(sessions, [], 'month', late)).toMatchObject({ passes: 100, days: 1 });
+  });
+
+  it.each(changes)(
+    'a week that began on the day %s counts that whole day, against the week before',
+    (_, [y, m, d]) => {
+      const late = new Date(y, m - 1, d + 6, 23, 30);
+      const sessions = [
+        session(new Date(y, m - 1, d, 0, 0), { duration_seconds: 120 }),
+        session(new Date(y, m - 1, d, 23, 30), { duration_seconds: 120 }),
+        session(new Date(y, m - 1, d - 1, 23, 59), { duration_seconds: 60 }),
+      ];
+      const current = statsTotals(sessions, [], 'week', late);
+      const before = previousTotals(sessions, [], 'week', late)!;
+      expect(current).toMatchObject({ seconds: 240, days: 1 });
+      expect(before).toMatchObject({ seconds: 60, days: 1 });
+      expect(totalChange('seconds', current, before, 'week')?.label).toBe(
+        '3 min more than the week before',
+      );
+      expect(totalChange('days', current, before, 'week')?.label).toBe('Same as the week before');
+    },
+  );
+});
+
+describe('the change across a year’s end, in words', () => {
+  // 3 January: the week began on 28 December, the month on 5 December.
+  const january = at(2027, 1, 3, 9);
+  const sessions = [
+    session(at(2027, 1, 2), { duration_seconds: 1800, repeats: 30 }),
+    session(at(2026, 12, 30), { duration_seconds: 600, repeats: 10 }),
+    session(at(2026, 12, 24), { duration_seconds: 3000, repeats: 5 }),
+    session(at(2026, 11, 20), { duration_seconds: 9000, repeats: 400 }),
+  ];
+  const loops = [
+    loop({ id: 'a', status: 'finished', finished_at: at(2026, 12, 31).toISOString() }),
+    loop({ id: 'b', status: 'finished', finished_at: at(2026, 12, 22).toISOString() }),
+    loop({ id: 'c', status: 'finished', finished_at: at(2026, 12, 23).toISOString() }),
+  ];
+
+  it.each([
+    ['seconds', 'week', '10 min less than the week before'],
+    ['days', 'week', '1 more than the week before'],
+    ['passes', 'week', '35 more than the week before'],
+    ['mastered', 'week', '1 fewer than the week before'],
+    ['seconds', 'month', '1 h less than the month before'],
+    ['days', 'month', '2 more than the month before'],
+    ['passes', 'month', '355 fewer than the month before'],
+    ['mastered', 'month', '3 more than the month before'],
+  ] as const)('%s for the %s: %s', (kind, range, label) => {
+    const current = statsTotals(sessions, loops, range, january);
+    const before = previousTotals(sessions, loops, range, january)!;
+    expect(totalChange(kind, current, before, range)?.label).toBe(label);
+  });
+});

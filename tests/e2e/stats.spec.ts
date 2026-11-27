@@ -492,3 +492,190 @@ test('a new user sees the one empty state', async ({ page, user }) => {
   await expect(page.getByTestId('stats-totals')).toHaveCount(0);
   await expect(page.getByRole('img')).toHaveCount(0);
 });
+
+// Unit 17 Test: fixtures put in by the service role, for the states the two above don't reach.
+
+async function addSong(user: E2eUser, title: string): Promise<string> {
+  const songId = crypto.randomUUID();
+  const inserted = await admin.from('songs').insert({
+    id: songId,
+    user_id: user.id,
+    title,
+    artist: 'Fixture',
+    file_path: `${user.id}/${songId}.gp`,
+    file_hash: crypto.randomUUID().replaceAll('-', '').padEnd(64, '0'),
+    original_tempo: 120,
+    bar_count: 16,
+  });
+  if (inserted.error) throw inserted.error;
+  return songId;
+}
+
+async function addLoop(user: E2eUser, songId: string, name: string): Promise<string> {
+  const id = crypto.randomUUID();
+  const inserted = await admin
+    .from('loops')
+    .insert({ id, user_id: user.id, song_id: songId, name, start_bar: 1, end_bar: 2 });
+  if (inserted.error) throw inserted.error;
+  return id;
+}
+
+async function addSession(
+  user: E2eUser,
+  loopId: string,
+  startedAt: Date,
+  seconds: number,
+  speedRatio: number,
+  repeats: number,
+) {
+  const inserted = await admin.from('practice_sessions').insert({
+    id: crypto.randomUUID(),
+    user_id: user.id,
+    loop_id: loopId,
+    started_at: startedAt.toISOString(),
+    duration_seconds: seconds,
+    speed_ratio: speedRatio,
+    repeats,
+  });
+  if (inserted.error) throw inserted.error;
+}
+
+/** Local noon `daysBack` days ago: clear of midnight whenever the test runs. */
+function noonOf(daysBack: number): Date {
+  const day = midnight(daysBack);
+  return new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12);
+}
+
+const sidewaysScroll = (page: Page) =>
+  page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+
+// Plan, QA focus "one session ever": day one must not read as a failure.
+test('after one session ever, every section speaks from that session', async ({ page, user }) => {
+  const loop = await addLoop(user, await addSong(user, 'First Song'), 'First Loop');
+  // Today's first instant: never after now, which the server would refuse.
+  await addSession(user, loop, midnight(0), 300, 0.8, 12);
+  const sessions = await sessionsOf(user);
+  expect(sessions).toHaveLength(1);
+  const loops = await loopsWithSongOf(user);
+
+  await signIn(page, user, '/stats');
+  await expectTotals(page, { minutes: 5, days: 1, passes: 12, mastered: 0 });
+  await expectChange(page, 'time', '5 min more than the week before');
+  await expectChange(page, 'days', '1 more than the week before');
+  await expectChange(page, 'passes', '12 more than the week before');
+  await expectChange(page, 'mastered', null);
+  await expectSongTimes(page, sessions, loops, midnight(6));
+  await expectWholePage(page, sessions, loops);
+  await expect(page.getByTestId('streak-line')).toHaveText('On a 1-day streak. Your longest yet.');
+
+  // One practice day: the speed alone, no arrow; no list to open.
+  await expect(page.getByTestId('loop-progress-speed')).toHaveText('80%');
+  await expect(page.getByTestId('loop-progress-time')).toHaveText('· 5 min · 1 day');
+  await expect(page.getByRole('button', { name: /^Show all \d+ loops$/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Chart of First Loop' }).click();
+  await expect(
+    page.getByRole('img', { name: /^Speed of First Loop: 80% on .+, its one practice day\.$/ }),
+  ).toBeVisible();
+  await expect(page.getByTestId('speed-point')).toHaveCount(1);
+
+  // A streak of one day is one date, and the session's loop is named.
+  await expect(page.getByTestId('record-streak-when')).not.toContainText('–');
+  await expect(page.getByTestId('record-session-when')).toHaveText(/^First Loop, /);
+  await expect(page.getByText(/^None earned yet/)).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Next up' }).getByRole('listitem')).toHaveCount(3);
+
+  expect(await sidewaysScroll(page), 'sideways page scroll').toBeLessThanOrEqual(0);
+  expect(await textSpillingOutOf(page.getByRole('main'))).toEqual([]);
+});
+
+test('seven songs and loops: five songs then Other, six loops then "Show all", one chart at a time', async ({
+  page,
+  user,
+}) => {
+  // Song A was practised yesterday and longest, Song G seven days ago and least.
+  const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+  const loopIds: string[] = [];
+  for (const [index, letter] of letters.entries()) {
+    const loop = await addLoop(user, await addSong(user, `Song ${letter}`), `Loop ${letter}`);
+    await addSession(user, loop, noonOf(index + 1), (7 - index) * 120, 0.6 + index * 0.05, 3);
+    loopIds.push(loop);
+  }
+  expect(await sessionsOf(user)).toHaveLength(7);
+
+  await signIn(page, user, '/stats');
+  await choosePeriod(page, 'All time');
+  await expect(page.getByTestId('total-time')).toHaveText('56 min');
+  // 14, 12, 10, 8 and 6 minutes, then Songs F and G together.
+  await expect(page.getByTestId('song-time')).toHaveText([
+    'Song A14 min',
+    'Song B12 min',
+    'Song C10 min',
+    'Song D8 min',
+    'Song E6 min',
+    'Other (2 songs)6 min',
+  ]);
+  // The week is today and the six days before: Song G, seven days ago, has no time in it.
+  await choosePeriod(page, 'Week');
+  await expect(page.getByTestId('total-time')).toHaveText('54 min');
+  await expect(page.getByTestId('song-time')).toHaveText([
+    'Song A14 min',
+    'Song B12 min',
+    'Song C10 min',
+    'Song D8 min',
+    'Song E6 min',
+    'Other (1 song)4 min',
+  ]);
+  await expect(page.getByRole('link', { name: /^Other/ })).toHaveCount(0);
+
+  // Six loops, last practised first; the seventh behind one button that keeps focus.
+  const rows = page.getByTestId('loop-progress');
+  const names = () => rows.getByRole('link').allTextContents();
+  await expect(rows).toHaveCount(6);
+  expect(await names()).toEqual(['Loop A', 'Loop B', 'Loop C', 'Loop D', 'Loop E', 'Loop F']);
+  const showAll = page.getByRole('button', { name: 'Show all 7 loops' });
+  await showAll.focus();
+  await page.keyboard.press('Enter');
+  await expect(rows).toHaveCount(7);
+  expect((await names())[6]).toBe('Loop G');
+  const showFewer = page.getByRole('button', { name: 'Show fewer', exact: true });
+  await expect(showFewer).toBeFocused();
+  await expect(showFewer).toHaveAttribute('aria-expanded', 'true');
+
+  // One chart at a time, and the period leaves it open.
+  await page.getByRole('button', { name: 'Chart of Loop A' }).click();
+  await expect(page.getByRole('img', { name: /^Speed of Loop A: 60% on / })).toBeVisible();
+  const chartOfG = page.getByRole('button', { name: 'Chart of Loop G' });
+  await chartOfG.click();
+  await expect(page.getByTestId('speed-chart')).toHaveCount(1);
+  await expect(page.getByRole('img', { name: /^Speed of Loop G: 90% on / })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Chart of Loop A' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await choosePeriod(page, 'Month');
+  await expect(chartOfG).toHaveAttribute('aria-expanded', 'true');
+  await expect(rows).toHaveCount(7);
+
+  // The numbers behind each graphic are there for a screen reader: a row a day, a row a point.
+  await expect(
+    page.getByRole('table', { name: 'Minutes practised per day' }).locator('tbody tr'),
+  ).toHaveCount(14);
+  await expect(
+    page.getByRole('table', { name: 'Speed of Loop G on each practice day' }).locator('tbody tr'),
+  ).toHaveText([/90%\s*2 min$/]);
+
+  // With everything open nothing widens the page or leaves its box, at this size.
+  await page.getByRole('button', { name: 'Show all badges' }).click();
+  await expect(page.getByTestId('badge')).toHaveCount(11);
+  expect(await sidewaysScroll(page), 'sideways page scroll').toBeLessThanOrEqual(0);
+  expect(await textSpillingOutOf(page.getByRole('main'))).toEqual([]);
+
+  // "Show fewer" takes the seventh row and its chart away again.
+  await showFewer.click();
+  await expect(rows).toHaveCount(6);
+  await expect(page.getByTestId('speed-chart')).toHaveCount(0);
+
+  // A song's bar goes to the song.
+  await page.getByRole('link', { name: 'Song A' }).click();
+  await expect(page).toHaveURL(/\/songs\/[0-9a-f-]{36}$/);
+});

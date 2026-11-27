@@ -1,11 +1,13 @@
-import { act, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { onlineManager } from '@tanstack/react-query';
+import { onlineManager, type QueryClient } from '@tanstack/react-query';
 import { Route } from 'react-router';
 import { queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
+import { sessionKeys } from '@/features/practice/sessionKeys';
 import { loopRow } from '@/test/loopTable';
-import { renderRoutes } from '@/test/render';
-import { BADGES } from './badges';
+import { renderRoutes, settle } from '@/test/render';
+import { BADGES, badgeProgress } from './badges';
+import { BadgeSection } from './BadgeSection';
 import { StatsPage } from './StatsPage';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -461,5 +463,505 @@ describe('StatsPage', () => {
     expect(
       await screen.findByText(/your stats haven't been opened on this device yet/),
     ).toBeVisible();
+  });
+});
+
+// Unit 17 Test: the states and windows Build's tests left out.
+describe('StatsPage, edges', () => {
+  const FILL = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const WALTZ = { id: 'song-waltz', title: 'Waltz' };
+  const activeGroove = practiceLoop(LOOP, 'Groove', GROOVE_SONG);
+
+  function renderStatsWithClient(path = '/stats') {
+    const { queryClient } = renderRoutes(<Route path="/stats" element={<StatsPage />} />, {
+      path,
+    });
+    return { user: userEvent.setup(), queryClient };
+  }
+  /** Both lists read again, as after another device's change. */
+  const readAgain = (queryClient: QueryClient) =>
+    act(async () => {
+      await queryClient.invalidateQueries();
+    });
+  const songTimes = () =>
+    within(screen.getByRole('list', { name: 'Practice time by song' }))
+      .getAllByTestId('song-time')
+      .map((row) => row.textContent);
+  const rowNames = () =>
+    progressRows().map((row) => within(row).getByRole('link').textContent ?? '');
+  const manyLoops = (count: number) => {
+    const ids = Array.from(
+      { length: count },
+      (_, index) => `2000000${index}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+    );
+    return {
+      // Loop 0 practised last.
+      sessions: ids.map((id, index) => session(daysAgo(index + 1), 120, 0.6, 1, id)),
+      loops: ids.map((id, index) => practiceLoop(id, `Loop ${index}`, GROOVE_SONG)),
+    };
+  };
+
+  // Plan, QA focus and Build's walk-through: day one, after one session.
+  it('after one session ever, every section says what that session gives and nothing reads as a failure', async () => {
+    serve({ sessions: [session(daysAgo(0, 0), 300, 0.8, 12)], loops: [activeGroove] });
+    const user = renderStats();
+    await screen.findByTestId('stats-totals');
+
+    expect([
+      text('total-time'),
+      text('total-days'),
+      text('total-passes'),
+      text('total-mastered'),
+    ]).toEqual(['5 min', '1', '12', '0']);
+    expect(text('total-time-change')).toBe('5 min more than the week before');
+    expect(text('total-days-change')).toBe('1 more than the week before');
+    expect(text('total-passes-change')).toBe('12 more than the week before');
+    expect(screen.queryByTestId('total-mastered-change')).not.toBeInTheDocument();
+    expect(screen.getByTestId('streak-line')).toHaveTextContent(
+      'On a 1-day streak. Your longest yet.',
+    );
+
+    expect(
+      within(screen.getByRole('list', { name: 'Practice time by song' }))
+        .getAllByTestId('song-time')
+        .map((row) => row.textContent),
+    ).toEqual(['Groove 1205 min']);
+    expect(text('daily-summary')).toMatch(/^5 min over 1 of the last 14 days\./);
+
+    // One day has nothing to compare: the speed alone, no arrow and no "no change".
+    expect(progressRows()).toHaveLength(1);
+    expect(text('loop-progress-speed')).toBe('80%');
+    expect(screen.getByTestId('loop-progress-time')).toHaveTextContent('5 min · 1 day');
+    expect(screen.queryByRole('button', { name: /^Show all \d+ loops$/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Chart of Groove' }));
+    expect(
+      screen.getByRole('img', { name: /^Speed of Groove: 80% on .+, its one practice day\.$/ }),
+    ).toBeVisible();
+    expect(screen.getAllByTestId('speed-point')).toHaveLength(1);
+
+    expect(text('heatmap-days')).toMatch(/^Practised on 1 of the last \d+ days\.$/);
+    expect(text('heatmap-best-week')).toMatch(/Best week: 5 min over 1 day, the week of /);
+
+    // Every record is that session; a streak of one day is one date, not a span.
+    expect(text('record-streak')).toBe('1 day');
+    expect(text('record-streak-when')).not.toMatch(/–/);
+    expect(text('record-day')).toBe('5 min');
+    expect(text('record-session')).toBe('5 min');
+    expect(text('record-session-when')).toMatch(/^Groove, /);
+
+    expect(screen.getByText(/^None earned yet/)).toBeVisible();
+    const nextUp = within(screen.getByRole('list', { name: 'Next up' }))
+      .getAllByRole('listitem')
+      .map((item) => item.textContent ?? '');
+    // 1 of 3 days, 1 of 7 days, 12 of 100 passes: ahead of 5 of 60 minutes.
+    expect(nextUp.map((label) => label.replace(/, not earned yet.*/, ''))).toEqual([
+      '3-day streak',
+      '7-day streak',
+      '100 passes',
+    ]);
+  });
+
+  describe('loop progress', () => {
+    it('lists exactly six loops with no "Show all", and seven as six with "Show all 7 loops"', async () => {
+      serve(manyLoops(6));
+      const first = renderRoutes(<Route path="/stats" element={<StatsPage />} />, {
+        path: '/stats',
+      });
+      await screen.findByTestId('stats-totals');
+      expect(rowNames()).toHaveLength(6);
+      expect(
+        screen.queryByRole('button', { name: /^Show all \d+ loops$/ }),
+      ).not.toBeInTheDocument();
+      first.unmount();
+
+      serve(manyLoops(7));
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      expect(rowNames()).toEqual(['Loop 0', 'Loop 1', 'Loop 2', 'Loop 3', 'Loop 4', 'Loop 5']);
+      expect(screen.getByRole('button', { name: 'Show all 7 loops' })).toBeVisible();
+    });
+
+    it('takes a chart away with its row on "Show fewer", and still opens one chart at a time after', async () => {
+      serve(manyLoops(7));
+      const user = renderStats();
+      await screen.findByTestId('stats-totals');
+      await user.click(screen.getByRole('button', { name: 'Show all 7 loops' }));
+      await user.click(screen.getByRole('button', { name: 'Chart of Loop 6' }));
+      expect(screen.getByRole('img', { name: /^Speed of Loop 6:/ })).toBeVisible();
+
+      await user.click(screen.getByRole('button', { name: 'Show fewer' }));
+      expect(screen.queryByTestId('speed-chart')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Chart of Loop 6' })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Chart of Loop 0' }));
+      expect(screen.getAllByTestId('speed-chart')).toHaveLength(1);
+      expect(screen.getByRole('img', { name: /^Speed of Loop 0:/ })).toBeVisible();
+    });
+
+    it('keeps the open chart and the whole list when the period changes', async () => {
+      serve(manyLoops(7));
+      const user = renderStats();
+      await screen.findByTestId('stats-totals');
+      await user.click(screen.getByRole('button', { name: 'Show all 7 loops' }));
+      await user.click(screen.getByRole('button', { name: 'Chart of Loop 6' }));
+
+      await user.click(screen.getByRole('radio', { name: 'Month' }));
+      expect(screen.getByRole('heading', { name: 'Last 30 days' })).toBeVisible();
+      expect(rowNames()).toHaveLength(7);
+      expect(screen.getByRole('button', { name: 'Show fewer' })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+      expect(screen.getByRole('button', { name: 'Chart of Loop 6' })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+      expect(screen.getByRole('img', { name: /^Speed of Loop 6:/ })).toBeVisible();
+    });
+
+    it('redraws an open chart, still open and still focused, when a new practice day is read', async () => {
+      const served = { sessions: [...sessions], loops: [activeGroove] };
+      serve(served);
+      const { user, queryClient } = renderStatsWithClient();
+      await screen.findByTestId('stats-totals');
+      const chart = screen.getByRole('button', { name: 'Chart of Groove' });
+      await user.click(chart);
+      expect(screen.getAllByTestId('speed-point')).toHaveLength(3);
+
+      // Another device practised three days ago, at 65%.
+      served.sessions = [...sessions, session(daysAgo(3), 240, 0.65)];
+      await readAgain(queryClient);
+      await waitFor(() => expect(screen.getAllByTestId('speed-point')).toHaveLength(4));
+      expect(
+        screen.getAllByTestId('speed-point').map((point) => point.getAttribute('data-percent')),
+      ).toEqual(['60', '65', '80', '70']);
+      expect(chart).toBeInTheDocument();
+      expect(chart).toHaveAttribute('aria-expanded', 'true');
+      expect(chart).toHaveFocus();
+      expect(screen.getByTestId('loop-progress-time')).toHaveTextContent('39 min · 4 days');
+    });
+
+    it('drops a loop’s row and its open chart when the loop is deleted elsewhere, leaving the others closed and usable', async () => {
+      const fill = session(daysAgo(2), 1500, 0.5, 3, FILL);
+      const served = {
+        sessions: [...sessions, fill],
+        loops: [activeGroove, practiceLoop(FILL, 'Fill', WALTZ)],
+      };
+      serve(served);
+      const { user, queryClient } = renderStatsWithClient();
+      await screen.findByTestId('stats-totals');
+      await user.click(screen.getByRole('button', { name: 'Chart of Fill' }));
+      expect(screen.getByRole('img', { name: /^Speed of Fill:/ })).toBeVisible();
+      expect(rowNames()).toEqual(['Groove', 'Fill']);
+
+      // The delete cascades: the loop and its sessions are gone from both lists.
+      served.sessions = sessions;
+      served.loops = [activeGroove];
+      await readAgain(queryClient);
+      await waitFor(() => expect(rowNames()).toEqual(['Groove']));
+      expect(rowNames()).toEqual(['Groove']);
+      expect(screen.queryByTestId('speed-chart')).not.toBeInTheDocument();
+      expect(screen.queryByText('Fill')).not.toBeInTheDocument();
+      expect(songTimes()).toEqual(['Groove 12015 min']);
+      expect(text('record-session')).toBe('20 min');
+
+      const groove = screen.getByRole('button', { name: 'Chart of Groove' });
+      expect(groove).toHaveAttribute('aria-expanded', 'false');
+      await user.click(groove);
+      expect(screen.getAllByTestId('speed-chart')).toHaveLength(1);
+      expect(
+        screen.getByRole('img', { name: /^Speed of Groove over 3 practice days/ }),
+      ).toBeVisible();
+    });
+
+    // Build, "Missing a piece": the loops list is ahead of the sessions (or the other way round).
+    it('with a loop gone from the list but its sessions still cached, keeps the time under Other and the record without a name', async () => {
+      const served = {
+        sessions: [...sessions, session(daysAgo(2), 1500, 0.5, 3, FILL)],
+        loops: [activeGroove, practiceLoop(FILL, 'Fill', WALTZ)],
+      };
+      serve(served);
+      const { user, queryClient } = renderStatsWithClient();
+      await screen.findByTestId('stats-totals');
+      await user.click(screen.getByRole('button', { name: 'Chart of Fill' }));
+      expect(songTimes()).toEqual(['Waltz25 min', 'Groove 12015 min']);
+      expect(text('record-session-when')).toMatch(/^Fill, /);
+
+      served.loops = [activeGroove];
+      await readAgain(queryClient);
+      await screen.findByText('Other');
+      expect(rowNames()).toEqual(['Groove']);
+      expect(screen.queryByTestId('speed-chart')).not.toBeInTheDocument();
+      // The bars still add up to the period's 40 minutes.
+      expect(songTimes()).toEqual(['Groove 12015 min', 'Other25 min']);
+      expect(text('total-time')).toBe('40 min');
+      expect(text('record-session')).toBe('25 min');
+      expect(text('record-session-when')).not.toMatch(/Fill|undefined|,/);
+    });
+  });
+
+  describe('where the time went', () => {
+    const sixSongs = Array.from({ length: 6 }, (_, index) => ({
+      loop: `3000000${index}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+      song: { id: `song-${index}`, title: `Song ${index}` },
+    }));
+
+    it('names a single sixth song as "Other (1 song)"', async () => {
+      serve({
+        sessions: sixSongs.map(({ loop }, index) =>
+          session(daysAgo(1), (6 - index) * 120, 0.8, 1, loop),
+        ),
+        loops: sixSongs.map(({ loop, song }) => practiceLoop(loop, 'Loop', song)),
+      });
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      expect(songTimes()).toEqual([
+        'Song 012 min',
+        'Song 110 min',
+        'Song 28 min',
+        'Song 36 min',
+        'Song 44 min',
+        'Other (1 song)2 min',
+      ]);
+      // "Other" is not a song: it goes nowhere.
+      expect(screen.queryByRole('link', { name: /^Other/ })).not.toBeInTheDocument();
+    });
+
+    it('leaves out a song with no time in the period, and brings it back in a period that has some', async () => {
+      const waltzLoop = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+      serve({
+        sessions: [today, session(daysAgo(20), 2400, 0.9, 1, waltzLoop)],
+        loops: [activeGroove, practiceLoop(waltzLoop, 'Intro', WALTZ)],
+      });
+      const user = renderStats();
+      await screen.findByTestId('stats-totals');
+      expect(songTimes()).toEqual(['Groove 12010 min']);
+      const list = screen.getByRole('list', { name: 'Practice time by song' });
+      expect(within(list).queryByText('Waltz')).not.toBeInTheDocument();
+      expect(within(list).queryByText(/^Other/)).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('radio', { name: 'Month' }));
+      expect(songTimes()).toEqual(['Waltz40 min', 'Groove 12010 min']);
+    });
+  });
+
+  describe('while its lists are read', () => {
+    const lost: FakeResult = {
+      data: null,
+      error: { message: 'TypeError: Failed to fetch', code: '' },
+    };
+    const readsOf = (table: string) =>
+      queryResult.mock.calls.filter(([call]) => call.table === table).length;
+
+    it('says it is loading until both lists are in, with no zeros meanwhile', async () => {
+      queryResult.mockImplementation((call) =>
+        call.table === 'practice_sessions'
+          ? new Promise<FakeResult>(() => {})
+          : Promise.resolve(ok(loops)),
+      );
+      renderStats();
+      expect(await screen.findByText('Loading your stats…')).toBeVisible();
+      await settle();
+      expect(screen.getByText('Loading your stats…')).toBeVisible();
+      expect(screen.queryByTestId('stats-totals')).not.toBeInTheDocument();
+      expect(screen.queryByText(/No practice yet/)).not.toBeInTheDocument();
+    });
+
+    it('says in fixed copy when the first read fails, and "Try again" reads only what failed', async () => {
+      queryResult.mockImplementation(async (call) =>
+        call.table === 'practice_sessions' ? lost : ok(loops),
+      );
+      const user = renderStats();
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(/^Couldn't load your stats\. /);
+      expect(alert).not.toHaveTextContent(/Failed to fetch|TypeError/);
+      expect(screen.queryByTestId('stats-totals')).not.toBeInTheDocument();
+      const loopReads = readsOf('loops');
+      const sessionReads = readsOf('practice_sessions');
+      expect(loopReads).toBeGreaterThan(0);
+
+      serve();
+      await user.click(screen.getByRole('button', { name: 'Try again' }));
+      await screen.findByTestId('stats-totals');
+      expect(text('total-time')).toBe('15 min');
+      expect(readsOf('practice_sessions')).toBeGreaterThan(sessionReads);
+      expect(readsOf('loops')).toBe(loopReads);
+    });
+
+    it('keeps the page when a later read fails over what is showing', async () => {
+      serve();
+      const { queryClient } = renderStatsWithClient();
+      await screen.findByTestId('stats-totals');
+
+      queryResult.mockImplementation(async () => lost);
+      await readAgain(queryClient);
+      const state = queryClient.getQueryState(sessionKeys.every('user-1'));
+      expect(state?.status).toBe('error');
+      expect(state?.data).toHaveLength(3);
+      await settle();
+      expect(text('total-time')).toBe('15 min');
+      expect(progressRows()).toHaveLength(1);
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+  });
+
+  // Plan: "a text alternative per graphic"; the brief: every number reaches a screen reader.
+  describe('what a screen reader gets', () => {
+    const hidden = (element: Element) => element.closest('[aria-hidden="true"], [hidden]') !== null;
+
+    it('names every graphic, hides every other drawing, and keeps every number out of hidden parts', async () => {
+      serve({
+        sessions: [...sessions, session(daysAgo(2), 1500, 0.5, 3, FILL)],
+        loops: [...loops, practiceLoop(FILL, 'Fill', WALTZ)],
+      });
+      const user = renderStats();
+      await screen.findByTestId('stats-totals');
+      await user.click(screen.getByRole('button', { name: 'Chart of Groove' }));
+      await user.click(screen.getByRole('button', { name: 'Show all badges' }));
+
+      const graphics = screen.getAllByRole('img');
+      expect(graphics).toHaveLength(3);
+      for (const graphic of graphics) expect(graphic).toHaveAccessibleName(/\d/);
+      // Icons, sparklines, the legend: drawings that say nothing a neighbour doesn't.
+      for (const svg of Array.from(document.querySelectorAll('svg'))) {
+        expect(svg.getAttribute('role') === 'img' || hidden(svg)).toBe(true);
+      }
+
+      const numbers = [
+        'total-time',
+        'total-days',
+        'total-passes',
+        'total-mastered',
+        'total-time-change',
+        'streak-line',
+        'daily-summary',
+        'heatmap-days',
+        'heatmap-best-week',
+        'record-streak',
+        'record-streak-when',
+        'record-day',
+        'record-day-when',
+        'record-session',
+        'record-session-when',
+      ].map((id) => screen.getByTestId(id));
+      const repeated = ['song-time', 'loop-progress-speed', 'loop-progress-time', 'badge'].flatMap(
+        (id) => screen.getAllByTestId(id),
+      );
+      for (const element of [...numbers, ...repeated]) {
+        expect(element.textContent).not.toBe('');
+        expect(hidden(element)).toBe(false);
+      }
+      // A song's bar is a drawing of the minutes beside it.
+      for (const row of screen.getAllByTestId('song-time')) {
+        const bar = row.querySelector('[aria-hidden="true"]');
+        expect(bar).not.toBeNull();
+        expect(bar?.textContent).toBe('');
+        expect(row.textContent).toMatch(/\d+ min$/);
+      }
+      // A badge not yet earned says so and how far along it is, in words.
+      for (const badge of screen.getAllByTestId('badge')) {
+        if (badge.getAttribute('data-earned') === 'true') continue;
+        expect(badge).toHaveTextContent(/, not earned yet/);
+        expect(badge).toHaveTextContent(/\d of \d|Every loop of one song/);
+      }
+      // A mastered loop's trophy is said, not only drawn.
+      expect(screen.getByRole('link', { name: /^Groove\s?, mastered$/ })).toBeVisible();
+    });
+
+    it('gives the two-week chart’s bars as a table: every day once, today named, the minutes the bars show', async () => {
+      serve();
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      const rows = within(screen.getByRole('table', { name: 'Minutes practised per day' }))
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) => Array.from(row.querySelectorAll('th, td')).map((cell) => cell.textContent));
+      expect(rows).toHaveLength(14);
+      expect(new Set(rows.map(([day]) => day)).size).toBe(14);
+      expect(rows[13]).toEqual(['Today', '10 min']);
+      expect(rows[12]?.[1]).toBe('5 min');
+      expect(rows.slice(0, 12).every(([, minutes]) => minutes === '0 min')).toBe(true);
+
+      // The numbers drawn over the bars are the same minutes.
+      const bars = screen.getAllByTestId('daily-bar');
+      expect(bars).toHaveLength(14);
+      const drawn = bars.map((bar) =>
+        Array.from(bar.querySelectorAll('text')).map((label) => label.textContent),
+      );
+      // An empty day carries its weekday and date only; a practised one its minutes first.
+      expect(drawn.slice(0, 12).every((labels) => labels.length === 2)).toBe(true);
+      expect(drawn[12]?.[0]).toBe('5');
+      expect(drawn[13]?.[0]).toBe('10');
+    });
+
+    it('gives a loop’s chart as a table: a row per point with its date, percent and minutes', async () => {
+      serve();
+      const user = renderStats();
+      await screen.findByTestId('stats-totals');
+      await user.click(screen.getByRole('button', { name: 'Chart of Groove' }));
+      const points = screen.getAllByTestId('speed-point');
+      const rows = within(
+        screen.getByRole('table', { name: 'Speed of Groove on each practice day' }),
+      )
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) => Array.from(row.querySelectorAll('th, td')).map((cell) => cell.textContent));
+      expect(rows).toHaveLength(points.length);
+      expect(rows.map(([, percent, minutes]) => [percent, minutes])).toEqual([
+        ['60%', '20 min'],
+        ['80%', '5 min'],
+        ['70%', '10 min'],
+      ]);
+      expect(rows.every(([day]) => /\d/.test(day ?? ''))).toBe(true);
+      // The button says what it opens and points at it.
+      const button = screen.getByRole('button', { name: 'Chart of Groove' });
+      const region = document.getElementById(button.getAttribute('aria-controls') ?? '');
+      expect(region).toContainElement(screen.getByTestId('speed-chart'));
+    });
+  });
+});
+
+describe('BadgeSection', () => {
+  const fresh = badgeProgress({ sessions: [], loops: [] });
+  const earnedBut = (left: number) =>
+    fresh.map((badge, index) => ({ ...badge, earned: index >= left }));
+
+  it('with every badge earned lists them all, with no "Next up" and nothing to show', () => {
+    render(<BadgeSection badges={earnedBut(0)} />);
+    expect(
+      within(screen.getByRole('list', { name: 'Badges earned' })).getAllByRole('listitem'),
+    ).toHaveLength(BADGES.length);
+    expect(screen.queryByText('Next up')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByText(/None earned yet/)).not.toBeInTheDocument();
+  });
+
+  it('with three left names them next up and offers no "Show all badges"', () => {
+    render(<BadgeSection badges={earnedBut(3)} />);
+    expect(
+      within(screen.getByRole('list', { name: 'Next up' })).getAllByRole('listitem'),
+    ).toHaveLength(3);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('with four left keeps one behind "Show all badges"', async () => {
+    const user = userEvent.setup();
+    render(<BadgeSection badges={earnedBut(4)} />);
+    expect(screen.getAllByTestId('badge')).toHaveLength(BADGES.length - 1);
+    await user.click(screen.getByRole('button', { name: 'Show all badges' }));
+    expect(
+      within(screen.getByRole('list', { name: 'More badges' })).getAllByRole('listitem'),
+    ).toHaveLength(1);
+    expect(screen.getAllByTestId('badge')).toHaveLength(BADGES.length);
+  });
+
+  it('with none earned and nothing started says so, and still names three', () => {
+    render(<BadgeSection badges={fresh} />);
+    expect(screen.getByText(/^None earned yet/)).toBeVisible();
+    expect(
+      within(screen.getByRole('list', { name: 'Next up' }))
+        .getAllByRole('listitem')
+        .map((item) => (item.textContent ?? '').replace(/, not earned yet.*/, '')),
+    ).toEqual(['3-day streak', '7-day streak', '30-day streak']);
   });
 });

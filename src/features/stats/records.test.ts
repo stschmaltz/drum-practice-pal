@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { inTimeZone } from '@/test/timeZone';
 import { practiceRecords } from './records';
 import type { StatsSession } from './totals';
 
@@ -94,6 +95,99 @@ describe('practiceRecords', () => {
       startedAt: at(2026, 11, 7),
       seconds: 700,
       loopId: 'b',
+    });
+  });
+});
+
+// Unit 17 Test: ties and edges.
+describe('practiceRecords, ties and edges', () => {
+  const withId = (id: string, date: Date, seconds: number, loop_id: string): StatsSession => ({
+    ...session(date, seconds, loop_id),
+    id,
+  });
+
+  it('keeps the earliest of three equal days and sessions, whatever order they come in', () => {
+    const three = [
+      session(at(2026, 11, 9), 600, 'third'),
+      session(at(2026, 11, 2), 600, 'first'),
+      session(at(2026, 11, 5), 600, 'second'),
+    ];
+    for (const sessions of [three, [...three].reverse()]) {
+      const records = practiceRecords(sessions);
+      expect(records.bestDay).toEqual({ date: new Date(2026, 10, 2), seconds: 600 });
+      expect(records.longestSession).toMatchObject({ loopId: 'first' });
+    }
+  });
+
+  it('gives two equal sessions begun at the same instant the same answer in either order', () => {
+    const pair = [
+      withId('b', at(2026, 11, 2), 600, 'loop-b'),
+      withId('a', at(2026, 11, 2), 600, 'loop-a'),
+    ];
+    expect(practiceRecords(pair).longestSession).toMatchObject({ loopId: 'loop-a' });
+    expect(practiceRecords([...pair].reverse()).longestSession).toMatchObject({
+      loopId: 'loop-a',
+    });
+  });
+
+  it('is beaten by one second more, on a later day', () => {
+    const records = practiceRecords([session(at(2026, 11, 2), 600), session(at(2026, 11, 9), 601)]);
+    expect(records.bestDay).toEqual({ date: new Date(2026, 10, 9), seconds: 601 });
+    expect(records.longestSession).toMatchObject({ seconds: 601 });
+  });
+
+  it('splits a day at midnight: 23:59 and 00:01 are two days of a streak, not one best day', () => {
+    const records = practiceRecords([
+      session(at(2026, 11, 3, 23, 59), 500),
+      session(at(2026, 11, 4, 0, 1), 500),
+      session(at(2026, 11, 6, 9), 450),
+      session(at(2026, 11, 6, 15), 450),
+    ]);
+    expect(records.bestDay).toEqual({ date: new Date(2026, 10, 6), seconds: 900 });
+    expect(records.longestSession).toMatchObject({
+      seconds: 500,
+      startedAt: at(2026, 11, 3, 23, 59),
+    });
+    // 3 and 4 November run on; the 6th stands alone.
+    expect(records.longestStreak).toEqual({
+      days: 2,
+      start: new Date(2026, 10, 3),
+      end: new Date(2026, 10, 4),
+    });
+  });
+
+  it('one session ever, on the last minute of a year: a streak of one day that starts and ends on it', () => {
+    const { longestStreak } = practiceRecords([session(at(2026, 12, 31, 23, 59), 45)]);
+    expect(longestStreak).toEqual({
+      days: 1,
+      start: new Date(2026, 11, 31),
+      end: new Date(2026, 11, 31),
+    });
+  });
+});
+
+describe.each([
+  ['Europe/London', [2026, 10, 25], [2026, 3, 29]],
+  ['America/New_York', [2026, 11, 1], [2026, 3, 8]],
+  ['Australia/Sydney', [2026, 4, 5], [2026, 10, 4]],
+] as const)('practiceRecords in %s', (zone, fallBack, springForward) => {
+  inTimeZone(zone);
+
+  it.each([
+    ['the clocks go back', fallBack],
+    ['the clocks go forward', springForward],
+  ] as const)('sums the day %s as one day, in a streak of three', (_, [y, m, d]) => {
+    const records = practiceRecords([
+      session(new Date(y, m - 1, d - 1, 23, 59), 700),
+      session(new Date(y, m - 1, d, 0, 30), 400),
+      session(new Date(y, m - 1, d, 23, 30), 400),
+      session(new Date(y, m - 1, d + 1, 0, 1), 700),
+    ]);
+    expect(records.bestDay).toEqual({ date: new Date(y, m - 1, d), seconds: 800 });
+    expect(records.longestStreak).toEqual({
+      days: 3,
+      start: new Date(y, m - 1, d - 1),
+      end: new Date(y, m - 1, d + 1),
     });
   });
 });

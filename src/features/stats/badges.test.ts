@@ -254,3 +254,58 @@ describe.each([
     expect(byId({ sessions, loops: [] })['streak-3']).toMatchObject({ earned: false, current: 2 });
   });
 });
+
+// Unit 17 Test: "Next up" at its edges.
+describe('nextUpBadges, edges', () => {
+  const ids = (badges: { id: string }[]) => badges.map((badge) => badge.id);
+  const fresh = () => badgeProgress({ sessions: [], loops: [] });
+
+  it('with exactly three left names all three and leaves nothing behind "Show all"', () => {
+    const badges = fresh().map((badge, index) => ({ ...badge, earned: index >= 3 }));
+    const { nextUp, rest } = nextUpBadges(badges);
+    expect(ids(nextUp)).toEqual(['streak-3', 'streak-7', 'streak-30']);
+    expect(rest).toEqual([]);
+  });
+
+  it('with four left keeps the one furthest off for "Show all"', () => {
+    const left: Record<string, number> = {
+      'streak-30': 15,
+      'hours-50': 5,
+      'passes-1000': 900,
+      'mastered-5': 4,
+    };
+    const badges = fresh().map((badge) => ({
+      ...badge,
+      earned: !(badge.id in left),
+      current: left[badge.id] ?? badge.target,
+    }));
+    const { nextUp, rest } = nextUpBadges(badges);
+    // 900 of 1,000, 4 of 5, 15 of 30; 5 of 50 hours waits.
+    expect(ids(nextUp)).toEqual(['passes-1000', 'mastered-5', 'streak-30']);
+    expect(ids(rest)).toEqual(['hours-50']);
+  });
+
+  it('orders by the share done, not the amount: 2 of 3 days is ahead of 500 of 1,000 passes', () => {
+    const badges = fresh().map((badge) =>
+      badge.id === 'streak-3'
+        ? { ...badge, current: 2 }
+        : badge.id === 'passes-1000'
+          ? { ...badge, current: 500 }
+          : badge,
+    );
+    expect(ids(nextUpBadges(badges).nextUp).slice(0, 2)).toEqual(['streak-3', 'passes-1000']);
+  });
+
+  it('never names an earned badge, and every unearned one is in exactly one of the two lists', () => {
+    const badges = badgeProgress({
+      sessions: [session(day(1), 4000, 150), session(day(2), 60, 1), session(day(3), 60, 1)],
+      loops: [{ song_id: 'x', status: 'finished' }],
+    });
+    const { nextUp, rest } = nextUpBadges(badges);
+    const unearned = badges.filter((badge) => !badge.earned);
+    expect(unearned.length).toBeLessThan(badges.length);
+    expect([...nextUp, ...rest].every((badge) => !badge.earned)).toBe(true);
+    expect(ids([...nextUp, ...rest]).sort()).toEqual(ids(unearned).sort());
+    expect(nextUp).toHaveLength(3);
+  });
+});
