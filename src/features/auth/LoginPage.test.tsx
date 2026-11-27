@@ -270,7 +270,9 @@ describe('LoginPage offline', () => {
 
 describe('LoginPage email field (12 UX pass)', () => {
   const pointer = (fine: boolean) =>
-    vi.spyOn(window, 'matchMedia').mockImplementation(
+    // jsdom has no matchMedia, and Vitest 4 won't spy on a missing property.
+    vi.stubGlobal(
+      'matchMedia',
       (query: string) =>
         ({
           matches: query === '(pointer: fine)' ? fine : false,
@@ -279,7 +281,7 @@ describe('LoginPage email field (12 UX pass)', () => {
           removeEventListener: () => {},
         }) as unknown as MediaQueryList,
     );
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
 
   it('shows an example address in the empty field', () => {
     renderLogin();
