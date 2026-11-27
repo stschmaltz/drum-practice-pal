@@ -31,6 +31,7 @@ Remove or rewrite what the instruction replaces, so no file is left saying the o
 - Supabase (Postgres, auth, storage) from Unit 02
 - Vitest + Testing Library; Playwright for e2e
 - Hosting: Cloudflare Workers static assets via Workers Builds (`wrangler.jsonc`). Every branch and PR gets a preview URL. SPA routing is handled by `not_found_handling`, so don't add `_redirects`
+- CI (`.github/workflows/ci.yml`): the repo is public, so GitHub-hosted runners cost nothing. `check`, e2e and `db` run on PRs (a newer push cancels the PR's running run) and on "Run workflow", not on the merge to `main`, which runs only `migrate`. `main` is protected: changes land through a PR whose checks passed, never a direct push
 
 ## Commands
 

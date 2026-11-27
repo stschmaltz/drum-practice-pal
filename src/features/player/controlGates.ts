@@ -4,13 +4,7 @@
  * (Unit 10). A control and its key must never disagree about whether a press
  * would do anything.
  */
-import {
-  isLoaded,
-  isRunning,
-  showsScoreBars,
-  type PlayerService,
-  type PlayerSnapshot,
-} from './PlayerService';
+import { isLoaded, showsScoreBars, type PlayerService, type PlayerSnapshot } from './PlayerService';
 
 /**
  * Whether playback can start: the song is loaded (or already running). Not
