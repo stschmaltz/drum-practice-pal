@@ -9,7 +9,8 @@ import { useMetronomeSample, type SampleRenderer } from './useMetronomeSample';
 /**
  * "Play sample": two bars of the voice being chosen, at the volume being
  * chosen, through the player's own sounds. Choosing another sound while it
- * plays plays that one instead, so sounds can be compared one after another.
+ * plays plays that one instead, so sounds can be compared one after another,
+ * and moving the volume changes the sample as it plays.
  */
 export function MetronomeSampleButton({
   voice,
@@ -36,6 +37,10 @@ export function MetronomeSampleButton({
     // The context was unlocked by the tap that started the sample, so this needs no gesture.
     if (sounding) play(voice, level);
   }, [voice]);
+
+  // The slider is heard as it moves, without starting the sample again.
+  const { setVolume } = sample;
+  useEffect(() => setVolume(volume), [setVolume, volume]);
 
   return (
     <div className="flex flex-col gap-2">

@@ -26,7 +26,9 @@ class FakeSource {
 }
 
 let sources: FakeSource[] = [];
+let gains: { gain: { value: number } }[] = [];
 let resumed = 0;
+let refuseResume = false;
 
 class FakeAudioContext {
   state = 'suspended';
@@ -34,6 +36,7 @@ class FakeAudioContext {
   destination = {};
   resume() {
     resumed++;
+    if (refuseResume) return Promise.reject(new DOMException('Not allowed', 'NotAllowedError'));
     this.state = 'running';
     return Promise.resolve();
   }
@@ -46,7 +49,9 @@ class FakeAudioContext {
     return { getChannelData: (channel: number) => data[channel] };
   }
   createGain() {
-    return { gain: { value: 1 } };
+    const gain = { gain: { value: 1 } };
+    gains.push(gain);
+    return gain;
   }
   createBufferSource() {
     const source = new FakeSource();
@@ -57,7 +62,9 @@ class FakeAudioContext {
 
 beforeEach(() => {
   sources = [];
+  gains = [];
   resumed = 0;
+  refuseResume = false;
   vi.stubGlobal('AudioContext', FakeAudioContext);
 });
 
@@ -86,8 +93,8 @@ function setup(voice: MetronomeVoice = DEFAULT_METRONOME_VOICE) {
   const view = render(<MetronomeSampleButton voice={voice} volume={0.5} render={fake.render} />);
   return {
     ...fake,
-    rerender: (next: MetronomeVoice) =>
-      view.rerender(<MetronomeSampleButton voice={next} volume={0.5} render={fake.render} />),
+    rerender: (next: MetronomeVoice, volume = 0.5) =>
+      view.rerender(<MetronomeSampleButton voice={next} volume={volume} render={fake.render} />),
   };
 }
 
@@ -144,6 +151,60 @@ describe('MetronomeSampleButton', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/^Couldn't play the sample\./);
     expect(alert).not.toHaveTextContent('sonivox');
+    expect(screen.getByRole('button', { name: 'Play sample' })).toBeInTheDocument();
+  });
+
+  it('plays at the slider’s volume and follows the slider while it plays', async () => {
+    const user = userEvent.setup();
+    const { calls, rerender } = setup();
+    await user.click(screen.getByRole('button', { name: 'Play sample' }));
+    await screen.findByRole('button', { name: 'Stop sample' });
+    expect(gains[0]?.gain.value).toBe(0.5);
+    rerender(DEFAULT_METRONOME_VOICE, 0.2);
+    expect(gains[0]?.gain.value).toBe(0.2);
+    // The level changed; the sample didn't start again.
+    expect(calls).toHaveLength(1);
+    expect(sources).toHaveLength(1);
+  });
+
+  it('takes a volume moved while the sample loads', async () => {
+    const user = userEvent.setup();
+    let finish: (samples: Float32Array) => void = () => {};
+    const view = render(
+      <MetronomeSampleButton
+        voice={DEFAULT_METRONOME_VOICE}
+        volume={0.5}
+        render={() => new Promise((resolve) => (finish = resolve))}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Play sample' }));
+    view.rerender(
+      <MetronomeSampleButton
+        voice={DEFAULT_METRONOME_VOICE}
+        volume={0}
+        render={() => new Promise((resolve) => (finish = resolve))}
+      />,
+    );
+    await act(async () => finish(new Float32Array(8)));
+    expect(gains[0]?.gain.value).toBe(0);
+  });
+
+  it('asks iOS for the playback audio session in the tap, so the ringer switch can’t mute it', async () => {
+    const user = userEvent.setup();
+    const audioSession = { type: 'auto' };
+    vi.stubGlobal('navigator', { ...navigator, audioSession });
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Play sample' }));
+    expect(audioSession.type).toBe('playback');
+  });
+
+  it('says it could not play when the browser refuses to start audio, and plays nothing', async () => {
+    const user = userEvent.setup();
+    refuseResume = true;
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Play sample' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/^Couldn't play the sample\./);
+    expect(sources).toEqual([]);
     expect(screen.getByRole('button', { name: 'Play sample' })).toBeInTheDocument();
   });
 });
