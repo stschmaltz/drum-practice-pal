@@ -11,6 +11,10 @@ const saved: Settings = {
   metronome_volume: 0.8,
   count_in_bars: 0,
   count_in_mode: 'start',
+  metronome_sound: 'click',
+  metronome_accent: true,
+  metronome_accent_sound: 'click',
+  metronome_subdivision: 1,
   drums_muted_default: false,
 };
 

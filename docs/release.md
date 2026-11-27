@@ -12,13 +12,22 @@ How Drum Practice Pal goes from `main` to the hosted Supabase project and the pr
 
 ## Where things are (Nov 2026)
 
-- Supabase project `pdvrzgeoijerdzioxtse` ("stschmaltz's Project", us-west-2, Free plan), linked with `npx supabase link --project-ref pdvrzgeoijerdzioxtse`. Migrations up to `20261123010000_session_sanity.sql` are pushed.
+- Supabase project `pdvrzgeoijerdzioxtse` ("stschmaltz's Project", us-west-2, Free plan), linked with `npx supabase link --project-ref pdvrzgeoijerdzioxtse`. Migrations up to `20261123010000_session_sanity.sql` were pushed by hand; from `20261128000000_metronome_sounds.sql` on, CI pushes them (section 2).
 - Production Worker: `https://drum-practice-pal.stschmaltz.workers.dev`.
 - Auth settings were pushed with `supabase config push` from a copy of `supabase/` whose `config.toml` holds the production column of section 3 (site URL, redirect URLs, confirm email on, minimum password 12, `max_frequency` 60 s, hosted email rate limit), then "Allow new users" off once Shane's account existed (`enable_signup = false`: an unknown address gets `signup_disabled`, which the app shows as "New accounts are closed."). To add an account later, turn it on, sign in, and turn it off again. Not pushed: the email templates. The Free plan refuses template changes while the built-in sender is used, so the email carries Supabase's default magic link and no 6-digit code until a custom SMTP sender is set; then push the two `[auth.email.template.*]` sections. Sign-in by link works meanwhile, but an installed iPhone PWA needs the code.
 
 ## 2. Hosted database
 
-Migrations live in `supabase/migrations/` and reach the hosted project with `supabase db push` (by hand; nothing in CI pushes). Link once:
+Migrations live in `supabase/migrations/`. CI applies them: the `migrate` job in `.github/workflows/ci.yml` runs `supabase db push` on every push to `main`, then checks the hosted schema against `src/lib/database.types.ts`. It needs two repository secrets (GitHub, Settings, Secrets and variables, Actions), set once:
+
+- [ ] `SUPABASE_ACCESS_TOKEN`: a personal access token from Supabase (Account, Access Tokens).
+- [ ] `SUPABASE_DB_PASSWORD`: the hosted project's database password (Project Settings, Database).
+
+Workers Builds deploys the same push at the same time, and the job doesn't wait for the tests (they passed on the PR), so the schema normally lands first. A migration must still be additive: a new column with a default, a new table, a new enum. One that renames or drops something the live build reads goes out in two releases: first a build that no longer reads it, then the migration.
+
+A migration that adds a check existing rows can fail is refused whole (it runs in a transaction), and the job goes red with the row's error. Write its SQL check in the list below, and run it in the hosted SQL editor before merging.
+
+To push by hand instead (CI down, a fix outside `main`), link once:
 
 ```bash
 npx supabase login
@@ -27,7 +36,7 @@ npx supabase link --project-ref <project-ref>
 
 ### Checks to run first
 
-Two migrations add checks that existing rows can fail, and one failing row stops the whole push. Run these in the hosted SQL editor; each must return no rows. Fix (or delete) any row they find before pushing.
+Two migrations add checks that existing rows can fail, and one failing row stops the whole push. Run these in the hosted SQL editor; each must return no rows. Fix (or delete) any row they find before pushing. Both are applied already; they stay as examples.
 
 - [ ] Before `20261123000000_loops_grants.sql` (blank names are refused from here on):
 
@@ -43,6 +52,8 @@ Two migrations add checks that existing rows can fail, and one failing row stops
   ```
 
 ### Push
+
+CI does the first three on every push to `main` (the `migrate` job); by hand they are:
 
 - [ ] `npx supabase db push --dry-run` lists only the migrations you expect.
 - [ ] `npx supabase db push`.
