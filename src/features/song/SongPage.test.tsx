@@ -1284,6 +1284,44 @@ describe('SongPage loops', () => {
     expect(speedReadout()).toHaveTextContent('80%');
   });
 
+  // Shane, practising: several loops are made in one go, then practised. The overview's "New
+  // loop" used to jump to each new loop's practice screen, and he had to back out for the next.
+  it('"New loop" from the overview keeps the form for the next loop; Done goes back to the song', async () => {
+    serve({ loops: [] });
+    const user = renderSong(`${SONG_A}?new=1`);
+    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    await panel().findByRole('form');
+
+    await user.type(form().getByLabelText('Name'), 'Verse');
+    await user.type(form().getByLabelText('First bar'), '3');
+    await user.type(form().getByLabelText('Last bar'), '4');
+    await user.click(form().getByRole('button', { name: 'Save loop' }));
+
+    // Still here, on an empty form that names what it saved and links to it.
+    expect(await form().findByTestId('loop-saved-note')).toHaveTextContent('Saved “Verse”.');
+    expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG_A}/play`);
+    expect(form().getByLabelText('Name')).toHaveValue('');
+    expect(form().getByLabelText('First bar')).toHaveValue('');
+    const [first] = loops.sent('insert') as Loop[];
+    expect(form().getByRole('link', { name: 'Practise it' })).toHaveAttribute(
+      'href',
+      `/songs/${SONG_A}/loops/${first?.id}`,
+    );
+
+    // A second loop is its own row, not the first sent again.
+    await user.type(form().getByLabelText('Name'), 'Chorus');
+    await user.type(form().getByLabelText('First bar'), '9');
+    await user.type(form().getByLabelText('Last bar'), '12');
+    await user.click(form().getByRole('button', { name: 'Save loop' }));
+    expect(await form().findByText(/Saved “Chorus”/)).toBeInTheDocument();
+    const sent = loops.sent('insert') as Loop[];
+    expect(sent.map((loop) => loop.name)).toEqual(['Verse', 'Chorus']);
+    expect(sent[0]?.id).not.toBe(sent[1]?.id);
+
+    await user.click(form().getByRole('button', { name: 'Done' }));
+    expect(await screen.findByText('At song overview')).toBeInTheDocument();
+  });
+
   it('refuses a form it cannot save, saying why, and sends nothing', async () => {
     const { user } = await openSong();
     await user.click(await panel().findByRole('button', { name: 'New loop' }));

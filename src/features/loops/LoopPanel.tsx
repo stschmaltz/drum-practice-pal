@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { Link } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { Icon } from '@/components/icons';
 import { OverflowMenu } from '@/components/OverflowMenu';
@@ -8,6 +9,7 @@ import {
   buttonClass,
   focusRing,
   ghostButtonClass,
+  linkClass,
   primaryButtonClass,
   sectionHeadingClass,
 } from '@/components/styles';
@@ -24,6 +26,7 @@ import {
   neighbourAfterLeaving,
 } from '@/lib/itemFocus';
 import { waitsForNetwork } from '@/lib/network';
+import { loopPracticePath } from '@/lib/routes';
 import type { LoopStatus } from '@/lib/schema';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
@@ -74,7 +77,13 @@ interface LoopPanelProps {
  * page as it was.
  */
 export interface LoopFormOutcome {
+  /**
+   * A new loop was saved. With `keepsAdding` the form stays, emptied, for the
+   * next loop, and says which one it just saved (several loops are made in one
+   * go, then practised: Shane, 2026-11-27); this is then only told about it.
+   */
   onCreated?: (loop: Loop) => void;
+  keepsAdding?: boolean;
   onEdited?: (loop: Loop) => void;
   onCancelled?: () => void;
 }
@@ -196,6 +205,10 @@ function LoopPanelBody({
   // The form replaces the list, and with it the button that opened it; focus goes back there.
   const focusWhenReady = useFocusWhenReady();
   const formOpener = useRef<LoopFormOpener | null>(null);
+  // The loops saved by a form that stays for the next one: the last is named above the
+  // fields, and each makes the next form a new one (its own client id, an empty name).
+  const [savedHere, setSavedHere] = useState<Loop[]>([]);
+  const lastSaved = savedHere[savedHere.length - 1];
 
   const openForm = (loop: Loop | null) => {
     if (!practice.openEditor(loop)) return;
@@ -235,7 +248,7 @@ function LoopPanelBody({
     return (
       <LoopEditorForm
         // A different loop is a different form: its typed name starts over.
-        key={editor.loopId ?? 'new'}
+        key={editor.loopId ?? `new-${savedHere.length}`}
         songId={songId}
         barCount={barCount}
         loop={editedLoop}
@@ -250,6 +263,14 @@ function LoopPanelBody({
             outcome?.onEdited?.(saved);
             return;
           }
+          if (outcome?.keepsAdding) {
+            // The form stays for the next loop: nothing is selected, so the whole song is
+            // still there to pick bars from.
+            setSavedHere((loops) => [...loops, saved]);
+            practice.openEditor(null);
+            outcome.onCreated?.(saved);
+            return;
+          }
           // A new loop is what the user wants to practice next; an edit leaves playback as it is.
           if (outcome?.onCreated) outcome.onCreated(saved);
           else practice.selectLoop(saved.id);
@@ -258,6 +279,18 @@ function LoopPanelBody({
           closeForm();
           outcome?.onCancelled?.();
         }}
+        note={
+          !editedLoop && lastSaved ? (
+            <>
+              Saved “{lastSaved.name}”.{' '}
+              <Link to={loopPracticePath(songId, lastSaved.id)} className={linkClass}>
+                Practise it
+              </Link>{' '}
+              or pick bars for another.
+            </>
+          ) : undefined
+        }
+        cancelLabel={!editedLoop && lastSaved ? 'Done' : undefined}
       />
     );
   }

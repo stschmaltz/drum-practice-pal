@@ -440,6 +440,9 @@ function SaveAsLoopSheet({
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const sheetHeight = useHeightOf(sheetRef);
+  // The loops saved from this sheet, the last one named above its fields.
+  const [savedHere, setSavedHere] = useState<Loop[]>([]);
+  const lastSaved = savedHere[savedHere.length - 1];
   const { editor } = practice;
   if (!editor) return null;
   return (
@@ -453,6 +456,8 @@ function SaveAsLoopSheet({
         className="fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 max-h-[60dvh] overflow-y-auto rounded-t-card border-t border-line bg-surface p-4 shadow-sheet md:right-gutter md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+var(--spacing-gutter))] md:border-x"
       >
         <LoopEditorForm
+          // A new form for each loop saved: its own client id, an empty name.
+          key={savedHere.length}
           layout="bar"
           songId={songId}
           barCount={barCount}
@@ -463,10 +468,32 @@ function SaveAsLoopSheet({
           onBarsChange={practice.setEditorBars}
           onSavingChange={practice.setEditorSaving}
           onSaved={(saved) => {
-            practice.closeEditor();
-            practice.selectLoop(saved.id);
+            // The whole song stays, emptied for the next loop: several are made in one go,
+            // then practised (Shane, 2026-11-27). The loop being practised stays the loop.
+            setSavedHere((loops) => [...loops, saved]);
+            practice.openEditor(null);
           }}
           onCancel={practice.closeEditor}
+          note={
+            lastSaved ? (
+              <>
+                Saved “{lastSaved.name}”.{' '}
+                {/* A button, not a link: this screen switches loop in place, and its URL follows. */}
+                <button
+                  type="button"
+                  className={linkClass}
+                  onClick={() => {
+                    practice.closeEditor();
+                    practice.selectLoop(lastSaved.id);
+                  }}
+                >
+                  Practise it
+                </button>{' '}
+                or pick bars for another.
+              </>
+            ) : undefined
+          }
+          cancelLabel={lastSaved ? 'Done' : undefined}
         />
       </div>
     </>

@@ -77,11 +77,15 @@ test('first run: sign in, upload, jam, make a loop, practise, hit full speed, fi
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Play');
 
-  // Back to the song, and "New loop": the bar picker opens, and the save goes to the loop.
+  // Back to the song, and "New loop": the bar picker opens. The save keeps the form for
+  // another loop and names the one it saved, whose link goes to its practice screen.
   await backTo(page, 'Groove 120').click();
   await page.getByRole('link', { name: 'New loop' }).click();
   await expect(loopForm(page)).toBeVisible({ timeout: 20_000 });
   await fillLoopForm(page, { name: 'Groove', firstBar: 5, lastBar: 6 });
+  await expect(page.getByTestId('loop-saved-note')).toContainText('Saved “Groove”.');
+  await expect(page).toHaveURL(/\/songs\/[^/]+\/play/);
+  await page.getByRole('link', { name: 'Practise it' }).click();
   await expect(page).toHaveURL(/\/songs\/[^/]+\/loops\/[^/]+$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Groove' })).toBeVisible();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });

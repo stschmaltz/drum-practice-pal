@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
@@ -47,6 +47,8 @@ export function LoopEditorForm({
   onSaved,
   onCancel,
   layout = 'panel',
+  note,
+  cancelLabel = 'Cancel',
 }: {
   songId: string;
   barCount: number;
@@ -61,6 +63,10 @@ export function LoopEditorForm({
   onSaved: (saved: Loop) => void;
   onCancel: () => void;
   layout?: 'panel' | 'bar';
+  /** Said above the fields, as a status: the loop just saved, when the form stays for the next. */
+  note?: ReactNode;
+  /** The second button's words: "Done" once a loop has been saved and the form stayed. */
+  cancelLabel?: string;
 }) {
   const inBar = layout === 'bar';
   const create = useCreateLoop(songId);
@@ -147,6 +153,11 @@ export function LoopEditorForm({
       onSubmit={onSubmit}
       noValidate
     >
+      {note && (
+        <p role="status" className="text-sm text-ink" data-testid="loop-saved-note">
+          {note}
+        </p>
+      )}
       <p className="text-sm text-ink-soft" aria-live="polite" data-testid="loop-bars-hint">
         {hint}
       </p>
@@ -205,7 +216,7 @@ export function LoopEditorForm({
           {saving ? 'Saving…' : inBar ? 'Save as loop' : 'Save loop'}
         </button>
         <button type="button" className={buttonClass} disabled={saving} onClick={onCancel}>
-          Cancel
+          {cancelLabel}
         </button>
       </div>
       {!online && (

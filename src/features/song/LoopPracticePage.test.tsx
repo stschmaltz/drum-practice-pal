@@ -464,7 +464,9 @@ describe('LoopPracticePage', () => {
       });
     });
 
-    it('in the whole song, taps pick a new loop’s bars; Save as loop opens its screen, replaced', async () => {
+    // Shane, practising: several loops are made in one go, then practised. A save no longer
+    // jumps to the new loop.
+    it('in the whole song, Save as loop keeps the view for the next loop and names the one saved', async () => {
       const { user, engine } = await openChorus([`/songs/${SONG}`]);
       await user.click(wholeSong());
       engine.seek.mockClear();
@@ -478,14 +480,38 @@ describe('LoopPracticePage', () => {
       await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Intro');
       await user.click(screen.getByRole('button', { name: 'Save as loop' }));
 
+      // Still the loop being practised, still the whole song, and an empty form.
+      expect(await screen.findByTestId('loop-saved-note')).toHaveTextContent('Saved “Intro”.');
+      expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeInTheDocument();
+      expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${CHORUS_ID}`);
+      expect(wholeSong()).toHaveAccessibleName(SHOWS_SONG);
+      expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('');
+      expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('');
+      expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
+
+      // A second loop is its own row: a new id, not the first one sent again.
+      tap(engine, 14);
+      tap(engine, 15);
+      await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Outro');
+      await user.click(screen.getByRole('button', { name: 'Save as loop' }));
+      expect(await screen.findByText(/Saved “Outro”/)).toBeInTheDocument();
+      const sent = loops.sent('insert') as Loop[];
+      expect(sent.map((loop) => loop.name)).toEqual(['Intro', 'Outro']);
+      expect(sent[0]).toMatchObject({ start_bar: 3, end_bar: 5, speed_ratio: 0.708333 });
+      expect(sent[0]?.id).not.toBe(sent[1]?.id);
+    });
+
+    it('"Practise it" in the saved note opens the loop just saved, replacing the URL', async () => {
+      const { user, engine } = await openChorus([`/songs/${SONG}`]);
+      await user.click(wholeSong());
+      tap(engine, 3);
+      tap(engine, 5);
+      await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Intro');
+      await user.click(screen.getByRole('button', { name: 'Save as loop' }));
+      await user.click(await screen.findByRole('button', { name: 'Practise it' }));
+
       expect(await screen.findByRole('heading', { level: 1, name: 'Intro' })).toBeInTheDocument();
       const [sent] = loops.sent('insert') as Loop[];
-      expect(sent).toMatchObject({
-        name: 'Intro',
-        start_bar: 3,
-        end_bar: 5,
-        speed_ratio: 0.708333,
-      });
       expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${sent?.id}`);
       // The new loop plays, drawn with a bar either side; the form has gone.
       expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
@@ -502,6 +528,23 @@ describe('LoopPracticePage', () => {
 
       historyBack();
       expect(await screen.findByText('At song overview')).toBeInTheDocument();
+    });
+
+    it('"Done" after a save goes back to the loop being practised', async () => {
+      const { user, engine } = await openChorus();
+      await user.click(wholeSong());
+      tap(engine, 3);
+      tap(engine, 5);
+      await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Intro');
+      await user.click(screen.getByRole('button', { name: 'Save as loop' }));
+      await user.click(await screen.findByRole('button', { name: 'Done' }));
+
+      expect(wholeSong()).toHaveAccessibleName(SHOWS_LOOP);
+      expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeInTheDocument();
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(9),
+        endTick: startOfBar(13),
+      });
     });
 
     it('a mouse drag in the whole song picks the bars', async () => {
@@ -538,7 +581,7 @@ describe('LoopPracticePage', () => {
       expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('3');
 
       release();
-      expect(await screen.findByRole('heading', { level: 1, name: 'Intro' })).toBeInTheDocument();
+      expect(await screen.findByTestId('loop-saved-note')).toHaveTextContent('Saved “Intro”.');
       expect(loops.sent('insert')).toHaveLength(1);
     });
 
