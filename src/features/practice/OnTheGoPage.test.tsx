@@ -31,7 +31,6 @@ const fill = practiceLoop(FILL, {
   start_bar: 9,
   end_bar: 12,
   speed_ratio: 0.708333,
-  target_ratio: 1,
   last_practiced_at: daysAgo(1),
 });
 const intro = practiceLoop('intro', {
@@ -138,9 +137,9 @@ describe('On the go', () => {
 
     const row = item('Chorus fill');
     expect(row.getByText('Groove 120 · Fixture Band')).toBeInTheDocument();
-    expect(row.getByText('Bars 9 to 12 · 71% · target 100%')).toBeInTheDocument();
+    expect(row.getByText('Bars 9 to 12 · 71%')).toBeInTheDocument();
     expect(row.getByText('Last practiced yesterday')).toBeInTheDocument();
-    // No artist, no target, never practiced.
+    // No artist, never practiced.
     expect(item('Outro').getByText('Tempo Change')).toBeInTheDocument();
     expect(item('Outro').getByText('Bars 5 to 8 · 100%')).toBeInTheDocument();
     expect(item('Outro').getByText('Not practiced yet')).toBeInTheDocument();
@@ -222,7 +221,7 @@ describe('finishing and reopening from the home page', () => {
     await user.click(tab(/^Finished/));
     expect(listed()).toEqual(['Chorus fill']);
     // Its history and speeds are as they were.
-    expect(item('Chorus fill').getByText('Bars 9 to 12 · 71% · target 100%')).toBeInTheDocument();
+    expect(item('Chorus fill').getByText('Bars 9 to 12 · 71%')).toBeInTheDocument();
     expect(
       item('Chorus fill').getByText(/^Last practiced yesterday · finished today$/),
     ).toBeTruthy();
@@ -463,34 +462,27 @@ describe('On the go offline (Unit 11)', () => {
 });
 
 describe('On the go cards (12 UX pass)', () => {
-  it('shows a loop with a target its way there as a progress bar, in the percents its line shows', async () => {
+  it('shows a loop’s way to full speed as a progress bar, in the percents its line shows', async () => {
     serve([fill, intro]);
     renderHome();
     await screen.findByText('Chorus fill', { selector: 'p' });
     const bar = item('Chorus fill').getByRole('progressbar', {
-      name: 'Speed towards the target of Chorus fill',
+      name: 'Speed towards full speed of Chorus fill',
     });
     // 0.708333 shows as 71%; the bar says the same.
     expect(bar).toHaveAttribute('aria-valuenow', '71');
     expect(bar).toHaveAttribute('aria-valuemax', '100');
-    expect(bar).toHaveAttribute('aria-valuetext', '71% of a 100% target');
+    expect(bar).toHaveAttribute('aria-valuetext', '71% of full speed');
     expect((bar.firstElementChild as HTMLElement).style.width).toBe('71%');
   });
 
-  it('draws no bar for a loop with no target', async () => {
-    serve([{ ...intro, target_ratio: null }]);
-    renderHome();
-    await screen.findByText('Intro', { selector: 'p' });
-    expect(item('Intro').queryByRole('progressbar')).not.toBeInTheDocument();
-  });
-
-  it('a speed past its target fills the bar and says so', async () => {
-    serve([{ ...fill, speed_ratio: 1.1, target_ratio: 1 }]);
+  it('a speed past full speed fills the bar and says so', async () => {
+    serve([{ ...fill, speed_ratio: 1.1 }]);
     renderHome();
     await screen.findByText('Chorus fill', { selector: 'p' });
     const bar = item('Chorus fill').getByRole('progressbar');
     expect(bar).toHaveAttribute('aria-valuenow', '100');
-    expect(bar).toHaveAttribute('aria-valuetext', '110% of a 100% target');
+    expect(bar).toHaveAttribute('aria-valuetext', '110% of full speed');
     expect((bar.firstElementChild as HTMLElement).style.width).toBe('100%');
   });
 

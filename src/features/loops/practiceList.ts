@@ -12,7 +12,7 @@ import type { Loop } from './loopForm';
  * literal, so supabase-js can type the row; a test keeps it in step with LOOP_SELECT.
  */
 export const PRACTICE_LOOP_SELECT =
-  'id, song_id, name, start_bar, end_bar, speed_ratio, target_ratio, status, finished_at, last_practiced_at, created_at, song:songs!loops_song_fkey(title, artist)';
+  'id, song_id, name, start_bar, end_bar, speed_ratio, status, finished_at, last_practiced_at, created_at, song:songs!loops_song_fkey(title, artist)';
 
 /** A loop with the song it belongs to. */
 export type PracticeLoop = Loop & { song: { title: string; artist: string } };

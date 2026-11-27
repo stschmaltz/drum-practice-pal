@@ -17,30 +17,15 @@ describe('speedLabel', () => {
 });
 
 describe('targetProgress', () => {
-  it('is nothing without a target', () => {
-    expect(targetProgress(0.8, null)).toBeNull();
-  });
-
   it.each([
-    [0.5, 1, 50, 100, 0.5, false],
-    [0.9, 0.9, 90, 90, 1, true],
-    [1.2, 1, 120, 100, 1, true],
-    // Shown as 71% and 71%: reached, though the stored ratios differ.
-    [0.708333, 0.71, 71, 71, 1, true],
-    [0.704, 0.71, 70, 71, 70 / 71, false],
-    // The schema's bounds: the slowest speed towards the fastest target.
-    [0.25, 2, 25, 200, 0.125, false],
-    // 99.5% shows as 100%, so it has reached a 100% target.
-    [0.995, 1, 100, 100, 1, true],
-  ])(
-    '%f towards %f is %i%% of %i%%',
-    (speed, target, speedPercent, targetPercent, fraction, reached) => {
-      expect(targetProgress(speed, target)).toEqual({
-        speedPercent,
-        targetPercent,
-        fraction,
-        reached,
-      });
-    },
-  );
+    [0.5, 50, 0.5, false],
+    [1, 100, 1, true],
+    [1.2, 120, 1, true],
+    [0.25, 25, 0.25, false],
+    // 99.5% shows as 100%, so it has reached full speed.
+    [0.995, 100, 1, true],
+    [0.704, 70, 0.7, false],
+  ])('%f is %i%% of full speed', (speed, speedPercent, fraction, reached) => {
+    expect(targetProgress(speed)).toEqual({ speedPercent, targetPercent: 100, fraction, reached });
+  });
 });

@@ -20,7 +20,7 @@ import {
 // The app's own select (LOOP_SELECT in src/features/loops/loopForm.ts), written out: that
 // module imports through the `@/` alias, which the database test config doesn't have.
 const LOOP_SELECT =
-  'id, song_id, name, start_bar, end_bar, speed_ratio, target_ratio, status, finished_at, last_practiced_at, created_at';
+  'id, song_id, name, start_bar, end_bar, speed_ratio, status, finished_at, last_practiced_at, created_at';
 
 let a: TestUser;
 let b: TestUser;
@@ -59,7 +59,6 @@ describe('what the app writes', () => {
         start_bar: 9,
         end_bar: 12,
         speed_ratio: 0.708333,
-        target_ratio: 1,
       })
       .select(LOOP_SELECT)
       .single();
@@ -73,7 +72,6 @@ describe('what the app writes', () => {
       end_bar: 12,
       // A typed BPM's ratio: stored to all six decimals, not rounded to a percent.
       speed_ratio: 0.708333,
-      target_ratio: 1,
       status: 'active',
       last_practiced_at: null,
     });
@@ -85,10 +83,8 @@ describe('what the app writes', () => {
     ['start_bar', 2],
     ['end_bar', 16],
     ['speed_ratio', 0.855556],
-    ['target_ratio', 1.25],
-    ['target_ratio', null],
   ] as const)('updates %s to %j and returns the saved row', async (field, value) => {
-    const id = await insertLoop(a, songA, { target_ratio: 0.9 });
+    const id = await insertLoop(a, songA);
     const { data, error } = await a.client
       .from('loops')
       .update({ [field]: value } as TablesUpdate<'loops'>)
@@ -299,7 +295,6 @@ describe('row-level security on loops is still owner-only', () => {
     ['start_bar', 3],
     ['end_bar', 5],
     ['speed_ratio', 2],
-    ['target_ratio', 0.25],
     ['status', 'finished'],
   ] as const)("B's update of %s on A's loop changes no row", async (field, value) => {
     const id = await insertLoop(a, songA);

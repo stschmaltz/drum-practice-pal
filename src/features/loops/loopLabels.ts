@@ -4,6 +4,7 @@
  */
 import { ratioToPercent } from '@/features/player/speed';
 import { bpmAtSpeed } from '@/features/player/tempo';
+import { TARGET_SPEED_RATIO } from './loopForm';
 
 /**
  * "85% (102 BPM)": the speed and the BPM it gives at `tempo`, the file's
@@ -15,7 +16,7 @@ export function speedLabel(ratio: number, tempo: number | null): string {
   return tempo === null ? percent : `${percent} (${bpmAtSpeed(tempo, ratio)} BPM)`;
 }
 
-/** How far a loop's saved speed has come towards its target, as the percents its line shows. */
+/** How far a loop's saved speed has come towards full speed, as the percents its line shows. */
 export interface TargetProgress {
   speedPercent: number;
   targetPercent: number;
@@ -27,16 +28,11 @@ export interface TargetProgress {
 
 /**
  * The home page's progress bar. Worked out from the whole percents on show,
- * never the stored ratios, so a bar never disagrees with the "71% · target
- * 71%" beside it. Null without a target: there is nothing to make progress to.
+ * never the stored ratios, so a bar never disagrees with the "71%" beside it.
  */
-export function targetProgress(
-  speedRatio: number,
-  targetRatio: number | null,
-): TargetProgress | null {
-  if (targetRatio === null) return null;
+export function targetProgress(speedRatio: number): TargetProgress {
   const speedPercent = ratioToPercent(speedRatio);
-  const targetPercent = ratioToPercent(targetRatio);
+  const targetPercent = ratioToPercent(TARGET_SPEED_RATIO);
   return {
     speedPercent,
     targetPercent,

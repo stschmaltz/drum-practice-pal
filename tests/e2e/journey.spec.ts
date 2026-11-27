@@ -8,7 +8,6 @@ import {
   openLoopPanel,
   playLoopButton,
   saveNewLoop,
-  saveSpeedButton,
 } from './loopsPage';
 import {
   barNumber,
@@ -34,10 +33,10 @@ import {
 
 // Unit 13: the whole first run, at each of the three sizes, through the UI a
 // new user meets: sign in with the emailed code, upload, jam, save a loop,
-// practise it, reach its target and finish it. Each step's own spec covers its
+// practise it, reach full speed and finish it. Each step's own spec covers its
 // edges; this one proves they join up.
 
-test('first run: sign in, upload, jam, save a loop, practise, hit the target, finish', async ({
+test('first run: sign in, upload, jam, save a loop, practise, hit full speed, finish', async ({
   page,
   user,
 }) => {
@@ -81,13 +80,12 @@ test('first run: sign in, upload, jam, save a loop, practise, hit the target, fi
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Play');
 
-  // Save a loop with a target, at a slower speed than the target.
-  await saveNewLoop(page, { name: 'Groove', firstBar: 5, lastBar: 6, target: 90 });
+  // Save a loop and slow it down: the loop keeps the speed it is played at.
+  await saveNewLoop(page, { name: 'Groove', firstBar: 5, lastBar: 6 });
   await expectLooping(page, 'Groove', 'Bars 5 to 6');
   await openLoopPanel(page);
   await commit(loopPercentField(page), '80');
-  await saveSpeedButton(page).click();
-  await expect(saveSpeedButton(page)).toBeDisabled();
+  await expect.poll(async () => (await loopsOf(user))[0]?.speed_ratio).toBe(0.8);
 
   // Practise it: a session is logged at its speed.
   await playLoopButton(page, 'Groove').click();
@@ -96,12 +94,11 @@ test('first run: sign in, upload, jam, save a loop, practise, hit the target, fi
   await expect(sessionLogged(page)).toContainText('of Groove at 80%');
   await sessionCount(user).toBe(1);
 
-  // Hit the target: the loop asks, and is finished only when told.
+  // Hit full speed: the loop asks, and is finished only when told.
   await openLoopPanel(page);
-  await commit(loopPercentField(page), '90');
-  await saveSpeedButton(page).click();
+  await commit(loopPercentField(page), '100');
   const prompt = loopPanel(page).getByTestId('finish-prompt');
-  await expect(prompt).toContainText("You've reached your target of 90%");
+  await expect(prompt).toContainText("You're playing it at full speed");
   expect((await loopsOf(user))[0]?.status).toBe('active');
   await prompt.getByRole('button', { name: 'Mark finished' }).click();
   await expect(loopPanel(page).getByRole('region', { name: 'Finished loops' })).toContainText(
@@ -114,6 +111,6 @@ test('first run: sign in, upload, jam, save a loop, practise, hit the target, fi
   await expect(homeTab(page, 'On the go')).toContainText('On the go (0)');
   await homeTab(page, 'Finished').click();
   await expect(homeItem(page, 'Groove')).toContainText('Groove 120');
-  await expect(homeItem(page, 'Groove')).toContainText('Bars 5 to 6 · 90% · target 90%');
+  await expect(homeItem(page, 'Groove')).toContainText('Bars 5 to 6 · 100%');
   expect(await sessionsOf(user)).toHaveLength(1);
 });

@@ -89,19 +89,18 @@ export function createAlphaTabEngine({
       return score !== null && api.load(score, trackIndexes);
     },
 
-    async loadSoundFont(url) {
-      const response = await fetch(url, { signal: soundFontDownload.signal });
-      // The dev server and the Workers SPA fallback answer a missing file with index.html.
-      const type = response.headers.get('content-type') ?? '';
-      if (!response.ok || type.includes('text/html')) {
-        throw new Error(`Soundfont not found at ${url} (${response.status})`);
-      }
-      const bytes = new Uint8Array(await response.arrayBuffer());
+    async loadSoundFont(urls) {
+      const fonts = await Promise.all(
+        urls.map((url) => fetchSoundFont(url, soundFontDownload.signal)),
+      );
       if (soundFontDownload.signal.aborted) return;
-      // False when alphaTab has no player (no Web Audio); without this the page would wait forever.
-      if (!api.loadSoundFont(bytes, false)) {
-        throw new Error('alphaTab has no player to load sounds into');
-      }
+      fonts.forEach((bytes, index) => {
+        // The first replaces whatever was loaded (a retry), the rest go over it.
+        // False when alphaTab has no player (no Web Audio); without this the page would wait forever.
+        if (!api.loadSoundFont(bytes, index > 0)) {
+          throw new Error('alphaTab has no player to load sounds into');
+        }
+      });
     },
 
     setLayout(next) {
@@ -439,4 +438,14 @@ function pointOf(event: MouseEvent): PointerPoint {
 
 function toLayoutMode(layout: LayoutChoice): alphaTab.LayoutMode {
   return layout === 'page' ? alphaTab.LayoutMode.Page : alphaTab.LayoutMode.Horizontal;
+}
+
+async function fetchSoundFont(url: string, signal: AbortSignal): Promise<Uint8Array> {
+  const response = await fetch(url, { signal });
+  // The dev server and the Workers SPA fallback answer a missing file with index.html.
+  const type = response.headers.get('content-type') ?? '';
+  if (!response.ok || type.includes('text/html')) {
+    throw new Error(`Soundfont not found at ${url} (${response.status})`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
 }

@@ -24,7 +24,7 @@ import { createEmitter, type Handler } from './emitter';
 import type { LayoutChoice } from './layout';
 import type { PlayerEngine } from './playerEngine';
 import { clampVolume, effectiveMetronomeVolume, type PlayerOptions } from './playerOptions';
-import { PLAYER_SOUND_FONT_URL } from './soundFont';
+import { PLAYER_SOUND_FONT_URLS } from './soundFont';
 import { clampSpeedRatio } from './speed';
 import { orderedBars } from './tapGesture';
 import { tempoAtBar } from './tempo';
@@ -137,7 +137,7 @@ export interface PlayerServiceConfig {
   /** From songs.drum_track_index: the track that renders and that "Mute drums" mutes. */
   drumTrackIndex: number | null;
   options: PlayerOptions;
-  soundFontUrl?: string;
+  soundFontUrls?: readonly string[];
   wakeLock?: WakeLockControl;
   /** Runs inside the play tap, before the engine starts. */
   unlockAudio?: () => void;
@@ -174,7 +174,7 @@ export function initialPlayerSnapshot(
 export class PlayerService {
   private readonly engine: PlayerEngine;
   private readonly drumTrackIndex: number | null;
-  private readonly soundFontUrl: string;
+  private readonly soundFontUrls: readonly string[];
   private readonly wakeLock: WakeLockControl;
   private readonly unlockAudio: () => void;
   private readonly clicks: ClickOutput;
@@ -223,7 +223,7 @@ export class PlayerService {
   constructor(engine: PlayerEngine, config: PlayerServiceConfig) {
     this.engine = engine;
     this.drumTrackIndex = config.drumTrackIndex;
-    this.soundFontUrl = config.soundFontUrl ?? PLAYER_SOUND_FONT_URL;
+    this.soundFontUrls = config.soundFontUrls ?? PLAYER_SOUND_FONT_URLS;
     this.wakeLock = config.wakeLock ?? screenWakeLock();
     this.unlockAudio = config.unlockAudio ?? (() => preferPlaybackAudioSession());
     this.clicks = config.clicks ?? webClickOutput();
@@ -291,7 +291,7 @@ export class PlayerService {
   private requestSoundFont(): void {
     if (this.soundFontRequested) return;
     this.soundFontRequested = true;
-    this.engine.loadSoundFont(this.soundFontUrl).catch(() => {
+    this.engine.loadSoundFont(this.soundFontUrls).catch(() => {
       // So a later load or retry tries again instead of waiting forever for sounds.
       this.soundFontRequested = false;
       this.fail('soundFont');

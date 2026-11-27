@@ -9,6 +9,7 @@ import {
   EMPTY_LOOP_FORM,
   formBarRange,
   hasReachedTarget,
+  shouldAskToFinish,
   LOOP_EDIT_FIELDS,
   LOOP_FIELDS,
   LOOP_SELECT,
@@ -32,7 +33,6 @@ const loop = (overrides: Partial<Loop> = {}): Loop => ({
   start_bar: 5,
   end_bar: 8,
   speed_ratio: 0.8,
-  target_ratio: 1,
   status: 'active',
   finished_at: null,
   last_practiced_at: null,
@@ -44,7 +44,6 @@ const form = (overrides: Partial<LoopFormValues> = {}): LoopFormValues => ({
   name: 'Chorus fill',
   startBar: '5',
   endBar: '8',
-  targetPercent: '',
   ...overrides,
 });
 
@@ -63,7 +62,9 @@ describe('columns', () => {
       new RegExp(`grant ${verb} \\(([^)]+)\\)\\s+on public\\.loops to authenticated`)
         .exec(migration)?.[1]
         ?.split(',')
-        .map((column) => column.trim()) ?? [];
+        .map((column) => column.trim())
+        // Dropped from the table since (20261127000000_drop_target_ratio.sql).
+        .filter((column) => column !== 'target_ratio') ?? [];
 
     // Exactly the grant, status included: finish and reopen are edits of it.
     expect([...LOOP_EDIT_FIELDS].sort()).toEqual([...granted('update')].sort());
@@ -80,21 +81,12 @@ describe('columns', () => {
 });
 
 describe('loopFormValues', () => {
-  it('shows a saved loop as text, the target as whole percent', () => {
-    expect(loopFormValues(loop({ target_ratio: 0.9 }))).toEqual({
-      name: 'Chorus fill',
-      startBar: '5',
-      endBar: '8',
-      targetPercent: '90',
-    });
-  });
-
-  it('leaves the target empty when there is none', () => {
-    expect(loopFormValues(loop({ target_ratio: null })).targetPercent).toBe('');
+  it('shows a saved loop as text', () => {
+    expect(loopFormValues(loop())).toEqual({ name: 'Chorus fill', startBar: '5', endBar: '8' });
   });
 
   it('starts a new loop empty', () => {
-    expect(EMPTY_LOOP_FORM).toEqual({ name: '', startBar: '', endBar: '', targetPercent: '' });
+    expect(EMPTY_LOOP_FORM).toEqual({ name: '', startBar: '', endBar: '' });
   });
 });
 
@@ -136,9 +128,9 @@ describe('formBarRange', () => {
 
 describe('parseLoopForm', () => {
   it('gives the row fields for a valid form', () => {
-    expect(parseLoopForm(form({ targetPercent: '100' }), BAR_COUNT)).toEqual({
+    expect(parseLoopForm(form(), BAR_COUNT)).toEqual({
       ok: true,
-      details: { name: 'Chorus fill', start_bar: 5, end_bar: 8, target_ratio: 1 },
+      details: { name: 'Chorus fill', start_bar: 5, end_bar: 8 },
     });
   });
 
@@ -146,34 +138,6 @@ describe('parseLoopForm', () => {
     const parsed = parseLoopForm(form({ name: '  Verse 2  ' }), BAR_COUNT);
     expect(parsed).toMatchObject({ ok: true, details: { name: 'Verse 2' } });
   });
-
-  it('saves no target for an empty target', () => {
-    for (const targetPercent of ['', '   ']) {
-      const parsed = parseLoopForm(form({ targetPercent }), BAR_COUNT);
-      expect(parsed).toMatchObject({ ok: true, details: { target_ratio: null } });
-    }
-  });
-
-  it.each([
-    ['25', 0.25],
-    ['200', 2],
-    ['90%', 0.9],
-    [' 105 ', 1.05],
-  ])('reads a target of %j as %f', (targetPercent, ratio) => {
-    const parsed = parseLoopForm(form({ targetPercent }), BAR_COUNT);
-    expect(parsed).toMatchObject({ ok: true, details: { target_ratio: ratio } });
-  });
-
-  it.each(['24', '201', '0', '-50', 'fast', '90.5', '1e2'])(
-    'refuses a target of %j',
-    (targetPercent) => {
-      const parsed = parseLoopForm(form({ targetPercent }), BAR_COUNT);
-      expect(parsed).toEqual({
-        ok: false,
-        errors: { targetPercent: 'Enter a target from 25 to 200%, or leave it empty.' },
-      });
-    },
-  );
 
   it.each(['', '   ', '\t\n'])('refuses the blank name %j', (name) => {
     expect(parseLoopForm(form({ name }), BAR_COUNT)).toEqual({
@@ -213,16 +177,9 @@ describe('parseLoopForm', () => {
   });
 
   it('reports every problem at once', () => {
-    const parsed = parseLoopForm(
-      { name: ' ', startBar: '9', endBar: '2', targetPercent: '500' },
-      BAR_COUNT,
-    );
+    const parsed = parseLoopForm({ name: ' ', startBar: '9', endBar: '2' }, BAR_COUNT);
     expect(parsed.ok).toBe(false);
-    expect(Object.keys(parsed.ok ? {} : parsed.errors).sort()).toEqual([
-      'bars',
-      'name',
-      'targetPercent',
-    ]);
+    expect(Object.keys(parsed.ok ? {} : parsed.errors).sort()).toEqual(['bars', 'name']);
   });
 });
 
@@ -234,9 +191,8 @@ describe('changedLoopFields', () => {
         name: 'Chorus fill',
         start_bar: 5,
         end_bar: 9,
-        target_ratio: null,
       }),
-    ).toEqual({ end_bar: 9, target_ratio: null });
+    ).toEqual({ end_bar: 9 });
   });
 
   it('gives nothing when nothing changed', () => {
@@ -254,46 +210,17 @@ describe('changedLoopFields', () => {
 
 describe('changedLoopDetails', () => {
   const details = (overrides: Partial<Loop> = {}) => {
-    const { name, start_bar, end_bar, target_ratio } = loop(overrides);
-    return { name, start_bar, end_bar, target_ratio };
+    const { name, start_bar, end_bar } = loop(overrides);
+    return { name, start_bar, end_bar };
   };
 
   it('gives the details that differ, and never the speed', () => {
-    const saved = loop({ speed_ratio: 0.8, target_ratio: 1 });
+    const saved = loop({ speed_ratio: 0.8 });
     expect(changedLoopDetails(saved, details({ name: 'Outro', end_bar: 9 }))).toEqual({
       name: 'Outro',
       end_bar: 9,
     });
     expect(changedLoopDetails(saved, details())).toEqual({});
-  });
-
-  it.each([
-    [0.855556, 0.86],
-    [0.864999, 0.86],
-    [0.708333, 0.71],
-    [1.996, 2],
-  ])('a saved target of %f under a typed %f is the same percent: not a change', (saved, typed) => {
-    expect(
-      changedLoopDetails(loop({ target_ratio: saved }), details({ target_ratio: typed })),
-    ).toEqual({});
-  });
-
-  it.each([
-    ['another percent', 0.855556, 0.87, 0.87],
-    ['the percent below', 0.855556, 0.85, 0.85],
-    ['cleared', 0.855556, null, null],
-    ['set where there was none', null, 0.86, 0.86],
-    ['a whole percent changed', 0.86, 0.9, 0.9],
-  ])('a target that is %s is sent', (_what, saved, typed, sent) => {
-    expect(
-      changedLoopDetails(loop({ target_ratio: saved }), details({ target_ratio: typed })),
-    ).toEqual({ target_ratio: sent });
-  });
-
-  it('no target on either side is no change', () => {
-    expect(
-      changedLoopDetails(loop({ target_ratio: null }), details({ target_ratio: null })),
-    ).toEqual({});
   });
 });
 
@@ -309,26 +236,12 @@ describe('applySavedLoopEdit', () => {
     });
   });
 
-  it('takes a null the server saved', () => {
-    const current = loop({ target_ratio: null, name: 'Verse' });
-    expect(
-      applySavedLoopEdit(current, loop({ target_ratio: null, name: 'Other' }), {
-        target_ratio: null,
-      }),
-    ).toEqual(current);
-  });
-
   it('leaves a sent field that a newer edit has changed since', () => {
     // 90% then 80%, both pending: the answer to 90% must not put 90% back over 80%.
     const current = loop({ speed_ratio: 0.8 });
     expect(applySavedLoopEdit(current, loop({ speed_ratio: 0.9 }), { speed_ratio: 0.9 })).toEqual(
       current,
     );
-    // A cleared target, then a new one.
-    const retargeted = loop({ target_ratio: 0.9 });
-    expect(
-      applySavedLoopEdit(retargeted, loop({ target_ratio: null }), { target_ratio: null }),
-    ).toEqual(retargeted);
   });
 
   it('with nothing sent, changes nothing, and never changes the loop it was given', () => {
@@ -359,11 +272,6 @@ describe('revertLoopEdit', () => {
       name: 'Old',
       end_bar: 12,
     });
-  });
-
-  it('puts back a target that was cleared', () => {
-    const current = { ...before, target_ratio: null };
-    expect(revertLoopEdit(current, before, { target_ratio: null }).target_ratio).toBe(1);
   });
 });
 
@@ -418,41 +326,35 @@ describe('barsLabel', () => {
 });
 
 describe('hasReachedTarget', () => {
+  // Every loop's target is full speed. What the loop's line shows is what counts:
+  // 119 BPM typed at a tempo of 120 is 0.991667, which shows as "99%".
   it.each([
-    ['under the target', { speed_ratio: 0.95, target_ratio: 1 }, false],
-    ['at the target', { speed_ratio: 1, target_ratio: 1 }, true],
-    ['past the target', { speed_ratio: 1.05, target_ratio: 1 }, true],
-    [
-      'at a target that is not a whole percent',
-      { speed_ratio: 0.855556, target_ratio: 0.855556 },
-      true,
-    ],
-    // What the loop's line shows is what counts: "71% (85 BPM) · target 71% (85 BPM)"
-    // with no question would look broken. 85 BPM typed at a tempo of 120 is 0.708333.
-    [
-      'showing the target’s percent from under it',
-      { speed_ratio: 0.708333, target_ratio: 0.71 },
-      true,
-    ],
-    ['a hair under a finer target', { speed_ratio: 0.855555, target_ratio: 0.855556 }, true],
-    ['showing one percent less', { speed_ratio: 0.704999, target_ratio: 0.71 }, false],
-    ['rounding up to the target', { speed_ratio: 0.845, target_ratio: 0.85 }, true],
-    ['rounding down from it', { speed_ratio: 0.844, target_ratio: 0.85 }, false],
-    ['with no target', { speed_ratio: 2, target_ratio: null }, false],
-  ])('%s: %j is %s', (_what, speeds, reached) => {
-    expect(hasReachedTarget(loop(speeds))).toBe(reached);
+    ['under full speed', 0.95, false],
+    ['at full speed', 1, true],
+    ['past it', 1.05, true],
+    ['showing 100% from under it', 0.995, true],
+    ['showing 99%', 0.991667, false],
+  ])('%s: %f is %s', (_what, speed_ratio, reached) => {
+    expect(hasReachedTarget(loop({ speed_ratio }))).toBe(reached);
   });
 
   it('never asks about a loop that is already finished', () => {
     expect(
       hasReachedTarget(
-        loop({
-          speed_ratio: 1,
-          target_ratio: 1,
-          status: 'finished',
-          finished_at: '2026-11-22T10:00:00Z',
-        }),
+        loop({ speed_ratio: 1, status: 'finished', finished_at: '2026-11-22T10:00:00Z' }),
       ),
     ).toBe(false);
+  });
+});
+
+describe('shouldAskToFinish', () => {
+  const practised = '2026-11-20T10:00:00Z';
+  it.each([
+    ['saved at 100%, never practised', 1, null, false, false],
+    ['worked up to 100% since it was chosen', 1, null, true, true],
+    ['at 100%, practised before', 1, practised, false, true],
+    ['under full speed', 0.9, practised, true, false],
+  ] as const)('%s', (_what, speed_ratio, last_practiced_at, moved, asks) => {
+    expect(shouldAskToFinish(loop({ speed_ratio, last_practiced_at }), moved)).toBe(asks);
   });
 });

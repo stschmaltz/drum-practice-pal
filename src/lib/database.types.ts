@@ -15,7 +15,6 @@ export type Database = {
           speed_ratio: number;
           start_bar: number;
           status: Database['public']['Enums']['loop_status'];
-          target_ratio: number | null;
           updated_at: string;
           user_id: string;
         };
@@ -31,7 +30,6 @@ export type Database = {
           speed_ratio?: number;
           start_bar: number;
           status?: Database['public']['Enums']['loop_status'];
-          target_ratio?: number | null;
           updated_at?: string;
           user_id?: string;
         };
@@ -46,7 +44,6 @@ export type Database = {
           speed_ratio?: number;
           start_bar?: number;
           status?: Database['public']['Enums']['loop_status'];
-          target_ratio?: number | null;
           updated_at?: string;
           user_id?: string;
         };

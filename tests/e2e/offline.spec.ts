@@ -13,7 +13,6 @@ import {
   openLoopPanel,
   saveLoopButton,
   saveNewLoop,
-  saveSpeedButton,
 } from './loopsPage';
 import { openFixture, playButton } from './playerPage';
 import {
@@ -165,7 +164,6 @@ test('offline, a song opened before plays its loops, and the practice syncs once
   await expect(page.getByTestId('session-waiting')).toContainText('saved on this device');
   await openLoopPanel(page);
   await commit(loopPercentField(page), '80');
-  await saveSpeedButton(page).click();
   await expect(loopPanel(page).getByTestId('loop-speed-queued')).toBeVisible();
   await expect.poll(() => outboxCount(page)).toBe(2);
   await sessionCount(user).toBe(0);

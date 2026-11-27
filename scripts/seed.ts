@@ -31,7 +31,6 @@ interface SeedLoop {
   startBar: number;
   endBar: number;
   speedRatio: number;
-  targetRatio: number | null;
   finished?: boolean;
   sessions?: SeedSession[];
 }
@@ -59,7 +58,6 @@ const seedUsers: SeedUser[] = [
             startBar: 1,
             endBar: 4,
             speedRatio: 0.8,
-            targetRatio: 1.0,
             sessions: [
               { daysAgo: 3, minutes: 6, speedRatio: 0.7, repeats: 14 },
               { daysAgo: 1, minutes: 8, speedRatio: 0.8, repeats: 18 },
@@ -70,7 +68,6 @@ const seedUsers: SeedUser[] = [
             startBar: 1,
             endBar: 16,
             speedRatio: 1.0,
-            targetRatio: 1.0,
             finished: true,
             sessions: [{ daysAgo: 10, minutes: 5, speedRatio: 1.0, repeats: 1 }],
           },
@@ -84,10 +81,9 @@ const seedUsers: SeedUser[] = [
             startBar: 7,
             endBar: 10,
             speedRatio: 0.75,
-            targetRatio: 1.1,
             sessions: [{ daysAgo: 2, minutes: 4, speedRatio: 0.75, repeats: 10 }],
           },
-          { name: 'Single bar', startBar: 9, endBar: 9, speedRatio: 0.5, targetRatio: null },
+          { name: 'Single bar', startBar: 9, endBar: 9, speedRatio: 0.5 },
         ],
       },
       { fixture: 'multi-track', loops: [] },
@@ -98,9 +94,7 @@ const seedUsers: SeedUser[] = [
     songs: [
       {
         fixture: 'waltz-34',
-        loops: [
-          { name: 'Waltz intro', startBar: 1, endBar: 4, speedRatio: 1.0, targetRatio: 1.25 },
-        ],
+        loops: [{ name: 'Waltz intro', startBar: 1, endBar: 4, speedRatio: 1.0 }],
       },
     ],
   },
@@ -162,7 +156,6 @@ async function seedLoop(admin: DbClient, userId: string, songId: string, loop: S
     start_bar: loop.startBar,
     end_bar: loop.endBar,
     speed_ratio: loop.speedRatio,
-    target_ratio: loop.targetRatio,
     status: loop.finished ? 'finished' : 'active',
   });
   if (error) throw error;

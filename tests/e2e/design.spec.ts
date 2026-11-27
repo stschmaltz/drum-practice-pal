@@ -73,7 +73,7 @@ test('the library, the song page with its loops, and the home page with a loop',
   await expectWellDrawn(page, 'song, jam');
   await expectFocusRings(page, 'song, jam');
 
-  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8, target: 110 });
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
   await openLoopPanel(page);
   await expect(loopItem(page, 'Verse')).toBeVisible();
   await expectWellDrawn(page, 'song, loop panel');
