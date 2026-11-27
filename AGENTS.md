@@ -283,6 +283,17 @@ docs/
 - There is no per-loop target: every loop aims at 100% (`TARGET_SPEED_RATIO` in `loopForm.ts`), and the loop form has no target field.
 - The player loads two soundfonts, in order, each over the last (`PLAYER_SOUND_FONT_URLS` in `soundFont.ts`; `engine.loadSoundFont(urls)` fetches all, then loads the first with `append` false and the rest with `append` true, and alphaTab plays a note from the last loaded font that has the instrument): Sonivox for every instrument, then MuseScore General's standard drum kit on its own (`public/drumkit/drums.sf3`, 1.3 MB, committed), because Sonivox's kit is thin. `npm run drum-kit` rebuilds it from a local `public/sf-candidates/MuseScore_General.sf3` (`scripts/extract-drum-kit.ts`, which copies one preset, the instruments and samples it reaches, and renumbers the SoundFont tables). A new soundfont the app loads also goes in `globPatterns`.
 
+## Fixes outside a unit (alerts, upgrades, CI)
+
+A request to fix something GitHub reports (Dependabot or code-scanning alerts, a failing check on `main`) or to upgrade a dependency is finished only when GitHub shows it fixed. Do all of it without stopping to ask:
+
+1. Branch from `origin/main` in a worktree, whatever branch is checked out.
+2. Make the change; `npm run check` and `npm run build` green; commit only that change.
+3. Push, open the PR, follow its checks and fix what fails.
+4. Merge it, then confirm on GitHub that the alerts are closed or the check is green on `main`.
+
+A clean `npm audit` or a green local check is step 2, not the end. Never push a commit you didn't make without saying so first.
+
 ## Stage workflow
 
 Each unit runs Build, Test, QA, Readability, Review (see `docs/plan.md`). Each stage:
