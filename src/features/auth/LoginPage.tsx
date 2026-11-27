@@ -15,6 +15,7 @@ import {
   labelClass,
   primaryButtonClass,
 } from '@/components/styles';
+import { DevSignIn } from './DevSignIn';
 import { safeNextPath, type LoginRedirectState } from './loginRedirect';
 import { useSendSignInEmail, useVerifySignInCode } from './useAuthActions';
 import {
@@ -91,6 +92,12 @@ export function LoginPage() {
             }}
             sendError={sendError}
           />
+        )}
+
+        {/* Only `npm run dev`: DEV is false in every build, so the button and its password
+            are dropped, and MODE is 'test' under Vitest. */}
+        {import.meta.env.DEV && import.meta.env.MODE === 'development' && (
+          <DevSignIn email={sentTo ?? email} />
         )}
       </div>
     </main>

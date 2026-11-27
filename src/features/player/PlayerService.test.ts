@@ -393,19 +393,25 @@ describe('PlayerService metronome voice', () => {
     expect(service.getSnapshot()).toMatchObject({ status: 'ready', metronomeVoice: cowbell });
   });
 
-  it('refuses a change while playing or counting in: it would rebuild the MIDI', () => {
+  it('changes the voice while playing or counting in, without stopping or restarting', () => {
     const { engine, service } = playing();
     engine.setMetronomeVoice.mockClear();
-    expect(service.setMetronomeVoice(cowbell)).toBe(false);
-    expect(engine.setMetronomeVoice).not.toHaveBeenCalled();
-    expect(service.getSnapshot().metronomeVoice).toEqual(DEFAULT_PLAYER_OPTIONS.metronomeVoice);
+    const restartsBefore = engine.restartCalls();
+    expect(service.setMetronomeVoice(cowbell)).toBe(true);
+    expect(engine.setMetronomeVoice).toHaveBeenCalledWith(cowbell);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(service.getSnapshot()).toMatchObject({ status: 'playing', metronomeVoice: cowbell });
 
     const counting = setup({ options: { countInBars: 1 } });
     counting.service.load(bytes);
     counting.engine.finishLoading();
     counting.service.play();
     expect(counting.service.getSnapshot().status).toBe('countingIn');
-    expect(counting.service.setMetronomeVoice(cowbell)).toBe(false);
+    expect(counting.service.setMetronomeVoice(cowbell)).toBe(true);
+    expect(counting.service.getSnapshot()).toMatchObject({
+      status: 'countingIn',
+      metronomeVoice: cowbell,
+    });
   });
 
   it('sends nothing for the voice already set, and refuses once the player has failed', () => {

@@ -66,13 +66,12 @@ export function canPickBars(snapshot: PlayerSnapshot): boolean {
 }
 
 /**
- * The metronome's sounds and subdivision: an option like the others, but only
- * while nothing plays or counts in, since applying one rebuilds the song's
- * MIDI (PlayerService.setMetronomeVoice).
+ * The metronome's sounds and subdivision: an option like the others, playing or
+ * not (the engine rebuilds the MIDI and carries on, PlayerService.setMetronomeVoice).
  */
 export function canChangeMetronomeVoice(
   player: PlayerService | null,
   snapshot: PlayerSnapshot,
 ): player is PlayerService {
-  return canChangeOptions(player, snapshot) && !isRunning(snapshot.status);
+  return canChangeOptions(player, snapshot);
 }

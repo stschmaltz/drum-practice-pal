@@ -271,18 +271,21 @@ describe('PlayerControls metronome sounds', () => {
     expect(player.getSnapshot().metronomeVoice).toEqual({ ...voice, accent: false });
   });
 
-  it('waits for a pause while playing, and says so', async () => {
-    const { engine, user } = setup();
+  it('changes while playing, and playback carries on', async () => {
+    const { engine, player, user } = setup();
     await startPlaying(engine, user);
 
-    expect(soundSelect()).toBeDisabled();
-    expect(beatOneSelect()).toBeDisabled();
-    expect(soundSelect()).toHaveAccessibleDescription("Pause to change the metronome's sounds.");
-
-    await user.click(playButton());
-    act(() => engine.fire('stateChanged', { playing: false }));
     expect(soundSelect()).toBeEnabled();
-    expect(screen.queryByText("Pause to change the metronome's sounds.")).not.toBeInTheDocument();
+    const restartsBefore = engine.restartCalls();
+    await user.selectOptions(beatOneSelect(), 'No accent');
+    expect(engine.setMetronomeVoice).toHaveBeenLastCalledWith(
+      expect.objectContaining({ accent: false }),
+    );
+    expect(player.getSnapshot()).toMatchObject({
+      status: 'playing',
+      metronomeVoice: expect.objectContaining({ accent: false }),
+    });
+    expect(engine.restartCalls()).toBe(restartsBefore);
   });
 });
 

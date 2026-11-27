@@ -450,6 +450,8 @@ Shane's first pass after the MVP (branch `practice-feedback`): the score takes t
 
 ### 14 Songs with recordings
 
+**Next after Unit 16's PR** (Shane, 2026-11-27). Not built yet.
+
 **Goal:** any song can be played along to with the real recording, at any point in learning it, whether or not it has a tab. Written to `docs/product.md`.
 
 **For whom and when** (jobs 1, 4 and 5 there; job 2 is Unit 15):
@@ -567,7 +569,16 @@ Numbered 16 when main was merged in: main had taken 14 and 15 for recordings whi
 - **Not in this unit:** XP or levels, a daily minutes goal (it would need a `user_settings` column), anything that reads or writes `target_ratio` (dropped after 13, in "practice feedback": "full speed" is always 100%).
 - Offline: every new screen reads from the persisted cache like the others, and the Stats page says so when it has nothing cached.
 
-**Acceptance:** at all three sizes a user goes Songs → a song → a loop's practice screen → practises → sees Session complete → Done is back on the song, and the e2e journey covers it; Stats' totals for the seed user equal sums over their sessions in the database; an old `?loop=` link opens the loop's practice screen; the player, loop, offline and shortcut specs still pass on the new routes.
+**From Shane's first try (2026-11-27), in this unit before Readability:**
+
+- **Practice screen: focused, with the whole song a toggle away.** The score opens showing only the loop's bars (and a bar either side for context), so nothing else invites a tap. A "Show whole song" toggle draws the whole score; there, tapping or dragging across bars picks a new range and a "Save as loop" bar (name, then save) appears on the screen itself, with no backing out to the song; saving opens the new loop's practice screen (`replace`). Tapping a bar outside the loop never seeks out of it.
+- **Speed controls on the practice screen:** keep the round ±5%, and add ±1 BPM steps, typing an exact BPM (tap the BPM) and typing an exact percent (tap the big percent). Each change is saved as it is made, as the nudges are (`useSaveLoopSpeed`), stored as a ratio (`bpmToRatio`).
+- **Track mixer:** a per-track mute list (each track by name, on or off) in the controls bar on both player screens, every track on at open, live like the other options (`setTrackMuted`, which Drums only and Mute drums already respect). Not saved per song in this unit.
+- **The metronome's sounds change while playing** (done: the engine rebuilds its MIDI and carries on; AGENTS.md, Metronome sounds).
+- **Local testing:** "Dev: sign in" on the dev server's login page (done; AGENTS.md, App shell).
+- **Song links and the YouTube player are not in this unit:** they are Unit 14, built next, after this unit's PR.
+
+**Acceptance:** at all three sizes a user goes Songs → a song → a loop's practice screen → practises → sees Session complete → Done is back on the song, and the e2e journey covers it; on the practice screen the score shows only the loop until "Show whole song", where a new loop can be saved without leaving the screen; the speed can be set by ±1 BPM, a typed BPM and a typed percent; each track can be muted on its own while playing; Stats' totals for the seed user equal sums over their sessions in the database; an old `?loop=` link opens the loop's practice screen; the player, loop, offline and shortcut specs still pass on the new routes.
 
 **Test focus:** streak, totals and badge maths with local-time dates (a DST change, midnight, a gap of one day); routes and redirects; the Session complete summary. **QA focus:** back and forward through the three levels, deep links, offline, 50 songs and 30 loops in one song, empty states, a phone in landscape. **Human check:** Shane signs off on the screenshots, then practises with the new flow for a week.
 
@@ -620,7 +631,7 @@ The handoff notes record none of these as done; delete a row once it is. Everyth
 - Practice routines (sequence of loops)
 - Stats: speed over time, weekly practice time, streaks
 - Setlists built on jam mode
-- Full track mixer
+- Full track mixer (volumes, saved per song; per-track mute is in Unit 16)
 - Remember jam speed per song
 - Notes per loop
 - Custom shortcut and pedal mapping
