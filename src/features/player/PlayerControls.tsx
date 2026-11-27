@@ -415,13 +415,8 @@ function CountInControls({
   );
 }
 
-/**
- * The metronome's sounds for this song. Unlike the bar's other options they
- * wait for playback to stop: applying one rebuilds the song's MIDI.
- */
+/** The metronome's sounds for this song, changeable while it plays. */
 function MetronomeVoiceControls({ player, snapshot }: PlayerViewProps) {
-  const noteId = useId();
-  const waitsForPause = canChangeOptions(player, snapshot) && isRunning(snapshot.status);
   const voice = snapshot.metronomeVoice;
   return (
     // Closed by default: chosen once in a while, and open it would push the score
@@ -440,15 +435,8 @@ function MetronomeVoiceControls({ player, snapshot }: PlayerViewProps) {
           voice={voice}
           soundLabel="Metronome sound"
           disabled={!canChangeMetronomeVoice(player, snapshot)}
-          describedBy={waitsForPause ? noteId : undefined}
           onChange={(next) => player?.setMetronomeVoice(next)}
         />
-        {/* Off controls say why they are off. */}
-        {waitsForPause && (
-          <p id={noteId} className="text-ink-muted">
-            Pause to change the metronome's sounds.
-          </p>
-        )}
       </div>
     </details>
   );

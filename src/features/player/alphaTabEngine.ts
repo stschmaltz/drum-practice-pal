@@ -89,17 +89,19 @@ export function createAlphaTabEngine({
   const metronome = createMetronomeTrack(api);
   api.midiLoad.on(metronome.write);
   api.midiLoaded.on(metronome.applyVolume);
+  api.midiLoaded.on(metronome.midiReloaded);
   api.playerReady.on(metronome.applyVolume);
 
   return {
     on(event, handler) {
-      subscribe(api, taps, event, handler);
+      subscribe(api, taps, metronome.hidesPlayback, event, handler);
     },
 
     loadScore(bytes, trackIndexes) {
       // api.load(bytes) falls back to alphaTex, which reads damaged bytes as a
       // one-bar score. Parsing with the Guitar Pro importers only refuses them.
       const score = loadGuitarPro(bytes);
+      metronome.halted();
       return score !== null && api.load(score, trackIndexes);
     },
 
@@ -126,6 +128,7 @@ export function createAlphaTabEngine({
     },
 
     play() {
+      metronome.playRequested();
       api.play();
     },
     unlockAudio() {
@@ -137,12 +140,15 @@ export function createAlphaTabEngine({
       }
     },
     pause() {
+      metronome.halted();
       api.pause();
     },
     stop() {
+      metronome.halted();
       api.stop();
     },
     seek(tick) {
+      metronome.seeked(tick);
       api.tickPosition = tick;
     },
     setSpeed(ratio) {
@@ -377,6 +383,7 @@ function scrollBoxToBar(
 function subscribe<K extends keyof EngineEvents>(
   api: alphaTab.AlphaTabApi,
   taps: Emitter<TapEvents>,
+  hidesPlayback: (event: { playing: boolean } | null) => boolean,
   event: K,
   handler: (payload: EngineEvents[K]) => void,
 ): void {
@@ -405,12 +412,16 @@ function subscribe<K extends keyof EngineEvents>(
       api.postRenderFinished.on(() => emit(undefined));
       return;
     case 'stateChanged':
-      api.playerStateChanged.on((e) =>
-        emit({ playing: e.state === alphaTab.synth.PlayerState.Playing }),
-      );
+      api.playerStateChanged.on((e) => {
+        const state = { playing: e.state === alphaTab.synth.PlayerState.Playing };
+        if (!hidesPlayback(state)) emit(state);
+      });
       return;
     case 'position':
-      api.playerPositionChanged.on((e) => emit({ tick: e.currentTick }));
+      // A rebuild's stop reports the range's start before the restart seeks back.
+      api.playerPositionChanged.on((e) => {
+        if (!hidesPlayback(null)) emit({ tick: e.currentTick });
+      });
       return;
     case 'finished':
       api.playerFinished.on(() => emit(undefined));
@@ -477,6 +488,9 @@ function createMetronomeTrack(api: alphaTab.AlphaTabApi) {
   let voice: MetronomeVoice = DEFAULT_METRONOME_VOICE;
   let volume = 0;
   let channel: number | null = null;
+  let startRequested = false;
+  /** A rebuild under playback, from setVoice until alphaTab plays again. */
+  let reload: { tick: number; resumed: boolean } | null = null;
 
   const applyVolume = () => {
     // alphaTab's own metronome stays silent: its ticks are gone from the MIDI anyway.
@@ -497,14 +511,67 @@ function createMetronomeTrack(api: alphaTab.AlphaTabApi) {
       applyVolume();
     },
 
-    /** Rebuilds the MIDI, which stops playback; the position is kept. */
+    /**
+     * Rebuilds the MIDI, which makes alphaTab stop; the position is kept. While
+     * playing (or asked to play), playback starts again from there once the new
+     * MIDI is in (`midiReloaded`), and the stop and start are hidden from the
+     * service (`hidesPlayback`): they are alphaTab's, not the user's, so they
+     * must not read as a pause (a session logged, the controls unfolding).
+     */
     setVoice(next: MetronomeVoice) {
       if (isSameVoice(voice, next)) return;
       voice = next;
       if (channel === null || !api.score) return;
       const tick = api.tickPosition;
+      if (api.playerState === alphaTab.synth.PlayerState.Playing || startRequested) {
+        reload = { tick, resumed: false };
+      }
       api.loadMidiForScore();
       api.tickPosition = tick;
+    },
+
+    /** On midiLoaded: starts again a playback that a voice change stopped. */
+    midiReloaded() {
+      if (reload === null || reload.resumed) return;
+      reload.resumed = true;
+      api.tickPosition = reload.tick;
+      api.play();
+    },
+
+    /** engine.play(): until alphaTab says it plays, a rebuild must start it again. */
+    playRequested() {
+      startRequested = true;
+    },
+
+    /** engine.pause(), stop() and a new score: nothing is to start again. */
+    halted() {
+      startRequested = false;
+      reload = null;
+    },
+
+    /** engine.seek(): a rebuild under way starts again from the new tick. */
+    seeked(tick: number) {
+      if (reload !== null) reload.tick = tick;
+    },
+
+    /**
+     * True for the state and position events of a rebuild under playback, which
+     * the service must not see. Ends at the "playing" that follows the restart,
+     * which is forwarded when the service never heard a "playing" for its play
+     * (a voice change just after a count-in's downbeat): it waits for one.
+     */
+    hidesPlayback(event: { playing: boolean } | null): boolean {
+      if (reload === null) {
+        if (event?.playing) startRequested = false;
+        return false;
+      }
+      if (event?.playing && reload.resumed) {
+        const serviceWaits = startRequested;
+        reload = null;
+        startRequested = false;
+        return !serviceWaits;
+      }
+      return true;
     },
   };
 }
