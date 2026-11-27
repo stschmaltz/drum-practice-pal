@@ -68,6 +68,7 @@ export class FakePlayerEngine implements PlayerEngine {
   setMetronomeVolume = vi.fn();
   setMetronomeVoice = vi.fn();
   setTrackMuted = vi.fn();
+  setTrackVolume = vi.fn();
   setPlaybackRange = vi.fn();
   setLooping = vi.fn();
   setHighlight = vi.fn();

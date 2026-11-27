@@ -1,7 +1,7 @@
 import { FakePlayerEngine, TEMPO_CHANGE_BAR_TEMPOS, TICKS_PER_BAR } from '@/test/fakePlayerEngine';
 import { COMMON_TIME, type Meter } from './countIn';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
-import { PlayerService, type PlayerServiceConfig } from './PlayerService';
+import { DRUM_TRACK_GAIN, PlayerService, type PlayerServiceConfig } from './PlayerService';
 import type { WakeLockControl } from './wakeLock';
 
 const bytes = new Uint8Array([1, 2, 3]);
@@ -380,6 +380,20 @@ describe('PlayerService metronome voice', () => {
       engine.loadScore.mock.invocationCallOrder[0] ?? 0,
     );
     expect(service.getSnapshot().metronomeVoice).toEqual(cowbell);
+  });
+
+  it('lifts the drum track over the band before the score loads, and nothing for a song without one', () => {
+    const { engine, service } = setup();
+    service.load(bytes);
+    expect(engine.setTrackVolume).toHaveBeenCalledWith(2, DRUM_TRACK_GAIN);
+    expect(DRUM_TRACK_GAIN).toBeGreaterThan(1);
+    expect(engine.setTrackVolume.mock.invocationCallOrder[0]).toBeLessThan(
+      engine.loadScore.mock.invocationCallOrder[0] ?? 0,
+    );
+
+    const noDrums = setup({ drumTrackIndex: null });
+    noDrums.service.load(bytes);
+    expect(noDrums.engine.setTrackVolume).not.toHaveBeenCalled();
   });
 
   it('changes the voice while paused', () => {

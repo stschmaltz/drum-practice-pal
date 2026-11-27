@@ -25,6 +25,13 @@ import type { LayoutChoice } from './layout';
 import type { PlayerEngine } from './playerEngine';
 import { isSameVoice, type MetronomeVoice } from './metronomeSounds';
 import { clampVolume, effectiveMetronomeVolume, type PlayerOptions } from './playerOptions';
+
+/**
+ * The drum track's level over the file's own (1). The kit was really quiet in
+ * the mix under guitars and bass (Shane, 2026-11-27); alphaTab doesn't cap a
+ * channel's volume. Tune by ear here.
+ */
+export const DRUM_TRACK_GAIN = 2.5;
 import { PLAYER_SOUND_FONT_URLS } from './soundFont';
 import { clampSpeedRatio } from './speed';
 import { orderedBars } from './tapGesture';
@@ -302,6 +309,10 @@ export class PlayerService {
     this.requestSoundFont();
     // Before the score, so the first MIDI already has the right clicks.
     this.engine.setMetronomeVoice(this.snapshot.metronomeVoice);
+    // The part being practised sits on top of the band, not level with it.
+    if (this.drumTrackIndex !== null) {
+      this.engine.setTrackVolume(this.drumTrackIndex, DRUM_TRACK_GAIN);
+    }
     if (!this.engine.loadScore(bytes, [this.drumTrackIndex ?? 0])) this.fail('score');
   }
 

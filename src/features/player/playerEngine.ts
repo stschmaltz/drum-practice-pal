@@ -83,6 +83,11 @@ export interface PlayerEngine {
    */
   setMetronomeVoice(voice: MetronomeVoice): void;
   setTrackMuted(trackIndex: number, muted: boolean): void;
+  /**
+   * A track's level in the mix (1 is the file's own; above 1 is louder). Kept
+   * and applied again whenever the synth takes a new MIDI or soundfont.
+   */
+  setTrackVolume(trackIndex: number, volume: number): void;
   setPlaybackRange(range: TickRange | null): void;
   setLooping(looping: boolean): void;
   /**

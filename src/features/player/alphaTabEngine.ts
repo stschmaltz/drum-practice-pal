@@ -107,6 +107,17 @@ export function createAlphaTabEngine({
   api.midiLoaded.on(metronome.applyVolume);
   api.midiLoaded.on(metronome.midiReloaded);
   api.playerReady.on(metronome.applyVolume);
+  // Track levels (the drum boost) are channel volumes the synth forgets with each
+  // new MIDI, as it does the metronome's: sent again at the same two moments.
+  const trackVolumes = new Map<number, number>();
+  const applyTrackVolumes = () => {
+    for (const [trackIndex, volume] of trackVolumes) {
+      const track = api.score?.tracks[trackIndex];
+      if (track && api.player) api.changeTrackVolume([track], volume);
+    }
+  };
+  api.midiLoaded.on(applyTrackVolumes);
+  api.playerReady.on(applyTrackVolumes);
 
   return {
     on(event, handler) {
@@ -189,6 +200,10 @@ export function createAlphaTabEngine({
     setTrackMuted(trackIndex, muted) {
       const track = api.score?.tracks[trackIndex];
       if (track) api.changeTrackMute([track], muted);
+    },
+    setTrackVolume(trackIndex, volume) {
+      trackVolumes.set(trackIndex, volume);
+      applyTrackVolumes();
     },
     setPlaybackRange(range) {
       api.playbackRange = range ? { startTick: range.startTick, endTick: range.endTick } : null;
