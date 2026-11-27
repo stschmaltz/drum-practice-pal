@@ -555,3 +555,92 @@ export function writeMetronome(file: alphaTab.midi.MidiFile, voice: MetronomeVoi
   }
   return channel;
 }
+
+/** The sample's tempo and length: two bars of 4/4, so beat one is heard come round again. */
+const SAMPLE_BPM = 100;
+const SAMPLE_BARS = 2;
+const SAMPLE_BEATS_PER_BAR = 4;
+/** Past the last click, so its decay isn't cut off. */
+const SAMPLE_TAIL_MS = 400;
+
+/**
+ * Two bars of `voice` rendered offline through alphaTab's own synth and the
+ * player's soundfonts, as interleaved stereo samples: the Settings page's
+ * "Play sample" plays exactly what a song's metronome would.
+ */
+export function renderMetronomeSample(
+  voice: MetronomeVoice,
+  soundFonts: Uint8Array[],
+  sampleRate: number,
+): Float32Array {
+  const { midi } = alphaTab;
+  const file = new midi.MidiFile();
+  const ticksPerBeat = file.division;
+  const beatMs = 60000 / SAMPLE_BPM;
+  file.addEvent(new midi.TempoChangeEvent(0, Math.round(beatMs * 1000)));
+  for (let index = 0; index < SAMPLE_BARS * SAMPLE_BEATS_PER_BAR; index++) {
+    file.addEvent(
+      new midi.AlphaTabMetronomeEvent(
+        0,
+        index * ticksPerBeat,
+        index % SAMPLE_BEATS_PER_BAR,
+        ticksPerBeat,
+        beatMs,
+      ),
+    );
+  }
+  writeMetronome(file, voice);
+
+  const options = new alphaTab.synth.AudioExportOptions();
+  options.soundFonts = soundFonts;
+  options.sampleRate = sampleRate;
+  // alphaTab's own tick stays off, as in the player.
+  options.metronomeVolume = 0;
+  const exporter = offlineSynth(sampleRate).exportAudio(options, file, [], new Map());
+  const totalMs = SAMPLE_BARS * SAMPLE_BEATS_PER_BAR * beatMs + SAMPLE_TAIL_MS;
+  const chunks: Float32Array[] = [];
+  let renderedMs = 0;
+  while (renderedMs < totalMs) {
+    const chunk = exporter.render(250);
+    if (!chunk) break;
+    chunks.push(chunk.samples);
+    renderedMs += 250;
+  }
+  const samples = new Float32Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    samples.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return samples;
+}
+
+/** A synth for alphaTab's audio exporter. It never plays, so its output does nothing. */
+export function offlineSynth(sampleRate: number): alphaTab.synth.AlphaSynth {
+  const event = { on: () => {}, off: () => {} };
+  const output = {
+    sampleRate,
+    open: () => {},
+    play: () => {},
+    destroy: () => {},
+    pause: () => {},
+    addSamples: () => {},
+    resetSamples: () => {},
+    activate: () => {},
+    ready: event,
+    samplesPlayed: event,
+    sampleRequest: event,
+    enumerateOutputDevices: () => Promise.resolve([]),
+    setOutputDevice: () => Promise.resolve(),
+    getOutputDevice: () => Promise.resolve(null),
+  } as unknown as alphaTab.synth.ISynthOutput;
+  return new alphaTab.synth.AlphaSynth(output, 500);
+}
+
+/** The player's soundfonts as bytes, for an offline render. */
+export function fetchSoundFonts(
+  urls: readonly string[],
+  signal: AbortSignal,
+): Promise<Uint8Array[]> {
+  return Promise.all(urls.map((url) => fetchSoundFont(url, signal)));
+}

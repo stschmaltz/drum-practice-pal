@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as alphaTab from '@coderline/alphatab';
-import { writeMetronome } from './alphaTabEngine';
+import { offlineSynth, renderMetronomeSample, writeMetronome } from './alphaTabEngine';
 import {
   DEFAULT_METRONOME_VOICE,
   PERCUSSION_CHANNEL,
@@ -34,28 +34,6 @@ function songMidi(fixture: string): alphaTab.midi.MidiFile {
   return file;
 }
 
-/** A synth to export with; it never plays, so its output does nothing. */
-function exportingSynth(): alphaTab.synth.AlphaSynth {
-  const event = { on: () => {}, off: () => {} };
-  const output = {
-    sampleRate: SAMPLE_RATE,
-    open: () => {},
-    play: () => {},
-    destroy: () => {},
-    pause: () => {},
-    addSamples: () => {},
-    resetSamples: () => {},
-    activate: () => {},
-    ready: event,
-    samplesPlayed: event,
-    sampleRequest: event,
-    enumerateOutputDevices: () => Promise.resolve([]),
-    setOutputDevice: () => Promise.resolve(),
-    getOutputDevice: () => Promise.resolve(null),
-  } as unknown as alphaTab.synth.ISynthOutput;
-  return new alphaTab.synth.AlphaSynth(output, 500);
-}
-
 /**
  * Mono samples of the first `seconds`, with every song channel silent: only
  * the metronome (`ownChannel`) or nothing is heard.
@@ -69,7 +47,7 @@ function render(file: alphaTab.midi.MidiFile, seconds: number, ownChannel: numbe
   for (let channel = 0; channel < SONG_CHANNELS; channel++) {
     options.trackVolume.set(channel, channel === ownChannel ? 1 : 0);
   }
-  const exporter = exportingSynth().exportAudio(options, file, [], new Map());
+  const exporter = offlineSynth(SAMPLE_RATE).exportAudio(options, file, [], new Map());
   const stereo: number[] = [];
   while (stereo.length < seconds * SAMPLE_RATE * 2) {
     const chunk = exporter.render(250);
@@ -221,5 +199,37 @@ describe('the metronome through alphaTab’s synth', () => {
     expect(events.some((event) => event instanceof alphaTab.midi.AlphaTabMetronomeEvent)).toBe(
       false,
     );
+  });
+});
+
+describe('renderMetronomeSample (Settings’ "Play sample")', () => {
+  /** 100 BPM. */
+  const SAMPLE_BEAT_SECONDS = 0.6;
+
+  function sample(voice: MetronomeVoice) {
+    const stereo = renderMetronomeSample(voice, [SOUNDFONT], SAMPLE_RATE);
+    const mono: number[] = [];
+    for (let i = 0; i + 1 < stereo.length; i += 2) {
+      mono.push(((stereo[i] ?? 0) + (stereo[i + 1] ?? 0)) / 2);
+    }
+    return mono;
+  }
+
+  it('is two bars of 4/4 with a click on every beat and beat one louder', () => {
+    const audio = sample({ ...DEFAULT_METRONOME_VOICE, sound: 'claves', accentSound: 'claves' });
+    expect(audio.length / SAMPLE_RATE).toBeGreaterThan(8 * SAMPLE_BEAT_SECONDS);
+    const hits = Array.from({ length: 8 }, (_, beat) =>
+      peak(audio, beat * SAMPLE_BEAT_SECONDS, beat * SAMPLE_BEAT_SECONDS + ATTACK),
+    );
+    hits.forEach((hit, beat) => expect(hit, `beat ${beat + 1}`).toBeGreaterThan(0.01));
+    for (const downbeat of [0, 4]) {
+      expect(hits[downbeat]).toBeGreaterThan((hits[downbeat + 1] ?? 0) * 1.1);
+    }
+  });
+
+  it('plays the subdivisions between the beats', () => {
+    const audio = sample({ ...DEFAULT_METRONOME_VOICE, sound: 'hi_hat', subdivision: 2 });
+    const offbeat = SAMPLE_BEAT_SECONDS / 2;
+    expect(peak(audio, offbeat, offbeat + ATTACK)).toBeGreaterThan(0.005);
   });
 });
