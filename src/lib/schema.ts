@@ -6,6 +6,7 @@ import { Constants, type Database } from './database.types';
 
 export type LoopStatus = Database['public']['Enums']['loop_status'];
 export type CountInMode = Database['public']['Enums']['count_in_mode'];
+export type MetronomeSound = Database['public']['Enums']['metronome_sound'];
 
 export const GP_FILES_BUCKET = 'gp-files';
 /** The bucket's file_size_limit. */
@@ -19,6 +20,10 @@ export const COUNT_IN_MODES = Constants.public.Enums.count_in_mode;
 
 export const METRONOME_VOLUME_MIN = 0;
 export const METRONOME_VOLUME_MAX = 1;
+export const METRONOME_SOUNDS = Constants.public.Enums.metronome_sound;
+/** Clicks per beat: beats only, then twice and four times as many. */
+export const METRONOME_SUBDIVISIONS = [1, 2, 4] as const;
+export type MetronomeSubdivision = (typeof METRONOME_SUBDIVISIONS)[number];
 
 export const SONG_TEXT_MAX_LENGTH = 300;
 /** songs.original_tempo must be above 0 and at most this. */
@@ -60,4 +65,12 @@ export function isCountInBars(value: number): value is CountInBars {
 
 export function isCountInMode(value: string): value is CountInMode {
   return (COUNT_IN_MODES as readonly string[]).includes(value);
+}
+
+export function isMetronomeSound(value: string): value is MetronomeSound {
+  return (METRONOME_SOUNDS as readonly string[]).includes(value);
+}
+
+export function isMetronomeSubdivision(value: number): value is MetronomeSubdivision {
+  return (METRONOME_SUBDIVISIONS as readonly number[]).includes(value);
 }

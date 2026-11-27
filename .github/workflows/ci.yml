@@ -57,3 +57,43 @@ jobs:
       - name: Generated types match the migrations
         run: npm run db:types && git diff --exit-code src/lib/database.types.ts
       - run: npm run db:seed
+
+  # Applies new migrations to the hosted Supabase project once they reach main,
+  # so nobody runs `supabase db push` by hand. It doesn't wait for the other
+  # jobs: they already passed on the PR, and Workers Builds deploys main's build
+  # at the same moment, so the schema should land first. Migrations must
+  # therefore be additive (old builds keep working on the new schema).
+  migrate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # One push at a time, never cancelled half way.
+    concurrency:
+      group: hosted-migrations
+      cancel-in-progress: false
+    env:
+      SUPABASE_PROJECT_REF: pdvrzgeoijerdzioxtse
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Secrets are set
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::error::Set the SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD repository secrets (docs/release.md, section 2)."
+            exit 1
+          fi
+      - run: npx supabase link --project-ref "$SUPABASE_PROJECT_REF"
+      - name: Migrations to apply
+        run: npx supabase db push --dry-run
+      # A migration that fails (a check an existing row breaks) rolls back and stops here.
+      - run: npx supabase db push
+      - name: Hosted schema matches the committed types
+        run: |
+          npx supabase gen types typescript --project-id "$SUPABASE_PROJECT_REF" --schema public \
+            | npx prettier --stdin-filepath database.types.ts \
+            | diff - src/lib/database.types.ts

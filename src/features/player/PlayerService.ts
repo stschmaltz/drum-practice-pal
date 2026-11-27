@@ -23,6 +23,7 @@ import { startCountIn } from './countInRunner';
 import { createEmitter, type Handler } from './emitter';
 import type { LayoutChoice } from './layout';
 import type { PlayerEngine } from './playerEngine';
+import { isSameVoice, type MetronomeVoice } from './metronomeSounds';
 import { clampVolume, effectiveMetronomeVolume, type PlayerOptions } from './playerOptions';
 import { PLAYER_SOUND_FONT_URL } from './soundFont';
 import { clampSpeedRatio } from './speed';
@@ -154,6 +155,7 @@ export function initialPlayerSnapshot(
     speedRatio: clampSpeedRatio(options.speedRatio),
     metronomeOn: options.metronomeOn,
     metronomeVolume: clampVolume(options.metronomeVolume),
+    metronomeVoice: options.metronomeVoice,
     drumsMuted: drumTrackIndex !== null && options.drumsMuted,
     countInBars: options.countInBars,
     countInMode: options.countInMode,
@@ -273,6 +275,8 @@ export class PlayerService {
     });
     this.wakeLock.setActive(false);
     this.requestSoundFont();
+    // Before the score, so the first MIDI already has the right clicks.
+    this.engine.setMetronomeVoice(this.snapshot.metronomeVoice);
     if (!this.engine.loadScore(bytes, [this.drumTrackIndex ?? 0])) this.fail('score');
   }
 
@@ -469,6 +473,21 @@ export class PlayerService {
     if (this.disposed) return;
     this.update({ metronomeVolume: clampVolume(volume) });
     this.applyMetronome();
+  }
+
+  /**
+   * The metronome's sounds and subdivision. Not a live option: the engine
+   * rebuilds the song's MIDI for it, which would stop playback, so it is
+   * refused (false) while playing or counting in. See canChangeMetronomeVoice.
+   */
+  setMetronomeVoice(voice: MetronomeVoice): boolean {
+    if (this.disposed || isRunning(this.snapshot.status) || this.snapshot.status === 'error') {
+      return false;
+    }
+    if (isSameVoice(voice, this.snapshot.metronomeVoice)) return true;
+    this.update({ metronomeVoice: voice });
+    this.engine.setMetronomeVoice(voice);
+    return true;
   }
 
   /**

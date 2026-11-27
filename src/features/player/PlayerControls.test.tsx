@@ -234,6 +234,58 @@ describe('PlayerControls live changes', () => {
   });
 });
 
+describe('PlayerControls metronome sounds', () => {
+  // Inside a closed <details>: jsdom keeps its content in the accessibility tree.
+  const soundSelect = () => screen.getByRole('combobox', { name: 'Metronome sound' });
+  const beatOneSelect = () => screen.getByRole('combobox', { name: 'Beat one' });
+  const clicks = () => screen.getByRole('radiogroup', { name: 'Clicks' });
+
+  it('starts from the options it is given', () => {
+    setup({
+      options: {
+        ...DEFAULT_PLAYER_OPTIONS,
+        metronomeVoice: { sound: 'claves', accent: false, accentSound: 'cowbell', subdivision: 4 },
+      },
+    });
+    expect(screen.getByText('Metronome sounds').closest('summary')).toHaveTextContent(
+      'Metronome soundsClaves, 4 per beat',
+    );
+    expect(soundSelect()).toHaveValue('claves');
+    expect(beatOneSelect()).toHaveValue('none');
+    expect(within(clicks()).getByRole('radio', { name: '4 per beat' })).toBeChecked();
+  });
+
+  it('changes the sound, beat one and the clicks while paused', async () => {
+    const { engine, player, user } = setup();
+    engine.setMetronomeVoice.mockClear();
+
+    await user.selectOptions(soundSelect(), 'Side stick');
+    await user.selectOptions(beatOneSelect(), 'Cowbell, louder');
+    await user.click(within(clicks()).getByRole('radio', { name: '2 per beat' }));
+
+    const voice = { sound: 'side_stick', accent: true, accentSound: 'cowbell', subdivision: 2 };
+    expect(engine.setMetronomeVoice).toHaveBeenLastCalledWith(voice);
+    expect(player.getSnapshot().metronomeVoice).toEqual(voice);
+
+    await user.selectOptions(beatOneSelect(), 'No accent');
+    expect(player.getSnapshot().metronomeVoice).toEqual({ ...voice, accent: false });
+  });
+
+  it('waits for a pause while playing, and says so', async () => {
+    const { engine, user } = setup();
+    await startPlaying(engine, user);
+
+    expect(soundSelect()).toBeDisabled();
+    expect(beatOneSelect()).toBeDisabled();
+    expect(soundSelect()).toHaveAccessibleDescription("Pause to change the metronome's sounds.");
+
+    await user.click(playButton());
+    act(() => engine.fire('stateChanged', { playing: false }));
+    expect(soundSelect()).toBeEnabled();
+    expect(screen.queryByText("Pause to change the metronome's sounds.")).not.toBeInTheDocument();
+  });
+});
+
 describe('PlayerControls drums only', () => {
   it('sits right after Mute drums and starts off, even when drums open muted', () => {
     setup({ options: { ...DEFAULT_PLAYER_OPTIONS, drumsMuted: true } });
