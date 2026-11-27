@@ -11,7 +11,7 @@ A tab-first drum practice tool: upload a Songsterr Guitar Pro export once, then 
 - Accounts and sync across phone, tablet and laptop
 - Upload .gp files into a song library
 - Jam mode: whole song, follow cursor, read-along while jamming
-- Loop practice: saved bar ranges with a name, current speed and target speed
+- Loop practice: saved bar ranges with a name and current speed; the target is always full speed (100%)
 - Speed shown as both % and BPM, editable either way
 - Session log per loop, so progress has a history
 - Loop states: active and finished, reopenable, history kept either way
@@ -40,7 +40,7 @@ A tab-first drum practice tool: upload a Songsterr Guitar Pro export once, then 
 | Hosting       | Cloudflare Workers (static assets)                                                                                                   | Free, fast, static SPA                                                  |
 | Speed model   | Store `speed_ratio`; derive BPM from the tempo at the loop's first bar                                                               | Songs can change tempo mid-song, so one BPM per song is wrong           |
 | Loop states   | `active` or `finished`, reopenable, history always kept                                                                              | Shows what's on the go and what you've done                             |
-| Layout        | alphaTab page layout at 768 px and up; horizontal scroll below                                                                       | A full page of drum notation doesn't fit a portrait phone               |
+| Layout        | alphaTab page layout at 768 px and up; horizontal scroll below. The score takes the page's whole width; loops are a sheet over it    | A full page of drum notation doesn't fit a portrait phone               |
 | Count-in      | Custom scheduler on top of alphaTab playback events                                                                                  | Built-in count-in doesn't cover "before every repeat"                   |
 | Test fixtures | Synthetic files generated from alphaTex and exported to GP7 by alphaTab, committed; real Songsterr exports kept local and gitignored | Deterministic tests without committing copyrighted tabs                 |
 | Input formats | Guitar Pro (.gp, .gpx, .gp3-5). Not MIDI                                                                                             | alphaTab imports GP, MusicXML and alphaTex; it only exports MIDI        |
@@ -72,7 +72,6 @@ Four tables, all owned by `user_id` with row-level security. Files live in Stora
 | name                   | text                       | "Chorus fill"                                 |
 | start_bar, end_bar     | int                        | 1-based, inclusive, start <= end <= bar_count |
 | speed_ratio            | numeric                    | Current speed, 0.25 to 2.0, default 1.0       |
-| target_ratio           | numeric, nullable          | Goal speed                                    |
 | status                 | enum `active` / `finished` |                                               |
 | finished_at            | timestamptz, nullable      | Set on finish, cleared on reopen              |
 | last_practiced_at      | timestamptz, nullable      | Denormalized for the "on the go" list         |
@@ -103,7 +102,7 @@ Four tables, all owned by `user_id` with row-level security. Files live in Stora
 
 - Displayed BPM = `speed_ratio` x tempo at `start_bar` (jam mode uses the current bar). Editing BPM writes back a ratio.
 - A session is logged when loop playback stops after at least 30 seconds of play time (tunable constant).
-- Reaching `target_ratio` prompts "Mark finished?"; it never finishes a loop automatically.
+- Reaching 100% prompts "Mark finished?"; it never finishes a loop automatically. A loop's speed is saved as it is played (no "Save speed").
 - A song is "in progress" when any of its loops is active; this is derived, not stored.
 
 ## Agent workflow
@@ -151,27 +150,29 @@ REVIEW: You are the Review agent for Unit NN: <name>. Read AGENTS.md and the han
 
 ## Units of work
 
-Fourteen units, run in order. Each is sized for one Build agent session. Unit 01 proves the audio stack on real devices before anything is built on it.
+Units run in order. Each is sized for one Build agent session. Unit 01 proves the audio stack on real devices before anything is built on it.
 
 Handoff notes written before the Visual design unit was added call the release unit "Unit 12". It is Unit 13 now.
 
-| #   | Unit                                       | Depends on |
-| --- | ------------------------------------------ | ---------- |
-| 00  | Scaffold, conventions, CI, preview deploys |            |
-| 01  | Spike: alphaTab on real devices            | 00         |
-| 02  | Supabase schema, auth, storage             | 00         |
-| 03  | App shell and auth UI                      | 02         |
-| 04  | Song library and upload                    | 03         |
-| 05  | Player core                                | 01, 04     |
-| 06  | Jam mode                                   | 05         |
-| —   | Hosted setup (configuration, not a unit)   | 05         |
-| 07  | Count-in                                   | 05, hosted |
-| 08  | Loops                                      | 06, 07     |
-| 09  | Practice sessions and progress             | 08         |
-| 10  | Keyboard shortcuts and pedals              | 09         |
-| 11  | PWA and offline                            | 09         |
-| 12  | Visual design                              | 11         |
-| 13  | Polish and release                         | all        |
+| #   | Unit                                        | Depends on |
+| --- | ------------------------------------------- | ---------- |
+| 00  | Scaffold, conventions, CI, preview deploys  |            |
+| 01  | Spike: alphaTab on real devices             | 00         |
+| 02  | Supabase schema, auth, storage              | 00         |
+| 03  | App shell and auth UI                       | 02         |
+| 04  | Song library and upload                     | 03         |
+| 05  | Player core                                 | 01, 04     |
+| 06  | Jam mode                                    | 05         |
+| —   | Hosted setup (configuration, not a unit)    | 05         |
+| 07  | Count-in                                    | 05, hosted |
+| 08  | Loops                                       | 06, 07     |
+| 09  | Practice sessions and progress              | 08         |
+| 10  | Keyboard shortcuts and pedals               | 09         |
+| 11  | PWA and offline                             | 09         |
+| 12  | Visual design                               | 11         |
+| 13  | Polish and release                          | all        |
+| 14  | Songs with recordings                       | 13         |
+| 15  | Play-along player, markers, recording loops | 14         |
 
 ### 00 Scaffold, conventions, CI, preview deploys
 
@@ -437,6 +438,115 @@ None left: each item was dealt with in 12 Build or moved to Unit 13 (see docs/un
 - From 12 Build: notation is at alphaTab's default size. At `display.scale` 1.15 taps in the phone's horizontal layout missed their bar, because the engine's hit-test (`barIndexAtPoint` via `watchScorePointer`), highlight (`highlightRects`) and scroll (`barBounds`) read `boundsLookup` as page pixels. Make them divide by the scale, then raise `NOTATION_SCALE` in `scoreTheme.ts` if the notation is too small at the kit. 13 Build tried it at 1.25: multiplying the bounds by the scale fixed the phone (horizontal) taps and broke every tablet and desktop (page) tap, and not scaling did the reverse, so alphaTab 1.9's bounds look scaled in page layout only; confirm that in alphaTab before relying on it.
 - From 12 Review (after UX pass): with focus on the controls bar's "When to count in" choice, C cycling the count-in to Off takes that group away and focus falls to `<body>` (`useFocusKeptInBar` in `PlayerControls.tsx` only looks at a fold change); hand it to the bars' checked option. On a cold start the library draws the big drop box while the songs load and then the compact Upload button (`compact` follows `songs.data`), so the page jumps under a pointer on its way to the box. (docs/units/12-visual-design.md, Review (after UX pass))
 - From 12 Build, from 08 QA: on a phone with the sheet open and nothing playing, about 112 px of the score shows, the staff cut at the sheet's edge (issue 6; 85 px before the UX pass sized the box to its line, 12 QA after the UX pass). A phone in landscape with the panel open leaves a 284 x 234 px score.
+
+### After 13: practice feedback
+
+Shane's first pass after the MVP (branch `practice-feedback`): the score takes the whole width with the loops as a sheet over it at every size; no per-loop target (100% always, column dropped; not additive, which was fine with no users yet); the loop's speed saves itself as it is played; MuseScore General's drum kit layered over Sonivox for a snare that sounds like one.
+
+**Carried forward**
+
+- The drum kit is MuseScore General's standard kit only (program 0). A song whose drum track uses another kit program plays Sonivox's kit for it. Listen at the kit; if the hi-hat or toms of Sonivox are better, the extraction can pick per note.
+
+### 14 Songs with recordings
+
+**Goal:** any song can be played along to with the real recording, at any point in learning it, whether or not it has a tab. Written to `docs/product.md`.
+
+**For whom and when** (jobs 1, 4 and 5 there; job 2 is Unit 15):
+
+- A song heard yesterday: paste its link, play along badly today, find out what is in it. No tab, no loops, nothing finished first
+- A song being learned from a tab: hear the real thing, or a drumless version, between loops, and read the tab while it plays
+- A song already down: one or two taps from opening the app to playing it
+
+Nothing here waits for loops to be finished, and nothing needs a tab.
+
+**What the services allow** (from memory unless marked; Build checks each before relying on it)
+
+- YouTube embeds play inside the app, with YouTube's own controls: play, seek, and speed from 0.25x to 2x. `playsinline` keeps iOS out of fullscreen
+- Some videos refuse to be embedded, often a label's official upload (player errors 101 and 150). The app then offers "Open in YouTube" in place of the player, and says why
+- Embeds can show ads, and on iOS they stop when the screen locks
+- Spotify can't be slowed, and its embed plays full tracks only for a browser logged into Spotify, otherwise a 30-second preview. So a Spotify link always opens Spotify (the app, on a phone). The app says so where the link is added: for slowing a song down, add a YouTube link
+- Neither works offline, and neither gives the app its audio, so drums out is a second link to a drumless version (YouTube has one for most songs). A tab's synth already does drums out with Mute drums
+- Title and artist from a pasted link: both services have an oEmbed endpoint that needs no key. Whether the browser may call them (CORS) is unchecked; if not, the title is typed
+
+**Scope**
+
+- **A song is a title and artist plus any of: a tab, an Original recording, a Drumless recording, other links.** At least one of them when it is added
+  - "Add song" in the library takes a file as now, or a pasted link (title and artist filled from the link where possible, editable, otherwise typed)
+  - A tab can be added later to a song that began as a link, and a link to a song that began as a tab, from the song page
+  - `songs.file_path`, `file_hash`, `original_tempo` and `bar_count` become nullable, all set or all null. Every screen that reads them says what it shows without them
+- **Links:** one Original, one Drumless, any number of Other (a lesson, a drum cover)
+  - Accepted: YouTube (`watch?v=`, `youtu.be/`, `/shorts/`, `music.youtube.com`, a `t=` start kept), Spotify (`open.spotify.com/track/…`, `spotify:track:…`), and any other `https` URL as a plain link. Share-sheet tracking parameters are dropped. Anything else is refused with fixed copy
+  - Parsing is a pure module (`src/features/recordings/songLinks.ts`): provider, video or track id, canonical URL, label
+  - Adding, changing and removing a link is online only (the four parts in AGENTS.md)
+- **The song page has a source switch: Tab, Original, Drumless**, showing only what the song has (a `SegmentedControl`; none when there is one source). It opens on the source used last for that song on this device, and `?source=` picks one from a link
+  - **A YouTube source** shows the video in the page with YouTube's controls, in a box that stays on screen (sticky, small on a phone). The app's own Play, speed, metronome and count-in don't act on it and aren't shown as if they did
+  - **A Spotify or other source** shows a card with "Open in Spotify" (or the host's name) and the note about speed
+  - **With a tab, the score stays under the recording**, scrolled by hand, silent, so the part can be read while the real song plays. Switching source stops whichever was sounding. Loops and the loop panel stay as they are (they play the tab)
+  - **Without a tab** the page is the recording, the links, and a quiet "Add a tab" for later. No loop panel (loops on a recording are Unit 15)
+- **Play from anywhere:** a song's library card, and the home page, have a play-along button per recording it has ("Original", "Drumless")
+  - YouTube: opens the song page on that source (one tap, then the video's own Play, which YouTube requires)
+  - Spotify and other links: opens the link directly
+  - The home page gets a **Songs** tab (`?tab=songs`) beside Active and Finished: every song with a recording, most recently opened first. This is where a song with no loops lives
+- **Recently played:** opening a recording (the song page on a recording source, or a link out) counts as practising the song for the library's "recently practiced" sort and the Songs tab's order. It is a queued write of a timestamp. No session is logged and nothing asks what was played
+- **Data:**
+  - `song_links`: `id, user_id, song_id, kind ('original' | 'drumless' | 'other'), provider ('youtube' | 'spotify' | 'web'), url (https, at most 2048), created_at, updated_at`; partial unique index on `(song_id, kind)` where `kind <> 'other'`; references `songs (id, user_id)`, cascades; RLS and column grants per AGENTS.md
+  - `songs`: the four file columns nullable with an all-or-none check; `last_played_at`, client-writable only through a grant on that column
+  - The loops trigger that checks `end_bar` against `bar_count` refuses a loop on a song with no tab
+- The embed is `youtube-nocookie.com`. No YouTube script loads until a recording source is opened, and none on any other screen
+
+**Walk-throughs** (taps from the app being open)
+
+- _New song, no tab:_ Library, Add song, paste link (title appears), Save: the song page opens on the video. Play. Four taps and a paste
+- _Song being learned, mid-practice:_ on the song page, Drumless in the source switch, Play on the video; the tab is still under it. Two taps. Back to Tab and a loop: two taps
+- _Song that is down:_ Home, Songs, "Drumless" on its card. For Spotify that is playing in three taps; for YouTube, a fourth on the video
+- _Offline at the jam space:_ recordings say they need a connection; the tab, its loops and everything from Unit 11 work as before. A link-only song says so plainly and offers nothing that would fail
+- _A video that refuses embedding:_ the box says the video can't be played here, with "Open in YouTube"
+
+**Acceptance:**
+
+- A song can be added from a link alone and from a file alone, and each can gain the other later
+- Every accepted URL form saves a normalised link; a hostile or malformed one is refused with fixed copy
+- An embeddable YouTube link plays in the song page at phone, tablet and desktop sizes, with the tab readable under it when there is one; a blocked one offers the way out
+- A song's recordings can be started from its library card and from the home page's Songs tab without visiting anything else first
+- No screen breaks or shows empty tab furniture for a song with no tab, and nothing about recordings depends on a loop's status
+- Tab songs behave exactly as before with no links added
+
+**Test focus:** URL parsing as a table (real shapes, share-sheet parameters, `javascript:`, `data:`, look-alike hosts such as `youtube.com.evil.test`); RLS, grants, the all-or-none check and the loops trigger in `tests/db`; every screen that reads a song, given one with no tab; the source switch (what sounds stops, the last source remembered, `?source=`); online-only gates on link edits. e2e can't play YouTube in CI: stub the embed's host and assert the frame's URL and the fallback. **QA focus:** a link-only song through every screen; a phone in portrait with the video box and the score together; pasting from the YouTube and Spotify share sheets; an embed-blocked video; rotation with a video playing. **Human check:** at the kit, add a song from a YouTube link and play along; a drumless link; a Spotify link opening the app on the phone and coming back; reading the tab under the video on the tablet.
+
+**Not in this unit, and why**
+
+- No "Played it through" button and no run-through counts: the app can't see playback in Spotify, and a button that only exists to tell the app what happened is a chore (`docs/product.md`). Unit 15 logs what it can see
+- No prompt when a song's loops are finished. Recordings are always one tap away, so there is nothing to unlock
+- No app-drawn controls over the video (speed keys, pedal, Space). They need the IFrame Player API and are Unit 15; YouTube's own controls already cover play, seek and speed
+
+**Open questions for Shane** (each with what I'd do)
+
+- _Where does the sound come from at the kit?_ If the phone is both the app and the speaker or earbuds, leaving for the Spotify app and coming back is fine. If you'd want the tab on screen while Spotify plays on the same phone, that works too (Spotify plays in the background); YouTube in the background does not. Recommendation: build as above and see
+- _Is "recently played" enough of a record for full-song practice,_ or do you want time played per song once the app can see it (Unit 15)? Recommendation: timestamp now, time later, never a manual log
+- _Should a song need a tab or a link at all?_ A bare title could be a to-learn list. Recommendation: require one for now
+
+**Carried forward**
+
+None yet.
+
+### 15 Play-along player, markers and loops on a recording
+
+**Goal:** find the hard parts while playing along, and work them, on the recording itself, so a song with no tab can be practised as fully as one with a tab. Planned in outline; to be detailed with `/design` after Unit 14 has been used at the kit.
+
+**For whom and when** (jobs 2 and 3 in `docs/product.md`): playing the full song while still bad at it, noticing where it falls apart, and keeping that spot without putting the sticks down for long.
+
+- The YouTube source is driven through the IFrame Player API (a `RecordingPlayer` behind an interface, as `PlayerEngine` is for alphaTab), so the app's own controls and keys act on it: Space, speed up and down, back 5 or 10 seconds, and a pedal
+- **Mark this spot:** one big button, and one key, drops a marker at the current time while the song keeps playing. Markers list under the video; a tap jumps to a few seconds before one. A marker can be named later, never at the moment it is made
+- **Loop a marker:** a loop on a recording is a start and end time on a link (seconds, in place of bars), made from a marker with handles to adjust. It has a saved speed, goes from active to finished, logs sessions and shows on the home page like any loop. With no tempo there is no count-in: a lead-in of a few seconds before the start instead
+- On a song with a tab, a marker can become a bar loop instead: "Find it in the tab" opens the loop form with the score, and the marker is kept on the loop
+- Time played along is logged from the player's own states (the `sessionTracker` rules), per song and source, replacing Unit 14's bare timestamp
+- To check first: whether `setPlaybackRate` takes rates between the 0.25 steps (if not, a recording loop's speeds are 25, 50, 75, 100%, and the UI says so); how exact `seekTo` is at a loop's seam; whether any of it survives a locked iPhone
+
+**Later, undesigned:** a rough offset between a tab and a recording (bar 1 at 0:07) so a bar loop can jump the video to about the right place and a marker can suggest its bars; a "Down" mark and repertoire view if the Songs tab gets long; adding a song by sharing from the YouTube or Spotify app (`share_target`, Android only).
+
+**Carried forward**
+
+None yet.
 
 ## Open human checks
 

@@ -1,4 +1,13 @@
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  configure,
+  fireEvent,
+  getConfig,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { Link, Outlet, Route } from 'react-router';
@@ -170,6 +179,13 @@ async function loadPlayer(
   await waitFor(() => expect(playButton()).toBeEnabled());
   return engine;
 }
+
+// The loop sheet starts closed and "Play loop" closes it, at every size. These tests are
+// about the page, not the sheet, so role queries see inside the closed sheet too; the
+// tests about the sheet itself assert `aria-expanded` and `toBeVisible`.
+const roleQueriesBefore = getConfig().defaultHidden;
+beforeAll(() => configure({ defaultHidden: true }));
+afterAll(() => configure({ defaultHidden: roleQueriesBefore }));
 
 beforeEach(() => {
   resetFakeSupabase();
@@ -1034,7 +1050,6 @@ describe('SongPage loops', () => {
     start_bar: 7,
     end_bar: 10,
     speed_ratio: 0.708333,
-    target_ratio: 1,
   });
 
   async function openSong(loops: Loop[] = []) {
@@ -1053,7 +1068,7 @@ describe('SongPage loops', () => {
     const items = await panel().findAllByRole('listitem');
     expect(items.map((item) => within(item).getByText(/Bars/).textContent)).toEqual([
       // 85 BPM typed against 120: the exact ratio, shown as 71%.
-      'Bars 7 to 10 · 71% (85 BPM) · target 100% (120 BPM)',
+      'Bars 7 to 10 · 71% (85 BPM)',
       // Bar 9 starts at 90 BPM, so half speed is 45.
       'Bars 9 to 12 · 50% (45 BPM)',
     ]);
@@ -1182,7 +1197,7 @@ describe('SongPage loops', () => {
     expect(engine.setHighlight).toHaveBeenLastCalledWith(null);
   });
 
-  it('saves a new loop with its name, bars, target and the speed playing now, then loops it', async () => {
+  it('saves a new loop with its name, bars and the speed playing now, then loops it', async () => {
     const { user, engine } = await openSong();
     fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '80' } });
     await user.click(await panel().findByRole('button', { name: 'New loop' }));
@@ -1193,7 +1208,6 @@ describe('SongPage loops', () => {
     // The tempo is the first bar's, so the note reads in that bar's BPM.
     expect(screen.getByTestId('loop-new-speed')).toHaveTextContent('80% (72 BPM)');
     await user.type(form().getByLabelText('Name'), '  Second half  ');
-    await user.type(form().getByLabelText(/Target speed/), '100');
     await user.click(form().getByRole('button', { name: 'Save loop' }));
 
     await waitFor(() => expect(loops.sent('insert')).toHaveLength(1));
@@ -1205,7 +1219,6 @@ describe('SongPage loops', () => {
       start_bar: 9,
       end_bar: 12,
       speed_ratio: 0.8,
-      target_ratio: 1,
     });
 
     // The form closes and the new loop is the one playing, without Play being pressed.
@@ -1256,11 +1269,12 @@ describe('SongPage loops', () => {
     expect(engine.setHighlight).toHaveBeenLastCalledWith(null);
   });
 
-  it('a typed BPM plays at once and Save speed stores the exact ratio it implies', async () => {
+  it('a typed BPM plays at once and is saved to the loop at the exact ratio it implies', async () => {
     const { user, engine } = await openSong([acrossTheChange]);
     await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
-    const save = panel().getByRole('button', { name: 'Save speed' });
-    expect(save).toBeDisabled();
+    expect(panel().queryByRole('button', { name: 'Save speed' })).not.toBeInTheDocument();
+    await settle();
+    expect(loops.sent('update')).toHaveLength(0);
 
     const bpmField = panel().getByLabelText('BPM');
     await user.clear(bpmField);
@@ -1270,15 +1284,23 @@ describe('SongPage loops', () => {
     expect(engine.setSpeed).toHaveBeenLastCalledWith(0.833333);
     expect(panel().getByLabelText('Speed %')).toHaveValue('83');
     expect(bpmReadout()).toHaveTextContent('100');
-    expect(loops.sent('update')).toHaveLength(0);
 
-    await user.click(save);
-    await waitFor(() => expect(loops.sent('update')).toHaveLength(1));
-    expect(loops.sent('update')).toEqual([{ speed_ratio: 0.833333 }]);
+    await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.833333 }]));
     await waitFor(() =>
-      expect(screen.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 83% (100 BPM)'),
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Bars 7 to 10 · 83% (100 BPM)'),
     );
-    expect(save).toBeDisabled();
+  });
+
+  it('a speed key while a loop plays saves the loop at that speed; choosing a loop saves nothing', async () => {
+    const { user } = await openSong([acrossTheChange]);
+    await user.click(await panel().findByRole('button', { name: 'Play loop Across the change' }));
+    await settle();
+    expect(loops.sent('update')).toEqual([]);
+
+    (document.activeElement as HTMLElement | null)?.blur();
+    await user.keyboard('{ArrowUp}');
+    // 71% on show, up 5%.
+    await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.76 }]));
   });
 
   it('nudges move the speed in whole percent from the percent on show', async () => {
@@ -1298,7 +1320,6 @@ describe('SongPage loops', () => {
 
     await chooseFromMenu(user, panel(), 'Across the change', 'Edit');
     expect(form().getByLabelText('Name')).toHaveValue('Across the change');
-    expect(form().getByLabelText(/Target speed/)).toHaveValue('100');
     const lastBar = form().getByLabelText('Last bar');
     await user.clear(lastBar);
     await user.type(lastBar, '12');
@@ -2106,7 +2127,11 @@ describe('SongPage keyboard shortcuts', () => {
   });
 
   it('Space on a focused Mark finished in the prompt pauses and finishes nothing', async () => {
-    const atTarget = loopOfSongA('late', { ...late, speed_ratio: 1, target_ratio: 1 });
+    const atTarget = loopOfSongA('late', {
+      ...late,
+      speed_ratio: 1,
+      last_practiced_at: '2026-11-20T10:00:00Z',
+    });
     const { user, engine, playLoop } = await openSong([atTarget]);
     await playLoop('Late');
     const prompt = within(panel().getByRole('group', { name: 'Mark finished?' }));

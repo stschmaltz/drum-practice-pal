@@ -20,7 +20,6 @@ import {
   ghostButtonClass,
   inlineIconClass,
   linkClass,
-  pressedButtonClass,
 } from '@/components/styles';
 import type { Song } from '@/features/library/songForm';
 import { useSong, useSongFile } from '@/features/library/useSongs';
@@ -31,6 +30,7 @@ import { panelShowsLoopSpeed } from '@/features/loops/loopPanelContent';
 import { useLoopPanelOpen } from '@/features/loops/useLoopPanelOpen';
 import { useLoopPractice } from '@/features/loops/useLoopPractice';
 import { useLoops } from '@/features/loops/useLoops';
+import { useSaveLoopSpeed } from '@/features/loops/useSaveLoopSpeed';
 import { CountInCounter } from '@/features/player/CountInCounter';
 import { PlayerControls, PlayPauseButton } from '@/features/player/PlayerControls';
 import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
@@ -188,6 +188,7 @@ function SongPlayer({
   const loops = useLoops(songId);
   const practice = useLoopPractice(player, snapshot, loops.data);
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
+  useSaveLoopSpeed(songId, practice.activeLoop, snapshot.speedRatio);
   useRequestedLoop(
     player !== null && snapshot.barCount !== null,
     loops,
@@ -236,7 +237,7 @@ function SongPlayer({
     // while the sheet is open, leaves room to scroll the score up above it: below 768 px the
     // score box is one line of music, so the page alone is too short to bring it clear.
     <div
-      className={`flex flex-col gap-3 lg:pb-0 ${
+      className={`flex flex-col gap-3 ${
         loopPanel.open ? 'pb-[calc(45dvh+4rem)] md:pb-[calc(min(40dvh,30rem)+4rem)]' : 'pb-12'
       }`}
       style={{ '--jam-bar-height': `${stickyBarHeight}px` } as CSSProperties}
@@ -261,38 +262,28 @@ function SongPlayer({
           onShowLoopSpeed={panelShowsLoopSpeed(practice, snapshot) ? showLoopSpeed : null}
         />
       </div>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <PlayerStatusLine snapshot={snapshot} />
-            <div className="flex gap-2">
-              <ShortcutsButton onOpen={shortcuts.openHelp} />
-              <LoopPanelToggle
-                open={loopPanel.open}
-                panelBodyId={loopPanel.bodyId}
-                onOpenChange={setLoopPanelOpen}
-              />
-            </div>
-          </div>
-          <SessionNotice tracker={tracker} loops={loops.data} />
-          <ScoreBox
-            scrollRef={scrollRef}
-            scoreRef={scoreRef}
-            snapshot={snapshot}
-            hidden={nothingToShow}
-          />
-        </div>
-        <LoopPanel
-          songId={songId}
-          player={player}
-          snapshot={snapshot}
-          practice={practice}
-          loops={loops}
-          open={loopPanel.open}
-          onOpenChange={setLoopPanelOpen}
-          bodyId={loopPanel.bodyId}
-        />
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <PlayerStatusLine snapshot={snapshot} />
+        <ShortcutsButton onOpen={shortcuts.openHelp} />
       </div>
+      <SessionNotice tracker={tracker} loops={loops.data} />
+      {/* The score has the page's whole width; the loop sheet lies over it when open. */}
+      <ScoreBox
+        scrollRef={scrollRef}
+        scoreRef={scoreRef}
+        snapshot={snapshot}
+        hidden={nothingToShow}
+      />
+      <LoopPanel
+        songId={songId}
+        player={player}
+        snapshot={snapshot}
+        practice={practice}
+        loops={loops}
+        open={loopPanel.open}
+        onOpenChange={setLoopPanelOpen}
+        bodyId={loopPanel.bodyId}
+      />
       <ShortcutOverlay open={shortcuts.helpOpen} onClose={shortcuts.closeHelp} />
       {/* On the page from the start: a live region added with its text is often not read. */}
       <p role="status" className="sr-only" data-testid="shortcut-announcement">
@@ -340,34 +331,6 @@ function ShortcutsButton({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-/**
- * Shows or hides the loop panel from 1024 px, where it is a column beside the
- * score. Hidden below (a phone, a tablet in portrait): the sheet's own header
- * is the one toggle there.
- */
-function LoopPanelToggle({
-  open,
-  panelBodyId,
-  onOpenChange,
-}: {
-  open: boolean;
-  panelBodyId: string;
-  onOpenChange: (open: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`max-lg:hidden ${open ? pressedButtonClass : buttonClass} whitespace-nowrap`}
-      aria-expanded={open}
-      aria-controls={panelBodyId}
-      onClick={() => onOpenChange(!open)}
-    >
-      <Icon name="loop" />
-      {open ? 'Hide loops' : 'Show loops'}
-    </button>
-  );
-}
-
 /** The scrolling box alphaTab renders the score into, with the count-in counter over it. */
 function ScoreBox({
   scrollRef,
@@ -397,7 +360,7 @@ function ScoreBox({
         // Below 768 px the score is one line of music scrolling sideways, so the box is as tall
         // as that line (alphaTab sizes it) rather than a fixed height of blank paper under it.
         // At least as tall as the count-in number drawn over it.
-        className="jam-score relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:h-[60dvh] md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))] lg:scroll-mb-4"
+        className="jam-score relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:h-[60dvh] md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))]"
       >
         <div ref={scoreRef} />
       </div>

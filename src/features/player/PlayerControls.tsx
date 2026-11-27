@@ -56,9 +56,9 @@ interface PlayerControlsProps extends PlayerViewProps {
   /** Absent: never folds (every screen but the song page). */
   fold?: ControlsFold;
   /**
-   * A loop is playing, and its own speed control (with "Save speed") is the
-   * one to use: the slider gives way to a button that shows it. Two speed
-   * controls that look alike, of which only one saves, read as one that saves.
+   * A loop is playing, and its own speed control (% and BPM, nudges) is the
+   * one to use: the slider gives way to a button that shows it, so there is
+   * one speed control on screen, not two that look alike.
    */
   onShowLoopSpeed?: (() => void) | null;
 }

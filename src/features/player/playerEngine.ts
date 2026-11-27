@@ -55,8 +55,11 @@ export interface PlayerEngine {
   on<K extends keyof EngineEvents>(event: K, handler: (payload: EngineEvents[K]) => void): void;
   /** Renders only `trackIndexes`; every track still plays. False when the bytes were refused. */
   loadScore(bytes: Uint8Array, trackIndexes: number[]): boolean;
-  /** Rejects when the soundfont can't be fetched. */
-  loadSoundFont(url: string): Promise<void>;
+  /**
+   * Loads the soundfonts in order, each over the last, once all are fetched
+   * (so playback never starts on the first alone). Rejects when one can't be.
+   */
+  loadSoundFont(urls: readonly string[]): Promise<void>;
   setLayout(layout: LayoutChoice): void;
   /** Must start audio synchronously: on iOS this has to run inside the tap. */
   play(): void;

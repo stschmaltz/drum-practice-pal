@@ -3,7 +3,6 @@ import type { Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
 import {
   activeLoopLine,
-  targetField,
   chooseLoopAction,
   closeLoopPanel,
   commit,
@@ -21,16 +20,14 @@ import {
   loopSpeed,
   newLoopButton,
   openLoopPanel,
-  savedSpeed,
   saveLoopButton,
   saveNewLoop,
-  saveSpeedButton,
   exitLoop,
   expectLooping,
-  expectedLoopPanel,
   setSpeed,
   loopSheetHeader,
 } from './loopsPage';
+import { loopsOf } from './practicePage';
 import {
   barCursorBox,
   barNumber,
@@ -231,7 +228,7 @@ test('a saved loop opens on another device at the same range and speed, with BPM
   test.setTimeout(90_000);
   // Bars 9 to 12 are after the tempo change: 90 BPM, not the song's opening 120.
   await openFixture(page, user, 'tempo-change', 'Tempo Change');
-  await saveNewLoop(page, { name: 'After the change', firstBar: 9, lastBar: 12, target: 100 });
+  await saveNewLoop(page, { name: 'After the change', firstBar: 9, lastBar: 12 });
   await expect(status(page)).toHaveText('Bar 9 of 16');
   await expect(bpm(page)).toHaveText('90');
 
@@ -240,10 +237,9 @@ test('a saved loop opens on another device at the same range and speed, with BPM
   await expect(loopPercentField(page)).toHaveValue('86');
   await expect(speed(page)).toHaveText('86%');
   await expect(bpm(page)).toHaveText('77');
-  await expect(savedSpeed(page)).toHaveText('Saved: 100% (90 BPM)');
-  await saveSpeedButton(page).click();
-  await expect(savedSpeed(page)).toHaveText('Saved: 86% (77 BPM)');
-  await expect(saveSpeedButton(page)).toBeDisabled();
+  // Saved as it was typed, with no "Save speed".
+  await expect(activeLoopLine(page)).toContainText('Bars 9 to 12 · 86% (77 BPM)');
+  await expect.poll(async () => (await loopsOf(user))[0]?.speed_ratio).toBe(0.855556);
   const songUrl = page.url();
 
   const context = await browser.newContext();
@@ -256,9 +252,7 @@ test('a saved loop opens on another device at the same range and speed, with BPM
     await expect(bpm(other)).toHaveText('120');
 
     await openLoopPanel(other);
-    await expect(loopItem(other, 'After the change')).toContainText(
-      'Bars 9 to 12 · 86% (77 BPM) · target 100% (90 BPM)',
-    );
+    await expect(loopItem(other, 'After the change')).toContainText('Bars 9 to 12 · 86% (77 BPM)');
     await playLoopButton(other, 'After the change').click();
 
     // The same range, the same speed, and the BPM the first device typed.
@@ -286,7 +280,7 @@ test('a saved loop opens on another device at the same range and speed, with BPM
   }
 });
 
-test('the loop speed shows % and BPM, each editable, with nudges; Save speed keeps it', async ({
+test('the loop speed shows % and BPM, each editable, with nudges; the loop keeps the last one', async ({
   user,
   page,
 }) => {
@@ -294,10 +288,10 @@ test('the loop speed shows % and BPM, each editable, with nudges; Save speed kee
   await setSpeed(page, 80);
   await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
   // A new loop saves at the speed playing now.
-  await expect(savedSpeed(page)).toHaveText('Saved: 80% (96 BPM)');
+  await expect(activeLoopLine(page)).toContainText('Bars 5 to 8 · 80% (96 BPM)');
   await expect(loopPercentField(page)).toHaveValue('80');
   await expect(loopBpmField(page)).toHaveValue('96');
-  await expect(saveSpeedButton(page)).toBeDisabled();
+  await expect(loopSpeed(page).getByRole('button', { name: 'Save speed' })).toHaveCount(0);
 
   // Percent, then BPM follows.
   await commit(loopPercentField(page), '50');
@@ -326,11 +320,10 @@ test('the loop speed shows % and BPM, each editable, with nudges; Save speed kee
   await commit(loopPercentField(page), '900');
   await expect(loopPercentField(page)).toHaveValue('200');
 
-  // Until Save speed, the loop keeps its old speed.
+  // The last speed set is the loop's speed.
   await commit(loopBpmField(page), '85');
-  await expect(savedSpeed(page)).toHaveText('Saved: 80% (96 BPM)');
-  await saveSpeedButton(page).click();
-  await expect(savedSpeed(page)).toHaveText('Saved: 71% (85 BPM)');
+  await expect(activeLoopLine(page)).toContainText('Bars 5 to 8 · 71% (85 BPM)');
+  await expect.poll(async () => (await loopsOf(user))[0]?.speed_ratio).toBe(0.708333);
 
   // Reopened, the loop plays at the BPM that was typed, not a rounded percent's.
   await page.reload();
@@ -347,26 +340,23 @@ test('the loop speed shows % and BPM, each editable, with nudges; Save speed kee
   await expect(playButton(page)).toHaveText('Play');
 });
 
-test('edit a loop’s name, bars and target; delete it after confirming', async ({ user, page }) => {
+test('edit a loop’s name and bars; delete it after confirming', async ({ user, page }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Intro', firstBar: 1, lastBar: 4 });
-  await saveNewLoop(page, { name: 'Outro', firstBar: 13, lastBar: 16, target: 120 });
-  await expect(loopItem(page, 'Outro')).toContainText('target 120% (144 BPM)');
+  await saveNewLoop(page, { name: 'Outro', firstBar: 13, lastBar: 16 });
   await expect(activeLoopLine(page)).toContainText('Outro');
 
   // Edit the loop that is playing: its new bars take over at once.
   await chooseLoopAction(page, 'Outro', 'Edit');
   await expect(loopNameField(page)).toHaveValue('Outro');
   await expect(firstBarField(page)).toHaveValue('13');
-  await expect(targetField(page)).toHaveValue('120');
+  await expect(loopForm(page).getByLabel(/Target/)).toHaveCount(0);
   await loopNameField(page).fill('  Last chorus  ');
   await firstBarField(page).fill('9');
   await lastBarField(page).fill('12');
-  await targetField(page).fill('');
   await saveLoopButton(page).click();
   await expect(loopForm(page)).toHaveCount(0);
   await expect(loopItem(page, 'Last chorus')).toContainText('Bars 9 to 12 · 100% (120 BPM)');
-  await expect(loopItem(page, 'Last chorus')).not.toContainText('target');
   await expect(loopItem(page, 'Outro')).toHaveCount(0);
   await expectLooping(page, 'Last chorus', 'Bars 9 to 12');
   await expect(status(page)).toHaveText('Bar 9 of 16');
@@ -375,11 +365,9 @@ test('edit a loop’s name, bars and target; delete it after confirming', async 
   await chooseLoopAction(page, 'Intro', 'Edit');
   await loopNameField(page).fill('   ');
   await lastBarField(page).fill('17');
-  await targetField(page).fill('500');
   await saveLoopButton(page).click();
   await expect(loopForm(page)).toContainText('Give the loop a name.');
   await expect(loopForm(page)).toContainText('Bars go from 1 to 16 in this song.');
-  await expect(loopForm(page)).toContainText('Enter a target from 25 to 200%');
   await loopForm(page).getByRole('button', { name: 'Cancel' }).click();
   await expect(loopItem(page, 'Intro')).toContainText('Bars 1 to 4');
 
@@ -444,8 +432,8 @@ test('a tap on a bar outside the playing loop moves nothing, paused or playing',
   await openFixture(page, user, 'groove-120', 'Groove 120');
   await saveNewLoop(page, { name: 'Bar two', firstBar: 2, lastBar: 2 });
   await expect(status(page)).toHaveText('Bar 2 of 16');
-  // Only the sheet is in the way of the score; the side column stays as it is.
-  if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
+  // The sheet lies over the score.
+  await closeLoopPanel(page);
   await expect.poll(async () => (await barCursorBox(page)).width).toBeGreaterThan(2);
   await scrollScoreToCursor(page);
   const bar3 = await nextBarPoint(page);
@@ -507,74 +495,64 @@ test('in a song with a repeat, a loop inside the repeat plays just its bars', as
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Play');
   await exitLoop(page);
-  // Only the sheet is in the way of the score; closing the side column
-  // would lay the score out again while the tap point is being measured.
-  if (expectedLoopPanel(page) === 'sheet') await closeLoopPanel(page);
+  // The sheet lies over the score.
+  await closeLoopPanel(page);
   const from = await barNumber(page);
   await scrollScoreToCursor(page);
   const landed = await tapAndWaitForBar(page, await nextBarPoint(page), from);
   expect(landed).toBe(from + 1);
 });
 
-test('the loop panel is a bottom sheet on a phone and a tablet in portrait, and a side column from 1024 px', async ({
+test('the loop panel is a sheet over the score at every size, and the score has the whole width', async ({
   user,
   page,
 }) => {
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  const sheetHeader = loopSheetHeader(page);
-  const columnToggle = page.getByRole('button', { name: /^(Show|Hide) loops$/ });
-  const sheet = expectedLoopPanel(page) === 'sheet';
-  // One toggle on show at each width, the one the shared steps use.
-  await expect(sheet ? columnToggle : sheetHeader).toBeHidden();
-  await expect(sheet ? sheetHeader : columnToggle).toBeVisible();
-  // The sheet starts closed, so the score opens with nothing over it; the column starts open.
-  await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', sheet ? 'false' : 'true');
+  await expect(page.getByRole('button', { name: /^(Show|Hide) loops$/ })).toHaveCount(0);
+  // The sheet starts closed, so the score opens with nothing over it.
+  await expect(loopSheetHeader(page)).toBeVisible();
+  await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'false');
+  const size = page.viewportSize();
+  if (!size) throw new Error('No viewport size');
+  const score = await scoreBox(page);
+
+  if (expectedLayout(page) === 'horizontal') {
+    // A phone: the score is the page's width, less its gutter.
+    expect(score.width).toBeGreaterThan(size.width * 0.85);
+  } else {
+    // From 768 px: the whole width beside the sidebar, with no column beside it
+    // and no cap on the page's width.
+    const sidebar = await boxOf(page.locator('aside:has(nav[aria-label="Main"])'), 'sidebar');
+    expect(score.width).toBeGreaterThan((size.width - sidebar.width) * 0.85);
+  }
 
   await openLoopPanel(page);
   await expect(newLoopButton(page)).toBeVisible();
   const panel = await boxOf(loopPanel(page), 'loop panel');
-  const size = page.viewportSize();
-  if (!size) throw new Error('No viewport size');
+  // Opening it lays nothing out again: the score keeps its width.
+  expect((await scoreBox(page)).width).toBe(score.width);
 
-  if (sheet) {
-    const tabBar = page.locator('nav[aria-label="Main"]:visible');
-    if (expectedLayout(page) === 'horizontal') {
-      // A phone: full width, sitting on the tab bar.
-      const tabBarBox = await boxOf(tabBar, 'tab bar');
-      expect(panel.x).toBe(0);
-      expect(panel.width).toBe(size.width);
-      expect(Math.abs(panel.y + panel.height - tabBarBox.y)).toBeLessThanOrEqual(2);
-    } else {
-      // A tablet in portrait: no tab bar, so on the foot of the window, and as wide as the
-      // score above it, to the right of the sidebar rather than under it.
-      const sidebar = await boxOf(page.locator('aside:has(nav[aria-label="Main"])'), 'sidebar');
-      const score = await scoreBox(page);
-      expect(panel.x).toBeGreaterThanOrEqual(sidebar.x + sidebar.width);
-      expect(Math.abs(panel.x - score.x)).toBeLessThanOrEqual(2);
-      expect(Math.abs(panel.width - score.width)).toBeLessThanOrEqual(2);
-      expect(Math.abs(panel.y + panel.height - size.height)).toBeLessThanOrEqual(2);
-      // The score has the content column's whole width, with no column beside it.
-      expect(score.width).toBeGreaterThan((size.width - sidebar.width) * 0.85);
-    }
-    // Short enough to leave the score in reach.
-    expect(panel.height).toBeLessThan(size.height * 0.6);
-
-    // Closed, only its header is left, and the page behind is clear of it.
-    await closeLoopPanel(page);
-    expect((await boxOf(loopPanel(page), 'closed sheet')).height).toBeLessThan(60);
-    await expect(newLoopButton(page)).toBeHidden();
+  if (expectedLayout(page) === 'horizontal') {
+    // A phone: full width, sitting on the tab bar.
+    const tabBarBox = await boxOf(page.locator('nav[aria-label="Main"]:visible'), 'tab bar');
+    expect(panel.x).toBe(0);
+    expect(panel.width).toBe(size.width);
+    expect(Math.abs(panel.y + panel.height - tabBarBox.y)).toBeLessThanOrEqual(2);
   } else {
-    // Beside the score, to its right, not over it.
-    const score = await scoreBox(page);
-    expect(panel.x).toBeGreaterThanOrEqual(score.x + score.width);
-    expect(panel.x + panel.width).toBeLessThanOrEqual(size.width);
-
-    // Closed, the score gets the width back.
-    await closeLoopPanel(page);
-    await expect(loopPanel(page)).toBeHidden();
-    await expect.poll(async () => (await scoreBox(page)).width).toBeGreaterThan(score.width);
-    await expect(viewport(page).locator('svg').first()).toBeVisible();
+    // No tab bar: on the foot of the window, inside the score's width.
+    expect(Math.abs(panel.y + panel.height - size.height)).toBeLessThanOrEqual(2);
+    expect(panel.x).toBeGreaterThanOrEqual(score.x - 2);
+    expect(panel.x + panel.width).toBeLessThanOrEqual(score.x + score.width + 2);
+    // From 1024 px only the bottom-right corner, so most of the score stays readable.
+    if (size.width >= 1024) expect(panel.width).toBeLessThan(score.width / 2);
   }
+  // Short enough to leave the score in reach.
+  expect(panel.height).toBeLessThan(size.height * 0.6);
+
+  // Closed, only its header is left, and the page behind is clear of it.
+  await closeLoopPanel(page);
+  expect((await boxOf(loopPanel(page), 'closed sheet')).height).toBeLessThan(60);
+  await expect(newLoopButton(page)).toBeHidden();
 });
 
 test('on a tablet in portrait the score fits two bars a line', async ({ user, page }, testInfo) => {
@@ -600,15 +578,14 @@ test('a loop across the tempo change opens on another device with BPM from its f
   test.setTimeout(90_000);
   // Bars 7 and 8 are at 120 in the file, bars 9 and 10 at 90.
   await openFixture(page, user, 'tempo-change', 'Tempo Change');
-  await saveNewLoop(page, { name: 'Across the change', firstBar: 7, lastBar: 10, target: 110 });
+  await saveNewLoop(page, { name: 'Across the change', firstBar: 7, lastBar: 10 });
   await expect(status(page)).toHaveText('Bar 7 of 16');
   await expect(bpm(page)).toHaveText('120');
 
   // 85 of bar 7's 120 is 70.8333%.
   await commit(loopBpmField(page), '85');
   await expect(loopPercentField(page)).toHaveValue('71');
-  await saveSpeedButton(page).click();
-  await expect(savedSpeed(page)).toHaveText('Saved: 71% (85 BPM)');
+  await expect.poll(async () => (await loopsOf(user))[0]?.speed_ratio).toBe(0.708333);
   const songPath = new URL(page.url()).pathname;
 
   const context = await browser.newContext();
@@ -617,10 +594,8 @@ test('a loop across the tempo change opens on another device with BPM from its f
     await signIn(other, user, songPath);
     await expect(playButton(other)).toBeEnabled({ timeout: 20_000 });
     await openLoopPanel(other);
-    // Speed and target both in the BPM of the loop's first bar.
-    await expect(loopItem(other, 'Across the change')).toContainText(
-      'Bars 7 to 10 · 71% (85 BPM) · target 110% (132 BPM)',
-    );
+    // The speed in the BPM of the loop's first bar.
+    await expect(loopItem(other, 'Across the change')).toContainText('Bars 7 to 10 · 71% (85 BPM)');
 
     await playLoopButton(other, 'Across the change').click();
     await expect(playButton(other)).toHaveText('Pause');
@@ -1011,11 +986,6 @@ test('while a loop plays its speed is set in its own item, which the controls ba
   await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'true');
   await expect(loopSpeed(page)).toBeFocused();
   await expect(loopSpeed(page)).toBeInViewport();
-  // Nothing to save: "Save speed" is drawn off (no fill, a dashed edge), not as a faded orange.
-  await expect(saveSpeedButton(page)).toBeDisabled();
-  await expect(saveSpeedButton(page)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  await expect(saveSpeedButton(page)).toHaveCSS('border-top-style', 'dashed');
-  await expect(saveSpeedButton(page)).toHaveCSS('opacity', '1');
 
   await exitLoop(page);
   await playButton(page).click();

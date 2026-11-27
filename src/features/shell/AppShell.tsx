@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router';
+import { NavLink, Outlet, useMatch } from 'react-router';
 import { Wordmark } from '@/components/Brand';
 import { Icon } from '@/components/icons';
 import { focusRing, ghostButtonClass } from '@/components/styles';
@@ -14,6 +14,9 @@ export function AppShell() {
   const user = useSignedInUser();
   // Writes an earlier page queued and never heard back about go once the user is known.
   useOutboxReplay();
+  // The song page is the score, the app's most important spot: it takes the whole
+  // width beside the sidebar. Other pages keep a readable line length.
+  const fullWidth = useMatch('/songs/:id') !== null;
 
   return (
     <div className="min-h-dvh md:flex">
@@ -41,7 +44,11 @@ export function AppShell() {
 
       {/* Bottom padding keeps content clear of the fixed tab bar and the iOS home indicator.
           min-w-0 lets main shrink below a wide child (alphaTab's rendered score) when the window narrows. */}
-      <main className="mx-auto w-full min-w-0 max-w-5xl p-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:p-gutter">
+      <main
+        className={`mx-auto w-full min-w-0 p-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:p-gutter ${
+          fullWidth ? '' : 'max-w-5xl'
+        }`}
+      >
         <OfflineBanner />
         <Outlet />
       </main>

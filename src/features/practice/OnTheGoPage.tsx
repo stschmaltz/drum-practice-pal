@@ -201,7 +201,6 @@ function PracticeLoopItem({
         </p>
         <p className="text-sm text-ink-muted">
           {barsLabel(loop.start_bar, loop.end_bar)} · {ratioToPercent(loop.speed_ratio)}%
-          {loop.target_ratio !== null && ` · target ${ratioToPercent(loop.target_ratio)}%`}
         </p>
         <TargetProgressBar loop={loop} />
         <p className="text-sm text-ink-muted">
@@ -224,21 +223,19 @@ function PracticeLoopItem({
 }
 
 /**
- * The saved speed's way to the target, as a bar: a labelled progressbar whose
- * numbers are the percents written above it. Only for a loop with a target.
+ * The saved speed's way to full speed, as a bar: a labelled progressbar whose
+ * numbers are the percents written above it.
  */
 function TargetProgressBar({ loop }: { loop: PracticeLoop }) {
-  const progress = targetProgress(loop.speed_ratio, loop.target_ratio);
-  if (!progress) return null;
-  const { speedPercent, targetPercent, fraction, reached } = progress;
+  const { speedPercent, targetPercent, fraction, reached } = targetProgress(loop.speed_ratio);
   return (
     <div
       role="progressbar"
-      aria-label={`Speed towards the target of ${loop.name}`}
+      aria-label={`Speed towards full speed of ${loop.name}`}
       aria-valuemin={0}
       aria-valuemax={targetPercent}
       aria-valuenow={Math.min(speedPercent, targetPercent)}
-      aria-valuetext={`${speedPercent}% of a ${targetPercent}% target`}
+      aria-valuetext={`${speedPercent}% of full speed`}
       data-testid="target-progress"
       className="mt-1 h-2 overflow-hidden rounded-full bg-raised ring-1 ring-line-strong ring-inset"
     >

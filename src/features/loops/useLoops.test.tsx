@@ -66,7 +66,6 @@ const newLoop = {
   start_bar: 9,
   end_bar: 12,
   speed_ratio: 0.85,
-  target_ratio: null,
 };
 
 beforeEach(() => {

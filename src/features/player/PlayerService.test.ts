@@ -45,7 +45,10 @@ describe('PlayerService loading', () => {
     expect(service.getSnapshot().status).toBe('loading');
     expect(engine.loadScore).toHaveBeenCalledWith(bytes, [2]);
     expect(engine.loadSoundFont).toHaveBeenCalledTimes(1);
-    expect(engine.loadSoundFont).toHaveBeenCalledWith('/soundfont/sonivox.sf2');
+    expect(engine.loadSoundFont).toHaveBeenCalledWith([
+      '/soundfont/sonivox.sf2',
+      '/drumkit/drums.sf3',
+    ]);
   });
 
   it('renders the first track when the song has no drum track', () => {
