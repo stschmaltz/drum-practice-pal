@@ -9,7 +9,9 @@ import { backTo, loopsOf, openPractice, practiceSpeed } from './practicePage';
 // song", a new loop is saved from the whole song without leaving the screen, and the speed is
 // set by 1 BPM, a typed BPM or a typed percent.
 
-const wholeSong = (page: Page) => page.getByRole('button', { name: 'Show whole song' });
+// One button, named for what a press shows next.
+const wholeSong = (page: Page) =>
+  page.getByRole('button', { name: /^Show (whole song|the loop)$/ });
 const saveSheet = (page: Page) => page.getByTestId('save-as-loop');
 
 /** The drawn score's area: a few bars against the whole song, at any layout. */
@@ -51,7 +53,7 @@ test('draws the loop alone; from the whole song a tap picks bars and Save as loo
   await expect(status(page)).toContainText('Bar 7 of 16');
 
   await wholeSong(page).click();
-  await expect(wholeSong(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect(wholeSong(page)).toHaveAccessibleName('Show the loop');
   await expect.poll(() => drawnArea(page)).toBeGreaterThan(loopArea * 2);
   await expect(saveSheet(page)).toBeVisible();
   await page.screenshot({
@@ -73,7 +75,7 @@ test('draws the loop alone; from the whole song a tap picks bars and Save as loo
   await expect(page.getByRole('heading', { level: 1, name: 'Early' })).toBeVisible();
   await expect(page).toHaveURL(/\/songs\/[^/]+\/loops\/[^/]+$/);
   await expect(saveSheet(page)).toHaveCount(0);
-  await expect(wholeSong(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(wholeSong(page)).toHaveAccessibleName('Show whole song');
   expect((await loopsOf(user)).map((loop) => loop.name).sort()).toEqual(['Early', 'Middle']);
   await expect.poll(() => drawnArea(page)).toBeLessThan(loopArea * 2);
   await expect(status(page)).toContainText('Bar 3 of 16');
