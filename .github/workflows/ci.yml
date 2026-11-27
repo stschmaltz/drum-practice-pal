@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # "Run workflow" on main runs everything again, the hosted migrations included.
+  workflow_dispatch:
 
 jobs:
   check:
@@ -64,7 +66,7 @@ jobs:
   # at the same moment, so the schema should land first. Migrations must
   # therefore be additive (old builds keep working on the new schema).
   migrate:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # One push at a time, never cancelled half way.
     concurrency:
@@ -87,13 +89,14 @@ jobs:
             echo "::error::Set the SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD repository secrets (docs/release.md, section 2)."
             exit 1
           fi
+      # CLI 3 aims every command at the local stack unless told --remote (the linked project).
       - run: npx supabase link --project-ref "$SUPABASE_PROJECT_REF"
       - name: Migrations to apply
-        run: npx supabase db push --dry-run
+        run: npx supabase db push --remote --dry-run
       # A migration that fails (a check an existing row breaks) rolls back and stops here.
-      - run: npx supabase db push
+      - run: npx supabase db push --remote
       - name: Hosted schema matches the committed types
         run: |
-          npx supabase gen types typescript --project-id "$SUPABASE_PROJECT_REF" --schema public \
+          npx supabase gen types typescript --remote --schema public \
             | npx prettier --stdin-filepath database.types.ts \
             | diff - src/lib/database.types.ts
