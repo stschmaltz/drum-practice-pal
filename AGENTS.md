@@ -283,16 +283,18 @@ docs/
 - There is no per-loop target: every loop aims at 100% (`TARGET_SPEED_RATIO` in `loopForm.ts`), and the loop form has no target field.
 - The player loads two soundfonts, in order, each over the last (`PLAYER_SOUND_FONT_URLS` in `soundFont.ts`; `engine.loadSoundFont(urls)` fetches all, then loads the first with `append` false and the rest with `append` true, and alphaTab plays a note from the last loaded font that has the instrument): Sonivox for every instrument, then MuseScore General's standard drum kit on its own (`public/drumkit/drums.sf3`, 1.3 MB, committed), because Sonivox's kit is thin. `npm run drum-kit` rebuilds it from a local `public/sf-candidates/MuseScore_General.sf3` (`scripts/extract-drum-kit.ts`, which copies one preset, the instruments and samples it reaches, and renumbers the SoundFont tables). A new soundfont the app loads also goes in `globPatterns`.
 
-## Fixes outside a unit (alerts, upgrades, CI)
+## How every change ships
 
-A request to fix something GitHub reports (Dependabot or code-scanning alerts, a failing check on `main`) or to upgrade a dependency is finished only when GitHub shows it fixed. Do all of it without stopping to ask:
+Every change to this repo ships the way `/unit` (`.claude/commands/unit.md`) ships a unit, whether or not it is a unit: a fix, a dependency upgrade, a Dependabot or code-scanning alert, a docs or agent change. The work is finished when it is merged and GitHub shows the result, not when it passes locally, and none of these steps is a question for Shane:
 
-1. Branch from `origin/main` in a worktree, whatever branch is checked out.
-2. Make the change; `npm run check` and `npm run build` green; commit only that change.
-3. Push, open the PR, follow its checks and fix what fails.
-4. Merge it, then confirm on GitHub that the alerts are closed or the check is green on `main`.
+1. A branch from `origin/main` (a worktree when the checkout holds other work), never the branch that happens to be checked out.
+2. The change, with `npm run check` green (and `npm run build` for a dependency or config change, `npm run e2e` when behaviour changes). Commit only that change.
+3. A review of the whole `git diff main...HEAD` against `docs/review-checklist.md` (the `reviewer` subagent, or the same pass by hand for a small diff); fix what it confirms.
+4. Push, `gh pr create`, request Copilot's review and confirm it (unit.md, step 8).
+5. Copilot's comments: verify each, fix it with a failing test first, reply on the thread and resolve it, and add a checklist row for any class no row covers. CI green.
+6. Merge, then confirm the outcome on GitHub (alerts closed, the check green on `main`).
 
-A clean `npm audit` or a green local check is step 2, not the end. Never push a commit you didn't make without saying so first.
+Never push a commit you didn't make without saying so first.
 
 ## Stage workflow
 
