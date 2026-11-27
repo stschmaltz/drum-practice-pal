@@ -235,7 +235,11 @@ function PracticePlayer({
   const stickyBarRef = useRef<HTMLDivElement>(null);
   const stickyBarHeight = useHeightOf(stickyBarRef);
   // A drag picks bars only in the whole song, where the form is already open.
-  const practice = useLoopPractice(player, snapshot, loops.data, { dragOpensForm: false });
+  // There a whole range picked is what plays, so a new loop is heard before it is saved.
+  const practice = useLoopPractice(player, snapshot, loops.data, {
+    dragOpensForm: false,
+    previewPickedBars: true,
+  });
   const wholeSong = practice.editor !== null;
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
   // Every change of the loop's speed is saved as it is made (no "Save speed").
@@ -383,9 +387,11 @@ function PracticePlayer({
 }
 
 /**
- * The whole song or the loop alone. A toggle: on, the score draws every bar
- * and taps pick a new loop's bars. Off until the score's bars are in, and
- * locked while a new loop's save is on its way (the form is what it is).
+ * The whole song or the loop alone. Says what a press shows next: "Show
+ * whole song" draws every bar, where taps pick a new loop's bars (and what is
+ * picked plays); "Show the loop" goes back to the loop's bars and its range.
+ * Off until the score's bars are in, and locked while a new loop's save is on
+ * its way (the form is what it is).
  */
 function WholeSongToggle({
   practice,
@@ -394,18 +400,17 @@ function WholeSongToggle({
   practice: LoopPractice;
   snapshot: PlayerSnapshot;
 }) {
-  const on = practice.editor !== null;
+  const wholeSong = practice.editor !== null;
   return (
     <button
       type="button"
-      aria-pressed={on}
-      className={on ? quietPressedButtonClass : quietButtonClass}
+      className={wholeSong ? quietPressedButtonClass : quietButtonClass}
       disabled={!canPickBars(snapshot) || (practice.editor?.saving ?? false)}
-      onClick={() => (on ? practice.closeEditor() : practice.openEditor(null))}
+      onClick={() => (wholeSong ? practice.closeEditor() : practice.openEditor(null))}
     >
-      <Icon name="music" />
+      <Icon name={wholeSong ? 'loop' : 'music'} />
       {/* Words from 1024 px; beside the name and Play below that, the icon stands for them. */}
-      <span className="max-lg:sr-only">Show whole song</span>
+      <span className="max-lg:sr-only">{wholeSong ? 'Show the loop' : 'Show whole song'}</span>
     </button>
   );
 }

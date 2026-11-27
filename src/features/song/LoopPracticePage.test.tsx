@@ -334,7 +334,10 @@ describe('LoopPracticePage', () => {
   });
 
   describe('the score: the loop, or the whole song', () => {
-    const wholeSong = () => screen.getByRole('button', { name: 'Show whole song' });
+    // One button, named for what a press shows next.
+    const wholeSong = () => screen.getByRole('button', { name: /^Show (whole song|the loop)$/ });
+    const SHOWS_LOOP = 'Show whole song';
+    const SHOWS_SONG = 'Show the loop';
     const saveForm = () => screen.getByRole('form', { name: 'New loop' });
     const tap = (engine: FakePlayerEngine, barNumber: number) =>
       act(() => engine.fire('barTapped', { barIndex: barNumber - 1 }));
@@ -368,7 +371,7 @@ describe('LoopPracticePage', () => {
       expect(engine.setVisibleBars.mock.invocationCallOrder[0]).toBeLessThan(
         engine.loadScore.mock.invocationCallOrder[0] ?? 0,
       );
-      expect(wholeSong()).toHaveAttribute('aria-pressed', 'false');
+      expect(wholeSong()).toHaveAccessibleName(SHOWS_LOOP);
       expect(screen.queryByRole('form', { name: 'New loop' })).not.toBeInTheDocument();
     });
 
@@ -401,12 +404,15 @@ describe('LoopPracticePage', () => {
       const restartsBefore = engine.restartCalls();
 
       await user.click(wholeSong());
-      expect(wholeSong()).toHaveAttribute('aria-pressed', 'true');
+      // The button now offers the way back, and the loop stays marked on the score.
+      expect(wholeSong()).toHaveAccessibleName(SHOWS_SONG);
       expect(engine.setVisibleBars).toHaveBeenLastCalledWith(null);
+      expect(engine.setHighlight).toHaveBeenLastCalledWith({ startBarIndex: 8, endBarIndex: 11 });
       expect(saveForm()).toBeInTheDocument();
       expect(screen.getByTestId('loop-bars-hint')).toHaveTextContent('Tap the first bar');
 
       await user.click(wholeSong());
+      expect(wholeSong()).toHaveAccessibleName(SHOWS_LOOP);
       expect(engine.setVisibleBars).toHaveBeenLastCalledWith({ startBarIndex: 7, endBarIndex: 12 });
       expect(screen.queryByRole('form', { name: 'New loop' })).not.toBeInTheDocument();
       // A drawing only: the loop played on throughout.
@@ -430,13 +436,42 @@ describe('LoopPracticePage', () => {
       expect(engine.scrollToBar).toHaveBeenCalledWith(8);
     });
 
-    it('in the whole song, taps pick a new loop’s bars and never seek; Save as loop opens its screen, replaced', async () => {
+    it('in the whole song, the bars picked are what plays, so a new loop is heard before it is saved', async () => {
+      const { user, engine } = await openChorus();
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await user.click(wholeSong());
+      const restartsBefore = engine.restartCalls();
+
+      // Half a pick plays nothing new: the loop goes on.
+      tap(engine, 3);
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(9),
+        endTick: startOfBar(13),
+      });
+      tap(engine, 5);
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(3),
+        endTick: startOfBar(6),
+      });
+      expect(engine.restartCalls()).toBe(restartsBefore);
+
+      // Back to the loop: its own bars play again.
+      await user.click(wholeSong());
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(9),
+        endTick: startOfBar(13),
+      });
+    });
+
+    it('in the whole song, taps pick a new loop’s bars; Save as loop opens its screen, replaced', async () => {
       const { user, engine } = await openChorus([`/songs/${SONG}`]);
       await user.click(wholeSong());
       engine.seek.mockClear();
       tap(engine, 3);
-      tap(engine, 5);
+      // A first tap only starts a pick: nothing moves.
       expect(engine.seek).not.toHaveBeenCalled();
+      tap(engine, 5);
       expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('3');
       expect(screen.getByRole('textbox', { name: 'Last bar' })).toHaveValue('5');
 
@@ -482,7 +517,7 @@ describe('LoopPracticePage', () => {
       await user.click(wholeSong());
       tap(engine, 3);
       await user.click(screen.getByRole('button', { name: 'Cancel' }));
-      expect(wholeSong()).toHaveAttribute('aria-pressed', 'false');
+      expect(wholeSong()).toHaveAccessibleName(SHOWS_LOOP);
       expect(engine.setVisibleBars).toHaveBeenLastCalledWith({ startBarIndex: 7, endBarIndex: 12 });
       await settle();
       expect(loops.sent('insert')).toEqual([]);
