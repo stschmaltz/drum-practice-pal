@@ -56,13 +56,15 @@ export function DailyMinutesChart({ days }: { days: readonly PracticeDay[] }) {
                 rx="2"
                 className={day.today ? 'fill-success' : 'fill-selected-line'}
               />
+              {/* Today is its weekday letter in bold, as the word was wider than its bar and ran into the edge or the day
+                  before; the caption and the table say which bar is today. */}
               <text
                 x={rect.x + rect.width / 2}
                 y={height + labelHeight - 3}
                 textAnchor="middle"
                 className={`text-[9px] ${day.today ? 'fill-ink font-bold' : 'fill-ink-muted'}`}
               >
-                {day.today ? 'Today' : weekdayFormat.format(day.date)}
+                {weekdayFormat.format(day.date)}
               </text>
             </g>
           );
@@ -206,9 +208,10 @@ export function SpeedChart({
           strokeDasharray="4 3"
           className="stroke-success"
         />
+        {/* Above the line where there is room for the 9px label, else just under it, so it is never cut off at the top. */}
         <text
           x={width - pad}
-          y={fullSpeedY - 3}
+          y={fullSpeedY - 3 >= 9 ? fullSpeedY - 3 : fullSpeedY + 10}
           textAnchor="end"
           className="fill-success text-[9px]"
         >
@@ -217,9 +220,12 @@ export function SpeedChart({
         <text x={pad} y={height - 1} className="fill-ink-muted text-[9px]">
           {axis.min}%
         </text>
-        <text x={pad} y={pad + 2} className="fill-ink-muted text-[9px]">
-          {axis.max}%
-        </text>
+        {/* At 100% the full-speed line's own label says it; a second one would sit on the dashes. */}
+        {axis.max !== 100 && (
+          <text x={pad} y={pad + 2} className="fill-ink-muted text-[9px]">
+            {axis.max}%
+          </text>
+        )}
         {plotted.length > 1 && (
           <path
             d={pathOf(plotted)}

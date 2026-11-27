@@ -15,7 +15,7 @@ import { failureCopy } from '@/lib/errorCopy';
 import { waitsForNetwork } from '@/lib/network';
 import { badgeProgress, type BadgeProgress } from './badges';
 import { DailyMinutesChart, PracticeHeatmap, SpeedChart } from './charts';
-import { currentStreak, daysLabel } from './streak';
+import { currentStreak } from './streak';
 import {
   dailyPractice,
   minutesLabel,
@@ -138,7 +138,7 @@ function Stats({
         {streak > 0 && (
           <p className="flex items-center gap-2 text-ink-soft">
             <Icon name="flame" className="text-warning" />
-            On a {daysLabel(streak)} streak.
+            On a {streak}-day streak.
           </p>
         )}
       </section>
