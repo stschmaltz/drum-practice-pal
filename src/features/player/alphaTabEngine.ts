@@ -652,7 +652,7 @@ function createMetronomeTrack(api: alphaTab.AlphaTabApi) {
 export const CYMBAL_KEYS: ReadonlySet<number> = new Set([49, 51, 52, 53, 55, 57, 59]);
 
 /** The cymbals' channel volume over the drum track's. Tune by ear here. */
-export const CYMBAL_GAIN = 8;
+export const CYMBAL_GAIN = 6;
 
 /**
  * Moves the drum channel's cymbal notes to a channel of their own that plays
