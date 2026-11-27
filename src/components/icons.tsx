@@ -52,6 +52,13 @@ const PATHS = {
       <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
     </>
   ),
+  // The speaker with a cross where its waves were: nothing sounds.
+  muted: (
+    <>
+      <path d="M4 9h3.5L12 5v14l-4.5-4H4z" />
+      <path d="m15.5 9.5 5 5M20.5 9.5l-5 5" />
+    </>
+  ),
   loop: (
     <>
       <path d="m17 3 3 3-3 3" />

@@ -289,6 +289,35 @@ describe('PlayerControls metronome sounds', () => {
   });
 });
 
+describe('PlayerControls Mute all', () => {
+  const muteAll = () => screen.getByRole('button', { name: 'Mute all' });
+
+  it('silences every track and brings them back, without a restart', async () => {
+    const { engine, player, user } = setup({ loaded: false });
+    act(() => engine.finishLoading({ trackNames: ['Guitar', 'Bass', 'Drums'] }));
+    const restartsBefore = engine.restartCalls();
+    expect(muteAll()).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(muteAll());
+    expect(muteAll()).toHaveAttribute('aria-pressed', 'true');
+    expect(engine.soundingTracks()).toEqual([]);
+    // The mixer says why its switches make no sound.
+    expect(screen.getByText(/Mute all is on/)).toBeInTheDocument();
+
+    await user.click(muteAll());
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(player.getSnapshot().allMuted).toBe(false);
+  });
+
+  it('is there for a song with no drum track, and off once the player has failed', () => {
+    const { engine } = setup({ drumTrackIndex: null });
+    expect(muteAll()).toBeEnabled();
+    act(() => engine.fire('error', { error: new Error('worker died') }));
+    expect(muteAll()).toBeDisabled();
+  });
+});
+
 describe('PlayerControls track mixer', () => {
   // Inside a closed <details>: jsdom keeps its content in the accessibility tree.
   const mixer = () => screen.getByRole('group', { name: 'Tracks' });
