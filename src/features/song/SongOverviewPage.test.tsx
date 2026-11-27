@@ -114,6 +114,13 @@ describe('SongOverviewPage', () => {
     expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG}/loops/${LOOP_A}`);
   });
 
+  it('opens a loop’s practice screen from its name too', async () => {
+    serve();
+    const user = renderOverview();
+    await user.click(await screen.findByRole('link', { name: 'Intro' }));
+    expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG}/loops/${LOOP_A}`);
+  });
+
   it('has New loop and Play whole song as links into the player', async () => {
     serve();
     renderOverview();

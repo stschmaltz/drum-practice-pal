@@ -21,6 +21,7 @@ import {
   DEFAULT_METRONOME_VOICE,
   freeChannel,
   isSameVoice,
+  metronomeChannelGain,
   metronomeKeys,
   metronomeNotes,
   PERCUSSION_CHANNEL,
@@ -520,7 +521,7 @@ function createMetronomeTrack(api: alphaTab.AlphaTabApi) {
   const applyVolume = () => {
     // alphaTab's own metronome stays silent: its ticks are gone from the MIDI anyway.
     api.metronomeVolume = 0;
-    if (channel !== null) api.player?.setChannelVolume(channel, volume);
+    if (channel !== null) api.player?.setChannelVolume(channel, metronomeChannelGain(volume));
   };
 
   return {

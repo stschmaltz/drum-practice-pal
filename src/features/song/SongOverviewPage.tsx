@@ -215,9 +215,15 @@ function LoopRow({
     <li className="flex flex-col gap-2 py-3" {...itemAttributes(loop.id)}>
       <div className="flex items-center gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <p className="flex items-start gap-2 font-semibold wrap-anywhere">
-            {finished && <Icon name="trophy" className="mt-0.5 size-4 text-success" />}
-            {loop.name}
+          <p className="flex items-center gap-2 font-semibold wrap-anywhere">
+            {finished && <Icon name="trophy" className="size-4 shrink-0 text-success" />}
+            {/* The name opens the loop too, as a song's title does on the Songs list. */}
+            <Link
+              to={loopPracticePath(song.id, loop.id)}
+              className={`inline-flex min-h-touch max-w-full items-center rounded-sm wrap-anywhere text-ink hover:text-brand ${focusRing}`}
+            >
+              {loop.name}
+            </Link>
           </p>
           <p className="text-sm text-ink-muted">
             {barsLabel(loop.start_bar, loop.end_bar)} · {percent}%

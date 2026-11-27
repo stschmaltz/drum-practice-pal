@@ -5,7 +5,9 @@ import {
   DEFAULT_METRONOME_VOICE,
   freeChannel,
   isSameVoice,
+  METRONOME_MAX_GAIN,
   METRONOME_SOUND_KEYS,
+  metronomeChannelGain,
   METRONOME_SOUND_LABELS,
   metronomeKeys,
   metronomeNotes,
@@ -162,5 +164,19 @@ describe('isSameVoice', () => {
     expect(isSameVoice(voice(), voice({ accent: false }))).toBe(false);
     expect(isSameVoice(voice(), voice({ accentSound: 'hi_hat' }))).toBe(false);
     expect(isSameVoice(voice(), voice({ subdivision: 2 }))).toBe(false);
+  });
+});
+
+describe('metronomeChannelGain', () => {
+  it("goes from silent to METRONOME_MAX_GAIN, louder than alphaTab's 1 at the top", () => {
+    expect(metronomeChannelGain(0)).toBe(0);
+    expect(metronomeChannelGain(1)).toBe(METRONOME_MAX_GAIN);
+    expect(METRONOME_MAX_GAIN).toBeGreaterThan(1);
+  });
+
+  it('rises faster at the top than the bottom, and stays in range', () => {
+    expect(metronomeChannelGain(0.5)).toBeCloseTo(METRONOME_MAX_GAIN / 4);
+    expect(metronomeChannelGain(1.5)).toBe(METRONOME_MAX_GAIN);
+    expect(metronomeChannelGain(-1)).toBe(0);
   });
 });
