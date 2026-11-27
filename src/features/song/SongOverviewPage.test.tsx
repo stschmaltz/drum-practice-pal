@@ -9,7 +9,7 @@ import {
   type FakeResult,
 } from '@/test/fakeSupabase';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
-import { renderRoutes, RouteMarker } from '@/test/render';
+import { historyBack, historyForward, renderRoutes, RouteMarker } from '@/test/render';
 import { SongOverviewPage } from './SongOverviewPage';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -66,14 +66,15 @@ function serve(saved: ReturnType<typeof loopRow>[] = [older, newer, done]) {
   });
 }
 
-function renderOverview(search = '') {
+function renderOverview(search = '', before?: string[]) {
   renderRoutes(
     <>
+      <Route path="/" element={<RouteMarker name="songs" />} />
       <Route path="/songs/:id" element={<SongOverviewPage />} />
       <Route path="/songs/:id/loops/:loopId" element={<RouteMarker name="practice" />} />
       <Route path="/songs/:id/play" element={<RouteMarker name="whole song" />} />
     </>,
-    { path: `/songs/${SONG}${search}` },
+    { path: `/songs/${SONG}${search}`, before },
   );
   return userEvent.setup();
 }
@@ -153,6 +154,44 @@ describe('SongOverviewPage', () => {
     serve();
     renderOverview(`?loop=${LOOP_B}`);
     expect(await screen.findByText('At practice')).toBeVisible();
+    expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG}/loops/${LOOP_B}`);
+  });
+
+  it('Back from the redirected ?loop= link skips the old address, so it never bounces forward again', async () => {
+    serve();
+    renderOverview(`?loop=${LOOP_B}`, ['/']);
+    expect(await screen.findByText('At practice')).toBeVisible();
+
+    historyBack();
+
+    // Pushed, Back would land on `?loop=`, which would redirect straight back to practice.
+    expect(await screen.findByText('At songs')).toBeVisible();
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/);
+    historyForward();
+    expect(await screen.findByText('At practice')).toBeVisible();
+    expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG}/loops/${LOOP_B}`);
+  });
+
+  it('a ?loop= naming a loop this song doesn’t have still goes to the practice screen, which says so', async () => {
+    // The overview doesn't read the loops before redirecting: the practice screen owns "Loop not found".
+    serve();
+    renderOverview('?loop=dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+    expect(await screen.findByText('At practice')).toBeVisible();
+  });
+
+  it('Back from a loop’s practice screen returns to the song, and Forward goes in again', async () => {
+    serve();
+    const user = renderOverview('', ['/']);
+    await user.click(await screen.findByRole('link', { name: 'Practise Chorus fill' }));
+    expect(await screen.findByText('At practice')).toBeVisible();
+
+    historyBack();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Groove 120' })).toBeVisible();
+    historyBack();
+    expect(await screen.findByText('At songs')).toBeVisible();
+    historyForward();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Groove 120' })).toBeVisible();
+    historyForward();
     expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG}/loops/${LOOP_B}`);
   });
 

@@ -81,3 +81,39 @@ Changed:
 4. On the overview: New loop → the jam page with the form open → save → the new loop's practice screen. Edit in a row's menu → the form on that loop → Cancel → back to the song. Mark finished / Reopen move the row.
 5. Stats: switch Week / Month / All time (the URL follows), pick another loop for speed over time, check the badges. Offline (DevTools) after a visit: the page still shows; in a fresh profile offline, it says it hasn't been opened.
 6. Old link: `/songs/<id>?loop=<loopId>` opens that loop's practice screen.
+
+## Test
+
+### Summary
+
+87 new unit and component tests (4,507 to 4,594 passing in `npm run check`, plus one `it.fails` for bug 1), and 2 new e2e tests (6 runs across the three sizes). No app code changed; every new test was broken once against the code it covers (below).
+
+- **Dates in zones that change their clocks.** The Build's summer-time cases ran in the machine's zone, which on CI (UTC) changes nothing, so they could pass on code that steps by 24 hours. `src/test/timeZone.ts` (`inTimeZone(zone)`, which sets `TZ` for a describe and checks it took, and `hoursInLocalDay`) pins Europe/London, America/New_York and Australia/Sydney, and each block first asserts the 25- and 23-hour days are where it expects them. Cases: late on the 25-hour day (23:30, where 24 hours earlier is still the same day), just after the midnight that follows each change, a day off on the change day, 14 daily bars and the 26-week heatmap running through each change with every day once and in order, and the week and month starting at local midnight across a change (`streak.test.ts`, `totals.test.ts`, `badges.test.ts`).
+- **Midnight and thresholds.** A session at the first millisecond of the week's first day counts and one a millisecond before doesn't; the same for a loop's `finished_at`. Every badge at its threshold and one under it (3,599 / 3,600 s, 99 / 100 and 999 / 1,000 passes, 2 / 3 and 6 / 7 days, 30 days across a month end, 4 / 5 loops, a song with no finished loop). A session at 00:05 carries on last night's run in the summary (`sessionSummary.test.ts`).
+- **Routes and history.** `renderRoutes` takes `before` (entries ahead of `path`) and renders hidden Back and Forward controls (`historyBack()`, `historyForward()` in `src/test/render.tsx`). `/library?q=…&sort=…` lands on `/` with both kept and Back skips it (`App.test.tsx`); `?loop=` likewise, Forward returns to the practice screen, and a `?loop=` for a loop the song lacks still goes to the practice screen, which owns "Loop not found"; Back and Forward from the overview through a practice screen and Songs (`SongOverviewPage.test.tsx`); Back after a loop key goes to the song, not the loop before (`LoopPracticePage.test.tsx`). The existing "the URL follows, replaced" test passed with `replace` removed; the new one fails.
+- **Session complete.** It takes focus and Keep going hands it to Play; a badge the session earns is listed with the streak it makes; Play again while the log's answer is held, and the summary still comes when it lands, the new session playing on; a refused log shows the "Couldn't save" notice and no summary, and its Try again that lands shows it; a session ended by hiding the page goes by keepalive and is never summed up, nor when the keepalive failed and the mutation sent it again once the page was back.
+- **The practice screen's loop.** A refetch that lacks the loop (deleted on another device) says "Loop not found" and destroys the engine; a failed background refetch keeps the loop and the player.
+- **The Build's known gap** is pinned twice: what happens today (Play in that window starts the whole song; the loop's range and speed are put under it without a stop) and, as `it.fails`, what should (bug 1).
+- **e2e.** `stats.spec.ts`: a new test signs in as the seed user (`demo@drumpal.test`, read only) and checks time, days and passes for All time, Month and Week, and mastered, against sums over their rows in the database, worked out in local days from local midnight; the existing test's streak check is now the exact words (`/3/` matched any 3). `practice.spec.ts`: Songs → song → loop, a loop key (the URL is replaced), Back to the song and to Songs, Forward to the song and to the second loop at its speed, then an old `?loop=` link from Stats and Back to Stats.
+- `App.test.tsx`'s lazy player routes wait 5 s for their heading: the first cold import took over a second once in five runs here.
+
+### Broken on purpose (each new test failed, then the code was put back)
+
+- `addDays` stepping by 24 hours (two versions: a raw `+ 86,400,000`, and the same normalised to midnight): 7 streak, 18 to 28 totals and 2 badge cases failed, in every pinned zone.
+- `earned: values >= target` as `>`: 15 badge cases.
+- `Navigate replace` removed from the overview's `?loop=` redirect and from `/library`, and `/library` dropping its search: the history tests.
+- `replace: true` removed from `useUrlFollowsLoop`: the Back-after-a-loop-key test (the Build's test passed).
+- Session complete: the summary claim dropped on a failed log (Try again test), dropped when a new session opens (Play again test), and given to any session not left by leaving (the keepalive-fallback test); its focus effect removed (focus test). The plain keepalive test passed under the last break, since a keepalive that lands never reaches the summary code; it stays as the rule's statement, and the fallback test is the one that bites.
+
+### Bugs found
+
+1. **Play on the practice screen can start the whole song** (the Build's known gap, confirmed). With the song's loops cached from an earlier visit, the player loads before the fresh loops read returns; Play and Space are enabled on `canPlay` alone, so a press plays the whole song (no range, at the speed the cached loop opened the player at), and when the read lands `useRequestedLoop` opens the loop under it without a stop (range and speed change mid-play; the session tracker starts only then). Pinned in `LoopPracticePage.test.tsx` ("today: Play then starts the whole song…" passes; "should stay off…" is `it.fails`: drop `.fails` with the fix). Fix: one predicate in `controlGates.ts`, say `canPlayLoopPractice(player, snapshot, loopOpen)` = `canPlay && (loopOpen || isRunning(status))`, taken by `PlayPauseButton` as a `gate` prop and by `useSongShortcuts`' `togglePlay` (an input beside `practice`), with the practice screen passing `practice.activeLoop !== null`. Four files; left to Build.
+
+### Not verified
+
+- **e2e against the right schema, after my new tests.** Before writing them, `stats.spec.ts` passed at all three sizes against this branch's schema (the shared stack had just been reset). During this stage another checkout migrated the shared local stack again (`20261127000000` and `20261128000000` are applied; `loops.target_ratio` is gone, 42703), so every loop insert and every loops read with `target_ratio` is refused. The run of the new and existing stats and navigation tests after that failed on it: the Stats page says "Couldn't load your stats. The server refused it." and a loop save leaves the form open. As asked, I stopped there and didn't reset. The full `npm run e2e` was not run. Next stage: `npm run db:reset` (or a stack of its own), then `E2E_PORT=4183 npm run e2e`, and check the two new tests in `stats.spec.ts` and `practice.spec.ts` in particular.
+
+### Checks
+
+- `npm run check`: green (typecheck, lint, format, 4,594 passed, 2 skipped).
+- `npm run e2e`: not run in full (see above). `stats.spec.ts` alone: 3 passed before the schema changed; after it, 9 failed of 9 (stats and the navigation test) on the refused `target_ratio`.

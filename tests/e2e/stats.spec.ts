@@ -1,13 +1,15 @@
 /// <reference lib="dom" />
 import type { Page } from '@playwright/test';
-import { createAdminClient } from '../../scripts/supabase-admin.ts';
+import { createAdminClient, findUserIdsByEmail } from '../../scripts/supabase-admin.ts';
 import { expect, signIn, test, type E2eUser } from './auth';
-import { navLink, sessionsOf } from './practicePage';
+import { loopsOf, navLink, sessionsOf } from './practicePage';
 
 // Unit 14: the Stats page's numbers are sums over the user's sessions in the
 // database, worked out on the device.
 
 const admin = createAdminClient();
+/** The seed user (`scripts/seed.ts`). Only read here, never changed. */
+const DEMO_EMAIL = 'demo@drumpal.test';
 
 /** The Period choice: a radio drawn by its label (SegmentedControl), so the label takes the press. */
 async function choosePeriod(page: Page, label: 'Week' | 'Month' | 'All time') {
@@ -57,11 +59,70 @@ async function seedPractice(user: E2eUser) {
   if (sessions.error) throw sessions.error;
 }
 
+/** A total of play time as the page writes it (`minutesLabel`): "45 min", "2 h", "1 h 5 min". */
+function minutesText(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  if (hours === 0) return `${minutes} min`;
+  return minutes % 60 === 0 ? `${hours} h` : `${hours} h ${minutes % 60} min`;
+}
+
+type Session = Awaited<ReturnType<typeof sessionsOf>>[number];
+
+/** The totals the page should show, worked out here from the rows: local days, the range from midnight. */
+function expectedTotals(sessions: Session[], days: number | null) {
+  const now = new Date();
+  const start =
+    days === null ? null : new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
+  const counted = sessions.filter(
+    (session) => start === null || Date.parse(session.started_at) >= start.getTime(),
+  );
+  return {
+    time: minutesText(counted.reduce((total, session) => total + session.duration_seconds, 0)),
+    passes: String(counted.reduce((total, session) => total + session.repeats, 0)),
+    days: String(
+      new Set(counted.map((session) => new Date(session.started_at).toDateString())).size,
+    ),
+  };
+}
+
+async function expectTotals(page: Page, expected: ReturnType<typeof expectedTotals>) {
+  await expect(page.getByTestId('total-time')).toHaveText(expected.time);
+  await expect(page.getByTestId('total-passes')).toHaveText(expected.passes);
+  await expect(page.getByTestId('total-days')).toHaveText(expected.days);
+}
+
+test('the seed user’s totals for each period are the sums of their sessions in the database', async ({
+  page,
+}) => {
+  const [id] = await findUserIdsByEmail(admin, DEMO_EMAIL);
+  if (!id) throw new Error(`${DEMO_EMAIL} is missing: run npm run db:seed`);
+  const demo = { id, email: DEMO_EMAIL };
+  const sessions = await sessionsOf(demo);
+  // The seed logs sessions; a test on none would pass on zeros.
+  expect(sessions.length).toBeGreaterThan(0);
+  const loops = await loopsOf(demo);
+
+  await signIn(page, demo, '/stats');
+  for (const [label, days] of [
+    ['All time', null],
+    ['Month', 30],
+    ['Week', 7],
+  ] as const) {
+    await choosePeriod(page, label);
+    await expectTotals(page, expectedTotals(sessions, days));
+  }
+  await choosePeriod(page, 'All time');
+  await expect(page.getByTestId('total-mastered')).toHaveText(
+    String(loops.filter((loop) => loop.status === 'finished').length),
+  );
+});
+
 test('all-time totals are the sums of the sessions in the database', async ({ page, user }) => {
   await seedPractice(user);
   await signIn(page, user, '/');
   // A streak of three days in the header (today, yesterday and the day before).
-  await expect(page.getByTestId('streak')).toHaveText(/3/);
+  await expect(page.getByTestId('streak')).toHaveText('Practice streak: 3 days');
 
   await navLink(page, 'Stats').click();
   await choosePeriod(page, 'All time');

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { inTimeZone } from '@/test/timeZone';
+import { nextDayKey } from './days';
 import {
   clockLabel,
   dailyPractice,
@@ -214,4 +216,84 @@ it.each([
   [2 * 3600 + 5 * 60 + 30, '2 h 5 min'],
 ])('minutesLabel(%i) is %s', (seconds, label) => {
   expect(minutesLabel(seconds)).toBe(label);
+});
+
+/** True when each key is the day after the one before it: no day skipped or repeated. */
+const consecutive = (keys: string[]) =>
+  keys.every((key, i) => i === 0 || nextDayKey(keys[i - 1]!) === key);
+
+describe('a range boundary at midnight', () => {
+  const sessions = [
+    session(new Date(2026, 10, 20, 0, 0, 0, 0), { repeats: 1 }),
+    session(new Date(2026, 10, 19, 23, 59, 59, 999), { repeats: 10 }),
+  ];
+
+  it('counts a session at the first instant of the range’s first day, and none a moment before', () => {
+    expect(statsTotals(sessions, [], 'week', now)).toMatchObject({ passes: 1, days: 1 });
+    expect(statsTotals(sessions, [], 'all', now)).toMatchObject({ passes: 11, days: 2 });
+  });
+
+  it('counts a loop finished at that instant in the week, and one a moment before only all time', () => {
+    const loops = [
+      loop({ id: 'in', status: 'finished', finished_at: new Date(2026, 10, 20).toISOString() }),
+      loop({
+        id: 'out',
+        status: 'finished',
+        finished_at: new Date(2026, 10, 19, 23, 59, 59).toISOString(),
+      }),
+    ];
+    expect(statsTotals([], loops, 'week', now).mastered).toBe(1);
+    expect(statsTotals([], loops, 'all', now).mastered).toBe(2);
+  });
+});
+
+// As in streak.test.ts: zones that change their clocks, whatever the machine's is.
+describe.each([
+  ['Europe/London', [2026, 10, 25], [2026, 3, 29]],
+  ['America/New_York', [2026, 11, 1], [2026, 3, 8]],
+  ['Australia/Sydney', [2026, 4, 5], [2026, 10, 4]],
+] as const)('in %s', (zone, fallBack, springForward) => {
+  inTimeZone(zone);
+  const changes = [
+    ['the clocks go back', fallBack],
+    ['the clocks go forward', springForward],
+  ] as const;
+
+  it.each(changes)('14 days ending late on the day %s are 14 days, each once', (_, [y, m, d]) => {
+    const days = dailyPractice(
+      [session(new Date(y, m - 1, d, 0, 30), { duration_seconds: 60 })],
+      new Date(y, m - 1, d, 23, 30),
+    );
+    const keys = days.map((day) => day.key);
+    expect(keys).toHaveLength(14);
+    expect(consecutive(keys)).toBe(true);
+    expect(days[13]).toMatchObject({ today: true, seconds: 60 });
+    expect(days.every((day) => day.date.getHours() === 0)).toBe(true);
+  });
+
+  it.each(changes)('14 days ending the day after %s are 14 days, each once', (_, [y, m, d]) => {
+    const keys = dailyPractice([], new Date(y, m - 1, d + 1, 0, 15)).map((day) => day.key);
+    expect(new Set(keys).size).toBe(14);
+    expect(consecutive(keys)).toBe(true);
+  });
+
+  it.each(changes)('the heatmap runs through the day %s: Mondays, no day twice', (_, [y, m, d]) => {
+    // A week after the change, so the change is inside the 26 weeks.
+    const weeks = practiceHeatmap([], new Date(y, m - 1, d + 7, 23, 30));
+    const keys = weeks.flat().map((day) => day.key);
+    expect(keys).toHaveLength(26 * 7);
+    expect(consecutive(keys)).toBe(true);
+    expect(weeks.every((week) => week[0]?.date.getDay() === 1)).toBe(true);
+  });
+
+  it.each(changes)('the week and month start at midnight across the day %s', (_, [y, m, d]) => {
+    const late = new Date(y, m - 1, d + 3, 23, 30);
+    expect(rangeStart('week', late)).toEqual(new Date(y, m - 1, d - 3));
+    expect(rangeStart('month', late)).toEqual(new Date(y, m - 1, d + 3 - 29));
+    const sessions = [
+      session(new Date(y, m - 1, d - 3, 0, 0), { repeats: 1 }),
+      session(new Date(y, m - 1, d - 4, 23, 59), { repeats: 10 }),
+    ];
+    expect(statsTotals(sessions, [], 'week', late)).toMatchObject({ passes: 1, days: 1 });
+  });
 });

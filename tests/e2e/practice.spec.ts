@@ -192,6 +192,58 @@ test('a song lists its loops by last practised and opens one on its practice scr
   expect((await sessionsOf(user)).every((session) => session.speed_ratio === 0.7)).toBe(true);
 });
 
+test('Back and Forward walk the three levels; a loop key and an old ?loop= link replace their entry', async ({
+  page,
+  user,
+}) => {
+  await openFixture(page, user, 'tempo-change', 'Tempo Change');
+  const songId = /\/songs\/([^/]+)\/play/.exec(page.url())?.[1];
+  if (!songId) throw new Error(`No song id in ${page.url()}`);
+  await saveNewLoop(page, { name: 'Verse', firstBar: 1, lastBar: 2 });
+  await saveNewLoop(page, { name: 'Bridge', firstBar: 9, lastBar: 10 });
+  const ids = Object.fromEntries((await loopsOf(user)).map((loop) => [loop.name, loop.id]));
+  const practiceUrl = (name: string) => new RegExp(`/songs/${songId}/loops/${ids[name]}$`);
+  const songUrl = new RegExp(`/songs/${songId}$`);
+
+  // Songs, the song, a loop.
+  await navLink(page, 'Songs').click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Songs' })).toBeVisible();
+  await page.getByRole('main').getByRole('link', { name: 'Tempo Change' }).click();
+  await expect(page).toHaveURL(songUrl);
+  await openPractice(page, 'Verse');
+  await expect(page).toHaveURL(practiceUrl('Verse'));
+
+  // A loop key moves on and the address follows, in place of the loop's entry.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('heading', { level: 1, name: 'Bridge' })).toBeVisible();
+  await expect(page).toHaveURL(practiceUrl('Bridge'));
+
+  await page.goBack();
+  await expect(page).toHaveURL(songUrl);
+  await expect(page.getByRole('link', { name: 'Practise Verse' })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Songs' })).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(songUrl);
+  await page.goForward();
+  await expect(page).toHaveURL(practiceUrl('Bridge'));
+  await expect(page.getByRole('heading', { level: 1, name: 'Bridge' })).toBeVisible();
+  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+  await expect(practiceSpeed(page)).toHaveText('100%');
+
+  // A link from an earlier build opens the loop's practice screen; Back skips it.
+  await navLink(page, 'Stats').click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Stats' })).toBeVisible();
+  await page.goto(`/songs/${songId}?loop=${ids.Verse}`);
+  await expect(page).toHaveURL(practiceUrl('Verse'));
+  await expect(page.getByRole('heading', { level: 1, name: 'Verse' })).toBeVisible();
+  await expect(status(page)).toContainText('Bar 1 of 16');
+  await page.goBack();
+  await expect(page).toHaveURL(/\/stats$/);
+});
+
 test('leaving the page mid-practice still logs the session, once', async ({ page, user }) => {
   await shortSessions(page, 2);
   await openFixture(page, user, 'groove-120', 'Groove 120');

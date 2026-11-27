@@ -35,3 +35,22 @@ it('earns nothing for a session that adds no badge', () => {
     earned: [],
   });
 });
+
+it('a session just after midnight carries on the run that ended last night', () => {
+  const late = (day: number): StatsSession => ({
+    ...session(`d${day}`, day),
+    started_at: new Date(2026, 10, day, 23, 50).toISOString(),
+  });
+  const justAfter: StatsSession = {
+    ...session('c', 26),
+    started_at: new Date(2026, 10, 26, 0, 5).toISOString(),
+  };
+  const extras = sessionSummaryExtras(
+    justAfter,
+    [late(24), late(25)],
+    [],
+    new Date(2026, 10, 26, 0, 10),
+  );
+  expect(extras.streakDays).toBe(3);
+  expect(extras.earned.map((badge) => badge.id)).toEqual(['streak-3']);
+});

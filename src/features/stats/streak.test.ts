@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addDays, dateOfDayKey, dayKeyOf, nextDayKey } from './days';
 import { currentStreak, daysLabel, longestStreak, practiceDayKeys } from './streak';
+import { hoursInLocalDay, inTimeZone } from '@/test/timeZone';
 
 // Local-time dates throughout, so the tests mean the same in every zone. The
 // summer-time cases cross the dates Europe and North America change their
@@ -102,4 +103,46 @@ describe('longestStreak', () => {
 it('daysLabel', () => {
   expect(daysLabel(1)).toBe('1 day');
   expect(daysLabel(4)).toBe('4 days');
+});
+
+// The cases above run in whatever zone the machine is in, which may never
+// change its clocks (CI runs in UTC). These pin zones that do, both
+// hemispheres. The 25-hour day is the one that catches stepping by 24 hours:
+// from 23:30 on the day the clocks go back, 24 hours earlier is still that day.
+describe.each([
+  ['Europe/London', { fallBack: [2026, 10, 25], springForward: [2026, 3, 29] }],
+  ['America/New_York', { fallBack: [2026, 11, 1], springForward: [2026, 3, 8] }],
+  ['Australia/Sydney', { fallBack: [2026, 4, 5], springForward: [2026, 10, 4] }],
+] as const)('in %s', (zone, { fallBack, springForward }) => {
+  inTimeZone(zone);
+  const changes = [
+    ['the clocks go back', fallBack],
+    ['the clocks go forward', springForward],
+  ] as const;
+
+  it('has a 25-hour and a 23-hour day where the tests expect them', () => {
+    expect(hoursInLocalDay(at(fallBack[0], fallBack[1], fallBack[2]))).toBe(25);
+    expect(hoursInLocalDay(at(springForward[0], springForward[1], springForward[2]))).toBe(23);
+  });
+
+  it.each(changes)('late on the day %s, counts that day once and the two before', (_, change) => {
+    const [y, m, d] = change;
+    const days = [at(y, m, d - 2, 21), at(y, m, d - 1, 0, 30), at(y, m, d, 1, 30)];
+    expect(currentStreak(days.map(session), at(y, m, d, 23, 30))).toBe(3);
+    expect(longestStreak(days.map(session))).toBe(3);
+    expect(practiceDayKeys(days.map(session)).size).toBe(3);
+  });
+
+  it.each(changes)('just after midnight following the day %s, still runs', (_, change) => {
+    const [y, m, d] = change;
+    const days = [at(y, m, d - 1, 20), at(y, m, d, 23, 45)];
+    expect(currentStreak(days.map(session), at(y, m, d + 1, 0, 15))).toBe(2);
+  });
+
+  it.each(changes)('a day off on the day %s ends the streak', (_, change) => {
+    const [y, m, d] = change;
+    const days = [at(y, m, d - 1, 23, 50), at(y, m, d + 1, 0, 10)];
+    expect(currentStreak(days.map(session), at(y, m, d + 1, 9))).toBe(1);
+    expect(longestStreak(days.map(session))).toBe(1);
+  });
 });
