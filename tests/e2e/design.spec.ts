@@ -137,6 +137,14 @@ test('the library, the song page with its loops, and the home page with a loop',
   await expectWellDrawn(page, 'stats');
   await expectFocusRings(page, 'stats');
 
+  // Unit 17: a loop's chart open under its row, and every badge on show.
+  await page.getByRole('button', { name: 'Chart of Verse' }).click();
+  await expect(page.getByRole('img', { name: /^Speed of Verse/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Show all badges' }).click();
+  await expect(page.getByRole('list', { name: 'More badges' })).toBeVisible();
+  await expectWellDrawn(page, 'stats, chart and all badges');
+  await expectFocusRings(page, 'stats, chart and all badges');
+
   await navLink(page, 'Songs').click();
   await expect(page.getByRole('main').getByRole('link', { name: 'Groove 120' })).toBeVisible();
   await expectWellDrawn(page, 'library');

@@ -220,7 +220,7 @@ function LoopRow({
             {/* The name opens the loop too, as a song's title does on the Songs list. */}
             <Link
               to={loopPracticePath(song.id, loop.id)}
-              className={`inline-flex min-h-touch max-w-full items-center rounded-sm wrap-anywhere text-ink hover:text-brand ${focusRing}`}
+              className={`inline-flex min-h-touch max-w-full min-w-touch items-center rounded-sm wrap-anywhere text-ink hover:text-brand ${focusRing}`}
             >
               {loop.name}
             </Link>

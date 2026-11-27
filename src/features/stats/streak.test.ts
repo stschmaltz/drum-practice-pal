@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { addDays, dateOfDayKey, dayKeyOf, nextDayKey } from './days';
-import { currentStreak, daysLabel, longestStreak, practiceDayKeys } from './streak';
+import {
+  currentStreak,
+  daysLabel,
+  longestStreak,
+  longestStreakRun,
+  practiceDayKeys,
+} from './streak';
 import { hoursInLocalDay, inTimeZone } from '@/test/timeZone';
 
 // Local-time dates throughout, so the tests mean the same in every zone. The
@@ -27,6 +33,31 @@ describe('days', () => {
     expect(dayKeyOf(addDays(from, 1))).toBe(second);
     expect(dayKeyOf(addDays(from, 2))).toBe(third);
     expect(nextDayKey(second)).toBe(third);
+  });
+});
+
+describe('longestStreakRun', () => {
+  it('is null with no sessions', () => {
+    expect(longestStreakRun([])).toBeNull();
+  });
+
+  it('gives the run its first and last day, across the end of a year', () => {
+    const days = [at(2026, 12, 30), at(2026, 12, 31, 23), at(2027, 1, 1, 1), at(2027, 1, 3)];
+    expect(longestStreakRun(days.map(session))).toEqual({
+      days: 3,
+      start: '2026-12-30',
+      end: '2027-01-01',
+    });
+  });
+
+  it('keeps the earlier of two runs as long, and a later one that is longer', () => {
+    const two = [at(2026, 11, 1), at(2026, 11, 2), at(2026, 11, 10), at(2026, 11, 11)];
+    expect(longestStreakRun(two.map(session))).toMatchObject({ days: 2, start: '2026-11-01' });
+    expect(longestStreakRun([...two, at(2026, 11, 12)].map(session))).toEqual({
+      days: 3,
+      start: '2026-11-10',
+      end: '2026-11-12',
+    });
   });
 });
 

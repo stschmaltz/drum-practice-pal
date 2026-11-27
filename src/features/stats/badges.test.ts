@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { inTimeZone } from '@/test/timeZone';
-import { BADGES, badgeProgress, newlyEarned, type BadgeInput } from './badges';
+import { BADGES, badgeProgress, newlyEarned, nextUpBadges, type BadgeInput } from './badges';
 
 const day = (n: number) => new Date(2026, 10, n, 12).toISOString();
 const session = (started: string, duration_seconds = 60, repeats = 1) => ({
@@ -176,6 +176,55 @@ describe('at each threshold', () => {
     expect(
       byId({ sessions: [], loops: [{ song_id: 'a', status: 'active' }] })['song-mastered'],
     ).toMatchObject({ earned: false });
+  });
+});
+
+describe('nextUpBadges', () => {
+  const ids = (badges: { id: string }[]) => badges.map((badge) => badge.id);
+
+  it('names the three unearned badges closest to done, closest first', () => {
+    // 2 days running (2/3, 2/7, 2/30), 48 min (0.8 of the hour), 90 passes (0.9 of 100).
+    const badges = badgeProgress({
+      sessions: [session(day(1), 1440, 45), session(day(2), 1440, 45)],
+      loops: [],
+    });
+    const { nextUp, rest } = nextUpBadges(badges);
+    expect(ids(nextUp)).toEqual(['passes-100', 'hours-1', 'streak-3']);
+    // The rest keep the list's order.
+    expect(ids(rest)).toEqual([
+      'streak-7',
+      'streak-30',
+      'hours-10',
+      'hours-50',
+      'passes-1000',
+      'mastered-1',
+      'mastered-5',
+      'song-mastered',
+    ]);
+  });
+
+  it('leaves out earned badges, and moves on to the next of a kind', () => {
+    const sessions = [session(day(1)), session(day(2)), session(day(3))];
+    const { nextUp } = nextUpBadges(badgeProgress({ sessions, loops: [] }));
+    expect(ids(nextUp)).not.toContain('streak-3');
+    // 3 of 7 days leads; the hour (3 of 60 min) and 100 passes (3) tie and keep the list's order.
+    expect(ids(nextUp)).toEqual(['streak-7', 'streak-30', 'hours-1']);
+  });
+
+  it('breaks a tie in the list’s order: at the start, the smallest streak, then the next', () => {
+    const { nextUp, rest } = nextUpBadges(badgeProgress({ sessions: [], loops: [] }));
+    expect(ids(nextUp)).toEqual(['streak-3', 'streak-7', 'streak-30']);
+    expect(rest).toHaveLength(BADGES.length - 3);
+  });
+
+  it('is short when fewer are left, and empty when every badge is earned', () => {
+    const badges = badgeProgress({ sessions: [], loops: [] });
+    const allButTwo = badges.map((badge, index) => ({ ...badge, earned: index >= 2 }));
+    expect(nextUpBadges(allButTwo)).toEqual({ nextUp: allButTwo.slice(0, 2), rest: [] });
+    expect(nextUpBadges(badges.map((badge) => ({ ...badge, earned: true })))).toEqual({
+      nextUp: [],
+      rest: [],
+    });
   });
 });
 
