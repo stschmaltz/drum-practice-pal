@@ -7,6 +7,7 @@ import {
   fixture,
   muteDrumsButton,
   openFixture,
+  openSongPlayer,
   playButton,
   showControls,
 } from './playerPage';
@@ -159,7 +160,7 @@ test('drums only pressed before the sounds have loaded holds once the song is re
   page,
 }) => {
   await recordSynthMessages(page);
-  await signIn(page, user, '/library');
+  await signIn(page, user, '/');
   await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture('multi-track'));
   await expect(page.getByRole('status').filter({ hasText: 'Added “Multi Track”.' })).toBeVisible();
 
@@ -173,7 +174,7 @@ test('drums only pressed before the sounds have loaded holds once the song is re
     await route.continue();
   });
 
-  await page.getByRole('list').getByRole('link', { name: 'Multi Track' }).click();
+  await openSongPlayer(page, 'Multi Track');
   await expect(drumsOnlyButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(playButton(page)).toBeDisabled();
   await drumsOnlyButton(page).click();
@@ -210,9 +211,9 @@ test('drums only is off again when the song is opened again, with nothing muted'
   expectOnlyDrumsSounding(await mutedChannels(page));
   expect(await synthCount(page)).toBe(1);
 
-  // Back to the library and in again, without a page load: a new player in the same tab.
+  // Back to the song and in again, without a page load: a new player in the same tab.
   await page.goBack();
-  await page.getByRole('list').getByRole('link', { name: 'Multi Track' }).click();
+  await page.getByRole('link', { name: 'Play whole song' }).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
 
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');

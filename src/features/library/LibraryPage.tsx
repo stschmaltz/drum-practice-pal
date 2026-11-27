@@ -3,7 +3,10 @@ import { useSearchParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
-import { cardGridClass, inputClass, labelClass, sectionHeadingClass } from '@/components/styles';
+import { inputClass, labelClass, sectionHeadingClass } from '@/components/styles';
+import { songMastery, type Mastery } from '@/features/loops/mastery';
+import { usePracticeLoops } from '@/features/loops/useLoops';
+import { StreakBadge } from '@/features/stats/StreakBadge';
 import { failureCopy } from '@/lib/errorCopy';
 import { findItemControl, isItemListed, neighbourAfterLeaving } from '@/lib/itemFocus';
 import { waitsForNetwork } from '@/lib/network';
@@ -23,8 +26,16 @@ const SORT_LABELS: Record<LibrarySort, string> = {
 /** Used when the URL names no sort; picking it drops the param. */
 const DEFAULT_SORT: LibrarySort = 'practiced';
 
+/**
+ * `/`, Songs (Unit 14; the library until then): every song with how much of
+ * it is mastered, searched and sorted, plus the upload. The header carries
+ * the practice streak.
+ */
 export function LibraryPage() {
   const songs = useSongs();
+  // Every loop, for each song's mastery ring.
+  const loops = usePracticeLoops();
+  const mastery = loops.data ? songMastery(loops.data) : null;
   // Once there are songs the upload is a button, and the list takes a dropped file.
   const hasSongs = songs.data !== undefined && songs.data.length > 0;
   // Here, not in the list: deleting the last song takes the list away, and its
@@ -33,7 +44,10 @@ export function LibraryPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Library" />
+      <div className="flex items-start justify-between gap-4">
+        <PageHeader title="Songs" />
+        <StreakBadge />
+      </div>
       <UploadPanel compact={hasSongs}>
         {waitsForNetwork(songs) ? (
           <EmptyState icon="offline">
@@ -51,7 +65,7 @@ export function LibraryPage() {
             No songs yet. Upload a Guitar Pro file to start your library.
           </EmptyState>
         ) : (
-          <SongList songs={songs.data} focusAfterDelete={focusAfterDelete} />
+          <SongList songs={songs.data} mastery={mastery} focusAfterDelete={focusAfterDelete} />
         )}
       </UploadPanel>
     </div>
@@ -103,11 +117,17 @@ function useEditingIds() {
   return [ids, onEditingChange] as const;
 }
 
+/** A song with no loops: no entry in the mastery map. */
+const NO_LOOPS: Mastery = { finished: 0, total: 0 };
+
 function SongList({
   songs,
+  mastery,
   focusAfterDelete,
 }: {
   songs: LibrarySong[];
+  /** Null while the loops are read. */
+  mastery: Map<string, Mastery> | null;
   focusAfterDelete: FocusWhenReady;
 }) {
   const { query, sort, setQuery, setSort } = useLibraryView();
@@ -193,11 +213,12 @@ function SongList({
         // Not the query itself: it comes from the URL.
         <p className="text-ink-muted">No songs match your search.</p>
       ) : (
-        <ul className={cardGridClass}>
+        <ul className="divide-y divide-line border-y border-line">
           {shown.map((song) => (
             <SongListItem
               key={song.id}
               song={song}
+              mastery={mastery ? (mastery.get(song.id) ?? NO_LOOPS) : null}
               onEditingChange={onEditingChange}
               onEditClosed={followEditClosed}
               onDeletePressed={followDelete}

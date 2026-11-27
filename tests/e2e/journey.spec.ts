@@ -1,43 +1,38 @@
 /// <reference lib="dom" />
 import { expect, signInEmailFor, test } from './auth';
-import {
-  commit,
-  expectLooping,
-  loopPanel,
-  loopPercentField,
-  openLoopPanel,
-  playLoopButton,
-  saveNewLoop,
-  saveSpeedButton,
-} from './loopsPage';
+import { fillLoopForm, loopForm } from './loopsPage';
 import {
   barNumber,
   fixture,
   nextBarPoint,
+  openSongOverview,
   playButton,
   scoreSettled,
-  status,
   tapAndWaitForBar,
   viewport,
 } from './playerPage';
 import {
-  homeItem,
-  homeTab,
+  backTo,
   loopsOf,
-  navLink,
+  nudge,
+  overviewItem,
   playFor,
+  practiceSaveSpeed,
+  practiceSpeed,
+  sessionComplete,
   sessionCount,
-  sessionLogged,
   sessionsOf,
   shortSessions,
 } from './practicePage';
 
-// Unit 13: the whole first run, at each of the three sizes, through the UI a
-// new user meets: sign in with the emailed code, upload, jam, save a loop,
-// practise it, reach its target and finish it. Each step's own spec covers its
+// Unit 13, redrawn for Unit 14's three levels: the whole first run, at each of
+// the three sizes, through the UI a new user meets. Sign in with the emailed
+// code, upload, jam the whole song, make a loop from the song's overview,
+// practise it on its practice screen, see Session complete, reach the target,
+// finish it, and Done is back on the song. Each step's own spec covers its
 // edges; this one proves they join up.
 
-test('first run: sign in, upload, jam, save a loop, practise, hit the target, finish', async ({
+test('first run: sign in, upload, jam, make a loop, practise, hit the target, finish', async ({
   page,
   user,
 }) => {
@@ -55,20 +50,22 @@ test('first run: sign in, upload, jam, save a loop, practise, hit the target, fi
   await page.getByLabel('Code').fill(code);
   await page.getByRole('button', { name: 'Sign in with code' }).click();
 
-  // A new account opens on an empty home page that points to the library.
-  await expect(page.getByRole('heading', { level: 1, name: 'On the go' })).toBeVisible();
-  await expect(page.getByText(/Nothing on the go/)).toBeVisible();
-  await page.getByRole('main').getByRole('link', { name: 'Go to Library' }).click();
+  // A new account opens on an empty songs list.
+  await expect(page.getByRole('heading', { level: 1, name: 'Songs' })).toBeVisible();
   await expect(page.getByText('No songs yet.', { exact: false })).toBeVisible();
+  // No practice yet: no streak in the header.
+  await expect(page.getByTestId('streak')).toHaveCount(0);
 
-  // Upload.
+  // Upload, and open the song: its overview, with no loops yet.
   await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture('groove-120'));
   await expect(page.getByRole('status').filter({ hasText: 'Added “Groove 120”.' })).toBeVisible();
-  await page.getByRole('list').getByRole('link', { name: 'Groove 120' }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Groove 120' })).toBeVisible();
-  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+  await expect(page.getByTestId('song-line')).toHaveText('Fixture · No loops yet');
+  await openSongOverview(page, 'Groove 120');
+  await expect(page.getByText(/No loops yet/)).toBeVisible();
 
-  // Jam: the song opens at 100%, plays, and a tap on a bar moves there.
+  // Jam the whole song: it opens at 100%, plays, and a tap on a bar moves there.
+  await page.getByRole('link', { name: 'Play whole song' }).click();
+  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(page.getByTestId('jam-speed')).toContainText('100%');
   await viewport(page).scrollIntoViewIfNeeded();
   await scoreSettled(page);
@@ -81,39 +78,51 @@ test('first run: sign in, upload, jam, save a loop, practise, hit the target, fi
   await playButton(page).click();
   await expect(playButton(page)).toHaveText('Play');
 
-  // Save a loop with a target, at a slower speed than the target.
-  await saveNewLoop(page, { name: 'Groove', firstBar: 5, lastBar: 6, target: 90 });
-  await expectLooping(page, 'Groove', 'Bars 5 to 6');
-  await openLoopPanel(page);
-  await commit(loopPercentField(page), '80');
-  await saveSpeedButton(page).click();
-  await expect(saveSpeedButton(page)).toBeDisabled();
+  // Back to the song, and "New loop": the bar picker opens, and the save goes to the loop.
+  await backTo(page, 'Groove 120').click();
+  await page.getByRole('link', { name: 'New loop' }).click();
+  await expect(loopForm(page)).toBeVisible({ timeout: 20_000 });
+  await fillLoopForm(page, { name: 'Groove', firstBar: 5, lastBar: 6, target: 90 });
+  await expect(page).toHaveURL(/\/songs\/[^/]+\/loops\/[^/]+$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Groove' })).toBeVisible();
+  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+  await expect(practiceSpeed(page)).toHaveText('100%');
 
-  // Practise it: a session is logged at its speed.
-  await playLoopButton(page, 'Groove').click();
-  await expect(status(page)).toContainText(/Bar [56] of/);
+  // Practise it at 80%: four nudges down, saved, then play.
+  for (let i = 0; i < 4; i++) await nudge(page, 'Slower').click();
+  await expect(practiceSpeed(page)).toHaveText('80%');
+  await practiceSaveSpeed(page).click();
+  await expect(practiceSaveSpeed(page)).toBeDisabled();
+  await playButton(page).click();
   await playFor(page, 3_000);
-  await expect(sessionLogged(page)).toContainText('of Groove at 80%');
+
+  // Session complete sums it up; the session is in the database at its speed.
+  const summary = sessionComplete(page);
+  await expect(summary).toBeVisible();
+  await expect(summary).toContainText('80% → 80%');
+  await expect(summary).toContainText('1 day');
   await sessionCount(user).toBe(1);
+  expect((await sessionsOf(user))[0]?.speed_ratio).toBe(0.8);
 
   // Hit the target: the loop asks, and is finished only when told.
-  await openLoopPanel(page);
-  await commit(loopPercentField(page), '90');
-  await saveSpeedButton(page).click();
-  const prompt = loopPanel(page).getByTestId('finish-prompt');
+  await nudge(page, 'Faster').click();
+  await nudge(page, 'Faster').click();
+  await practiceSaveSpeed(page).click();
+  const prompt = page.getByTestId('finish-prompt');
   await expect(prompt).toContainText("You've reached your target of 90%");
   expect((await loopsOf(user))[0]?.status).toBe('active');
   await prompt.getByRole('button', { name: 'Mark finished' }).click();
-  await expect(loopPanel(page).getByRole('region', { name: 'Finished loops' })).toContainText(
-    'Groove',
-  );
   await expect.poll(async () => (await loopsOf(user))[0]?.status).toBe('finished');
 
-  // Home has it under Finished, with its history kept.
-  await navLink(page, 'On the go').click();
-  await expect(homeTab(page, 'On the go')).toContainText('On the go (0)');
-  await homeTab(page, 'Finished').click();
-  await expect(homeItem(page, 'Groove')).toContainText('Groove 120');
-  await expect(homeItem(page, 'Groove')).toContainText('Bars 5 to 6 · 90% · target 90%');
+  // Done is back on the song, where the loop is mastered, its history kept.
+  await summary.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Groove 120' })).toBeVisible();
+  await expect(page.getByTestId('song-facts')).toContainText('1 of 1 mastered');
+  await expect(overviewItem(page, 'mastered', 'Groove')).toContainText('Bars 5 to 6 · 90%');
   expect(await sessionsOf(user)).toHaveLength(1);
+
+  // And the songs list has the streak, and the song mastered.
+  await backTo(page, 'Songs').click();
+  await expect(page.getByTestId('streak')).toHaveText(/1/);
+  await expect(page.getByTestId('song-line')).toHaveText('Fixture · Mastered');
 });

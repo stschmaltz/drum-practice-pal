@@ -1,32 +1,10 @@
 import { loopRow } from '@/test/loopTable';
 import { LOOP_SELECT } from './loopForm';
-import {
-  PRACTICE_LOOP_SELECT,
-  PRACTICE_TABS,
-  practiceLoopsFor,
-  practiceTabFrom,
-} from './practiceList';
+import { PRACTICE_LOOP_SELECT, practiceLoopsFor } from './practiceList';
 
 describe('PRACTICE_LOOP_SELECT', () => {
   it("is the loop's own columns plus its song's name", () => {
     expect(PRACTICE_LOOP_SELECT).toBe(`${LOOP_SELECT}, song:songs!loops_song_fkey(title, artist)`);
-  });
-});
-
-describe('practiceTabFrom', () => {
-  it.each([
-    ['active', 'active'],
-    ['finished', 'finished'],
-    [null, 'active'],
-    ['', 'active'],
-    ['FINISHED', 'active'],
-    ['<b>finished</b>', 'active'],
-  ])('%j shows the %s tab', (value, tab) => {
-    expect(practiceTabFrom(value)).toBe(tab);
-  });
-
-  it('knows the two tabs, on the go first', () => {
-    expect(PRACTICE_TABS).toEqual(['active', 'finished']);
   });
 });
 

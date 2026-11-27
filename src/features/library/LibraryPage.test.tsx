@@ -64,6 +64,10 @@ const listRows = (songs: LibrarySong[]) =>
 function serveLibrary(songs: LibrarySong[]) {
   let current = songs;
   queryResult.mockImplementation(async (call): Promise<FakeResult> => {
+    // The mastery rings' loops and the streak's sessions: none.
+    if (call.table === 'loops' || call.table === 'practice_sessions') {
+      return { data: [], error: null };
+    }
     const id = call.ops.find((op) => op.method === 'eq' && op.args[0] === 'id')?.args[1];
     if (opArgs(call, 'delete')) {
       current = current.filter((s) => s.id !== id);
@@ -111,7 +115,14 @@ describe('LibraryPage', () => {
   });
 
   it('shows a load error with a retry that recovers', async () => {
-    queryResult.mockResolvedValueOnce({ data: null, error: { message: 'network down' } });
+    serveLibrary(library);
+    const serve = queryResult.getMockImplementation();
+    let songsFailed = false;
+    queryResult.mockImplementation(async (call) => {
+      if (call.table !== 'songs' || songsFailed) return serve!(call);
+      songsFailed = true;
+      return { data: null, error: { message: 'network down' } };
+    });
     const { user } = renderLibrary();
     expect(await screen.findByRole('alert')).toHaveTextContent(
       "Couldn't load your songs. Something went wrong. Try again.",
@@ -472,10 +483,11 @@ describe('LibraryPage layout (12 UX pass)', () => {
     }
   });
 
-  it('lays the songs out as a grid that goes to columns on a wide screen', async () => {
+  it('lays the songs out as plain rows between dividers (Unit 14), not cards', async () => {
     serveLibrary(library);
     renderLibrary();
     await screen.findByRole('heading', { name: 'Your songs (3)' });
-    expect(screen.getByRole('list')).toHaveClass('grid', 'lg:grid-cols-2', 'xl:grid-cols-3');
+    expect(screen.getByRole('list')).toHaveClass('divide-y', 'divide-line');
+    expect(screen.getByRole('list')).not.toHaveClass('grid');
   });
 });

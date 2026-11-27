@@ -11,6 +11,7 @@ import {
   type FakeResult,
 } from '@/test/fakeSupabase';
 import { renderRoutes, settle } from '@/test/render';
+import type { Mastery } from '@/features/loops/mastery';
 import type { LibrarySong } from './songForm';
 import { SongListItem } from './SongListItem';
 
@@ -29,17 +30,17 @@ const song: LibrarySong = {
 const ok = (data: unknown): FakeResult => ({ data, error: null });
 const fail = (message: string): FakeResult => ({ data: null, error: { message } });
 
-function renderItem(item: LibrarySong = song) {
+function renderItem(item: LibrarySong = song, mastery: Mastery | null = null) {
   renderRoutes(
     <Route
-      path="/library"
+      path="/"
       element={
         <ul>
-          <SongListItem song={item} />
+          <SongListItem song={item} mastery={mastery} />
         </ul>
       }
     />,
-    { path: '/library' },
+    { path: '/' },
   );
   return userEvent.setup();
 }
@@ -48,34 +49,28 @@ function renderItem(item: LibrarySong = song) {
 const updates = () =>
   queryResult.mock.calls.map(([call]) => opArgs(call, 'update')?.[0]).filter(Boolean);
 const deletes = () => queryResult.mock.calls.filter(([call]) => opArgs(call, 'delete'));
-const day = (timestamp: string) =>
-  new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(timestamp));
 
 beforeEach(resetFakeSupabase);
 
 describe('SongListItem summary', () => {
-  it('shows title, artist, bars, BPM, added date and that it is unpractised', () => {
-    renderItem();
+  it('links to the song, with its artist and its mastery on the line under the name', () => {
+    renderItem(song, { finished: 2, total: 4 });
     expect(screen.getByRole('link', { name: 'Groove' })).toHaveAttribute('href', '/songs/song-1');
-    expect(screen.getByText('Band')).toBeInTheDocument();
-    expect(
-      screen.getByText(`16 bars · 120 BPM · added ${day(song.created_at)} · not practiced yet`),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('song-line')).toHaveTextContent('Band · 2 of 4 loops mastered');
     expect(screen.queryByText(/No drum track found/)).not.toBeInTheDocument();
   });
 
-  it('shows a fractional tempo, the last practice date and the no-drum-track note', () => {
-    renderItem({
-      ...song,
-      artist: '',
-      original_tempo: 92.5,
-      drum_track_index: null,
-      last_practiced_at: '2026-11-21T12:00:00Z',
-    });
-    expect(screen.getByText(/92\.5 BPM/)).toBeInTheDocument();
-    expect(
-      screen.getByText(new RegExp(`practiced ${day('2026-11-21T12:00:00Z')}`)),
-    ).toBeInTheDocument();
+  it.each([
+    [{ finished: 0, total: 0 }, 'No loops yet'],
+    [{ finished: 3, total: 3 }, 'Mastered'],
+  ])('says %j as "%s"', (mastery, line) => {
+    renderItem({ ...song, artist: '' }, mastery);
+    expect(screen.getByTestId('song-line')).toHaveTextContent(new RegExp(`^${line}$`));
+  });
+
+  it('shows the artist alone while the loops are read, and the no-drum-track note', () => {
+    renderItem({ ...song, drum_track_index: null }, null);
+    expect(screen.getByTestId('song-line')).toHaveTextContent(/^Band$/);
     expect(screen.getByText(/No drum track found in this file/)).toBeInTheDocument();
   });
 });

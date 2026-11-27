@@ -35,12 +35,29 @@ export const speedSlider = (page: Page) => controls(page).getByRole('slider', { 
 export const status = (page: Page) => page.getByTestId('player-status');
 export const viewport = (page: Page) => page.getByTestId('score-viewport');
 
-/** Uploads a fixture through the library and opens its song page. */
+/** From the songs list (`/`), a song's overview: its loops, and the ways into the player. */
+export async function openSongOverview(page: Page, title: string) {
+  await page.getByRole('main').getByRole('list').getByRole('link', { name: title }).click();
+  await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+}
+
+/**
+ * From the songs list (`/`), the song's overview and then "Play whole song":
+ * jam mode, where the earlier units' specs run (Unit 14 put it a level down).
+ */
+export async function openSongPlayer(page: Page, title: string) {
+  await openSongOverview(page, title);
+  await page.getByRole('link', { name: 'Play whole song' }).click();
+  await expect(page).toHaveURL(/\/songs\/[^/]+\/play$/);
+}
+
+/** Uploads a fixture on the songs list and opens it in jam mode (`/songs/:id/play`). */
 export async function openFixture(page: Page, user: E2eUser, name: string, title: string) {
-  await signIn(page, user, '/library');
+  await signIn(page, user, '/');
   await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture(name));
   await expect(page.getByRole('status').filter({ hasText: `Added “${title}”.` })).toBeVisible();
-  await page.getByRole('list').getByRole('link', { name: title }).click();
+  await openSongPlayer(page, title);
   await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
   // Enabled once the score, MIDI and soundfont are all in.
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });

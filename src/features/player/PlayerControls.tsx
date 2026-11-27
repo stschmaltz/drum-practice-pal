@@ -54,21 +54,34 @@ interface PlayerControlsProps extends PlayerViewProps {
    * controls that look alike, of which only one saves, read as one that saves.
    */
   onShowLoopSpeed?: (() => void) | null;
+  /** False where the screen has a speed control of its own (the practice screen's). */
+  showSpeed?: boolean;
 }
 
-/** Play/Pause. Part of `PlayerControls` unless the screen places it itself. */
-export function PlayPauseButton({ player, snapshot }: PlayerViewProps) {
+/**
+ * Play/Pause. Part of `PlayerControls` unless the screen places it itself.
+ * `round`: the practice screen's one big round button, its word left to
+ * screen readers (the name stays "Play" / "Pause").
+ */
+export function PlayPauseButton({
+  player,
+  snapshot,
+  round = false,
+}: PlayerViewProps & { round?: boolean }) {
   const running = isRunning(snapshot.status);
+  const shape = round
+    ? 'size-16 shrink-0 rounded-full! px-0! md:size-20'
+    : 'min-w-24 md:min-w-28 md:text-lg';
   return (
     <button
       type="button"
-      className={`${primaryButtonClass} min-w-24 md:min-w-28 md:text-lg`}
+      className={`${primaryButtonClass} ${shape}`}
       disabled={!canPlay(player, snapshot)}
       // No await before this: iOS only starts audio inside the tap itself.
       onClick={() => player?.togglePlay()}
     >
-      <Icon name={running ? 'pause' : 'play'} className="size-6" />
-      {running ? 'Pause' : 'Play'}
+      <Icon name={running ? 'pause' : 'play'} className={round ? 'size-8' : 'size-6'} />
+      <span className={round ? 'sr-only' : undefined}>{running ? 'Pause' : 'Play'}</span>
     </button>
   );
 }
@@ -94,6 +107,7 @@ export function PlayerControls({
   showPlayButton = true,
   fold,
   onShowLoopSpeed = null,
+  showSpeed = true,
 }: PlayerControlsProps) {
   // Unlike Play, options work before the song is ready; they only wait for the player to exist
   // (and are off once it has failed).
@@ -176,7 +190,7 @@ export function PlayerControls({
             : 'flex flex-wrap items-center gap-x-4 gap-y-1 lg:min-w-80 lg:flex-1'
         }
       >
-        {onShowLoopSpeed ? (
+        {!showSpeed ? null : onShowLoopSpeed ? (
           <LoopSpeedButton
             speedRatio={snapshot.speedRatio}
             compact={folded}

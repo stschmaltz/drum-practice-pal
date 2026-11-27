@@ -1,8 +1,6 @@
 /// <reference lib="dom" />
-import type { Page } from '@playwright/test';
 import { expect, signIn, test } from './auth';
 import {
-  activeLoopLine,
   commit,
   playLoopButton,
   loopPanel,
@@ -12,7 +10,6 @@ import {
   saveNewLoop,
   saveSpeedButton,
   exitLoop,
-  expectLooping,
 } from './loopsPage';
 import {
   chooseCountIn,
@@ -24,12 +21,14 @@ import {
   status,
 } from './playerPage';
 import {
-  homeItem,
-  homeList,
-  homeTab,
+  backTo,
   loopsOf,
   navLink,
   openLoopHistory,
+  openPractice,
+  overviewItem,
+  overviewList,
+  practiceSpeed,
   playFor,
   playOn,
   recordSentSessions,
@@ -44,8 +43,6 @@ import {
 // Unit 09: practice sessions and progress. Loop play time is logged, a loop
 // has a history, a loop at its target asks "Mark finished?", and the home page
 // lists what is on the go and what is finished.
-
-const speed = (page: Page) => page.getByTestId('jam-speed');
 
 test('a minute of loop practice is logged as one session with its speed and duration', async ({
   page,
@@ -133,20 +130,18 @@ test('hitting the target asks "Mark finished?", and finish and reopen move the l
   );
   await expect.poll(async () => (await loopsOf(user))[0]?.status).toBe('finished');
 
-  // Home: nothing on the go, the loop under Finished with its song and speeds.
-  await navLink(page, 'On the go').click();
-  await expect(homeTab(page, 'On the go')).toContainText('On the go (0)');
-  await expect(page.getByText(/Nothing on the go/)).toBeVisible();
-  await homeTab(page, 'Finished').click();
-  const finished = homeItem(page, 'Fill');
-  await expect(finished).toContainText('Groove 120');
-  await expect(finished).toContainText('Bars 3 to 4 · 90% · target 90%');
-  await expect(finished).toContainText('Last practiced today · finished today');
+  // The song's overview: nothing on the go, the loop mastered with its speed.
+  await backTo(page, 'Groove 120').click();
+  await expect(page.getByTestId('song-facts')).toContainText('1 of 1 mastered');
+  await expect(overviewList(page, 'on the go')).toHaveCount(0);
+  const finished = overviewItem(page, 'mastered', 'Fill');
+  await expect(finished).toContainText('Bars 3 to 4 · 90%');
+  await expect(finished).toContainText('Last practiced today');
 
-  await finished.getByRole('button', { name: 'Reopen Fill' }).click();
-  await expect(page.getByText(/No finished loops yet/)).toBeVisible();
-  await homeTab(page, 'On the go').click();
-  await expect(homeItem(page, 'Fill')).toContainText('Last practiced today');
+  await finished.getByRole('button', { name: 'More actions for Fill' }).click();
+  await page.getByRole('menuitem', { name: 'Reopen' }).click();
+  await expect(overviewItem(page, 'on the go', 'Fill')).toContainText('Last practiced today');
+  await expect(overviewList(page, 'mastered')).toHaveCount(0);
   await expect
     .poll(async () => (await loopsOf(user))[0])
     .toMatchObject({
@@ -155,14 +150,9 @@ test('hitting the target asks "Mark finished?", and finish and reopen move the l
     });
   // The history was kept through both.
   expect(await sessionsOf(user)).toHaveLength(1);
-
-  // The tab survives a reload, from the address.
-  await homeTab(page, 'Finished').click();
-  await page.reload();
-  await expect(homeTab(page, 'Finished')).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('the home page lists loops by last practiced and opens a loop ready to play in one tap', async ({
+test('a song lists its loops by last practised and opens one on its practice screen in one tap', async ({
   page,
   user,
 }) => {
@@ -175,27 +165,24 @@ test('the home page lists loops by last practiced and opens a loop ready to play
   await playFor(page, 3_000);
   await expect(sessionLogged(page)).toContainText('of Late one at 70%');
 
-  await navLink(page, 'On the go').click();
+  await backTo(page, 'Tempo Change').click();
 
-  // The practiced loop leads; the one never practiced follows.
-  await expect(homeList(page).getByRole('listitem')).toHaveCount(2);
-  const names = await homeList(page)
+  // The practised loop leads; the one never practised follows.
+  const onTheGo = overviewList(page, 'on the go');
+  await expect(onTheGo.getByRole('listitem')).toHaveCount(2);
+  const names = await onTheGo
     .getByRole('listitem')
     .evaluateAll((items) => items.map((item) => item.querySelector('p')?.textContent));
   expect(names).toEqual(['Late one', 'First saved']);
-  await expect(homeItem(page, 'Late one')).toContainText('Bars 9 to 10 · 70% · target 100%');
-  await expect(homeItem(page, 'Late one')).toContainText('Last practiced today');
-  await expect(homeItem(page, 'First saved')).toContainText('Not practiced yet');
+  await expect(overviewItem(page, 'on the go', 'Late one')).toContainText('Bars 9 to 10 · 70%');
+  await expect(overviewItem(page, 'on the go', 'Late one')).toContainText('Last practiced today');
 
-  await homeItem(page, 'Late one').getByRole('link', { name: 'Practice Late one' }).click();
-
-  // The song opens on the loop at its saved speed: one tap in, then Play.
-  await expect(page.getByRole('heading', { level: 1, name: 'Tempo Change' })).toBeVisible();
-  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
-  await expectLooping(page, 'Late one', 'Bars 9 to 10');
-  await expect(speed(page)).toHaveText('70%');
+  // Its practice screen opens on the loop at its saved speed: one tap in, then Play.
+  await openPractice(page, 'Late one');
+  await expect(practiceSpeed(page)).toHaveText('70%');
   // 90 BPM from bar 9, at 70%.
-  await expect(page.getByTestId('jam-bpm')).toHaveText('63');
+  await expect(page.getByRole('group', { name: 'Loop speed' })).toContainText('63 BPM');
+  await expect(page.getByTestId('practice-to-full-speed')).toHaveText('30% to full speed');
   await expect(status(page)).toContainText('Bar 9 of 16');
   await expect(playButton(page)).toHaveText('Play');
 
@@ -224,11 +211,10 @@ test('leaving the page mid-practice still logs the session, once', async ({ page
 
   // The same through the app's own navigation, where the page lives on.
   await signIn(page, user, '/');
-  await page.getByRole('link', { name: 'Practice Leaving' }).click();
-  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
-  await expect(activeLoopLine(page)).toContainText('Leaving');
+  await page.getByRole('main').getByRole('link', { name: 'Groove 120' }).click();
+  await openPractice(page, 'Leaving');
   await playOn(page, 3_500);
-  await navLink(page, 'Library').click();
+  await navLink(page, 'Songs').click();
 
   await sessionCount(user, { timeout: 10_000 }).toBe(2);
 });

@@ -25,7 +25,7 @@ function renderAt(path: string, session: Session | null) {
 beforeEach(resetFakeSupabase);
 
 describe('App', () => {
-  it.each(['/', '/library', '/settings', '/songs/abc', '/no-such-page'])(
+  it.each(['/', '/library', '/stats', '/settings', '/songs/abc', '/no-such-page'])(
     'sends signed-out visitors from %s to the login page',
     (path) => {
       renderAt(path, null);
@@ -35,10 +35,14 @@ describe('App', () => {
   );
 
   it.each([
-    ['/', 'On the go'],
-    ['/library', 'Library'],
-    // Lazy-loaded with the player; "abc" isn't a song id.
+    ['/', 'Songs'],
+    // The library of earlier builds is the songs list now.
+    ['/library', 'Songs'],
+    ['/stats', 'Stats'],
     ['/songs/abc', 'Song not found'],
+    // Lazy-loaded with the player; "abc" isn't a song id.
+    ['/songs/abc/play', 'Song not found'],
+    ['/songs/abc/loops/def', 'Song not found'],
     ['/no-such-page', 'Page not found'],
   ])('shows a signed-in user %s inside the shell', async (path, heading) => {
     renderAt(path, fakeSession());
@@ -47,8 +51,8 @@ describe('App', () => {
   });
 
   it('sends a signed-in user away from /login to ?next=', () => {
-    renderAt('/login?next=%2Flibrary', fakeSession());
-    expect(screen.getByRole('heading', { level: 1, name: 'Library' })).toBeInTheDocument();
+    renderAt('/login?next=%2Fsettings', fakeSession());
+    expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
   });
 
   it('sends a user back to /login when the session ends', () => {

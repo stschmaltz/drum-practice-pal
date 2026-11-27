@@ -95,13 +95,18 @@ export interface NewLoop {
 export async function saveNewLoop(page: Page, loop: NewLoop): Promise<void> {
   await openLoopPanel(page);
   await newLoopButton(page).click();
+  await fillLoopForm(page, loop);
+  await expect(loopForm(page)).toHaveCount(0);
+  await expect(activeLoopLine(page)).toContainText(loop.name);
+}
+
+/** Types a new loop into the open loop form and saves it. */
+export async function fillLoopForm(page: Page, loop: NewLoop): Promise<void> {
   await firstBarField(page).fill(String(loop.firstBar));
   await lastBarField(page).fill(String(loop.lastBar));
   await loopNameField(page).fill(loop.name);
   if (loop.target !== undefined) await targetField(page).fill(String(loop.target));
   await saveLoopButton(page).click();
-  await expect(loopForm(page)).toHaveCount(0);
-  await expect(activeLoopLine(page)).toContainText(loop.name);
 }
 
 /** The highlighted blocks over the score, one per line of music the range touches. */

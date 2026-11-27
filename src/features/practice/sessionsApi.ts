@@ -38,6 +38,23 @@ export async function fetchLoopSessions(
   );
 }
 
+/** Every session of the user, oldest first: the Stats page works everything out from these. */
+export async function fetchAllSessions(userId: string): Promise<PracticeSession[]> {
+  return fetchAllPages(async (from, to) =>
+    unwrap(
+      await supabase
+        .from('practice_sessions')
+        .select(SESSION_SELECT)
+        .eq('user_id', userId)
+        // A total order, so pages don't overlap or skip rows.
+        .order('started_at')
+        .order('id')
+        .range(from, to),
+      'practice sessions',
+    ),
+  );
+}
+
 /**
  * Logs a session. The id is the tracker's, and a row that already has it is
  * left alone ("on conflict do nothing"), so a retry after a lost response

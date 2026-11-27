@@ -349,6 +349,8 @@ export function useDeleteLoop(songId: string) {
       );
       // Its practice history went with it (cascade).
       queryClient.removeQueries({ queryKey: sessionKeys.forLoop(user.id, loopId) });
+      // Its sessions went with it: the streak and the Stats page count them no more.
+      void queryClient.invalidateQueries({ queryKey: sessionKeys.every(user.id) });
     },
     onSettled: () => invalidateWhenIdle(queryClient, user.id),
   });

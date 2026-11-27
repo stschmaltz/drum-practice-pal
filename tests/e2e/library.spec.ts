@@ -33,7 +33,8 @@ test('uploads a Guitar Pro file with its metadata, and warns on a duplicate', as
   await expect(page.getByRole('status').filter({ hasText: 'Added “Tempo Change”.' })).toBeVisible();
   const list = page.getByRole('list');
   await expect(list.getByRole('link', { name: 'Tempo Change' })).toBeVisible();
-  await expect(list.getByText('16 bars · 120 BPM')).toBeVisible();
+  // One line under the name on the list (Unit 14); the file's facts are on the song's overview.
+  await expect(list.getByTestId('song-line')).toHaveText('Fixture · No loops yet');
 
   const [row] = await songRows(user);
   expect(row).toMatchObject({
@@ -53,6 +54,7 @@ test('uploads a Guitar Pro file with its metadata, and warns on a duplicate', as
   expect(await songRows(user)).toHaveLength(1);
   await warning.getByRole('link', { name: 'Open “Tempo Change”' }).click();
   await expect(page).toHaveURL(`/songs/${row!.id}`);
+  await expect(page.getByTestId('song-facts')).toHaveText('16 bars · 120 BPM');
 });
 
 test('a file with no drum track uploads with a null index and a note', async ({ user, page }) => {
@@ -174,7 +176,7 @@ test('every fixture uploads with the metadata its source declares', async ({ use
     const item = page.getByRole('listitem').filter({
       has: page.getByRole('link', { name: expected.title, exact: true }),
     });
-    await expect(item).toContainText(`${expected.barCount} bars · ${expected.tempoAtBar1} BPM`);
+    await expect(item.getByTestId('song-line')).toHaveText('Fixture · No loops yet');
     await expect(item.getByText('No drum track found')).toHaveCount(
       expected.drumTrackIndex === null ? 1 : 0,
     );

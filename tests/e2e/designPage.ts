@@ -184,6 +184,8 @@ export function auditScreen(page: Page): Promise<ScreenAudit> {
 
     for (const svg of Array.from(document.querySelectorAll('svg'))) {
       if (inScore(svg)) continue;
+      // A chart (Unit 14) is an image named by what it shows, not an icon.
+      if (svg.getAttribute('role') === 'img' && svg.hasAttribute('aria-label')) continue;
       audit.counted.icons += 1;
       if (svg.closest('[aria-hidden="true"]') === null) audit.spokenIcons.push(describe(svg));
     }

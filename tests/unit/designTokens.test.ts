@@ -75,6 +75,10 @@ const NON_TEXT_PAIRS: [part: string, on: string[]][] = [
   ['score-range', ['score-paper']],
   // The focus ring on a toggle that is on.
   ['focus', ['selected']],
+  // Unit 14's progress marks and charts: a mastered ring or full bar, today's bar, the
+  // full-speed line, against the page and the track they sit on.
+  ['success', ['canvas', 'surface', 'line']],
+  ['selected-line', ['line']],
 ];
 
 describe('token contrast', () => {

@@ -6,6 +6,7 @@ import {
   changedSongFields,
   normaliseSongEdit,
   revertSongEdit,
+  songFactsLabel,
   toLibrarySong,
   validateSongEdit,
   type Song,
@@ -109,4 +110,11 @@ describe('revertSongEdit', () => {
     const current = { id: 'a', title: 'Old', artist: '' };
     expect(revertSongEdit(current, before, { artist: '' })).toEqual({ ...current, artist: 'Band' });
   });
+});
+
+it.each([
+  [120, '16 bars · 120 BPM'],
+  [92.5, '16 bars · 92.5 BPM'],
+])('songFactsLabel at %d BPM', (original_tempo, label) => {
+  expect(songFactsLabel({ bar_count: 16, original_tempo })).toBe(label);
 });
