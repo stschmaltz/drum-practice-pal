@@ -10,6 +10,17 @@ Drum Practice Pal: a tab-first drum practice PWA. Users upload Guitar Pro files,
 - Who it is for and how to judge a design: `docs/product.md`. Read it before designing or building anything a user touches
 - Handoff notes, one per unit: `docs/units/NN-name.md`
 
+## When Shane's instructions change something
+
+An instruction from Shane that changes what is built, for whom, or how agents work is written into the repo in the same turn, before or with the work it changes. Chat is not where it lives: the next agent starts cold from these files.
+
+- A change to a unit's scope, order or acceptance: that unit's section of `docs/plan.md` (and the unit table, Key decisions or Data model if they now say otherwise)
+- A change to who the app is for or how a design is judged: `docs/product.md`
+- A change to a convention, pattern or how a stage works: this file, and the agent or command it concerns in `.claude/agents/` or `.claude/commands/`
+- A correction to a mistake an agent made: the rule that would have prevented it, in whichever of the above owns it, not only the fix
+
+Remove or rewrite what the instruction replaces, so no file is left saying the old thing. Say in your reply which files you changed. If an instruction contradicts a doc and it isn't clear which should win, ask.
+
 ## Stack
 
 - Vite + React 19 + TypeScript (strict, `noUncheckedIndexedAccess`)
