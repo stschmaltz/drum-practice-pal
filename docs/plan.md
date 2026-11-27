@@ -151,7 +151,7 @@ REVIEW: You are the Review agent for Unit NN: <name>. Read AGENTS.md and the han
 
 ## Units of work
 
-Fourteen units, run in order. Each is sized for one Build agent session. Unit 01 proves the audio stack on real devices before anything is built on it.
+Fifteen units, run in order. Each is sized for one Build agent session. Unit 01 proves the audio stack on real devices before anything is built on it.
 
 Handoff notes written before the Visual design unit was added call the release unit "Unit 12". It is Unit 13 now.
 
@@ -172,6 +172,7 @@ Handoff notes written before the Visual design unit was added call the release u
 | 11  | PWA and offline                            | 09         |
 | 12  | Visual design                              | 11         |
 | 13  | Polish and release                         | all        |
+| 14  | Songs first and practice progress          | 13         |
 
 ### 00 Scaffold, conventions, CI, preview deploys
 
@@ -437,6 +438,30 @@ None left: each item was dealt with in 12 Build or moved to Unit 13 (see docs/un
 - From 12 Build: notation is at alphaTab's default size. At `display.scale` 1.15 taps in the phone's horizontal layout missed their bar, because the engine's hit-test (`barIndexAtPoint` via `watchScorePointer`), highlight (`highlightRects`) and scroll (`barBounds`) read `boundsLookup` as page pixels. Make them divide by the scale, then raise `NOTATION_SCALE` in `scoreTheme.ts` if the notation is too small at the kit. 13 Build tried it at 1.25: multiplying the bounds by the scale fixed the phone (horizontal) taps and broke every tablet and desktop (page) tap, and not scaling did the reverse, so alphaTab 1.9's bounds look scaled in page layout only; confirm that in alphaTab before relying on it.
 - From 12 Review (after UX pass): with focus on the controls bar's "When to count in" choice, C cycling the count-in to Off takes that group away and focus falls to `<body>` (`useFocusKeptInBar` in `PlayerControls.tsx` only looks at a fold change); hand it to the bars' checked option. On a cold start the library draws the big drop box while the songs load and then the compact Upload button (`compact` follows `songs.data`), so the page jumps under a pointer on its way to the box. (docs/units/12-visual-design.md, Review (after UX pass))
 - From 12 Build, from 08 QA: on a phone with the sheet open and nothing playing, about 112 px of the score shows, the staff cut at the sheet's edge (issue 6; 85 px before the UX pass sized the box to its line, 12 QA after the UX pass). A phone in landscape with the panel open leaves a 284 x 234 px score.
+
+### 14 Songs first and practice progress
+
+**Goal:** organise the app the way practice happens: songs, then a song's loops, then practising one loop, with light game-like feedback on progress and a Stats tab. Shane signed off on the "songs first, minimal" mockup on 2026-11-26: plain rows with dividers, one ring or bar per item, one main action per screen; no level names, no cards around list items.
+
+- **Navigation:** Songs · Stats · Settings (bottom tabs below `md`, sidebar from `md`, as now). `/` is the Songs list; the library merges into it (upload by picker and drop, search, sort, edit, delete all kept). `/library` redirects to `/`. The On the go page goes; a finished loop is shown as mastered inside its song.
+- **Songs list (`/`):** one row per song: a mastery ring (finished loops of all its loops; a dashed ring with no loops; a full ring and "Mastered" when every loop is finished) and one line under the name ("2 of 4 loops mastered", "No loops yet"). Recently practised first by default. The header carries the streak as a flame and a number of days, hidden at 0. Upload is a quiet link-style action, not a big drop box once songs exist.
+- **Song overview (`/songs/:id`):** title, artist and "n of m mastered". The loops: active ones first (last practised first), then finished ones below with a trophy. An active loop's row shows its name, bars and saved speed as a percent, a thin bar of that speed towards full speed (100%), and a round play button that opens its practice screen. Edit, history and delete stay in the row's More menu. "New loop" and "Play whole song" are quiet actions. This screen doesn't load alphaTab or the file (percent only, as the home page does today).
+- **Practice screen (`/songs/:id/loops/:loopId`):** the player set to the loop (range, looping, saved speed), as `useLoopPractice.openLoop` does now. On it: the loop's name, one muted line with the session's play time and passes, the score, the speed in large type with BPM and "n% to full speed", nudge buttons and "Save speed", and one big Play/Pause. Count-in, metronome, drum toggles, keyboard shortcuts and the "Mark finished?" prompt keep working; the loop keys switch to the song's other loops (the URL follows with `replace`). Back goes to the song.
+- **Play whole song (`/songs/:id/play`):** today's jam mode. "New loop" opens it with the bar picker open; after the save, the app goes to the new loop's practice screen.
+- **Old links:** `/songs/:id?loop=<id>` redirects to that loop's practice screen (`loopPracticePath` changes to the new path), so bookmarks and links from earlier builds still work.
+- **Session complete:** when a session is logged while the practice screen stays, a summary replaces the "Practice logged" note: play time, passes, speed at the start and the end, the streak in days, and any badge the session just earned. "Keep going" closes it; "Done" goes back to the song. The start speed comes from the tracker (it isn't stored). Not shown for a session logged by leaving the page.
+- **Stats (`/stats`):** a Week / Month / All time choice (in the URL) over: practice time, days practised, loop passes, loops mastered; minutes per day for the last 14 days with today marked; a heatmap of practice days for the last 26 weeks; speed over time for a chosen loop (each session's speed); and the badges, earned ones in colour and locked ones with their progress. Charts are SVG drawn by the app on the design tokens (no chart library), each with a text alternative.
+- **Data:** everything is derived on the client from the user's sessions and loops; nothing new is stored and there is no migration. Every session of the user is read with `fetchAllPages`. Streaks, totals and badges are pure modules (`src/features/stats/`): a streak is consecutive local calendar days with at least one logged session, ending today or yesterday. The badge list is fixed in code (streaks of 3, 7 and 30 days; 1, 10 and 50 hours; 100 and 1,000 passes; first loop mastered; 5 loops mastered; a song with every loop mastered), each with its progress.
+- **Not in this unit:** XP or levels, a daily minutes goal (it would need a `user_settings` column), anything that reads or writes `target_ratio` (another branch removes it; "full speed" here is always 100%).
+- Offline: every new screen reads from the persisted cache like the others, and the Stats page says so when it has nothing cached.
+
+**Acceptance:** at all three sizes a user goes Songs → a song → a loop's practice screen → practises → sees Session complete → Done is back on the song, and the e2e journey covers it; Stats' totals for the seed user equal sums over their sessions in the database; an old `?loop=` link opens the loop's practice screen; the player, loop, offline and shortcut specs still pass on the new routes.
+
+**Test focus:** streak, totals and badge maths with local-time dates (a DST change, midnight, a gap of one day); routes and redirects; the Session complete summary. **QA focus:** back and forward through the three levels, deep links, offline, 50 songs and 30 loops in one song, empty states, a phone in landscape. **Human check:** Shane signs off on the screenshots, then practises with the new flow for a week.
+
+**Carried forward**
+
+None yet.
 
 ## Open human checks
 
