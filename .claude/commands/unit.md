@@ -5,6 +5,8 @@ argument-hint: <unit number, e.g. 03>
 
 Run Unit $ARGUMENTS from docs/plan.md through the full pipeline. You are the orchestrator: delegate the work, don't do it yourself.
 
+The PR steps here (8 on) are how every change on this project ships, unit or not: see "How every change ships" in AGENTS.md.
+
 1. Create and switch to branch `unit-$ARGUMENTS` from main.
 2. Use the `builder` subagent for Unit $ARGUMENTS. Commit: `unit $ARGUMENTS: build`.
 3. Use the `tester` subagent. Commit: `unit $ARGUMENTS: tests`.
