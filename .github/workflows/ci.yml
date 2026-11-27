@@ -93,8 +93,9 @@ jobs:
       - run: npx supabase link --project-ref "$SUPABASE_PROJECT_REF"
       - name: Migrations to apply
         run: npx supabase db push --remote --dry-run
-      # A migration that fails (a check an existing row breaks) rolls back and stops here.
-      - run: npx supabase db push --remote
+      # --yes: hosted changes ask for confirmation, which CI cannot give. A migration
+      # that fails (a check an existing row breaks) rolls back and stops here.
+      - run: npx supabase db push --remote --yes
       - name: Hosted schema matches the committed types
         run: |
           npx supabase gen types typescript --remote --schema public \
