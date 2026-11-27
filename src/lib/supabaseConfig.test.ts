@@ -1,4 +1,20 @@
-import { readSupabaseConfig, resolveSupabaseUrl } from './supabaseConfig';
+import { isLocalSupabaseUrl, readSupabaseConfig, resolveSupabaseUrl } from './supabaseConfig';
+
+describe('isLocalSupabaseUrl', () => {
+  it.each(['http://127.0.0.1:54321', 'http://localhost:54421', ' http://[::1]:54321 '])(
+    'takes the local stack: %s',
+    (url) => expect(isLocalSupabaseUrl(url)).toBe(true),
+  );
+
+  it.each([
+    'https://abcdefgh.supabase.co',
+    'http://192.168.1.20:54321',
+    'https://localhost.evil.test',
+    'not a url',
+    '',
+    undefined,
+  ])('refuses anything else: %s', (url) => expect(isLocalSupabaseUrl(url)).toBe(false));
+});
 
 describe('resolveSupabaseUrl', () => {
   it('keeps a loopback API when the page is on loopback', () => {

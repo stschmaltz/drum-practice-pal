@@ -5,6 +5,7 @@ import { throwIfError } from '@/lib/supabaseResult';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { ghostButtonClass } from '@/components/styles';
 import { DEV_DEFAULT_EMAIL, DEV_PASSWORD } from './devPassword';
+import { DEV_TARGET_IS_LOCAL } from './devTarget';
 import { normalizeEmail } from './signInInput';
 
 /**
@@ -17,6 +18,10 @@ export function DevSignIn({ email }: { email: string }) {
   const signIn = useMutation({
     networkMode: 'always',
     mutationFn: async (address: string) => {
+      // Checked here too, not only where the button is drawn: the password is public.
+      if (!DEV_TARGET_IS_LOCAL) {
+        throw new UserFacingError('Dev sign-in only works against the local Supabase stack.');
+      }
       const attempt = await supabase.auth.signInWithPassword({
         email: address,
         password: DEV_PASSWORD,

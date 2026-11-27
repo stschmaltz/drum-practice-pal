@@ -219,13 +219,24 @@ export const checkedCountInMode = (page: Page) => countInModeGroup(page).locator
 const COUNT_IN_LABELS = { 0: 'Off', 1: '1 bar', 2: '2 bars' } as const;
 const COUNT_IN_MODE_LABELS = { start: 'At the start', every_repeat: 'Every repeat' } as const;
 
+/**
+ * Brings a control to the middle of the window before a click. Playwright
+ * scrolls a target only just into view, which on a phone can be under the
+ * sticky Play bar or the loop sheet's header: the click then never lands
+ * (two phone cases of loop-scroll.spec.ts timed out on it in CI).
+ */
+async function clearOfStickyBars(target: Locator): Promise<void> {
+  await target.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+}
+
 /** Chooses the count-in's bars in the controls bar, opening the bar first if playback folded it. */
 export async function chooseCountIn(page: Page, bars: 0 | 1 | 2): Promise<void> {
   await showControls(page);
-  await countInGroup(page)
+  const option = countInGroup(page)
     .locator('label')
-    .filter({ hasText: new RegExp(`^${COUNT_IN_LABELS[bars]}$`) })
-    .click();
+    .filter({ hasText: new RegExp(`^${COUNT_IN_LABELS[bars]}$`) });
+  await clearOfStickyBars(option);
+  await option.click();
   await expect(checkedCountIn(page)).toHaveValue(String(bars));
 }
 
@@ -235,10 +246,11 @@ export async function chooseCountInMode(
   mode: keyof typeof COUNT_IN_MODE_LABELS,
 ): Promise<void> {
   await showControls(page);
-  await countInModeGroup(page)
+  const option = countInModeGroup(page)
     .locator('label')
-    .filter({ hasText: new RegExp(`^${COUNT_IN_MODE_LABELS[mode]}$`) })
-    .click();
+    .filter({ hasText: new RegExp(`^${COUNT_IN_MODE_LABELS[mode]}$`) });
+  await clearOfStickyBars(option);
+  await option.click();
   await expect(checkedCountInMode(page)).toHaveValue(mode);
 }
 

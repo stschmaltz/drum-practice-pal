@@ -18,6 +18,21 @@ function isLoopback(hostname: string): boolean {
 }
 
 /**
+ * Whether a configured Supabase URL (as written in env, before any rewrite for
+ * a LAN device) is the local stack. Anything that must never reach a hosted
+ * project (the dev sign-in and its shared password, the seed's passwords) asks
+ * this first; an unreadable or missing URL is not local.
+ */
+export function isLocalSupabaseUrl(configuredUrl: string | undefined): boolean {
+  if (!configuredUrl) return false;
+  try {
+    return isLoopback(new URL(configuredUrl.trim()).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * A phone on the LAN opening the dev server at http://192.168.x.y:5173 can't
  * reach a Supabase URL of 127.0.0.1 (that's the phone itself). When the
  * configured API is on loopback and the page isn't, point at the page's host
