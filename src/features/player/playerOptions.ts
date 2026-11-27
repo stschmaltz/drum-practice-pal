@@ -5,17 +5,21 @@
 import type { Settings } from '@/features/settings/settingsForm';
 import {
   isCountInBars,
+  isMetronomeSubdivision,
   METRONOME_VOLUME_MAX,
   METRONOME_VOLUME_MIN,
   type CountInBars,
   type CountInMode,
 } from '@/lib/schema';
+import { DEFAULT_METRONOME_VOICE, type MetronomeVoice } from './metronomeSounds';
 
 export interface PlayerOptions {
   speedRatio: number;
   metronomeOn: boolean;
   /** 0 to 1; kept while the metronome is off so turning it back on restores it. */
   metronomeVolume: number;
+  /** Its sounds and subdivision; changed only while nothing plays (see PlayerService). */
+  metronomeVoice: MetronomeVoice;
   drumsMuted: boolean;
   /** 0 is off. */
   countInBars: CountInBars;
@@ -28,6 +32,7 @@ export const DEFAULT_PLAYER_OPTIONS: PlayerOptions = {
   speedRatio: 1,
   metronomeOn: true,
   metronomeVolume: 0.8,
+  metronomeVoice: DEFAULT_METRONOME_VOICE,
   drumsMuted: false,
   countInBars: 0,
   countInMode: 'start',
@@ -37,17 +42,43 @@ export const DEFAULT_PLAYER_OPTIONS: PlayerOptions = {
 export function playerOptionsFromSettings(
   settings: Pick<
     Settings,
-    'metronome_on' | 'metronome_volume' | 'drums_muted_default' | 'count_in_bars' | 'count_in_mode'
+    | 'metronome_on'
+    | 'metronome_volume'
+    | 'metronome_sound'
+    | 'metronome_accent'
+    | 'metronome_accent_sound'
+    | 'metronome_subdivision'
+    | 'drums_muted_default'
+    | 'count_in_bars'
+    | 'count_in_mode'
   >,
 ): PlayerOptions {
   return {
     speedRatio: 1,
     metronomeOn: settings.metronome_on,
     metronomeVolume: clampVolume(settings.metronome_volume),
+    metronomeVoice: metronomeVoiceFromSettings(settings),
     drumsMuted: settings.drums_muted_default,
     // The column is a plain int; anything the check constraint wouldn't allow counts as off.
     countInBars: isCountInBars(settings.count_in_bars) ? settings.count_in_bars : 0,
     countInMode: settings.count_in_mode,
+  };
+}
+
+export function metronomeVoiceFromSettings(
+  settings: Pick<
+    Settings,
+    'metronome_sound' | 'metronome_accent' | 'metronome_accent_sound' | 'metronome_subdivision'
+  >,
+): MetronomeVoice {
+  return {
+    sound: settings.metronome_sound,
+    accent: settings.metronome_accent,
+    accentSound: settings.metronome_accent_sound,
+    // A plain int column, like count_in_bars: anything else plays beats only.
+    subdivision: isMetronomeSubdivision(settings.metronome_subdivision)
+      ? settings.metronome_subdivision
+      : 1,
   };
 }
 

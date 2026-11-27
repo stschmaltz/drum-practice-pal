@@ -20,6 +20,10 @@ const saved: Settings = {
   metronome_volume: 0.8,
   count_in_bars: 0,
   count_in_mode: 'start',
+  metronome_sound: 'click',
+  metronome_accent: true,
+  metronome_accent_sound: 'click',
+  metronome_subdivision: 1,
   drums_muted_default: false,
 };
 
@@ -137,6 +141,20 @@ describe('SettingsPage', () => {
     expect(saveButton()).toBeDisabled();
     expect(screen.getByRole('radio', { name: '2 bars' })).toBeChecked();
     expect(volume()).toHaveValue('35');
+  });
+
+  it('saves the metronome’s sounds and clicks, only those changed', async () => {
+    serveSettings(saved);
+    const { user } = renderSettings();
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Sound' }), 'Hi-hat');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Beat one' }), 'No accent');
+    await user.click(screen.getByRole('radio', { name: '4 per beat' }));
+    await user.click(saveButton());
+
+    expect(await screen.findByText('Saved')).toBeInTheDocument();
+    expect(writes()).toEqual([
+      { metronome_sound: 'hi_hat', metronome_accent: false, metronome_subdivision: 4 },
+    ]);
   });
 
   it('keeps your edits and shows the error when the save fails', async () => {

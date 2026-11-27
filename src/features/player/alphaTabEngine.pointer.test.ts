@@ -35,6 +35,10 @@ vi.mock('@coderline/alphatab', () => {
     boundsLookup: StubApi['boundsLookup'] = null;
     postRenderFinished = new Event();
     renderer = { partialRenderFinished: new Event() };
+    // The metronome's (createMetronomeTrack): never fired here.
+    midiLoad = new Event();
+    midiLoaded = new Event();
+    playerReady = new Event();
     destroy = vi.fn();
     constructor() {
       stub.apis.push(this);

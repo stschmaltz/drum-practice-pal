@@ -14,11 +14,16 @@ describe('playerOptionsFromSettings', () => {
         drums_muted_default: true,
         count_in_bars: 2,
         count_in_mode: 'every_repeat',
+        metronome_sound: 'cowbell',
+        metronome_accent: false,
+        metronome_accent_sound: 'click',
+        metronome_subdivision: 4,
       }),
     ).toEqual({
       speedRatio: 1,
       metronomeOn: false,
       metronomeVolume: 0.4,
+      metronomeVoice: { sound: 'cowbell', accent: false, accentSound: 'click', subdivision: 4 },
       drumsMuted: true,
       countInBars: 2,
       countInMode: 'every_repeat',
@@ -32,6 +37,10 @@ describe('playerOptionsFromSettings', () => {
       drums_muted_default: false,
       count_in_bars: 0,
       count_in_mode: 'start',
+      metronome_sound: 'click',
+      metronome_accent: true,
+      metronome_accent_sound: 'click',
+      metronome_subdivision: 1,
     });
     expect(options.metronomeVolume).toBe(1);
   });
@@ -43,19 +52,44 @@ describe('playerOptionsFromSettings', () => {
       drums_muted_default: false,
       count_in_bars: 5,
       count_in_mode: 'start',
+      metronome_sound: 'click',
+      metronome_accent: true,
+      metronome_accent_sound: 'click',
+      metronome_subdivision: 1,
     });
     expect(options.countInBars).toBe(0);
+  });
+
+  it('treats a subdivision the app does not offer as beats only', () => {
+    const options = playerOptionsFromSettings({
+      metronome_on: true,
+      metronome_volume: 0.8,
+      drums_muted_default: false,
+      count_in_bars: 0,
+      count_in_mode: 'start',
+      metronome_sound: 'claves',
+      metronome_accent: true,
+      metronome_accent_sound: 'cowbell',
+      metronome_subdivision: 3,
+    });
+    expect(options.metronomeVoice).toEqual({
+      sound: 'claves',
+      accent: true,
+      accentSound: 'cowbell',
+      subdivision: 1,
+    });
   });
 });
 
 describe('DEFAULT_PLAYER_OPTIONS', () => {
   it('matches the user_settings column defaults', () => {
     // supabase/migrations/20261122000000_schema.sql: metronome_on true, volume 0.8, drums unmuted,
-    // count-in off at start.
+    // count-in off at start; 20261128000000_metronome_sounds.sql: the click, beat one accented.
     expect(DEFAULT_PLAYER_OPTIONS).toEqual({
       speedRatio: 1,
       metronomeOn: true,
       metronomeVolume: 0.8,
+      metronomeVoice: { sound: 'click', accent: true, accentSound: 'click', subdivision: 1 },
       drumsMuted: false,
       countInBars: 0,
       countInMode: 'start',
