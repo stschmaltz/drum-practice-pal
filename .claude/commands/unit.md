@@ -24,3 +24,5 @@ Run Unit $ARGUMENTS from docs/plan.md through the full pipeline. You are the orc
    - How many comments Copilot left, and which checklist rows were added because of them.
 
 Stop and ask me before anything outside this unit's scope, and before any step the plan marks as a Human check.
+
+If Shane gives an instruction along the way that changes the plan, the product rules or how agents work, write it into the docs as AGENTS.md says (When Shane's instructions change something) before carrying on, and tell him which files changed.

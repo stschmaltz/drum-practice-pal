@@ -15,3 +15,5 @@ Read `docs/product.md` first, then the parts of AGENTS.md and `docs/plan.md` the
 6. **Present:** the jobs, the walk-throughs, the design, what was left out and why, the slices, and the open questions for Shane with a recommendation for each.
 
 Only when Shane agrees, write the unit into `docs/plan.md` in the form `docs/product.md` describes.
+
+If Shane gives an instruction along the way that changes the plan, the product rules or how agents work, write it into the docs as AGENTS.md says (When Shane's instructions change something) before carrying on, and tell him which files changed.
