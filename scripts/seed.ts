@@ -86,7 +86,8 @@ const seedUsers: SeedUser[] = [
             speedRatio: 1.0,
             finished: true,
             sessions: [
-              { daysAgo: 30, minutes: 5, speedRatio: 0.9, repeats: 1 },
+              // Past the 30th day by more than a change of clocks moves it: stats.spec.ts needs practice in the month before.
+              { daysAgo: 32, minutes: 5, speedRatio: 0.9, repeats: 1 },
               { daysAgo: 28, minutes: 6, speedRatio: 0.95, repeats: 1 },
               { daysAgo: 27, minutes: 5, speedRatio: 1.0, repeats: 1 },
               { daysAgo: 10, minutes: 5, speedRatio: 1.0, repeats: 1 },

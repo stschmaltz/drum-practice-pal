@@ -1200,7 +1200,7 @@ describe('StatsPage, after QA', () => {
         'neglected-loop',
       );
 
-    it('names the active loops left longest, with their song, how long, and a way to practise them', async () => {
+    it('names the active loops left a week or more, practised ones first, with their song, how long, and a way to them', async () => {
       serve({
         sessions: [
           session(daysAgo(0), 300, 0.8, 1, id('b')),
@@ -1219,28 +1219,28 @@ describe('StatsPage, after QA', () => {
       expect(screen.getByRole('heading', { name: 'Not practised lately' })).toBeVisible();
       const [first, second, ...rest] = neglected();
       expect(rest).toHaveLength(0);
-      // Never practised, saved twenty days ago: left longer than Verse's twelve.
-      expect(first).toHaveTextContent('Fill');
-      expect(first).toHaveTextContent('Waltz');
+      // A loop that was being practised comes before one never started, though that one has waited longer.
+      expect(first).toHaveTextContent('Verse');
+      expect(first).toHaveTextContent('Groove 120');
       expect(within(first!).getByTestId('neglected-when')).toHaveTextContent(
-        'not practised yet, saved 20 days ago',
-      );
-      expect(within(first!).getByRole('link', { name: 'Fill' })).toHaveAttribute(
-        'href',
-        `/songs/${WALTZ.id}/loops/${id('d')}`,
-      );
-      expect(second).toHaveTextContent('Verse');
-      expect(second).toHaveTextContent('Groove 120');
-      expect(within(second!).getByTestId('neglected-when')).toHaveTextContent(
         'last practised 12 days ago',
       );
-      expect(within(second!).getByRole('link', { name: 'Verse' })).toHaveAttribute(
+      expect(within(first!).getByRole('link', { name: 'Verse' })).toHaveAttribute(
         'href',
         `/songs/${GROOVE_SONG.id}/loops/${id('c')}`,
       );
+      expect(second).toHaveTextContent('Fill');
+      expect(second).toHaveTextContent('Waltz');
+      expect(within(second!).getByTestId('neglected-when')).toHaveTextContent(
+        'not practised yet, saved 20 days ago',
+      );
+      expect(within(second!).getByRole('link', { name: 'Fill' })).toHaveAttribute(
+        'href',
+        `/songs/${WALTZ.id}/loops/${id('d')}`,
+      );
     });
 
-    it('shows three at most', async () => {
+    it('shows three at most, the most recently practised first', async () => {
       const letters = ['b', 'c', 'd', 'e', 'f'];
       serve({
         sessions: [
@@ -1251,8 +1251,8 @@ describe('StatsPage, after QA', () => {
       });
       await openStats();
       expect(neglected().map((row) => within(row).getByRole('link').textContent)).toEqual([
-        'Loop f',
-        'Loop e',
+        'Loop b',
+        'Loop c',
         'Loop d',
       ]);
     });

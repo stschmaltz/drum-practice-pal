@@ -86,7 +86,9 @@ describe('neglectedLoops', () => {
     expect(found([session('a', at(2026, 11, 20, 0))], [loop('a')], early)).toEqual([]);
   });
 
-  it('lists the longest left first, three at most', () => {
+  // 17 QA (after fix round 1), issue 1: longest left first, loops dropped
+  // months ago held the block for good and one that slipped last week never showed.
+  it('lists the most recently practised first, three at most', () => {
     expect(NEGLECTED_SHOWN).toBe(3);
     const loops = ['a', 'b', 'c', 'd'].map((id) => loop(id));
     const sessions = [
@@ -96,9 +98,65 @@ describe('neglectedLoops', () => {
       session('d', daysAgo(9)),
     ];
     expect(found(sessions, loops)).toEqual([
-      ['b', 40],
-      ['c', 15],
+      ['a', 8],
       ['d', 9],
+      ['c', 15],
+    ]);
+  });
+
+  it('keeps a loop that slipped last week ahead of three abandoned months ago', () => {
+    const loops = ['old1', 'old2', 'old3', 'slipped'].map((id) => loop(id));
+    const sessions = [
+      session('old1', daysAgo(330)),
+      session('old2', daysAgo(325)),
+      session('old3', daysAgo(200)),
+      session('slipped', daysAgo(9)),
+    ];
+    expect(found(sessions, loops)).toEqual([
+      ['slipped', 9],
+      ['old3', 200],
+      ['old2', 325],
+    ]);
+  });
+
+  it('orders two loops left on the same day by the later session', () => {
+    const sessions = [session('a', daysAgo(9, 8)), session('b', daysAgo(9, 20))];
+    expect(found(sessions, [loop('a'), loop('b')])).toEqual([
+      ['b', 9],
+      ['a', 9],
+    ]);
+  });
+
+  it('puts loops never practised after the practised ones, the most recently saved first', () => {
+    const loops = [
+      loop('never-old', { created_at: daysAgo(60).toISOString() }),
+      loop('never-new', { created_at: daysAgo(8).toISOString() }),
+      loop('practised'),
+    ];
+    // Practised long before either was saved, and still ahead of them.
+    expect(found([session('practised', daysAgo(90))], loops)).toEqual([
+      ['practised', 90],
+      ['never-new', 8],
+      ['never-old', 60],
+    ]);
+  });
+
+  it('gives a loop never practised no place while three practised ones qualify', () => {
+    const loops = [
+      loop('never', { created_at: daysAgo(7).toISOString() }),
+      loop('a'),
+      loop('b'),
+      loop('c'),
+    ];
+    const sessions = [
+      session('a', daysAgo(100)),
+      session('b', daysAgo(50)),
+      session('c', daysAgo(20)),
+    ];
+    expect(found(sessions, loops)).toEqual([
+      ['c', 20],
+      ['b', 50],
+      ['a', 100],
     ]);
   });
 

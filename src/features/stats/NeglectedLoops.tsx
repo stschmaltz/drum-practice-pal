@@ -7,9 +7,10 @@ import type { StatsData } from './statsData';
 
 /**
  * "Not practised lately", under Loop progress: up to three active loops left
- * a week or more, the longest first, each with its song, how long it has
- * been, and its name as the way to its practice screen. Nothing at all when
- * no loop has been left that long: the page doesn't say "all caught up".
+ * a week or more, the most recently practised first (`neglectedLoops`), each
+ * with its song, how long it has been, and its name as the way to its
+ * practice screen. Nothing at all when no loop has been left that long: the
+ * page doesn't say "all caught up".
  */
 export function NeglectedLoops({ sessions, loops, now }: StatsData & { now: Date }) {
   const headingId = useId();

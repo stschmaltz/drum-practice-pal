@@ -480,3 +480,69 @@ Updated: the stats modules' list (`heatmap.ts`, `statLabels.ts`, `STATS_RANGE_HE
 - Before: `npm run check` green (135 files, 5005 passed, 2 skipped); e2e 14 of 14.
 - After: `npm run check` green (137 files, 5029 passed, 2 skipped: 2 more in the stats folder, the rest are the per-file checks in `tests/unit/designTokens.test.ts` running over the new files); e2e 14 of 14.
 - e2e was `stats.spec.ts` (6 tests) and `design.spec.ts` "the library, the song page with its loops…" at phone and desktop, `E2E_PORT=4183`, this worktree's stack on 54421, on a fresh build each time (no preview server was up). Tablet and the full suite were not run, by instruction; the database was not seeded or reset.
+
+## Review
+
+Read: AGENTS.md, `docs/review-checklist.md`, the unit's section of the plan, this note, and every line of `git diff origin/main...HEAD` under `src`, `tests` and `scripts`.
+
+### Inventory
+
+The unit adds no write, no effect, no timer, no listener and no migration. What holds state or reads it:
+
+- **The period** (`useStatsRange` in `StatsPage.tsx`): `?range=` in the URL, validated by `statsRangeFrom`, set with `replace`, other parameters kept. Only the totals and "Where the time went" read it.
+- **The open chart** (`chartOf` in `LoopProgressList`): one loop id or none. Rows are keyed by loop id, so a refetch redraws an open chart in place; an id whose loop has gone, or whose row "Show fewer" hides, matches nothing.
+- **"Show all n loops"** (`showingAll` in `LoopProgressList`) and **"Show all badges"** (`BadgeSection`): one button each whose words change, so focus never moves; each is drawn only while there is something behind it.
+- **The two reads** (`useAllSessions`, `usePracticeLoops`, both Unit 16's): offline with nothing cached, a failed first read (`isLoadingError`, retrying only the list that failed), loading until both are in, the one empty state, then the page. A failed later read keeps the page. A loop deleted elsewhere takes its row, chart and neglected entry; its sessions, while still cached, count under "Other" and the record loses its name.
+- **Derived in render, pure:** `totals.ts`, `heatmap.ts`, `loopProgress.ts`, `songTime.ts`, `records.ts`, `neglected.ts`, `badges.ts` (`nextUpBadges`), `speedChartLayout.ts`, `chartScale.ts`, `dateLabels.ts`, `statLabels.ts`, each taking `now` or a locale where it needs one.
+- **Outside the page:** `scripts/seed.ts` (the demo user's sessions), `tests/e2e/practicePage.ts` (`addLoopLeftAlone`), `tests/e2e/stats.spec.ts`, `tests/e2e/design.spec.ts`; one import line each in `SessionComplete.tsx`, `LoopPracticePage.tsx` and `StreakBadge.tsx`; one class constant in `SongOverviewPage.tsx`.
+
+### Behaviour pass
+
+- **Interleavings.** No async window is added. Each of the reads' states has a component test from the Test stage (a read landing with a chart open, a loop leaving with its chart open, the lists out of step, a failed read over data, a failed first read and its retry). Nothing is done once on cached data and nothing is latched.
+- **Gates.** "Show all" at the boundary (six rows none, seven one), "Show all badges" (three left none, four one), the change lines (`periodBeforeHasPractice`), Records (`hasRecords`), the best week (two practised days), the neglected block (none: no heading): each one predicate, each tested at its edge.
+- **Gestures.** Buttons, links and radios only.
+- **Round trips, rounded values compared.** Nothing is written back. Every comparison is made on what is shown: play time in whole minutes with "<1 min" against "0 min" (`totalChange`), a day's speed and a row's change in whole percents (`ratioToPercent`), neglect in calendar days (`daysBetween`), the sparkline's green dot on the shown percent. Orders that use the unrounded value (songs by seconds, a best day by a second) only break ties between equal labels.
+- **Validated paths.** `?range=` falls back to the week; ids in links come from rows through `loopPracticePath` and `songPath`; no text from a URL or an error is drawn (`failureCopy`).
+- **What is drawn.** Tokens only (the token test reads the new files); every chart an `img` with a summary and a hidden table, the sparkline and bars hidden beside their numbers; 44 px targets and focus rings measured by `design.spec.ts` with a chart open and every badge shown; a 100-character loop name and a 300-character title measured for overflow in `stats.spec.ts`.
+
+### Findings
+
+1. **Fixed (product, decided). "Not practised lately" named the longest abandoned first** (`src/features/stats/neglected.ts`, the sort; QA after fix round 1, issue 1). Three loops dropped months ago held the block for good and one that slipped last week never showed. It is now the most recently practised first among the loops left 7 calendar days or more, then loops never practised (saved 7 or more days ago) by the most recently saved, three at most; two loops left on the same day go by the later session. Tests first: five cases in `neglected.test.ts` and two in `StatsPage.test.tsx` failed on the old order (7 failed, 72 passed), then passed. `stats.spec.ts`'s `expectNeglected` works the new order out from the rows, and a new case, "the loop that slipped last week is named before ones dropped months ago, three at most", has four left loops (300, 200, 100 and 9 days) and one practised yesterday. Plan, AGENTS.md and the component's comment say the new rule; the Carried forward line is gone.
+2. **Fixed (hygiene, test data). The seed's only session in "the month before" sat on the period's edge** (`scripts/seed.ts`, "Whole song", `daysAgo: 30`). `stats.spec.ts` expects the seed user to have practice in the 30 days before the last 30. Seed times are `Date.now() - n * 24 h`, so that session is on calendar day 30 only while no change of clocks lies between: seeded in the last hour of a day within a month after the clocks go back, it falls on day 29, inside the month, and the spec fails on `before.days`. Not in CI (UTC), but on a laptop in a zone with summer time, for an hour a night, a month a year. Moved to `daysAgo: 32`; the stack was re-seeded. Checklist section 7 gains the class.
+
+No other defect was confirmed. Looked at and left, each with why:
+
+- `StatsPage.tsx`, the load error: `failureCopy(sessions.error ?? loops.error)` reads the sessions read's error first, also when only the loops read failed to load and the sessions read holds an older background failure. From Unit 16, both are almost always the same kind. Carried forward.
+- `Stats` takes `now` when it renders; a page left open past midnight keeps yesterday's "today" until a press or a refetch redraws it. From Unit 16. Carried forward.
+- `heatmapWeekCount` and `bestDayIndex` spread a list into `Math.min` / `Math.max`: a call with more than about 120,000 arguments throws. That is some decades of sessions for one user; left.
+- `loopProgress` filters every session once per loop on each render. With 30 loops and a year of sessions QA measured nothing; left.
+- "Records" would be a heading with nothing under it for a user whose two practice days hold only sessions of 0 seconds. The database allows 0, the app never logs under 30 seconds; left.
+- A chart open on the seventh row comes back open when "Show all" is pressed again after "Show fewer" (the id is kept). Harmless; left.
+
+### The two confirmations
+
+**(a) PR #31 and Session complete.** Nothing in this unit reads `SessionComplete.tsx`, `sessionSummary.ts` or the tracker's `completed`. The Stats code imports nothing from `src/features/practice` but types and `useAllSessions`. What this unit changed in files that hold Session complete:
+
+- `src/features/practice/SessionComplete.tsx`: one import line (`daysLabel` now from `statLabels`). If #31 deletes the file, the merge reports modify/delete; take the delete.
+- `src/features/song/LoopPracticePage.tsx`: one import line (`clockLabel` now from `statLabels`), four lines below the `SessionComplete` import. Merges cleanly with #31 as pushed.
+- `tests/e2e/design.spec.ts`: the Stats steps were added straight after the existing "Keep going" press on the Session complete sheet. A removal of that press touches the neighbouring lines and will conflict; keep both sides' intent (drop the press, keep `addLoopLeftAlone` and the Stats steps, which need only that a session was logged).
+- `tests/e2e/practicePage.ts`: `addLoopLeftAlone` was added just above the comment that names Session complete and the `sessionComplete` locator; the same kind of neighbouring edit.
+- `AGENTS.md`, `docs/plan.md`: both branches edit them.
+
+As pushed today (`origin/practice-notes`, two commits: saving a loop stays put; mute all) #31 does not remove the sheet yet. A trial merge of it into this branch (`git merge-tree`) conflicts in `AGENTS.md` only; `docs/plan.md` and `LoopPracticePage.tsx` merge by themselves. One thing to check after either merge: anything #31 adds that imports `daysLabel` from `stats/streak` or `clockLabel` from `stats/totals` must import from `stats/statLabels`, where this unit moved them; `tsc` says so at once.
+
+**(b) The seed and CI's e2e.** It cannot fail there. The e2e job seeds each shard's own stack and then runs the suite; only `stats.spec.ts` reads the seed user, and it works every expected number out from the rows it reads, not from the seed's source. What it assumes about the seed: at least one session; practice in the week before (sessions 8, 9, 10 and 12 days back) and in the month before (now 32 days back, see finding 2; CI is in UTC, where 30 was safe too); five songs or fewer with time; a session's loop always in the list; "Single bar" neglected (19 days, against a limit of 7). None is near an edge. The fractional sessions (`2.99`, `0.02`, `0.03` days) can fall either side of a midnight, and the spec groups by the same local days as the page, so either way agrees. The database accepts them: none starts in the future, none is longer than a day. `tests/db/seed.test.ts` checks songs and loops, not session counts, and the loop "Single bar" is unchanged. The job's order (seed, then suite) is as before.
+
+### Checklist and AGENTS.md
+
+- `docs/review-checklist.md`, section 7: fixture times in 24-hour steps near a period's boundary (finding 2).
+- AGENTS.md: the neglected rule's order in the Stats bullets.
+
+### Open issues
+
+Carried forward under Unit 17 in `docs/plan.md`: the load error's reason and the page's `now` (both Unit 16's), and that #31 conflicts in `AGENTS.md`. QA's remaining minor and cosmetic issues were already there.
+
+### Results
+
+- `npm run check`: green, 137 files and 5033 tests passed, 2 skipped (5029 before: the four added cases in `neglected.test.ts`).
+- e2e at phone, tablet and desktop, on a fresh build (`E2E_PORT=4183`, this worktree's stack on 54421, re-seeded): `stats.spec.ts` 21 of 21 (7 tests x 3, one new); `design.spec.ts` "the library, the song page with its loops…" 3 of 3. The full suite and `npm run test:db` were not run, by instruction.

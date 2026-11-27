@@ -382,8 +382,9 @@ async function expectDayCounts(page: Page, sessions: Session[]) {
 
 /**
  * "Not practised lately": the active loops whose last session (or, never
- * practised, whose saving) was seven calendar days ago or more, the longest
- * left first, three at most; no block at all when there is none.
+ * practised, whose saving) was seven calendar days ago or more: the most
+ * recently practised first, then those never practised by the most recently
+ * saved, three at most; no block at all when there is none.
  */
 async function expectNeglected(page: Page, sessions: Session[], loops: LoopRow[]) {
   const left = loops
@@ -391,15 +392,23 @@ async function expectNeglected(page: Page, sessions: Session[], loops: LoopRow[]
     .map((loop) => {
       const own = sessions.filter((each) => each.loop_id === loop.id);
       const last =
-        own.length > 0 ? Math.max(...own.map((each) => dayNumber(each.started_at))) : null;
+        own.length > 0 ? Math.max(...own.map((each) => Date.parse(each.started_at))) : null;
+      // Since when it has been left alone: its latest session, or its saving.
+      const since = last ?? Date.parse(loop.created_at);
       return {
         loop,
         practised: last !== null,
-        days: today() - (last ?? dayNumber(loop.created_at)),
+        since,
+        days: today() - dayNumber(new Date(since).toISOString()),
       };
     })
     .filter((each) => each.days >= 7)
-    .sort((a, b) => b.days - a.days || a.loop.id.localeCompare(b.loop.id))
+    .sort(
+      (a, b) =>
+        Number(!a.practised) - Number(!b.practised) ||
+        b.since - a.since ||
+        a.loop.id.localeCompare(b.loop.id),
+    )
     .slice(0, 3);
 
   const items = page.getByTestId('neglected-loop');
@@ -892,6 +901,43 @@ test('seven songs and loops: five songs then Other, six loops then "Show all", o
   // A song's bar goes to the song.
   await page.getByRole('link', { name: 'Song A' }).click();
   await expect(page).toHaveURL(/\/songs\/[0-9a-f-]{36}$/);
+});
+
+// 17 QA (after fix round 1), issue 1: longest left first, loops dropped months
+// ago held "Not practised lately" for good and one left last week never showed.
+test('the loop that slipped last week is named before ones dropped months ago, three at most', async ({
+  page,
+  user,
+}) => {
+  const song = await addSong(user, 'Left Song');
+  // In the order they were saved, which is not the order they are named in.
+  const left: [name: string, daysBack: number][] = [
+    ['Dropped in winter', 300],
+    ['Slipped last week', 9],
+    ['Dropped in spring', 200],
+    ['Dropped in summer', 100],
+    ['Still going', 1],
+  ];
+  for (const [name, daysBack] of left) {
+    await addSession(user, await addLoop(user, song, name), noonOf(daysBack), 300, 0.7, 5);
+  }
+  const sessions = await sessionsOf(user);
+  expect(sessions).toHaveLength(left.length);
+
+  await signIn(page, user, '/stats');
+  const items = page.getByTestId('neglected-loop');
+  await expect(items.getByRole('link')).toHaveText([
+    'Slipped last week',
+    'Dropped in summer',
+    'Dropped in spring',
+  ]);
+  await expect(items.getByTestId('neglected-when')).toHaveText([
+    'last practised 9 days ago',
+    'last practised 100 days ago',
+    'last practised 200 days ago',
+  ]);
+  // And by the rows, worked out here.
+  await expectNeglected(page, sessions, await loopsWithSongOf(user));
 });
 
 interface DrawnText {
