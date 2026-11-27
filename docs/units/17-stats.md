@@ -173,3 +173,94 @@ None that changes a number. Three things for QA and Review to judge, none fixed 
 
 - `npm run check`: green, 4917 passed and 2 skipped (4841 before this stage: 76 added).
 - e2e, phone, tablet and desktop: `stats.spec.ts` 15 of 15 passed (5 tests x 3), `design.spec.ts` "the library, the song page with its loops…" 3 of 3.
+
+## QA
+
+Run on the dev server (`npm run dev -- --port 5183 --strictPort`) against this worktree's stack (API 54421), Chromium through Playwright, at 390x844, 820x1180, 1440x900 and 844x390. The offline cold start was run on the build with its service worker (`npm run build -- --mode development`, `vite preview` on 4183). Users: the seed user, and five throwaway users built by a node script over `scripts/supabase-admin.ts` and deleted afterwards (one session ever; nothing; one 45-second session; 12 songs and 30 loops with 90 sessions, two 100-character loop names, a 300-character and a 130-character song title; a year with 434 sessions, one loop practised on 336 days, every badge earned). The stack is back to its three users and the seed's 20 sessions.
+
+Screenshots: `docs/units/17-shots/qa-<user>-<size>-<state>.png` (`week`, `month`, `all`, `open` for a chart open with every loop and badge shown, `chart` for the chart alone; `qa-year-*-hardbit-chart.png` for the 336-day chart; `qa-seed-*-offline*.png`, `qa-seed-phone-slow-loading.png`, `qa-seed-phone-load-error.png`, `qa-year-desktop-de-locale.png`). Full-page shots draw the phone's tab bar part-way down the page; that is the capture, not the app.
+
+### Acceptance
+
+| Criterion                                                              | Result                                                                                                                                                              |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| With the seed user every number can be checked against their sessions  | **Pass.** Checked by hand from the rows (below), and `stats.spec.ts` passes 15 of 15 after this stage's change                                                      |
+| A day of ten minutes at 80% with a one-minute try at 100% shows at 80% | **Pass.** Seed, Nov 24: 600 s at 80% and 60 s at 100%; the chart's point and table row say "80%, 11 min", the row says "60% → 85%"                                  |
+| A new user still sees the one empty state                              | **Pass** at three sizes: one card, "No practice yet…", "Go to Songs". No zeros, charts or badges                                                                    |
+| Nothing overflows at 390 px                                            | **Pass.** No sideways scroll and no element past `main`'s edges for any user, period or open state, at 390, 820, 1440 and 844x390; long names wrap, titles truncate |
+
+### The numbers by hand (seed user, Nov 27)
+
+From the 20 rows, grouped by local day, with none of the app's code:
+
+- Week (Nov 21 to 27): 2,460 s = 41 min, 5 days, 108 passes, 1 mastered. The week before (Nov 14 to 20): 33 min, 4 days, 70 passes, 0. Page: "41 min, 8 min more", "5, 1 more", "108, 38 more", "1, 1 more". Agrees.
+- Month: 7,440 s = 2 h 4 min, 17 days, 267 passes; the 30 days before: 5 min, 1 day, 1 pass. Page: "1 h 59 min more", "16 more", "266 more". Agrees. All time: 2 h 9 min, 18 days, 268. Agrees.
+- Where the time went, week: Main groove 420 + 660 + 480 + 360 = 1,920 s, "Groove 120, 32 min"; Tempo Change 240 + 300 = 9 min. Agrees.
+- Last two weeks: 10, 5, 12, 6, 7, 11, 4, 8, 11 = 74 min over 9 days. Agrees with the bars, the caption and the table.
+- Loop progress: Main groove 5,340 s = 1 h 29 min over 11 days, 60% first and 85% last; Across the tempo drop 19 min, 4 days, 60 to 75; Whole song 21 min, 4 days, 90 to 100. Agrees.
+- Practice days: 18 of 180; the week of Mon Nov 23: 660 + 240 + 480 + 660 = 34 min over 4 days. Agrees.
+- Records: streak Nov 24 to 27 (4 days), most in a day Nov 18 (720 s), longest session Main groove Nov 18 (720 s). Agrees.
+- The year user and the 30-loop user were cross-checked the same way for the totals and their change lines in all three periods (for instance 6,683 min = "111 h 23 min", 13,503 passes; 328 against 242 min = "1 h 26 min more"). All agree.
+
+### QA focus
+
+- **One session ever:** every section draws and nothing breaks; "80% · 5 min · 1 day" with no arrow, a one-point chart. See issues 7 and 2.
+- **30 loops:** six rows, "Show all 30 loops", then a 6,056 px page on a phone, behind the button. Rows that got slower say "95% → 85%, down 10" in muted text. Fine.
+- **12 songs:** five and "Other (7 songs)". See issue 9.
+- **A year of history:** the totals, heatmap (169 of 180 days), records (54-day streak) and badges (all eleven in a line, no "Next up", no button) are right and read well. The 336-day chart does not: issue 1. A 39-day chart on the same user reads well (`qa-year-phone-chart.png`).
+- **Long names:** wrap or truncate everywhere, no overflow.
+- **Week, Month, All time:** the totals, their lines and "Where the time went" follow; All time has no lines; the URL keeps `?range=`, a bad value falls back to Week, and one Back leaves the page.
+- **Phone in landscape:** two columns never form (844 px is under `lg`), nothing overflows, the sidebar is in place.
+- **Offline:** with the page cached, a cold reload offline on the built app draws the same totals, with the offline banner over them, and the chart opens; in the dev server, leaving for Songs and coming back offline does the same. With nothing cached: "You're offline, and your stats haven't been opened on this device yet."
+- **Slow and failing reads:** a read held four seconds shows "Loading your stats…" and nothing else; a 500 with a message in its body shows "Couldn't load your stats. The server refused it…" (never the body's words) and "Try again" draws the page.
+- **Keyboard:** Tab order is Period, the song links, each loop's name and Chart button, "Show all badges"; every one has a visible ring. The arrows change the period. Enter and Space open and close a chart with focus kept on its button and `aria-expanded` right. No target in `main` is under 44 px with everything open (phone and desktop).
+- **Screen reader paths** (from the accessibility tree; no real screen reader was run): the three charts are `img`s named with their numbers; the daily chart and the speed chart each have their table (14 rows; a row per practice day with date, percent and minutes: 336 rows for the year loop); sparklines, song bars and icons are hidden; unearned badges say "not earned yet"; a mastered loop's link says "mastered". The heatmap has no table: issue 3.
+
+### The Test stage's three findings
+
+1. **The heatmap has no table of its days: confirmed.** No `table` in its figure; 180 `<title>`s inside the `img`, which the accessibility tree does not expose. A reader gets "Practised on 18 of the last 180 days" and the best week, no days. Issue 3.
+2. **A day under a minute reads three ways: confirmed, and it goes further than reported.** With one 45-second session ever (`qa-submin-phone-week.png`): Practice time "0 min" beside Days practised "1"; "Quick Song, 0 min" over a full-width bar; the bar labelled "<1"; "0 min over 1 of the last 14 days"; the loop row "70% · 0 min · 1 day"; "Best week: 0 min over 1 day"; Records "Most in one day 0 min" and "Longest session 0 min". Practice time has no change line while the other totals say "1 more than the week before". Issue 2.
+3. **Two number formats: confirmed.** In a de-DE browser (`qa-year-desktop-de-locale.png`): "1.184" over "56 fewer than the month before", "13.503" passes beside the badge "1,000 passes". The dates follow the locale too, inside English sentences: "Do., 21. Mai", "the week of 8. Juni". Issue 4.
+
+### Issues
+
+1. **Major. A loop practised on hundreds of days draws a band, not a chart.** Repro: a loop with a session on 336 of the last 365 days, speed 50% to 100%; Stats, "Chart of" that loop (`qa-year-{phone,tablet,desktop,landscape}-hardbit-chart.png`). Every point is a dot 7.7 px wide on a phone (12 px on a laptop) at 0.9 px (1.45 px) apart, so the dots merge into a band about three dots thick that hides the line; the percents ("65%", "72%"…) are drawn on the band; the first date carries its year ("Nov 28, 2025") and runs under the next ("Feb 14"), and "50%" and "52%" collide at the left. The table behind it is right (336 rows). The dots start to touch at about 40 practice days on a phone, where the chart still reads well; by a few hundred it does not. The date collision needs only a first day in an earlier year and a second dated point close after it (the gap allows 50 units, a date with its year is wider), so expect it each January on a loop begun in December with a dozen days; that case was read from the code, not run. This is the decision Build left to QA: the chart needs a rule for many days (no dots past a density, or the last three months with the start named), and the date gap has to allow for a label with a year.
+2. **Minor. Under a minute reads as "0 min" in eight places** (finding 2 above). Repro: one 45-second session today. "<1 min" wherever a time is shown and is not zero would settle all of them; the totals' change line would then follow.
+3. **Minor. The heatmap has no text alternative for its days** (finding 1). Against AGENTS.md's rule for charts. A table of the practised days would do.
+4. **Minor. Locale and English mixed** (finding 3). Pick one: the copy is English, so `'en'` for numbers and dates is the consistent choice.
+5. **Minor (product). Which period?** Only the totals and "Where the time went" follow the Period choice; the latter says so beside its heading. Loop progress, Practice days, Records and Badges never change with it and don't say so. With "Week" chosen, "60% → 85%, up 25 · 1 h 29 min · 11 days" reads as the week's gain. Repro: seed user, Week. Say "since Nov 3" in the row (it also answers "over how long?"), or give those headings the same quiet aside ("All time").
+6. **Minor (product). Two meanings of "week".** "Last 7 days" is rolling; "Best week" under the heatmap is a calendar week, Monday to Sunday. The seed user reads "41 min" for the week at the top and a best week of "34 min" lower down: the best is less than now. Say "best calendar week", or work the best out over rolling weeks.
+7. **Minor (product). Day one is mostly restatement.** After one session (`qa-one-phone-week.png`): three green "n more than the week before" lines against a week with nothing in it, three Records rows that are all that one session, "Practised on 1 of the last 180 days", "Best week: 5 min over 1 day". Nothing is wrong; little of it says anything. Leave the change line out when there is no history before this period, and hold Records and "Best week" until there are two practice days.
+8. **Minor. "Of the last 180 days"** is 26 weeks less the days of this week still to come, so it moves between 176 and 182 through the week. It reads as an arbitrary number. "In the last 26 weeks" is stable.
+9. **Minor. "Other" sets the scale.** With 12 songs "Other (7 songs), 8 h 43 min" is the full bar and the five named songs draw at under a quarter of the width, nearly alike (`qa-many-phone-top.png`, `qa-many-*-song-time.png`). Scale the bars to the longest named song, or show Other as a line of text.
+10. **Cosmetic, not fixed. Chart text grows with the chart.** On a laptop and a phone on its side the charts fill up to 576 px, so their labels are 20 to 25 px tall, larger than the page's text, while on a phone the heatmap's months and weekdays are about 9 px. Both are legible; they don't match the page.
+11. **Cosmetic, fixed. "days" alone on a line.** On a phone a row such as "85% → 75%, down 10 · 36 min · 3 days" broke before the last word. The play time and days are now one unbreakable piece (`LoopProgressList.tsx`), so the row breaks before "36 min" instead. Checked at 390 px with 30 rows (no overflow, the year row "89 h 48 min · 336 days" still fits); `npm run check` and `stats.spec.ts` pass.
+
+### As a product
+
+Shane asked for useful, fun and motivating, with enough detail to be interesting and the fluff gone. Section by section, read as a drummer between sessions:
+
+- **Totals:** useful at a glance. "41 min, 8 min more than the week before" is the best line on the page: a number and its direction. "Loop passes" is the weakest of the four: a count with no meaning of its own (a pass of one bar and of sixteen count the same). Not ambiguous, mild filler.
+- **Streak line:** good, one line, says both numbers.
+- **Where the time went:** answers "what have I neglected" only by omission: a song with no time in the period is absent, not named. For a learner with three songs it is clear at a glance; a line such as "Not touched this week: Rosanna" would answer the question the unit set. Period stated. See issue 9.
+- **Last two weeks:** the clearest graphic. Minutes on the bars, dates under them, today marked. The caption's second sentence ("Each bar is a day's minutes; today is the last") restates the picture and could go.
+- **Loop progress:** the heart of the page and the part that motivates: "60% → 85%, up 25" is what job 3 in `docs/product.md` asks for, and the name is one tap from the loop (two taps to sound). The sparkline is a shape beside its numbers. The chart under a row is good up to a few dozen days (issue 1). Ambiguous on period (issue 5). The sentence under the heading is long for something most users will never wonder about.
+- **Practice days:** Shane asked for it. With three weeks of history it is 160 empty squares and a corner of orange, and "18 of the last 180 days" reads as a low score for someone who started three weeks ago. With a year it is satisfying. The numbers under it are right; see issues 6 and 8.
+- **Records:** interesting once there is history ("54 days, Sep 18 – Nov 10"). For a newer user the longest streak is on the page three times (streak line, Records, the "Next up" badge's "4 of 7 days in a row"). All-time, unlabelled (issue 5).
+- **Badges:** much better than the wall. Earned ones in a line, three with progress, the rest behind a button. "Next up" gives a reason to come back tomorrow. With everything earned it is a quiet line of eleven, which is fine.
+
+What still reads as filler: Loop passes as a headline total; the daily chart's second caption sentence; Records on day one; the heatmap in a user's first weeks. What is missing for "what have I been neglecting": anything that names a neglected song or loop (a loop not practised for two weeks is only lower in the list). Neither blocks the unit as written.
+
+Order, chores and gates (`docs/product.md`): none. Nothing must be done on the page, nothing is asked of the user, the links are second ways in. A user with no loops, or with loops and no sessions, sees the empty state or the section's own waiting line.
+
+### Not run
+
+The full e2e suite and `npm run test:db`; Safari and Firefox; a real screen reader; a real phone. The dev server has no service worker, so offline there was "leave and come back"; the cold start was on the build.
+
+### Human check (from the plan)
+
+- Shane reviews the PR and the screenshots (`docs/units/17-shots/`: the `qa-` files and Build's `stats-*`).
+
+### Verdict
+
+**FAIL**, on one major issue: the speed chart for a loop with hundreds of practice days (issue 1), which the plan named as QA's to judge. Every acceptance criterion passes and every number checked is right. Issues 2 to 9 are minor and can go with the fix or be carried forward.

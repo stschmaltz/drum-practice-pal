@@ -114,7 +114,10 @@ function LoopProgressRow({
             </span>
             <span className="text-ink-muted" data-testid="loop-progress-time">
               {' '}
-              · {minutesLabel(progress.seconds)} · {daysLabel(days.length)}
+              · {/* One piece, so a narrow row never leaves "days" alone on a line (17 QA). */}
+              <span className="whitespace-nowrap">
+                {minutesLabel(progress.seconds)} · {daysLabel(days.length)}
+              </span>
             </span>
           </p>
         </div>
