@@ -7,6 +7,12 @@ on:
   # "Run workflow" on main runs everything again, the hosted migrations included.
   workflow_dispatch:
 
+env:
+  # The local stack's images from GitHub's registry, not public.ecr.aws: with
+  # several jobs pulling at once, ECR's anonymous per-IP limit refused a shard
+  # ("Data limit exceeded").
+  SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
+
 jobs:
   check:
     runs-on: ubuntu-latest
