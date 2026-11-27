@@ -235,6 +235,9 @@ async function chooseSegment(group: Locator, label: string): Promise<void> {
     .filter({ hasText: new RegExp(`^${label}$`) })
     .locator('input[type="radio"]');
   await expect(radio).toBeEnabled();
+  // Focus first, as a real click on the option does: specs that go on with the arrow keys
+  // (shortcuts.spec.ts) expect the chosen option to hold it.
+  await radio.focus();
   await radio.dispatchEvent('click');
 }
 
