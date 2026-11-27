@@ -5,7 +5,12 @@ import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
-import { focusRing, linkClass, sectionHeadingClass } from '@/components/styles';
+import {
+  focusRing,
+  linkClass,
+  sectionHeadingClass,
+  smallHeadingClass as statLabelClass,
+} from '@/components/styles';
 import type { PracticeLoop } from '@/features/loops/practiceList';
 import { usePracticeLoops } from '@/features/loops/useLoops';
 import type { PracticeSession } from '@/features/practice/sessions';
@@ -18,13 +23,16 @@ import { BadgeSection } from './BadgeSection';
 import { DailyMinutesChart, PracticeHeatmap } from './charts';
 import { dateSpan, shortDate, weekdayDate } from './dateLabels';
 import { LoopProgressList } from './LoopProgressList';
-import { practiceRecords } from './records';
-import { timeBySong } from './songTime';
+import { NeglectedLoops } from './NeglectedLoops';
+import { hasRecords, practiceRecords } from './records';
+import { barShare, songBarScale, timeBySong } from './songTime';
 import { currentStreak, daysLabel, longestStreak } from './streak';
 import {
+  countLabel,
   dailyPractice,
   hasPracticeHistory,
   minutesLabel,
+  periodBeforeHasPractice,
   practiceHeatmap,
   previousTotals,
   statsRangeFrom,
@@ -130,9 +138,13 @@ interface StatsData {
   loops: readonly PracticeLoop[];
 }
 
+/** Beside the heading of a section that doesn't follow the Period choice (17 QA issue 5). */
+const ALL_TIME = 'All time';
+
 function Stats({ sessions, loops }: StatsData) {
   const [range, setRange] = useStatsRange();
   const now = new Date();
+  const heatmapWeeks = practiceHeatmap(sessions, now);
 
   return (
     <>
@@ -161,24 +173,32 @@ function Stats({ sessions, loops }: StatsData) {
         </Section>
       </div>
 
-      <Section id="progress-heading" title="Loop progress">
+      <Section id="progress-heading" title="Loop progress" aside={ALL_TIME}>
         <p className="max-w-prose text-sm text-ink-muted">
           Each day counts at the speed you spent the most time at, so a quick try at full speed
           isn&apos;t a day at full speed.
         </p>
         <LoopProgressList sessions={sessions} loops={loops} now={now} />
+        <NeglectedLoops sessions={sessions} loops={loops} now={now} />
       </Section>
 
       <div className={pairClass}>
-        <Section id="heatmap-heading" title="Practice days">
-          <PracticeHeatmap weeks={practiceHeatmap(sessions, now)} now={now} />
+        <Section
+          id="heatmap-heading"
+          title="Practice days"
+          aside={`Last ${heatmapWeeks.length} weeks`}
+        >
+          <PracticeHeatmap weeks={heatmapWeeks} now={now} />
         </Section>
-        <Section id="records-heading" title="Records">
-          <Records sessions={sessions} loops={loops} now={now} />
-        </Section>
+        {/* Not on day one, when every record would be that day's one session (17 QA issue 7). */}
+        {hasRecords(sessions) && (
+          <Section id="records-heading" title="Records" aside={ALL_TIME}>
+            <Records sessions={sessions} loops={loops} now={now} />
+          </Section>
+        )}
       </div>
 
-      <Section id="badges-heading" title="Badges">
+      <Section id="badges-heading" title="Badges" aside={ALL_TIME}>
         <BadgeSection badges={badgeProgress({ sessions, loops })} />
       </Section>
     </>
@@ -193,48 +213,61 @@ function Section({
 }: {
   id: string;
   title: string;
-  /** Said quietly after the heading: what the section covers when that can change. */
+  /** Said quietly after the heading: the time the section covers, which the Period choice may or may not set. */
   aside?: string;
   children: ReactNode;
 }) {
   return (
     <section aria-labelledby={id} className="flex min-w-0 flex-col gap-3">
-      <h2 id={id} className={`${sectionHeadingClass} flex flex-wrap items-baseline gap-x-2`}>
+      {/* Inline, with a real space between: the heading reads "Records All time", not "RecordsAll time". */}
+      <h2 id={id} className={sectionHeadingClass}>
         {title}
-        {aside && <span className="text-sm font-normal text-ink-muted">{aside}</span>}
+        {aside && (
+          <>
+            {' '}
+            <span className="ml-1 text-sm font-normal tracking-normal whitespace-nowrap text-ink-muted">
+              {aside}
+            </span>
+          </>
+        )}
       </h2>
       {children}
     </section>
   );
 }
 
-const statLabelClass = 'text-xs font-semibold tracking-wider text-ink-muted uppercase';
 const statValueClass = 'text-2xl font-bold tabular-nums';
 
+/** No "Loop passes" (17 QA): a pass of one bar and of sixteen counted the same, so the total said nothing. */
 const TOTALS: { kind: keyof StatsTotals; label: string; testId: string }[] = [
   { kind: 'seconds', label: 'Practice time', testId: 'total-time' },
   { kind: 'days', label: 'Days practised', testId: 'total-days' },
-  { kind: 'passes', label: 'Loop passes', testId: 'total-passes' },
   { kind: 'mastered', label: 'Loops mastered', testId: 'total-mastered' },
 ];
 
-/** The period's four totals, each with how it compares with the period before (none for all time). */
+/**
+ * The period's three totals, each with how it compares with the period
+ * before: none for all time, and none while the period before has no practice
+ * to compare with.
+ */
 function Totals({ sessions, loops, range, now }: StatsData & { range: StatsRange; now: Date }) {
   const totals = statsTotals(sessions, loops, range, now);
   const before = previousTotals(sessions, loops, range, now);
   return (
     <dl
-      className="grid grid-cols-2 gap-x-6 gap-y-4 border-y border-line py-4 sm:grid-cols-4"
+      className="grid grid-cols-2 gap-x-6 gap-y-4 border-y border-line py-4 sm:grid-cols-3"
       data-testid="stats-totals"
     >
       {TOTALS.map(({ kind, label, testId }) => {
         const change =
-          before === null || range === 'all' ? null : totalChange(kind, totals, before, range);
+          before === null || range === 'all' || !periodBeforeHasPractice(before)
+            ? null
+            : totalChange(kind, totals, before, range);
         return (
           <div key={kind} className="flex flex-col gap-0.5">
             <dt className={statLabelClass}>{label}</dt>
             <dd className={statValueClass} data-testid={testId}>
-              {kind === 'seconds' ? minutesLabel(totals.seconds) : totals[kind].toLocaleString()}
+              {kind === 'seconds' ? minutesLabel(totals.seconds) : countLabel(totals[kind])}
             </dd>
             {change && (
               <dd
@@ -277,15 +310,17 @@ function SongTimeBars({
   range,
   now,
 }: StatsData & { range: StatsRange; now: Date }) {
-  const { songs, other } = timeBySong(sessions, loops, range, now);
-  const longest = Math.max(...songs.map((song) => song.seconds), other?.seconds ?? 0);
-  if (longest === 0) {
+  const time = timeBySong(sessions, loops, range, now);
+  const { songs, other } = time;
+  // The longest named song's time, never Other's (17 QA issue 9).
+  const scale = songBarScale(time);
+  if (scale === 0) {
     return <p className="text-ink-muted">No practice in this period.</p>;
   }
   return (
     <ol aria-label="Practice time by song" className="flex flex-col">
       {songs.map((song) => (
-        <SongTimeRow key={song.songId} seconds={song.seconds} longest={longest}>
+        <SongTimeRow key={song.songId} seconds={song.seconds} scale={scale}>
           <Link
             to={songPath(song.songId)}
             title={song.title}
@@ -296,7 +331,7 @@ function SongTimeBars({
         </SongTimeRow>
       ))}
       {other && (
-        <SongTimeRow seconds={other.seconds} longest={longest}>
+        <SongTimeRow seconds={other.seconds} scale={scale} muted>
           <span className="inline-flex min-h-touch items-center text-ink-soft">
             {other.songs > 0
               ? `Other (${other.songs} ${other.songs === 1 ? 'song' : 'songs'})`
@@ -310,14 +345,19 @@ function SongTimeBars({
 
 function SongTimeRow({
   seconds,
-  longest,
+  scale,
+  muted = false,
   children,
 }: {
   seconds: number;
-  /** The longest bar's play time: the full width. */
-  longest: number;
+  /** The play time a full-width bar stands for. */
+  scale: number;
+  /** "Other": several songs together, drawn apart from the songs and never wider than the widest. */
+  muted?: boolean;
   children: ReactNode;
 }) {
+  // To a hundredth of a percent, so 540 of 600 is "90%", not 90.00000000000001.
+  const width = Math.round(barShare(seconds, scale) * 10_000) / 100;
   return (
     <li className="flex flex-col pb-2" data-testid="song-time">
       <div className="flex items-center justify-between gap-3">
@@ -326,20 +366,23 @@ function SongTimeRow({
       </div>
       <div aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-raised">
         <div
-          className="h-full min-w-1 rounded-full bg-selected-line"
-          style={{ width: `${(seconds / longest) * 100}%` }}
+          className={`h-full min-w-1 rounded-full ${muted ? 'bg-ink-muted' : 'bg-selected-line'}`}
+          style={{ width: `${width}%` }}
+          data-testid="song-bar"
         />
       </div>
     </li>
   );
 }
 
-/** The bests: longest streak, most practice in a day, longest single session, each with when. */
+/**
+ * The bests: longest streak, most practice in a day, longest single session,
+ * each with when. Drawn once `hasRecords` says there is more than one day to
+ * choose between.
+ */
 function Records({ sessions, loops, now }: StatsData & { now: Date }) {
   const { longestStreak: streak, bestDay, longestSession } = practiceRecords(sessions);
-  if (!streak || !bestDay || !longestSession) {
-    return <p className="text-ink-muted">Records start with your first session.</p>;
-  }
+  if (!streak || !bestDay || !longestSession) return null;
   const loopName = loops.find((loop) => loop.id === longestSession.loopId)?.name;
   const sessionDay = shortDate(longestSession.startedAt, now);
   return (

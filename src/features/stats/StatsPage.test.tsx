@@ -72,12 +72,14 @@ describe('StatsPage', () => {
     const user = renderStats();
     await screen.findByTestId('stats-totals');
     expect(screen.getByRole('heading', { name: 'Last 7 days' })).toBeVisible();
-    expect([
-      text('total-time'),
-      text('total-days'),
-      text('total-passes'),
-      text('total-mastered'),
-    ]).toEqual(['15 min', '2', '30', '1']);
+    expect([text('total-time'), text('total-days'), text('total-mastered')]).toEqual([
+      '15 min',
+      '2',
+      '1',
+    ]);
+    // 17 QA: "Loop passes" was a count with no meaning of its own. Three totals, no fourth.
+    expect(within(screen.getByTestId('stats-totals')).getAllByRole('term')).toHaveLength(3);
+    expect(screen.queryByText('Loop passes')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('radio', { name: 'Month' }));
     expect(screen.getByRole('heading', { name: 'Last 30 days' })).toBeVisible();
@@ -94,33 +96,72 @@ describe('StatsPage', () => {
     renderStats('/stats?range=all');
     await screen.findByTestId('stats-totals');
     expect(screen.getByRole('radio', { name: 'All time' })).toBeChecked();
-    expect(text('total-passes')).toBe('70');
+    expect(text('total-time')).toBe('35 min');
   });
 
   describe('against the period before', () => {
+    const changeLines = () =>
+      ['time', 'days', 'mastered'].map(
+        (total) => screen.queryByTestId(`total-${total}-change`)?.textContent ?? null,
+      );
+
     it('says how each total of the week and the month compares, and nothing for all time', async () => {
-      // The week before this one: 5 minutes on one day, 50 passes.
-      serve({ sessions: [...sessions, session(daysAgo(9), 300, 0.6, 50)], loops });
+      // The week before this one: 5 minutes on one day. Forty days ago: 2 minutes.
+      serve({
+        sessions: [...sessions, session(daysAgo(9), 300, 0.6, 50), session(daysAgo(40), 120, 0.6)],
+        loops,
+      });
       const user = renderStats();
       await screen.findByTestId('stats-totals');
-      expect(text('total-time-change')).toBe('10 min more than the week before');
-      expect(text('total-days-change')).toBe('1 more than the week before');
-      expect(text('total-passes-change')).toBe('20 fewer than the week before');
-      expect(text('total-mastered-change')).toBe('1 more than the week before');
+      expect(changeLines()).toEqual([
+        '10 min more than the week before',
+        '1 more than the week before',
+        '1 more than the week before',
+      ]);
 
       await user.click(screen.getByRole('radio', { name: 'Month' }));
-      // Nothing in the thirty days before these thirty.
-      expect(text('total-time-change')).toBe('40 min more than the month before');
-      expect(text('total-passes-change')).toBe('120 more than the month before');
+      expect(changeLines()).toEqual([
+        '38 min more than the month before',
+        '3 more than the month before',
+        '1 more than the month before',
+      ]);
 
       await user.click(screen.getByRole('radio', { name: 'All time' }));
-      expect(text('total-time')).toBe('40 min');
-      expect(screen.queryByTestId('total-time-change')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('total-mastered-change')).not.toBeInTheDocument();
+      expect(text('total-time')).toBe('42 min');
+      expect(changeLines()).toEqual([null, null, null]);
+    });
+
+    // 17 QA issue 7: "n more than the week before" against a week with nothing in it.
+    it('has no line under any total when the period before has no practice at all', async () => {
+      // Twenty days ago is before the week before, and inside the month.
+      serve();
+      const user = renderStats();
+      await screen.findByTestId('stats-totals');
+      expect(text('total-time')).toBe('15 min');
+      expect(changeLines()).toEqual([null, null, null]);
+
+      await user.click(screen.getByRole('radio', { name: 'Month' }));
+      expect(text('total-time')).toBe('35 min');
+      expect(changeLines()).toEqual([null, null, null]);
+    });
+
+    it('still says a week with nothing in it is less than a week that had practice', async () => {
+      serve({ sessions: [session(daysAgo(9), 300, 0.6, 50)], loops: [] });
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      expect(text('total-time')).toBe('0 min');
+      expect(changeLines()).toEqual([
+        '5 min less than the week before',
+        '1 fewer than the week before',
+        null,
+      ]);
     });
 
     it('leaves out the line for a total that is nothing in both periods', async () => {
-      serve({ sessions, loops: [practiceLoop(LOOP, 'Groove', GROOVE_SONG)] });
+      serve({
+        sessions: [...sessions, session(daysAgo(9), 300, 0.6)],
+        loops: [practiceLoop(LOOP, 'Groove', GROOVE_SONG)],
+      });
       renderStats();
       await screen.findByTestId('stats-totals');
       expect(text('total-mastered')).toBe('0');
@@ -162,14 +203,84 @@ describe('StatsPage', () => {
     expect(
       await screen.findByRole('img', { name: /Minutes practised per day, last 14 days: 15 min/ }),
     ).toBeVisible();
-    expect(text('daily-summary')).toMatch(/^15 min over 2 of the last 14 days\./);
+    // The whole caption: nothing after it that only says what a bar chart is (17 QA).
+    expect(text('daily-summary')).toBe('15 min over 2 of the last 14 days.');
     expect(screen.getByRole('table', { name: 'Minutes practised per day' })).toBeInTheDocument();
 
-    expect(screen.getByRole('img', { name: /Practised on 3 of the last \d+ days/ })).toBeVisible();
-    expect(text('heatmap-days')).toMatch(/^Practised on 3 of the last \d+ days\.$/);
+    // Three weeks of history: the map is its shortest, twelve weeks, and counts in weeks.
+    expect(
+      screen.getByRole('img', { name: 'Practised on 3 days in the last 12 weeks.' }),
+    ).toBeVisible();
+    expect(text('heatmap-days')).toBe('Practised on 3 days in the last 12 weeks.');
     // 20 minutes three weeks ago beats this week's 15 (or less, when a Monday falls between).
-    expect(text('heatmap-best-week')).toMatch(/Best week: 20 min over 1 day, the week of /);
-    expect(screen.getAllByTestId('heatmap-month').length).toBeGreaterThanOrEqual(5);
+    expect(text('heatmap-best-week')).toMatch(
+      /Best calendar week: 20 min over 1 day, the week of .+\.$/,
+    );
+    expect(screen.getAllByTestId('heatmap-month').length).toBeGreaterThanOrEqual(2);
+  });
+
+  // 17 QA issue 5: which sections follow the Period choice, and what the others cover.
+  it('says beside each heading what the section covers', async () => {
+    serve();
+    const user = renderStats();
+    await screen.findByTestId('stats-totals');
+    const headings = () =>
+      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
+    expect(headings()).toEqual([
+      'Last 7 days',
+      'Where the time went Last 7 days',
+      'Last two weeks',
+      'Loop progress All time',
+      'Practice days Last 12 weeks',
+      'Records All time',
+      'Badges All time',
+    ]);
+    await user.click(screen.getByRole('radio', { name: 'Month' }));
+    // Only the first two follow the choice.
+    expect(headings()).toEqual([
+      'Last 30 days',
+      'Where the time went Last 30 days',
+      'Last two weeks',
+      'Loop progress All time',
+      'Practice days Last 12 weeks',
+      'Records All time',
+      'Badges All time',
+    ]);
+  });
+
+  it('spans the practice days from the first practice week, up to 26 weeks', async () => {
+    serve({ sessions: [...sessions, session(daysAgo(400), 600, 0.5)], loops });
+    renderStats();
+    await screen.findByTestId('stats-totals');
+    expect(screen.getByRole('heading', { name: 'Practice days Last 26 weeks' })).toBeVisible();
+    expect(text('heatmap-days')).toBe('Practised on 3 days in the last 26 weeks.');
+  });
+
+  // 17 QA issue 3: the map's days were only `<title>`s inside the `img`.
+  it('gives the practice days as a table by week: week starting, days practised, minutes', async () => {
+    serve();
+    renderStats();
+    await screen.findByTestId('stats-totals');
+    const table = screen.getByRole('table', { name: 'Practice days by week' });
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((cell) => cell.textContent),
+    ).toEqual(['Week starting', 'Days practised', 'Practice']);
+    const rows = within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => Array.from(row.querySelectorAll('th, td')).map((cell) => cell.textContent));
+    // A row a week, not a row a day.
+    expect(rows).toHaveLength(12);
+    expect(rows.every(([week]) => /\d/.test(week ?? ''))).toBe(true);
+    const practised = rows.filter(([, days]) => days !== '0');
+    // Today and yesterday are one week or two (a Monday between); twenty days ago is another.
+    expect(practised.map(([, days]) => Number(days)).reduce((a, b) => a + b, 0)).toBe(3);
+    expect(practised.map(([, , minutes]) => minutes)).toContain('20 min');
+    expect(
+      rows.filter(([, days]) => days === '0').every(([, , minutes]) => minutes === '0 min'),
+    ).toBe(true);
   });
 
   // 16 QA issue 6: practised days on the brand, empty ones a quiet cell, and today ringed.
@@ -375,6 +486,52 @@ describe('StatsPage', () => {
     expect(text('record-session-when')).toMatch(/^Groove, /);
   });
 
+  // 17 QA issue 9: "Other" set the scale, and the five named songs drew as slivers.
+  describe('the song bars', () => {
+    const bar = (row: HTMLElement) => row.querySelector<HTMLElement>('[data-testid="song-bar"]')!;
+    const rows = () => screen.getAllByTestId('song-time');
+    const manySongs = (seconds: number[]) => {
+      const songs = seconds.map((_, index) => ({
+        loop: `4000000${index}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+        song: { id: `song-${index}`, title: `Song ${index}` },
+      }));
+      return {
+        sessions: songs.map(({ loop }, index) =>
+          session(daysAgo(1), seconds[index] ?? 0, 0.8, 1, loop),
+        ),
+        loops: songs.map(({ loop, song }) => practiceLoop(loop, 'Loop', song)),
+      };
+    };
+
+    it('are scaled to the named song with the most time, with Other muted and no wider', async () => {
+      // Five named songs of 10 to 6 minutes; five more of 5 minutes each are Other: 25 minutes.
+      serve(manySongs([600, 540, 480, 420, 360, 300, 300, 300, 300, 300]));
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      const [first, second, , , fifth, other] = rows();
+      expect(rows()).toHaveLength(6);
+      expect(bar(first!).style.width).toBe('100%');
+      expect(bar(second!).style.width).toBe('90%');
+      expect(bar(fifth!).style.width).toBe('60%');
+      for (const row of rows().slice(0, 5)) expect(bar(row)).toHaveClass('bg-selected-line');
+
+      expect(other).toHaveTextContent('Other (5 songs)25 min');
+      // Capped at the full width, and drawn apart from the songs.
+      expect(bar(other!).style.width).toBe('100%');
+      expect(bar(other!)).toHaveClass('bg-ink-muted');
+      expect(bar(other!)).not.toHaveClass('bg-selected-line');
+    });
+
+    it('give a smaller Other its own share of the longest song', async () => {
+      serve(manySongs([600, 500, 400, 300, 200, 150]));
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      const other = rows()[5]!;
+      expect(other).toHaveTextContent('Other (1 song)2 min');
+      expect(bar(other).style.width).toBe('25%');
+    });
+  });
+
   describe('badges', () => {
     const badges = () => screen.getAllByTestId('badge');
     const labels = (list: HTMLElement) =>
@@ -440,7 +597,7 @@ describe('StatsPage', () => {
       expect(screen.queryByTestId('stats-totals')).not.toBeInTheDocument();
       expect(screen.queryByRole('img')).not.toBeInTheDocument();
       expect(screen.queryByTestId('badge')).not.toBeInTheDocument();
-      expect(screen.queryByRole('heading', { name: 'Records' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: /^Records/ })).not.toBeInTheDocument();
     });
 
     it('still shows the stats for loops mastered without a session, and says what is missing', async () => {
@@ -452,7 +609,10 @@ describe('StatsPage', () => {
       expect(screen.queryByTestId('streak-line')).not.toBeInTheDocument();
       expect(screen.getByText('No practice in this period.')).toBeVisible();
       expect(screen.getByText('Practise a loop to see how its speed moves.')).toBeVisible();
-      expect(screen.getByText('Records start with your first session.')).toBeVisible();
+      // No records without practice, and no section waiting for them.
+      expect(screen.queryByRole('heading', { name: /^Records/ })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('record-streak')).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /^Badges/ })).toBeVisible();
     });
   });
 
@@ -507,16 +667,15 @@ describe('StatsPage, edges', () => {
     const user = renderStats();
     await screen.findByTestId('stats-totals');
 
-    expect([
-      text('total-time'),
-      text('total-days'),
-      text('total-passes'),
-      text('total-mastered'),
-    ]).toEqual(['5 min', '1', '12', '0']);
-    expect(text('total-time-change')).toBe('5 min more than the week before');
-    expect(text('total-days-change')).toBe('1 more than the week before');
-    expect(text('total-passes-change')).toBe('12 more than the week before');
-    expect(screen.queryByTestId('total-mastered-change')).not.toBeInTheDocument();
+    expect([text('total-time'), text('total-days'), text('total-mastered')]).toEqual([
+      '5 min',
+      '1',
+      '0',
+    ]);
+    // 17 QA issue 7: nothing came before, so nothing is compared.
+    for (const total of ['time', 'days', 'mastered']) {
+      expect(screen.queryByTestId(`total-${total}-change`)).not.toBeInTheDocument();
+    }
     expect(screen.getByTestId('streak-line')).toHaveTextContent(
       'On a 1-day streak. Your longest yet.',
     );
@@ -526,7 +685,7 @@ describe('StatsPage, edges', () => {
         .getAllByTestId('song-time')
         .map((row) => row.textContent),
     ).toEqual(['Groove 1205 min']);
-    expect(text('daily-summary')).toMatch(/^5 min over 1 of the last 14 days\./);
+    expect(text('daily-summary')).toBe('5 min over 1 of the last 14 days.');
 
     // One day has nothing to compare: the speed alone, no arrow and no "no change".
     expect(progressRows()).toHaveLength(1);
@@ -539,15 +698,17 @@ describe('StatsPage, edges', () => {
     ).toBeVisible();
     expect(screen.getAllByTestId('speed-point')).toHaveLength(1);
 
-    expect(text('heatmap-days')).toMatch(/^Practised on 1 of the last \d+ days\.$/);
-    expect(text('heatmap-best-week')).toMatch(/Best week: 5 min over 1 day, the week of /);
+    // The map is as short as it gets, and a best week of one day would only repeat the day.
+    expect(text('heatmap-days')).toBe('Practised on 1 day in the last 12 weeks.');
+    expect(screen.queryByTestId('heatmap-best-week')).not.toBeInTheDocument();
 
-    // Every record is that session; a streak of one day is one date, not a span.
-    expect(text('record-streak')).toBe('1 day');
-    expect(text('record-streak-when')).not.toMatch(/–/);
-    expect(text('record-day')).toBe('5 min');
-    expect(text('record-session')).toBe('5 min');
-    expect(text('record-session-when')).toMatch(/^Groove, /);
+    // Every record would be that one session: they wait for a second practice day.
+    expect(screen.queryByRole('heading', { name: /^Records/ })).not.toBeInTheDocument();
+    for (const record of ['record-streak', 'record-day', 'record-session']) {
+      expect(screen.queryByTestId(record)).not.toBeInTheDocument();
+    }
+    // Nothing is neglected on day one.
+    expect(screen.queryByRole('heading', { name: 'Not practised lately' })).not.toBeInTheDocument();
 
     expect(screen.getByText(/^None earned yet/)).toBeVisible();
     const nextUp = within(screen.getByRole('list', { name: 'Next up' }))
@@ -830,9 +991,7 @@ describe('StatsPage, edges', () => {
       const numbers = [
         'total-time',
         'total-days',
-        'total-passes',
         'total-mastered',
-        'total-time-change',
         'streak-line',
         'daily-summary',
         'heatmap-days',
@@ -917,6 +1076,231 @@ describe('StatsPage, edges', () => {
       const button = screen.getByRole('button', { name: 'Chart of Groove' });
       const region = document.getElementById(button.getAttribute('aria-controls') ?? '');
       expect(region).toContainElement(screen.getByTestId('speed-chart'));
+    });
+  });
+});
+
+// Build (QA fix round 1): what 17 QA found, each as the page shows it.
+describe('StatsPage, after QA', () => {
+  const activeGroove = practiceLoop(LOOP, 'Groove', GROOVE_SONG);
+  const cells = (table: HTMLElement) =>
+    within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => Array.from(row.querySelectorAll('th, td')).map((cell) => cell.textContent));
+
+  // Issue 2: one 45-second session read "0 min" in eight places and "<1" in a ninth.
+  describe('under a minute of practice', () => {
+    it('reads "<1 min" in the total, the song’s bar, the day’s bar and its table, the caption and the loop’s row', async () => {
+      serve({ sessions: [session(daysAgo(0, 0), 45, 0.7, 2)], loops: [activeGroove] });
+      const user = renderStats();
+      await screen.findByTestId('stats-totals');
+      expect(text('total-time')).toBe('<1 min');
+      expect(text('total-days')).toBe('1');
+      expect(screen.getByTestId('song-time')).toHaveTextContent('Groove 120<1 min');
+      expect(text('daily-summary')).toBe('<1 min over 1 of the last 14 days.');
+      const today = screen.getAllByTestId('daily-bar')[13]!;
+      expect(today.querySelector('text')?.textContent).toBe('<1');
+      expect(cells(screen.getByRole('table', { name: 'Minutes practised per day' }))[13]).toEqual([
+        'Today',
+        '<1 min',
+      ]);
+      expect(screen.getByTestId('loop-progress-time')).toHaveTextContent('<1 min · 1 day');
+      await user.click(screen.getByRole('button', { name: 'Chart of Groove' }));
+      expect(
+        cells(screen.getByRole('table', { name: 'Speed of Groove on each practice day' }))[0]?.[2],
+      ).toBe('<1 min');
+    });
+
+    it('reads "<1 min" in the records, the best week and the weeks’ table, and compares as it reads', async () => {
+      serve({
+        sessions: [session(daysAgo(0, 0), 45, 0.7), session(daysAgo(10), 40, 0.7)],
+        loops: [activeGroove],
+      });
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      expect(text('record-day')).toBe('<1 min');
+      expect(text('record-session')).toBe('<1 min');
+      expect(text('heatmap-best-week')).toMatch(/Best calendar week: <1 min over 1 day/);
+      const weeks = cells(screen.getByRole('table', { name: 'Practice days by week' }));
+      expect(weeks.filter(([, days]) => days === '1').map(([, , time]) => time)).toEqual([
+        '<1 min',
+        '<1 min',
+      ]);
+      // "<1 min" this week and "<1 min" the week before: the same, as shown.
+      expect(text('total-time')).toBe('<1 min');
+      expect(text('total-time-change')).toBe('Same as the week before');
+    });
+  });
+
+  // Issue 1: 336 dots merged into a band with labels drawn over it.
+  describe('a loop’s chart by how many days it has', () => {
+    /** One session a day for `count` days ending today, at the percents `speedOf` gives, oldest first. */
+    const daily = (count: number, speedOf: (index: number) => number) =>
+      Array.from({ length: count }, (_, index) =>
+        session(daysAgo(count - 1 - index), 120, speedOf(index) / 100),
+      );
+    const openChart = async (served: unknown[]) => {
+      serve({ sessions: served, loops: [activeGroove] });
+      const user = renderStats();
+      await screen.findByTestId('stats-totals');
+      await user.click(screen.getByRole('button', { name: 'Chart of Groove' }));
+      return screen.getByTestId('speed-chart');
+    };
+    const dots = (chart: HTMLElement) => chart.querySelectorAll('circle').length;
+    const labels = (chart: HTMLElement) =>
+      within(chart)
+        .queryAllByTestId('speed-label')
+        .map((label) => label.textContent);
+    const dates = (chart: HTMLElement) =>
+      within(chart)
+        .queryAllByTestId('speed-date')
+        .map((label) => label.textContent ?? '');
+
+    it('with a few days dots and labels every day, and dates the two ends', async () => {
+      const chart = await openChart(daily(5, (index) => 60 + index * 5));
+      expect(dots(chart)).toBe(5);
+      expect(labels(chart)).toEqual(['60%', '65%', '70%', '75%', '80%']);
+      expect(dates(chart)).toHaveLength(2);
+    });
+
+    it('from nine days keeps a dot a day but labels only the first, the best and the last', async () => {
+      // Twelve days; the seventh is the best.
+      const chart = await openChart(daily(12, (index) => (index === 6 ? 95 : 60 + index)));
+      expect(dots(chart)).toBe(12);
+      expect(labels(chart)).toEqual(['60%', '95%', '71%']);
+      expect(dates(chart)).toHaveLength(2);
+    });
+
+    it('past thirty days draws the line with dots on the first, the best and the last day only', async () => {
+      const chart = await openChart(daily(40, (index) => (index === 20 ? 100 : 50 + index)));
+      expect(dots(chart)).toBe(3);
+      expect(screen.getAllByTestId('speed-point')).toHaveLength(3);
+      expect(labels(chart)).toEqual(['50%', '100%', '89%']);
+      expect(dates(chart)).toHaveLength(2);
+      // The line still runs through every day, and the table still has them all.
+      expect(chart.querySelector('path')?.getAttribute('d')?.match(/[ML]/g)).toHaveLength(40);
+      expect(
+        cells(screen.getByRole('table', { name: 'Speed of Groove on each practice day' })),
+      ).toHaveLength(40);
+      expect(chart).toHaveAccessibleName(/^Speed of Groove over 40 practice days: from 50% on /);
+    });
+
+    it('gives both dates their year when the line crosses a new year', async () => {
+      const chart = await openChart([session(daysAgo(400), 300, 0.6), ...daily(3, () => 80)]);
+      const [first, last] = dates(chart);
+      expect(first).toMatch(/\d{4}/);
+      expect(last).toMatch(/\d{4}/);
+    });
+
+    it('dates one day once, in the middle', async () => {
+      const chart = await openChart(daily(1, () => 80));
+      expect(dots(chart)).toBe(1);
+      expect(labels(chart)).toEqual(['80%']);
+      expect(dates(chart)).toHaveLength(1);
+    });
+
+    it('never names "100%" twice at one spot when every day is at full speed or over', async () => {
+      const chart = await openChart(daily(3, (index) => 100 + index * 10));
+      const axis = Array.from(chart.querySelectorAll('text'))
+        .filter((label) => !label.hasAttribute('data-testid'))
+        .map((label) => label.textContent);
+      expect(axis).toEqual(['100%']);
+    });
+
+    it('draws a row’s sparkline as a line with one dot at its end, however many days', async () => {
+      serve({ sessions: daily(40, (index) => 50 + index), loops: [activeGroove] });
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      const sparkline = screen.getByTestId('sparkline');
+      expect(sparkline.querySelectorAll('circle')).toHaveLength(1);
+      expect(sparkline.querySelector('path')?.getAttribute('d')?.match(/[ML]/g)).toHaveLength(40);
+    });
+  });
+
+  // The plan's third question, "what have I been neglecting", had no answer that named anything.
+  describe('not practised lately', () => {
+    const WALTZ = { id: 'song-waltz', title: 'Waltz' };
+    const id = (letter: string) => `${letter.repeat(8)}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`;
+    const saved = (letter: string, name: string, daysBack: number, song = GROOVE_SONG) => ({
+      ...practiceLoop(id(letter), name, song),
+      created_at: daysAgo(daysBack),
+    });
+    const neglected = () =>
+      within(screen.getByRole('list', { name: 'Not practised lately' })).getAllByTestId(
+        'neglected-loop',
+      );
+
+    it('names the active loops left longest, with their song, how long, and a way to practise them', async () => {
+      serve({
+        sessions: [
+          session(daysAgo(0), 300, 0.8, 1, id('b')),
+          session(daysAgo(12), 300, 0.7, 1, id('c')),
+          session(daysAgo(30), 300, 0.7, 1, id('c')),
+          session(daysAgo(90), 300, 1, 1, id('e')),
+        ],
+        loops: [
+          saved('b', 'Today’s loop', 40),
+          saved('c', 'Verse', 40),
+          saved('d', 'Fill', 20, WALTZ),
+          { ...saved('e', 'Done', 100), status: 'finished', finished_at: daysAgo(90) },
+        ],
+      });
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      expect(screen.getByRole('heading', { name: 'Not practised lately' })).toBeVisible();
+      const [first, second, ...rest] = neglected();
+      expect(rest).toHaveLength(0);
+      // Never practised, saved twenty days ago: left longer than Verse's twelve.
+      expect(first).toHaveTextContent('Fill');
+      expect(first).toHaveTextContent('Waltz');
+      expect(within(first!).getByTestId('neglected-when')).toHaveTextContent(
+        'not practised yet, saved 20 days ago',
+      );
+      expect(within(first!).getByRole('link', { name: 'Fill' })).toHaveAttribute(
+        'href',
+        `/songs/${WALTZ.id}/loops/${id('d')}`,
+      );
+      expect(second).toHaveTextContent('Verse');
+      expect(second).toHaveTextContent('Groove 120');
+      expect(within(second!).getByTestId('neglected-when')).toHaveTextContent(
+        'last practised 12 days ago',
+      );
+      expect(within(second!).getByRole('link', { name: 'Verse' })).toHaveAttribute(
+        'href',
+        `/songs/${GROOVE_SONG.id}/loops/${id('c')}`,
+      );
+    });
+
+    it('shows three at most', async () => {
+      const letters = ['b', 'c', 'd', 'e', 'f'];
+      serve({
+        sessions: [
+          session(daysAgo(0), 300, 0.8),
+          ...letters.map((letter, index) => session(daysAgo(10 + index), 60, 0.7, 1, id(letter))),
+        ],
+        loops: [activeGroove, ...letters.map((letter) => saved(letter, `Loop ${letter}`, 50))],
+      });
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      expect(neglected().map((row) => within(row).getByRole('link').textContent)).toEqual([
+        'Loop f',
+        'Loop e',
+        'Loop d',
+      ]);
+    });
+
+    it('is not there when every active loop was practised this week or only just saved', async () => {
+      serve({
+        sessions: [session(daysAgo(0), 300, 0.8), session(daysAgo(6), 300, 0.8, 1, id('b'))],
+        loops: [activeGroove, saved('b', 'Verse', 40), saved('c', 'New today', 0)],
+      });
+      renderStats();
+      await screen.findByTestId('stats-totals');
+      expect(
+        screen.queryByRole('heading', { name: 'Not practised lately' }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('neglected-loop')).not.toBeInTheDocument();
     });
   });
 });

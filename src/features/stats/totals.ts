@@ -5,7 +5,7 @@
  */
 import type { PracticeSession } from '@/features/practice/sessions';
 import type { Loop } from '@/features/loops/loopForm';
-import { addDays, dayKeyOf, dayKeyOfIso, startOfDay, type DayKey } from './days';
+import { addDays, dayKeyOf, dayKeyOfIso, daysBetween, startOfDay, type DayKey } from './days';
 
 export type StatsSession = Pick<
   PracticeSession,
@@ -122,30 +122,58 @@ export interface TotalChange {
 }
 
 /**
- * How one total compares with the period before. Play time is compared as the
- * whole minutes both totals show (checklist 4: 59 s against 61 s is "0 min"
- * against "1 min", so 1 min more), counts as they are. Null when both show
- * nothing: "0, same as the week before" says nothing worth a line.
+ * A count as the page writes it, grouped the way the reader's locale does.
+ * One function for a total and for the line under it (17 QA issue 4: "1.184"
+ * over "56 fewer" beside "1,000 passes"). `locale` is for tests.
+ */
+export function countLabel(value: number, locale?: string): string {
+  return value.toLocaleString(locale);
+}
+
+/**
+ * Whether the period before has anything to compare with: a session. Against
+ * a period with no practice at all every line is "n more than the week
+ * before", which only repeats the total (17 QA issue 7), so the page draws no
+ * line then, under any total.
+ */
+export function periodBeforeHasPractice(previous: StatsTotals | null): boolean {
+  return previous !== null && previous.days > 0;
+}
+
+/**
+ * How one total compares with the period before. Play time is compared as
+ * what both totals show (checklist 4): whole minutes, so 59 s against 61 s is
+ * "<1 min" against "1 min" and 1 min more; and under a minute against nothing
+ * is "<1 min more", since those two don't read the same. Counts are compared
+ * as they are. Null when both show nothing: "0, same as the week before" says
+ * nothing worth a line.
  */
 export function totalChange(
   kind: keyof StatsTotals,
   current: StatsTotals,
   previous: StatsTotals,
   range: ComparedRange,
+  locale?: string,
 ): TotalChange | null {
-  const shown = (totals: StatsTotals) =>
-    kind === 'seconds' ? Math.floor(totals.seconds / 60) : totals[kind];
-  if (shown(current) === 0 && shown(previous) === 0) return null;
-  const difference = shown(current) - shown(previous);
   const before = PERIOD_BEFORE[range];
-  if (difference === 0) return { direction: 'same', label: `Same as ${before}` };
-  const amount = Math.abs(difference);
-  const up = difference > 0;
-  const words =
-    kind === 'seconds'
-      ? `${minutesLabel(amount * 60)} ${up ? 'more' : 'less'}`
-      : `${amount.toLocaleString('en')} ${up ? 'more' : 'fewer'}`;
-  return { direction: up ? 'up' : 'down', label: `${words} than ${before}` };
+  const change = (difference: number, words: (amount: number) => string): TotalChange => {
+    if (difference === 0) return { direction: 'same', label: `Same as ${before}` };
+    const up = difference > 0;
+    return {
+      direction: up ? 'up' : 'down',
+      label: `${words(Math.abs(difference))} ${up ? 'more' : kind === 'seconds' ? 'less' : 'fewer'} than ${before}`,
+    };
+  };
+  if (kind !== 'seconds') {
+    if (current[kind] === 0 && previous[kind] === 0) return null;
+    return change(current[kind] - previous[kind], (amount) => countLabel(amount, locale));
+  }
+  if (current.seconds <= 0 && previous.seconds <= 0) return null;
+  const minutes = wholeMinutes(current.seconds) - wholeMinutes(previous.seconds);
+  if (minutes !== 0) return change(minutes, (amount) => minutesLabel(amount * 60));
+  // The same whole minutes. Only "<1 min" against "0 min" still reads differently.
+  const some = (seconds: number) => Number(seconds > 0);
+  return change(some(current.seconds) - some(previous.seconds), () => minutesLabel(1));
 }
 
 /**
@@ -222,22 +250,45 @@ export function heatLevel(seconds: number): HeatLevel {
   return (step === -1 ? 4 : step + 1) as HeatLevel;
 }
 
+/** The map's fewest and most weeks. */
+export const HEATMAP_MIN_WEEKS = 12;
+export const HEATMAP_MAX_WEEKS = 26;
+
+/** The Monday that begins the date's week, at midnight. */
+function mondayOf(date: Date): Date {
+  // getDay(): 0 is Sunday. Days since this week's Monday.
+  return addDays(date, -((date.getDay() + 6) % 7));
+}
+
 /**
- * The last `weeks` weeks as columns of seven days, Monday first, oldest week
- * first. The last column is this week, with the days after today marked
- * `future`.
+ * How many weeks the map spans: from the week of the first session to this
+ * one, but never fewer than twelve nor more than twenty-six (17 QA issue 7:
+ * three weeks of practice were a corner of colour in 160 empty squares).
+ */
+export function heatmapWeekCount(
+  sessions: readonly Pick<StatsSession, 'started_at'>[],
+  now: Date,
+): number {
+  if (sessions.length === 0) return HEATMAP_MIN_WEEKS;
+  const first = Math.min(...sessions.map((session) => Date.parse(session.started_at)));
+  const weeks = daysBetween(mondayOf(new Date(first)), mondayOf(now)) / 7 + 1;
+  return Math.min(Math.max(weeks, HEATMAP_MIN_WEEKS), HEATMAP_MAX_WEEKS);
+}
+
+/**
+ * The last `weeks` weeks (`heatmapWeekCount` unless told) as columns of seven
+ * days, Monday first, oldest week first. The last column is this week, with
+ * the days after today marked `future`.
  */
 export function practiceHeatmap(
   sessions: readonly StatsSession[],
   now: Date,
-  weeks = 26,
+  weeks = heatmapWeekCount(sessions, now),
 ): HeatmapDay[][] {
   const byDay = secondsByDay(sessions);
   const today = startOfDay(now);
   const todayKey = dayKeyOf(now);
-  // getDay(): 0 is Sunday. Days since this week's Monday.
-  const sinceMonday = (today.getDay() + 6) % 7;
-  const firstMonday = addDays(today, -sinceMonday - (weeks - 1) * 7);
+  const firstMonday = addDays(mondayOf(today), -(weeks - 1) * 7);
   return Array.from({ length: weeks }, (_, week) =>
     Array.from({ length: 7 }, (_, weekday) => {
       const date = addDays(firstMonday, week * 7 + weekday);
@@ -249,33 +300,72 @@ export function practiceHeatmap(
   );
 }
 
-export interface HeatmapSummary {
-  /** Days drawn: every day of the weeks up to today. */
-  daysShown: number;
-  daysPractised: number;
-  /** The week with the most play time (the earlier one on a tie); null with none. */
-  bestWeek: { start: Date; seconds: number; days: number } | null;
+/** One calendar week of the map, Monday to Sunday. */
+export interface HeatmapWeek {
+  /** Its Monday, at midnight. */
+  start: Date;
+  /** Days of it that were practised. */
+  days: number;
+  seconds: number;
 }
+
+/**
+ * The map week by week, oldest first: its text alternative (17 QA issue 3), a
+ * row a week rather than 180 day rows.
+ */
+export function heatmapWeekRows(weeks: readonly (readonly HeatmapDay[])[]): HeatmapWeek[] {
+  return weeks.flatMap((week) => {
+    const monday = week[0];
+    if (!monday) return [];
+    return [
+      {
+        start: monday.date,
+        days: week.filter((day) => day.seconds > 0).length,
+        seconds: week.reduce((total, day) => total + day.seconds, 0),
+      },
+    ];
+  });
+}
+
+export interface HeatmapSummary {
+  /** Weeks drawn, this one included. */
+  weeksShown: number;
+  daysPractised: number;
+  /**
+   * The calendar week with the most play time (the earlier one on a tie).
+   * Null until two days of the map were practised: the best week of one day
+   * is that day again (17 QA issue 7).
+   */
+  bestWeek: HeatmapWeek | null;
+}
+
+/** Practised days it takes before a best week says more than the day itself. */
+const BEST_WEEK_FROM_DAYS = 2;
 
 /** The heatmap's numbers: how many of its days were practised, and its best week. */
 export function heatmapSummary(weeks: readonly (readonly HeatmapDay[])[]): HeatmapSummary {
-  const shown = weeks.flat().filter((day) => !day.future);
-  let bestWeek: HeatmapSummary['bestWeek'] = null;
-  for (const week of weeks) {
-    const seconds = week.reduce((total, day) => total + day.seconds, 0);
-    const monday = week[0];
-    if (!monday || seconds === 0 || (bestWeek && seconds <= bestWeek.seconds)) continue;
-    bestWeek = {
-      start: monday.date,
-      seconds,
-      days: week.filter((day) => day.seconds > 0).length,
-    };
+  const rows = heatmapWeekRows(weeks);
+  const daysPractised = rows.reduce((total, week) => total + week.days, 0);
+  let bestWeek: HeatmapWeek | null = null;
+  for (const week of rows) {
+    if (week.seconds > (bestWeek?.seconds ?? 0)) bestWeek = week;
   }
   return {
-    daysShown: shown.length,
-    daysPractised: shown.filter((day) => day.seconds > 0).length,
-    bestWeek,
+    weeksShown: weeks.length,
+    daysPractised,
+    bestWeek: daysPractised >= BEST_WEEK_FROM_DAYS ? bestWeek : null,
   };
+}
+
+/**
+ * The map's one-line summary. In weeks, which the map is made of: a count of
+ * days shown moved through the week (17 QA issue 8).
+ */
+export function heatmapLine({
+  daysPractised,
+  weeksShown,
+}: Pick<HeatmapSummary, 'daysPractised' | 'weeksShown'>): string {
+  return `Practised on ${daysPractised} ${daysPractised === 1 ? 'day' : 'days'} in the last ${weeksShown} weeks.`;
 }
 
 /** How close two month names over the heatmap may come, in columns, before the first is dropped. */
@@ -312,11 +402,27 @@ export function clockLabel(totalSeconds: number): string {
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
 }
 
-/** "45 min", "2 h 5 min", "0 min": a total of play time, to the minute. */
+const wholeMinutes = (totalSeconds: number) => Math.floor(Math.max(0, totalSeconds) / 60);
+
+/**
+ * "45 min", "2 h 5 min": play time to the minute, wherever the Stats page
+ * writes one. Under a minute is "<1 min" and only no time at all is "0 min"
+ * (17 QA issue 2: a 45-second session read "0 min" beside "1 day").
+ */
 export function minutesLabel(totalSeconds: number): string {
-  const minutes = Math.floor(Math.max(0, totalSeconds) / 60);
+  if (totalSeconds > 0 && totalSeconds < 60) return '<1 min';
+  const minutes = wholeMinutes(totalSeconds);
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   if (hours === 0) return `${minutes} min`;
   return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+}
+
+/**
+ * The number over a day's bar: its minutes with no unit, since the chart
+ * counts in minutes ("12", "75", "<1"). The same rounding as `minutesLabel`,
+ * so a bar and its row in the table agree.
+ */
+export function barMinutesLabel(totalSeconds: number): string {
+  return totalSeconds > 0 && totalSeconds < 60 ? '<1' : String(wholeMinutes(totalSeconds));
 }

@@ -20,7 +20,7 @@ type Session = Awaited<ReturnType<typeof sessionsOf>>[number];
 async function loopsWithSongOf(user: E2eUser) {
   const { data, error } = await admin
     .from('loops')
-    .select('id, name, status, finished_at, song_id, song:songs!loops_song_fkey(title)')
+    .select('id, name, status, finished_at, created_at, song_id, song:songs!loops_song_fkey(title)')
     .eq('user_id', user.id);
   if (error) throw error;
   return data;
@@ -57,8 +57,9 @@ async function choosePeriod(page: Page, label: 'Week' | 'Month' | 'All time') {
 
 // The expected numbers, from the rows -----------------------------------------
 
-/** A total of play time as the page writes it: "45 min", "2 h", "1 h 5 min". */
+/** A total of play time as the page writes it: "45 min", "2 h", "1 h 5 min"; "<1 min" under a minute. */
 function minutesText(seconds: number): string {
+  if (seconds > 0 && seconds < 60) return '<1 min';
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
   if (hours === 0) return `${minutes} min`;
@@ -81,10 +82,20 @@ function dayNumber(iso: string): number {
 
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
+/** A local day number as a date, at midnight. */
+const dateOfDay = (day: number) => {
+  const utc = new Date(day * 86_400_000);
+  return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate());
+};
+
+/** The day number of the Monday that begins a day's week. */
+const mondayOf = (day: number) => day - ((dateOfDay(day).getDay() + 6) % 7);
+
+const today = () => dayNumber(new Date().toISOString());
+
 interface Totals {
-  minutes: number;
+  seconds: number;
   days: number;
-  passes: number;
   mastered: number;
 }
 
@@ -101,26 +112,44 @@ function totalsBetween(
   };
   const counted = sessions.filter((session) => inside(session.started_at));
   return {
-    minutes: Math.floor(sum(counted.map((session) => session.duration_seconds)) / 60),
     seconds: sum(counted.map((session) => session.duration_seconds)),
     days: new Set(counted.map((session) => dayNumber(session.started_at))).size,
-    passes: sum(counted.map((session) => session.repeats)),
     mastered: loops.filter(
       (loop) => loop.status === 'finished' && loop.finished_at !== null && inside(loop.finished_at),
     ).length,
   };
 }
 
-/** The line under a total: how it compares with the period before, or null for no line. */
-function changeText(now: number, before: number, unit: 'min' | '', period: 'week' | 'month') {
-  if (now === 0 && before === 0) return null;
-  if (now === before) return `Same as the ${period} before`;
-  const amount = Math.abs(now - before);
-  const words =
-    unit === 'min'
-      ? `${minutesText(amount * 60)} ${now > before ? 'more' : 'less'}`
-      : `${amount.toLocaleString('en')} ${now > before ? 'more' : 'fewer'}`;
-  return `${words} than the ${period} before`;
+type Period = 'week' | 'month';
+
+/**
+ * The lines under the three totals: how each compares with the period before,
+ * null for no line. None at all when the period before has no practice in it.
+ */
+function changeTexts(now: Totals, before: Totals, period: Period) {
+  if (before.days === 0) return { time: null, days: null, mastered: null };
+  const than = `than the ${period} before`;
+  const same = `Same as the ${period} before`;
+  const count = (current: number, earlier: number) => {
+    if (current === 0 && earlier === 0) return null;
+    if (current === earlier) return same;
+    const amount = Math.abs(current - earlier).toLocaleString('en');
+    return `${amount} ${current > earlier ? 'more' : 'fewer'} ${than}`;
+  };
+  const time = () => {
+    if (now.seconds === 0 && before.seconds === 0) return null;
+    // Compared as shown: whole minutes, and "<1 min" against "0 min".
+    const minutes = Math.floor(now.seconds / 60) - Math.floor(before.seconds / 60);
+    const moved = minutes !== 0 ? minutes : Number(now.seconds > 0) - Number(before.seconds > 0);
+    if (moved === 0) return same;
+    const amount = minutes !== 0 ? minutesText(Math.abs(minutes) * 60) : '<1 min';
+    return `${amount} ${moved > 0 ? 'more' : 'less'} ${than}`;
+  };
+  return {
+    time: time(),
+    days: count(now.days, before.days),
+    mastered: count(now.mastered, before.mastered),
+  };
 }
 
 /** The streak running now (ending today or yesterday) and the longest ever, in days. */
@@ -138,8 +167,7 @@ function streaks(sessions: Session[]) {
     longest = Math.max(longest, run);
     previous = day;
   }
-  const today = dayNumber(new Date().toISOString());
-  return { current: runEndingOn.get(today) ?? runEndingOn.get(today - 1) ?? 0, longest };
+  return { current: runEndingOn.get(today()) ?? runEndingOn.get(today() - 1) ?? 0, longest };
 }
 
 /** One loop's working speed per practice day, oldest first: the percent with the most play time, the slower on a tie. */
@@ -177,19 +205,30 @@ function speedText(percents: number[]): string {
 
 // What the page shows ---------------------------------------------------------
 
+const TOTAL_NAMES = ['time', 'days', 'mastered'] as const;
+
 async function expectTotals(page: Page, expected: Totals) {
-  await expect(page.getByTestId('total-time')).toHaveText(minutesText(expected.minutes * 60));
-  await expect(page.getByTestId('total-passes')).toHaveText(expected.passes.toLocaleString('en'));
+  await expect(page.getByTestId('total-time')).toHaveText(minutesText(expected.seconds));
   await expect(page.getByTestId('total-days')).toHaveText(String(expected.days));
   await expect(page.getByTestId('total-mastered')).toHaveText(String(expected.mastered));
+  // Three totals: "Loop passes" went in QA fix round 1.
+  await expect(page.getByTestId('stats-totals').locator('dt')).toHaveCount(3);
 }
 
-/** A total's change line, or that it has none. */
-async function expectChange(page: Page, total: string, expected: string | null) {
-  const line = page.getByTestId(`total-${total}-change`);
-  if (expected === null) await expect(line).toHaveCount(0);
-  else await expect(line).toHaveText(expected);
+/** Each total's change line, or that it has none. */
+async function expectChanges(
+  page: Page,
+  expected: Record<(typeof TOTAL_NAMES)[number], string | null>,
+) {
+  for (const total of TOTAL_NAMES) {
+    const line = page.getByTestId(`total-${total}-change`);
+    const text = expected[total];
+    if (text === null) await expect(line).toHaveCount(0);
+    else await expect(line).toHaveText(text);
+  }
 }
+
+const NO_CHANGES = { time: null, days: null, mastered: null };
 
 /** Every loop that has a session, with what its progress row should say. */
 async function expectLoopProgress(page: Page, sessions: Session[], loops: LoopRow[]) {
@@ -237,12 +276,27 @@ async function expectSongTimes(
   await expect(page.getByTestId('song-time')).toHaveText(expected);
 }
 
-async function expectRecords(page: Page, sessions: Session[]) {
+/** Play time per local day. */
+function secondsPerDay(sessions: Session[]): Map<number, number> {
   const byDay = new Map<number, number>();
   for (const session of sessions) {
     const day = dayNumber(session.started_at);
     byDay.set(day, (byDay.get(day) ?? 0) + session.duration_seconds);
   }
+  return byDay;
+}
+
+/** The records, or that there are none yet: they wait for a second practice day. */
+async function expectRecords(page: Page, sessions: Session[]) {
+  const byDay = secondsPerDay(sessions);
+  if (byDay.size < 2) {
+    await expect(page.getByRole('heading', { name: /^Records/ })).toHaveCount(0);
+    for (const record of ['record-streak', 'record-day', 'record-session']) {
+      await expect(page.getByTestId(record)).toHaveCount(0);
+    }
+    return;
+  }
+  await expect(page.getByRole('heading', { name: 'Records All time' })).toBeVisible();
   await expect(page.getByTestId('record-streak')).toHaveText(daysText(streaks(sessions).longest));
   await expect(page.getByTestId('record-day')).toHaveText(minutesText(Math.max(...byDay.values())));
   await expect(page.getByTestId('record-session')).toHaveText(
@@ -250,18 +304,126 @@ async function expectRecords(page: Page, sessions: Session[]) {
   );
 }
 
-/** The two-week chart's caption and the heatmap's: play time and days practised in each window. */
+/**
+ * A date as the page writes it in Playwright's browser (en-US): "Nov 23", with
+ * its year when that isn't this one (or when told).
+ */
+function dateText(date: Date, withYear = date.getFullYear() !== new Date().getFullYear()): string {
+  return new Intl.DateTimeFormat('en-US', {
+    day: 'numeric',
+    month: 'short',
+    ...(withYear ? { year: 'numeric' } : {}),
+  }).format(date);
+}
+
+/**
+ * The weeks the practice-days map spans, oldest first, each with its Monday,
+ * days practised and play time: from the week of the first session to this
+ * one, never fewer than 12 nor more than 26.
+ */
+function heatmapWeeks(sessions: Session[]) {
+  const byDay = secondsPerDay(sessions);
+  const thisMonday = mondayOf(today());
+  const firstDay = Math.min(...byDay.keys(), today());
+  const spanned = (thisMonday - mondayOf(firstDay)) / 7 + 1;
+  const count = Math.min(Math.max(spanned, 12), 26);
+  return Array.from({ length: count }, (_, index) => {
+    const monday = thisMonday - (count - 1 - index) * 7;
+    const practised = [0, 1, 2, 3, 4, 5, 6]
+      .map((weekday) => byDay.get(monday + weekday) ?? 0)
+      .filter((seconds) => seconds > 0);
+    return { monday, days: practised.length, seconds: sum(practised) };
+  });
+}
+
+/**
+ * The two-week chart's caption, and everything the practice-days map says:
+ * the weeks it spans beside its heading, the days practised in them, the best
+ * calendar week (from the second practised day on) and the table of weeks
+ * behind the picture.
+ */
 async function expectDayCounts(page: Page, sessions: Session[]) {
   const twoWeeks = totalsBetween(sessions, [], midnight(13), null);
-  await expect(page.getByTestId('daily-summary')).toContainText(
+  await expect(page.getByTestId('daily-summary')).toHaveText(
     `${minutesText(twoWeeks.seconds)} over ${twoWeeks.days} of the last 14 days.`,
   );
-  // 25 whole weeks and this one up to today, Monday first.
-  const shown = 25 * 7 + ((new Date().getDay() + 6) % 7) + 1;
-  const mapped = totalsBetween(sessions, [], midnight(shown - 1), null);
+
+  const weeks = heatmapWeeks(sessions);
+  await expect(
+    page.getByRole('heading', { name: `Practice days Last ${weeks.length} weeks` }),
+  ).toBeVisible();
+  const practised = sum(weeks.map((week) => week.days));
   await expect(page.getByTestId('heatmap-days')).toHaveText(
-    `Practised on ${mapped.days} of the last ${shown} days.`,
+    `Practised on ${practised} ${practised === 1 ? 'day' : 'days'} in the last ${weeks.length} weeks.`,
   );
+
+  const bestWeek = page.getByTestId('heatmap-best-week');
+  if (practised < 2) {
+    // The best week of one day would be that day again.
+    await expect(bestWeek).toHaveCount(0);
+  } else {
+    // The earlier of two equal weeks.
+    const best = weeks.reduce((top, week) => (week.seconds > top.seconds ? week : top));
+    await expect(bestWeek).toHaveText(
+      `Best calendar week: ${minutesText(best.seconds)} over ${daysText(best.days)}, the week of ${dateText(dateOfDay(best.monday))}.`,
+    );
+  }
+
+  // The picture's numbers for a screen reader: a row a week.
+  const rows = page.getByRole('table', { name: 'Practice days by week' }).locator('tbody tr');
+  await expect(rows.locator('th')).toHaveText(
+    weeks.map((week) => dateText(dateOfDay(week.monday))),
+  );
+  await expect(rows.locator('td:nth-of-type(1)')).toHaveText(weeks.map((week) => `${week.days}`));
+  await expect(rows.locator('td:nth-of-type(2)')).toHaveText(
+    weeks.map((week) => minutesText(week.seconds)),
+  );
+}
+
+/**
+ * "Not practised lately": the active loops whose last session (or, never
+ * practised, whose saving) was seven calendar days ago or more, the longest
+ * left first, three at most; no block at all when there is none.
+ */
+async function expectNeglected(page: Page, sessions: Session[], loops: LoopRow[]) {
+  const left = loops
+    .filter((loop) => loop.status === 'active')
+    .map((loop) => {
+      const own = sessions.filter((each) => each.loop_id === loop.id);
+      const last =
+        own.length > 0 ? Math.max(...own.map((each) => dayNumber(each.started_at))) : null;
+      return {
+        loop,
+        practised: last !== null,
+        days: today() - (last ?? dayNumber(loop.created_at)),
+      };
+    })
+    .filter((each) => each.days >= 7)
+    .sort((a, b) => b.days - a.days || a.loop.id.localeCompare(b.loop.id))
+    .slice(0, 3);
+
+  const items = page.getByTestId('neglected-loop');
+  await expect(items).toHaveCount(left.length);
+  const heading = page.getByRole('heading', { name: 'Not practised lately' });
+  if (left.length === 0) {
+    await expect(heading).toHaveCount(0);
+    return;
+  }
+  await expect(heading).toBeVisible();
+  expect(
+    await items.evaluateAll((all) => all.map((item) => item.getAttribute('data-loop'))),
+  ).toEqual(left.map((each) => each.loop.id));
+  for (const { loop, practised, days } of left) {
+    const item = page.locator(`[data-testid="neglected-loop"][data-loop="${loop.id}"]`);
+    await expect(item.getByTestId('neglected-when')).toHaveText(
+      practised ? `last practised ${days} days ago` : `not practised yet, saved ${days} days ago`,
+    );
+    await expect(item.getByText(loop.song.title, { exact: true })).toBeVisible();
+    await expect(item.getByRole('link', { name: loop.name })).toHaveAttribute(
+      'href',
+      `/songs/${loop.song_id}/loops/${loop.id}`,
+    );
+  }
 }
 
 /** The badges that should be earned, by their labels, in the page's order. */
@@ -300,13 +462,23 @@ async function expectWholePage(page: Page, sessions: Session[], loops: LoopRow[]
     }`,
   );
   await expectDayCounts(page, sessions);
+  // Sections the Period choice doesn't move say what they cover.
+  await expect(page.getByRole('heading', { name: 'Loop progress All time' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Badges All time' })).toBeVisible();
   await expectLoopProgress(page, sessions, loops);
+  await expectNeglected(page, sessions, loops);
   await expectRecords(page, sessions);
   const earned = earnedBadges(sessions, loops);
   await expect(page.locator('[data-testid="badge"][data-earned="true"]')).toHaveText(earned);
   // Three more are "Next up"; the rest wait behind the disclosure.
   await expect(page.getByTestId('badge')).toHaveCount(Math.min(earned.length + 3, 11));
-  await page.getByRole('button', { name: 'Show all badges' }).click();
+  const showAll = page.getByRole('button', { name: 'Show all badges' });
+  if (earned.length + 3 >= 11) {
+    // Nothing is left to wait behind it.
+    await expect(showAll).toHaveCount(0);
+    return;
+  }
+  await showAll.click();
   await expect(page.getByTestId('badge')).toHaveCount(11);
   await page.getByRole('button', { name: 'Show fewer badges' }).click();
 }
@@ -334,20 +506,21 @@ test('every number on the seed user’s page is what their sessions in the datab
     await expectTotals(page, totals);
     await expectSongTimes(page, sessions, loops, start);
     if (days === null || start === null) {
-      for (const total of ['time', 'days', 'passes', 'mastered']) {
-        await expectChange(page, total, null);
-      }
+      await expectChanges(page, NO_CHANGES);
       continue;
     }
     // The period before: as many days, ending where this one starts.
     const before = totalsBetween(sessions, loops, midnight(2 * days - 1), start);
-    const period = days === 7 ? 'week' : 'month';
-    await expectChange(page, 'time', changeText(totals.minutes, before.minutes, 'min', period));
-    await expectChange(page, 'days', changeText(totals.days, before.days, '', period));
-    await expectChange(page, 'passes', changeText(totals.passes, before.passes, '', period));
-    await expectChange(page, 'mastered', changeText(totals.mastered, before.mastered, '', period));
+    // The seed practises in both periods before, so the lines are there to check.
+    expect(before.days).toBeGreaterThan(0);
+    await expectChanges(page, changeTexts(totals, before, days === 7 ? 'week' : 'month'));
   }
   await expectWholePage(page, sessions, loops);
+  // The seed leaves "Single bar" alone for 19 days, so the page names it.
+  // (`expectNeglected` has checked its days against the rows.)
+  await expect(
+    page.getByTestId('neglected-loop').getByRole('link', { name: 'Single bar' }),
+  ).toBeVisible();
 });
 
 /** The longest text the database takes for a loop's name and a song's title, with no space to break at. */
@@ -445,10 +618,30 @@ test('a try at full speed is not a day at full speed, and nothing overflows', as
   await expectSongTimes(page, sessions, loops, null);
   await expectWholePage(page, sessions, loops);
 
-  // The week leaves out the sessions 9 and 40 days ago.
+  // Every loop here is finished or was practised this week: nothing is named as left.
+  await expect(page.getByTestId('neglected-loop')).toHaveCount(0);
+  // Three practice days, so the records are listed: the streak's two ends, the session's loop.
+  await expect(page.getByTestId('record-streak-when')).toContainText('–');
+  await expect(page.getByTestId('record-session-when')).toHaveText(/^Verse, /);
+
+  // The week leaves out the sessions 9 and 40 days ago: 26 minutes on three
+  // days, against the 7 minutes of nine days ago in the week before.
   await choosePeriod(page, 'Week');
-  await expect(page.getByTestId('total-passes')).toHaveText(String(10 + 20 + 2 + 11 + 8));
-  await expect(page.getByTestId('total-passes-change')).toHaveText('39 more than the week before');
+  await expect(page.getByTestId('total-time')).toHaveText('26 min');
+  await expectChanges(page, {
+    time: '19 min more than the week before',
+    days: '2 more than the week before',
+    mastered: '1 more than the week before',
+  });
+  // The month before has only the session 40 days ago.
+  await choosePeriod(page, 'Month');
+  const month = totalsBetween(sessions, loops, midnight(29), null);
+  const monthBefore = totalsBetween(sessions, loops, midnight(59), midnight(29));
+  await expectTotals(page, month);
+  await expectChanges(page, changeTexts(month, monthBefore, 'month'));
+  await expect(page.getByTestId('total-time-change')).toHaveText(
+    '24 min more than the month before',
+  );
 
   // Unit 17's acceptance. Yesterday on "Verse": ten minutes at 80%, one at 100%.
   const row = page.locator(`[data-testid="loop-progress"][data-loop="${verse}"]`);
@@ -559,14 +752,19 @@ test('after one session ever, every section speaks from that session', async ({ 
   const loops = await loopsWithSongOf(user);
 
   await signIn(page, user, '/stats');
-  await expectTotals(page, { minutes: 5, days: 1, passes: 12, mastered: 0 });
-  await expectChange(page, 'time', '5 min more than the week before');
-  await expectChange(page, 'days', '1 more than the week before');
-  await expectChange(page, 'passes', '12 more than the week before');
-  await expectChange(page, 'mastered', null);
+  await expectTotals(page, { seconds: 300, days: 1, mastered: 0 });
+  // Nothing before this week to compare with: no "5 min more than the week before".
+  await expectChanges(page, NO_CHANGES);
   await expectSongTimes(page, sessions, loops, midnight(6));
   await expectWholePage(page, sessions, loops);
   await expect(page.getByTestId('streak-line')).toHaveText('On a 1-day streak. Your longest yet.');
+  // The map is its shortest, and neither a best week nor records restate the one day.
+  await expect(page.getByTestId('heatmap-days')).toHaveText(
+    'Practised on 1 day in the last 12 weeks.',
+  );
+  await expect(page.getByTestId('heatmap-best-week')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /^Records/ })).toHaveCount(0);
+  await expect(page.getByTestId('neglected-loop')).toHaveCount(0);
 
   // One practice day: the speed alone, no arrow; no list to open.
   await expect(page.getByTestId('loop-progress-speed')).toHaveText('80%');
@@ -578,9 +776,6 @@ test('after one session ever, every section speaks from that session', async ({ 
   ).toBeVisible();
   await expect(page.getByTestId('speed-point')).toHaveCount(1);
 
-  // A streak of one day is one date, and the session's loop is named.
-  await expect(page.getByTestId('record-streak-when')).not.toContainText('–');
-  await expect(page.getByTestId('record-session-when')).toHaveText(/^First Loop, /);
   await expect(page.getByText(/^None earned yet/)).toBeVisible();
   await expect(page.getByRole('list', { name: 'Next up' }).getByRole('listitem')).toHaveCount(3);
 
@@ -595,8 +790,11 @@ test('seven songs and loops: five songs then Other, six loops then "Show all", o
   // Song A was practised yesterday and longest, Song G seven days ago and least.
   const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
   const loopIds: string[] = [];
+  const songIds: string[] = [];
   for (const [index, letter] of letters.entries()) {
-    const loop = await addLoop(user, await addSong(user, `Song ${letter}`), `Loop ${letter}`);
+    const song = await addSong(user, `Song ${letter}`);
+    const loop = await addLoop(user, song, `Loop ${letter}`);
+    songIds.push(song);
     await addSession(user, loop, noonOf(index + 1), (7 - index) * 120, 0.6 + index * 0.05, 3);
     loopIds.push(loop);
   }
@@ -614,6 +812,12 @@ test('seven songs and loops: five songs then Other, six loops then "Show all", o
     'Song E6 min',
     'Other (2 songs)6 min',
   ]);
+  // The bars are measured against the longest named song, and "Other" with them: never the scale.
+  expect(
+    await page
+      .getByTestId('song-bar')
+      .evaluateAll((bars) => bars.map((bar) => (bar as HTMLElement).style.width)),
+  ).toEqual(['100%', '85.71%', '71.43%', '57.14%', '42.86%', '42.86%']);
   // The week is today and the six days before: Song G, seven days ago, has no time in it.
   await choosePeriod(page, 'Week');
   await expect(page.getByTestId('total-time')).toHaveText('54 min');
@@ -626,6 +830,16 @@ test('seven songs and loops: five songs then Other, six loops then "Show all", o
     'Other (1 song)4 min',
   ]);
   await expect(page.getByRole('link', { name: /^Other/ })).toHaveCount(0);
+
+  // Loop G was last practised seven days ago: named as left, with its song and a way to it.
+  const left = page.getByTestId('neglected-loop');
+  await expect(left).toHaveCount(1);
+  await expect(left.getByTestId('neglected-when')).toHaveText('last practised 7 days ago');
+  await expect(left.getByText('Song G', { exact: true })).toBeVisible();
+  await expect(left.getByRole('link', { name: 'Loop G' })).toHaveAttribute(
+    'href',
+    `/songs/${songIds[6]}/loops/${loopIds[6]}`,
+  );
 
   // Six loops, last practised first; the seventh behind one button that keeps focus.
   const rows = page.getByTestId('loop-progress');
@@ -678,4 +892,125 @@ test('seven songs and loops: five songs then Other, six loops then "Show all", o
   // A song's bar goes to the song.
   await page.getByRole('link', { name: 'Song A' }).click();
   await expect(page).toHaveURL(/\/songs\/[0-9a-f-]{36}$/);
+});
+
+interface DrawnText {
+  text: string;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/** The text drawn in the charts matched by `selector`: each one's words and box on screen. */
+const chartTexts = (page: Page, selector: string): Promise<DrawnText[]> =>
+  page.locator(`${selector} text`).evaluateAll((texts) =>
+    texts.map((text) => {
+      const box = text.getBoundingClientRect();
+      return {
+        text: text.textContent ?? '',
+        left: box.left,
+        right: box.right,
+        top: box.top,
+        bottom: box.bottom,
+      };
+    }),
+  );
+
+/** Pairs of texts whose boxes share any area (touching edges don't count), as "a / b". */
+function overlapping(texts: DrawnText[]): string[] {
+  const pairs: string[] = [];
+  texts.forEach((a, index) => {
+    for (const b of texts.slice(index + 1)) {
+      if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) {
+        pairs.push(`${a.text} / ${b.text}`);
+      }
+    }
+  });
+  return pairs;
+}
+
+// 17 QA issue 1: a loop practised on hundreds of days drew a band of dots with
+// its percents over it and one date under another.
+test('a year of practice days on one loop draws a line with three days marked and two dates, readable at 390 px', async ({
+  page,
+  user,
+}) => {
+  const DAYS = 365;
+  const loop = await addLoop(user, await addSong(user, 'Year Song'), 'Year Loop');
+  // Oldest first, yesterday last: 50% up to 100% on the 300th day, then 95%.
+  const percentOn = (index: number) => (index <= 300 ? 50 + Math.round(index / 6) : 95);
+  const inserted = await admin.from('practice_sessions').insert(
+    Array.from({ length: DAYS }, (_, index) => ({
+      id: crypto.randomUUID(),
+      user_id: user.id,
+      loop_id: loop,
+      started_at: noonOf(DAYS - index).toISOString(),
+      duration_seconds: 600,
+      speed_ratio: percentOn(index) / 100,
+      repeats: 20,
+    })),
+  );
+  if (inserted.error) throw inserted.error;
+  const sessions = await sessionsOf(user);
+  expect(sessions).toHaveLength(DAYS);
+  const loops = await loopsWithSongOf(user);
+
+  await signIn(page, user, '/stats');
+  await choosePeriod(page, 'All time');
+  await expectTotals(page, totalsBetween(sessions, loops, null, null));
+  await expectWholePage(page, sessions, loops);
+  const row = page.locator(`[data-testid="loop-progress"][data-loop="${loop}"]`);
+  await expect(row.getByTestId('loop-progress-speed')).toHaveText('50% → 95%, up 45');
+
+  await row.getByRole('button', { name: 'Chart of Year Loop' }).click();
+  const chart = page.getByRole('img', {
+    name: /^Speed of Year Loop over 365 practice days: from 50% on .+ to 95% on .+\.$/,
+  });
+  const first = noonOf(DAYS);
+  const last = noonOf(1);
+  const withYear = first.getFullYear() !== last.getFullYear();
+
+  const expectReadableChart = async (size: string) => {
+    await expect(chart, size).toBeVisible();
+    // The line, and a dot only on the first day, the best and the last: no band of 365.
+    await expect(chart.locator('path'), size).toHaveCount(1);
+    expect(
+      await page
+        .getByTestId('speed-point')
+        .evaluateAll((points) => points.map((point) => point.getAttribute('data-percent'))),
+      size,
+    ).toEqual(['50', '100', '95']);
+    await expect(page.getByTestId('speed-label'), size).toHaveText(['50%', '100%', '95%']);
+    // Both ends dated, each with its year only when the two differ in year.
+    await expect(page.getByTestId('speed-date'), size).toHaveText([
+      dateText(first, withYear),
+      dateText(last, withYear),
+    ]);
+    const texts = await chartTexts(page, '[data-testid="speed-chart"]');
+    // Not vacuous: two axis percents, three points' percents, two dates.
+    expect(texts, size).toHaveLength(7);
+    expect(overlapping(texts), `${size}: chart texts drawn over one another`).toEqual([]);
+    // Every chart on the page, at this width: no text under 10 px tall.
+    const all = await chartTexts(page, 'main svg[role="img"]');
+    expect(all.length, size).toBeGreaterThan(texts.length);
+    expect(
+      all
+        .filter((each) => each.bottom - each.top < 10)
+        .map((each) => `${each.text}: ${each.bottom - each.top}`),
+      `${size}: chart text under 10 px`,
+    ).toEqual([]);
+    expect(await sidewaysScroll(page), `${size}: sideways page scroll`).toBeLessThanOrEqual(0);
+  };
+
+  await expectReadableChart('this size');
+  // The table behind the picture still has every day.
+  await expect(
+    page
+      .getByRole('table', { name: 'Speed of Year Loop on each practice day' })
+      .locator('tbody tr'),
+  ).toHaveCount(DAYS);
+  // And at a phone's width, whatever the project's: the chart is smallest there.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectReadableChart('390 px');
 });

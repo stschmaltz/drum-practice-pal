@@ -109,7 +109,14 @@ const seedUsers: SeedUser[] = [
               { daysAgo: 0.03, minutes: 5, speedRatio: 0.75, repeats: 12 },
             ],
           },
-          { name: 'Single bar', startBar: 9, endBar: 9, speedRatio: 0.5 },
+          {
+            // Practised once and left: the Stats page's "Not practised lately" names it.
+            name: 'Single bar',
+            startBar: 9,
+            endBar: 9,
+            speedRatio: 0.5,
+            sessions: [{ daysAgo: 19, minutes: 3, speedRatio: 0.5, repeats: 20 }],
+          },
         ],
       },
       { fixture: 'multi-track', loops: [] },

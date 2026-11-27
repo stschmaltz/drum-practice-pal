@@ -79,3 +79,17 @@ export function timeBySong(
     totalSeconds,
   };
 }
+
+/**
+ * The play time a full-width bar stands for: the named song with the most.
+ * Never "Other" (17 QA issue 9: seven songs' time together made the five
+ * named bars slivers), unless no song is named at all.
+ */
+export function songBarScale({ songs, other }: TimeBySong): number {
+  return songs[0]?.seconds ?? other?.seconds ?? 0;
+}
+
+/** A bar's share of the full width, 0 to 1: "Other" past the scale is capped at it. */
+export function barShare(seconds: number, scale: number): number {
+  return scale <= 0 ? 0 : Math.min(Math.max(seconds, 0) / scale, 1);
+}

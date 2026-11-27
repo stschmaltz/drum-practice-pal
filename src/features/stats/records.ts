@@ -3,8 +3,20 @@
  * stands until it is beaten, so a tie stays with the earlier day or session.
  */
 import { dateOfDayKey } from './days';
-import { longestStreakRun } from './streak';
+import { longestStreakRun, practiceDayKeys } from './streak';
 import { secondsByDay, type StatsSession } from './totals';
+
+/** Practice days it takes before a record says more than the day itself. */
+const RECORDS_FROM_DAYS = 2;
+
+/**
+ * Whether the page lists records yet (17 QA issue 7). After one practice day
+ * every record is that day, said three times; from the second there is
+ * something one day can beat.
+ */
+export function hasRecords(sessions: readonly Pick<StatsSession, 'started_at'>[]): boolean {
+  return practiceDayKeys(sessions).size >= RECORDS_FROM_DAYS;
+}
 
 export interface PracticeRecords {
   /** The longest run of practice days, with its first and last day; null with no sessions. */

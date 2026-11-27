@@ -2,16 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { inTimeZone } from '@/test/timeZone';
 import { nextDayKey } from './days';
 import {
+  barMinutesLabel,
   clockLabel,
+  countLabel,
   dailyPractice,
   dailySummary,
   hasPracticeHistory,
   heatLevel,
+  heatmapLine,
   heatmapMonths,
   heatmapSummary,
+  heatmapWeekCount,
+  heatmapWeekRows,
   minutesLabel,
+  periodBeforeHasPractice,
   practiceHeatmap,
   previousRange,
+  HEATMAP_MAX_WEEKS,
+  HEATMAP_MIN_WEEKS,
   previousTotals,
   rangeStart,
   statsRangeFrom,
@@ -183,8 +191,8 @@ describe('practiceHeatmap', () => {
   });
 
   it('starts every week on a Monday when today is a Monday or a Sunday', () => {
-    expect(practiceHeatmap([], at(2026, 11, 23))[25]?.[0]?.key).toBe('2026-11-23');
-    expect(practiceHeatmap([], at(2026, 11, 29))[25]?.[6]).toMatchObject({
+    expect(practiceHeatmap([], at(2026, 11, 23), 26)[25]?.[0]?.key).toBe('2026-11-23');
+    expect(practiceHeatmap([], at(2026, 11, 29), 26)[25]?.[6]).toMatchObject({
       key: '2026-11-29',
       today: true,
       future: false,
@@ -327,10 +335,7 @@ describe('totalChange', () => {
 
   it('says nothing when there is nothing in either period', () => {
     expect(totalChange('mastered', totals({}), totals({}), 'week')).toBeNull();
-    // Under a minute in both shows as "0 min" twice.
-    expect(
-      totalChange('seconds', totals({ seconds: 45 }), totals({ seconds: 30 }), 'week'),
-    ).toBeNull();
+    expect(totalChange('seconds', totals({}), totals({}), 'week')).toBeNull();
   });
 
   it('compares play time as the whole minutes shown, not the seconds under them', () => {
@@ -338,10 +343,61 @@ describe('totalChange', () => {
     expect(
       totalChange('seconds', totals({ seconds: 119 }), totals({ seconds: 60 }), 'week')?.direction,
     ).toBe('same');
-    // "1 min" against "0 min": a minute more, though two seconds apart.
+    // "1 min" against "<1 min": a minute more, though two seconds apart.
     expect(
       totalChange('seconds', totals({ seconds: 61 }), totals({ seconds: 59 }), 'week')?.label,
     ).toBe('1 min more than the week before');
+  });
+
+  // 17 QA issue 2: under a minute is "<1 min", so it is neither nothing nor a whole minute.
+  it('compares under a minute as what it shows, "<1 min"', () => {
+    const change = (current: number, previous: number) =>
+      totalChange('seconds', totals({ seconds: current }), totals({ seconds: previous }), 'week');
+    // "<1 min" twice.
+    expect(change(45, 30)).toEqual({ direction: 'same', label: 'Same as the week before' });
+    // "<1 min" against "0 min", either way round.
+    expect(change(45, 0)).toEqual({
+      direction: 'up',
+      label: '<1 min more than the week before',
+    });
+    expect(change(0, 45)).toEqual({
+      direction: 'down',
+      label: '<1 min less than the week before',
+    });
+  });
+
+  // 17 QA issue 4: "1.184" over "56 fewer" in one browser, "1,184" over it in another.
+  it('writes a count the way the total above it is written, in the reader’s locale', () => {
+    const passes = (locale: string) =>
+      totalChange('passes', totals({ passes: 40 }), totals({ passes: 1240 }), 'month', locale)
+        ?.label;
+    expect(passes('en-US')).toBe(`${countLabel(1200, 'en-US')} fewer than the month before`);
+    expect(passes('de-DE')).toBe(`${countLabel(1200, 'de-DE')} fewer than the month before`);
+    expect(countLabel(1200, 'de-DE')).toBe('1.200');
+    expect(countLabel(13503, 'en-US')).toBe('13,503');
+  });
+});
+
+// 17 QA issue 7: "5 min more than the week before" against a week with nothing in it says nothing.
+describe('periodBeforeHasPractice', () => {
+  const dayOne = [session(at(2026, 11, 26, 9))];
+
+  it('is false when the period before has no session, and for all time', () => {
+    expect(periodBeforeHasPractice(previousTotals(dayOne, [], 'week', now))).toBe(false);
+    expect(periodBeforeHasPractice(previousTotals(dayOne, [], 'month', now))).toBe(false);
+    expect(periodBeforeHasPractice(previousTotals(dayOne, [], 'all', now))).toBe(false);
+  });
+
+  it('is false for a loop marked finished in a period with no practice in it', () => {
+    const finished = loop({ status: 'finished', finished_at: at(2026, 11, 16).toISOString() });
+    expect(periodBeforeHasPractice(previousTotals(dayOne, [finished], 'week', now))).toBe(false);
+  });
+
+  it('is true once the period before has a session, however short', () => {
+    const sessions = [...dayOne, session(at(2026, 11, 14), { duration_seconds: 30 })];
+    expect(periodBeforeHasPractice(previousTotals(sessions, [], 'week', now))).toBe(true);
+    // 12 days ago is inside the thirty days on show, not before them.
+    expect(periodBeforeHasPractice(previousTotals(sessions, [], 'month', now))).toBe(false);
   });
 });
 
@@ -359,8 +415,95 @@ it('dailySummary gives the chart’s play time and how many of its days were pra
   expect(dailySummary(dailyPractice([], now))).toEqual({ seconds: 0, practised: 0 });
 });
 
+// 17 QA issue 7: three weeks of practice were a corner of orange in 160 empty squares.
+describe('heatmapWeekCount', () => {
+  // `now` is a Thursday; its week began on Monday 23 November.
+  it('is twelve weeks with no session, or with a first session inside them', () => {
+    expect(HEATMAP_MIN_WEEKS).toBe(12);
+    expect(heatmapWeekCount([], now)).toBe(12);
+    expect(heatmapWeekCount([session(at(2026, 11, 26))], now)).toBe(12);
+    // Monday 7 September opens the twelfth week back.
+    expect(heatmapWeekCount([session(at(2026, 9, 7))], now)).toBe(12);
+  });
+
+  it('grows a week at a time from the week of the first session', () => {
+    // Sunday 6 September is in the thirteenth week back.
+    expect(heatmapWeekCount([session(at(2026, 9, 6, 23))], now)).toBe(13);
+    expect(heatmapWeekCount([session(at(2026, 11, 24)), session(at(2026, 8, 5))], now)).toBe(17);
+  });
+
+  it('stops at twenty-six weeks, however long ago the first session was', () => {
+    expect(HEATMAP_MAX_WEEKS).toBe(26);
+    expect(heatmapWeekCount([session(at(2026, 6, 1))], now)).toBe(26);
+    expect(heatmapWeekCount([session(at(2026, 5, 31))], now)).toBe(26);
+    expect(heatmapWeekCount([session(at(2021, 1, 1))], now)).toBe(26);
+  });
+
+  it('is what the map draws unless told otherwise, the first session’s week first', () => {
+    const weeks = practiceHeatmap([session(at(2026, 8, 5))], now);
+    expect(weeks).toHaveLength(17);
+    expect(weeks[0]?.[0]?.key).toBe('2026-08-03');
+    expect(weeks[0]?.[2]).toMatchObject({ key: '2026-08-05', seconds: 60 });
+    expect(weeks[16]?.[3]).toMatchObject({ key: '2026-11-26', today: true });
+  });
+
+  describe('across a change of clocks', () => {
+    inTimeZone('Europe/London');
+    it('counts whole weeks through the 25-hour day', () => {
+      // Monday 31 August to Monday 23 November, the clocks going back on 25 October between.
+      expect(heatmapWeekCount([session(at(2026, 8, 31, 0))], at(2026, 11, 23, 23))).toBe(13);
+    });
+  });
+});
+
+// 17 QA issue 3: the map's text alternative, a row a week.
+describe('heatmapWeekRows', () => {
+  it('gives each week its Monday, the days practised and the play time, oldest first', () => {
+    const rows = heatmapWeekRows(
+      practiceHeatmap(
+        [
+          session(at(2026, 11, 24), { duration_seconds: 25 * 60 }),
+          session(at(2026, 11, 25), { duration_seconds: 5 * 60 }),
+          session(at(2026, 11, 12), { duration_seconds: 9 * 60 }),
+          session(at(2026, 11, 12, 20), { duration_seconds: 11 * 60 }),
+        ],
+        now,
+      ),
+    );
+    expect(rows).toHaveLength(12);
+    expect(rows[0]).toEqual({ start: new Date(2026, 8, 7), days: 0, seconds: 0 });
+    expect(rows[9]).toEqual({ start: new Date(2026, 10, 9), days: 1, seconds: 20 * 60 });
+    expect(rows[10]).toEqual({ start: new Date(2026, 10, 16), days: 0, seconds: 0 });
+    expect(rows[11]).toEqual({ start: new Date(2026, 10, 23), days: 2, seconds: 30 * 60 });
+  });
+});
+
 describe('heatmapSummary', () => {
-  it('counts the days shown up to today, the days practised, and the best week', () => {
+  // 17 QA issue 8: "of the last 180 days" moved between 176 and 182 through the week.
+  it.each([
+    [1, 12, 'Practised on 1 day in the last 12 weeks.'],
+    [9, 26, 'Practised on 9 days in the last 26 weeks.'],
+    [0, 12, 'Practised on 0 days in the last 12 weeks.'],
+  ])('says %i days of %i weeks in words', (daysPractised, weeksShown, line) => {
+    expect(heatmapLine({ daysPractised, weeksShown })).toBe(line);
+  });
+
+  // 17 QA issue 7: "Best week: 5 min over 1 day" on day one restates the day.
+  it('has no best week until two days of the map were practised', () => {
+    const one = practiceHeatmap([session(at(2026, 11, 24), { duration_seconds: 600 })], now);
+    expect(heatmapSummary(one)).toEqual({ weeksShown: 12, daysPractised: 1, bestWeek: null });
+    const two = practiceHeatmap(
+      [session(at(2026, 11, 24), { duration_seconds: 600 }), session(at(2026, 11, 25))],
+      now,
+    );
+    expect(heatmapSummary(two).bestWeek).toEqual({
+      start: new Date(2026, 10, 23),
+      seconds: 660,
+      days: 2,
+    });
+  });
+
+  it('counts the weeks shown, the days practised, and the best week', () => {
     const weeks = practiceHeatmap(
       [
         session(at(2026, 11, 24), { duration_seconds: 25 * 60 }),
@@ -375,8 +518,7 @@ describe('heatmapSummary', () => {
       now,
     );
     expect(heatmapSummary(weeks)).toEqual({
-      // 25 whole weeks and Monday to Thursday of this one.
-      daysShown: 25 * 7 + 4,
+      weeksShown: 26,
       daysPractised: 5,
       bestWeek: { start: new Date(2026, 10, 9), seconds: 40 * 60, days: 2 },
     });
@@ -399,7 +541,7 @@ describe('heatmapSummary', () => {
 
   it('has no best week with nothing practised', () => {
     expect(heatmapSummary(practiceHeatmap([], now))).toEqual({
-      daysShown: 25 * 7 + 4,
+      weeksShown: 12,
       daysPractised: 0,
       bestWeek: null,
     });
@@ -408,7 +550,10 @@ describe('heatmapSummary', () => {
 
 describe('heatmapMonths', () => {
   const columns = (today: Date) =>
-    heatmapMonths(practiceHeatmap([], today)).map(({ column, date }) => [column, date.getMonth()]);
+    heatmapMonths(practiceHeatmap([], today, 26)).map(({ column, date }) => [
+      column,
+      date.getMonth(),
+    ]);
 
   it('names each month at the first week that starts in it', () => {
     // The map opens on Monday 1 June.
@@ -442,14 +587,32 @@ it.each([
   expect(clockLabel(seconds)).toBe(label);
 });
 
+// 17 QA issue 2: a 45-second session read "0 min" beside "1 day", and "<1" on its bar.
 it.each([
   [0, '0 min'],
-  [59, '0 min'],
+  [1, '<1 min'],
+  [45, '<1 min'],
+  [59, '<1 min'],
+  [60, '1 min'],
+  [119, '1 min'],
   [45 * 60, '45 min'],
   [2 * 3600, '2 h'],
   [2 * 3600 + 5 * 60 + 30, '2 h 5 min'],
+  [-5, '0 min'],
 ])('minutesLabel(%i) is %s', (seconds, label) => {
   expect(minutesLabel(seconds)).toBe(label);
+});
+
+it.each([
+  [0, '0'],
+  [45, '<1'],
+  [60, '1'],
+  [12 * 60 + 59, '12'],
+  // A bar counts in minutes however long the day: there is no room for "1 h 15 min" over it.
+  [75 * 60, '75'],
+])('barMinutesLabel(%i) is %s, agreeing with minutesLabel under an hour', (seconds, label) => {
+  expect(barMinutesLabel(seconds)).toBe(label);
+  if (seconds < 3600) expect(minutesLabel(seconds)).toBe(`${label} min`);
 });
 
 /** True when each key is the day after the one before it: no day skipped or repeated. */
@@ -513,7 +676,7 @@ describe.each([
 
   it.each(changes)('the heatmap runs through the day %s: Mondays, no day twice', (_, [y, m, d]) => {
     // A week after the change, so the change is inside the 26 weeks.
-    const weeks = practiceHeatmap([], new Date(y, m - 1, d + 7, 23, 30));
+    const weeks = practiceHeatmap([], new Date(y, m - 1, d + 7, 23, 30), 26);
     const keys = weeks.flat().map((day) => day.key);
     expect(keys).toHaveLength(26 * 7);
     expect(consecutive(keys)).toBe(true);

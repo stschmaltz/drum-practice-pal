@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { timeBySong, type SongTimeLoop } from './songTime';
+import { barShare, songBarScale, timeBySong, type SongTimeLoop } from './songTime';
 import type { StatsSession } from './totals';
 
 const at = (year: number, month: number, day: number, hour = 12) =>
@@ -119,6 +119,46 @@ describe('timeBySong', () => {
     expect(time.songs).toHaveLength(1);
     expect(time.other).toEqual({ songs: 0, seconds: 120 });
     expect(time.totalSeconds).toBe(420);
+  });
+});
+
+// 17 QA issue 9: with twelve songs "Other" was the full bar and the five named ones a sliver each.
+describe('songBarScale and barShare', () => {
+  it('scales the bars to the named song with the most time, whatever Other adds up to', () => {
+    const many = Array.from({ length: 12 }, (_, index) => loop(`l${index}`, `s${index}`));
+    // Seven songs past the fifth, together far more than the longest named one.
+    const time = timeBySong(
+      many.map((each, index) => session(each.id, at(2026, 11, 25), index < 5 ? 600 - index : 500)),
+      many,
+      'week',
+      now,
+    );
+    expect(time.other?.seconds).toBe(3500);
+    const scale = songBarScale(time);
+    expect(scale).toBe(600);
+    expect(barShare(time.songs[0]!.seconds, scale)).toBe(1);
+    expect(barShare(300, scale)).toBe(0.5);
+    // "Other" is as wide as the widest bar at most: it never sets the scale and never runs past it.
+    expect(barShare(time.other!.seconds, scale)).toBe(1);
+  });
+
+  it('gives a smaller Other its own share', () => {
+    const many = Array.from({ length: 6 }, (_, index) => loop(`l${index}`, `s${index}`));
+    const time = timeBySong(
+      many.map((each, index) => session(each.id, at(2026, 11, 25), (6 - index) * 100)),
+      many,
+      'week',
+      now,
+    );
+    expect(barShare(time.other!.seconds, songBarScale(time))).toBeCloseTo(100 / 600);
+  });
+
+  it('falls back to Other when no song is named, and to nothing with no time at all', () => {
+    const unknownOnly = timeBySong([session('gone', at(2026, 11, 25), 120)], [], 'week', now);
+    expect(songBarScale(unknownOnly)).toBe(120);
+    expect(barShare(120, 120)).toBe(1);
+    expect(songBarScale(timeBySong([], [], 'week', now))).toBe(0);
+    expect(barShare(0, 0)).toBe(0);
   });
 });
 

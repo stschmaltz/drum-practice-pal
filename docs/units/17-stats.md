@@ -264,3 +264,89 @@ The full e2e suite and `npm run test:db`; Safari and Firefox; a real screen read
 ### Verdict
 
 **FAIL**, on one major issue: the speed chart for a loop with hundreds of practice days (issue 1), which the plan named as QA's to judge. Every acceptance criterion passes and every number checked is right. Issues 2 to 9 are minor and can go with the fix or be carried forward.
+
+## Build (QA fix round 1)
+
+Two Build sessions: the first did the app code and its unit and component tests and was cut off; the second finished the e2e, the seed, the screenshots and the docs. All eleven QA issues are dealt with, and the two things QA's product read said were missing or filler (nothing names a neglected loop; "Loop passes" as a headline).
+
+### Summary, by QA issue
+
+1. **A year of practice days is a line, not a band (major).** What the chart draws on its line now follows how many days it has (`speedChartLayout.ts`, pure): up to 8 days a dot a day and a percent on every day with room; up to 30 a dot a day and the first, best and last day's percents; past 30 the line alone with a dot and a percent on those three days (`dottedDays`, `percentLabelOrder`). Labels are offered in priority order (last, first, best, the rest) and one that would overlap a kept label or the axis's own gives way (`clearLabels` over estimated `textBox`es). The two dates under the plot carry a year only when they differ in year (`axisDates`), and the first gives way if the two don't fit with 8 units of air (`axisDatesShown`). The sparkline is a line with one dot at its end, whatever the days. The table behind the chart still has every day.
+2. **"<1 min", never "0 min" for some play time.** `minutesLabel` is the one writer of a play time (totals, song bars, captions, rows, records, tables) and `barMinutesLabel` the number over a bar; `totalChange` compares what both totals show, so under a minute against nothing is "<1 min more".
+3. **The heatmap has its table**, a row a week (`heatmapWeekRows`: week starting, days practised, practice), not 180 day rows.
+4. **One number format.** A count goes through `countLabel` in a total and in its change line alike, so both follow the reader's locale. Dates still follow the locale inside English sentences (carried forward; QA suggested `'en'` throughout).
+5. **Which period.** Sections the Period choice doesn't move say what they cover beside the heading: "Loop progress All time", "Records All time", "Badges All time", "Practice days Last N weeks" (`Section`'s `aside`).
+6. **"Best calendar week"**, so it isn't read against the rolling "Last 7 days".
+7. **Day one doesn't restate itself.** No change line under any total while the period before has no practice (`periodBeforeHasPractice`); Records from the second practice day (`hasRecords`); the best calendar week from two practised days; the heatmap spans from the first practice week, at least 12 and at most 26 weeks (`heatmapWeekCount`), so three weeks of practice aren't a corner of 160 empty squares.
+8. **"Practised on N days in the last W weeks."** Weeks are what the map is made of; the count of days shown moved through the week.
+9. **"Other" doesn't set the scale.** Song bars are scaled to the longest named song (`songBarScale`); "Other" is muted and capped at full width (`barShare`).
+10. **Chart text matches the page.** The bar and line charts are at most `max-w-md` wide (9-unit text is 11.5 px on a 390 px phone and 14.4 px at the cap); the heatmap is drawn at 1 to 1.4 px a unit in rem, and scrolls in its own box on a phone narrower than its 26 weeks.
+11. **"days" alone on a line** was fixed by QA; kept.
+
+From QA's product read: **"Loop passes" is gone from the headline totals** (three totals; passes still count towards the badges). **"Not practised lately"** is new under Loop progress (`neglected.ts`, `NeglectedLoops.tsx`): up to three active loops whose last session was 7 or more calendar days ago, longest left first, each with its song, "last practised 12 days ago" and its name as a link to its practice screen. The daily chart's caption lost its second sentence, which restated the picture. `smallHeadingClass` (styles.ts) is the small caps heading the totals, the records and this block share.
+
+### Decisions (confirmed by the caller)
+
+- A loop never practised is listed as neglected only once it was saved 7 or more days ago ("not practised yet, saved 9 days ago"), so a loop saved this week isn't called neglected before it could be practised.
+- "Best calendar week" waits for two practised days.
+- The chart's two dates carry a year only when the two ends differ in year.
+- The seed's "Single bar" loop now has one session 19 days ago (3 minutes at 50%), so the seed user has a neglected loop for the spec and the screenshots. The seed has 21 sessions; QA's hand-checked numbers above are from the 20 before it (all time is now 3 min, 1 day and 20 passes more).
+
+### Product walk-through (docs/product.md)
+
+- _Day one, one song, one session:_ three totals with no "more than the week before" against nothing, a streak of one, one bar, one loop row with its one-point chart, a 12-week map with one square, no Records, no "Not practised lately", "None earned yet" and three badges to go for. Nothing reads as a failure and nothing is asked.
+- _Missing a piece:_ no loops or no sessions is still the one empty state; a finished loop with no sessions, each section's own waiting line as before. A song with no loops never appears and nothing here needs one. "Not practised lately" is absent, not "all caught up", when no loop has been left.
+- _Offline:_ unchanged. Everything is worked out from the two cached lists; the new block and rules read nothing else.
+- No order is forced and no chore added: the neglected block names loops and links to them, nothing more. A finished loop is never listed.
+
+### Files
+
+- App: `src/features/stats/` (`StatsPage.tsx`, `charts.tsx`, `BadgeSection.tsx`, `NeglectedLoops.tsx` new, `neglected.ts` new, `speedChartLayout.ts` new, `totals.ts`, `records.ts`, `songTime.ts`, `dateLabels.ts`, `days.ts`), `src/components/styles.ts`.
+- Unit and component tests: `neglected.test.ts`, `speedChartLayout.test.ts` (new), `totals.test.ts`, `records.test.ts`, `songTime.test.ts`, `dateLabels.test.ts`, `StatsPage.test.tsx`.
+- e2e: `tests/e2e/stats.spec.ts`, `tests/e2e/design.spec.ts`, `tests/e2e/practicePage.ts` (`addLoopLeftAlone`).
+- `scripts/seed.ts`; `docs/plan.md` (Unit 17's scope and Carried forward), `AGENTS.md`; `docs/units/17-shots/stats-*.png`.
+
+### e2e
+
+`stats.spec.ts` still works every number on the page out from the database rows with none of the app's code, now including: the three totals and their change lines (none when the period before has no practice); the heading asides; the weeks the map spans, its line, the best calendar week and all three columns of its table; "Not practised lately" (which loops, in what order, how many days, the song, the link; no block when none); Records absent under two practice days. New or changed cases:
+
+- _Seed user:_ also expects "Single bar" under "Not practised lately".
+- _A try at full speed:_ the week's and the month's totals and change lines ("19 min more than the week before", "24 min more than the month before"), the records' dates, no neglected loop.
+- _One session ever:_ no change lines, "Practised on 1 day in the last 12 weeks.", no best week, no Records.
+- _Seven songs:_ Loop G, last practised 7 days ago, is named with its song and link; the song bars' widths are 100%, 85.71%… against Song A, "Other" at 42.86%.
+- _A year of practice days (new):_ 365 days on one loop, 50% up to 100% and back to 95%. Three dots (50, 100, 95), their three percents, one path, both dates with their years, seven texts in the chart with no two boxes sharing any area, no chart text on the page under 10 px tall, no sideways scroll; measured at the project's size and again at 390 px; the table has 365 rows. Checked that it bites: with the 30-day dot limit raised it fails on 365 dots.
+- `expectWholePage` no longer presses "Show all badges" when every badge is earned or next up (the year user: eight earned, three next).
+- `design.spec.ts`: before the Stats audit a second loop practised once nine days ago is put in by the service role (`addLoopLeftAlone`) and read by a reload, so the audit and the focus-ring pass cover the change lines, "Not practised lately" and Records as well.
+
+### Screenshots
+
+Retaken on the build, seed user, at 390, 820 and 1440 px: `stats-{phone,tablet,desktop}.png` (Week), `stats-month-*` and `stats-open-*` (Month, Main groove's chart open, every badge). New: `stats-year-chart-*` and `stats-year-*`, a throwaway user with one loop practised on 308 of the last 336 days. Looked at: the year chart is a wavering line from "51%" at the left to "96%" at the right under the dashed 100% line, with "Dec 27, 2025" and "Nov 26, 2026" under its ends, at all three sizes; the best day's dot sits beside the last and its percent gave way to the last's. The seed page shows three totals with their lines, the asides, "Not practised lately: Single bar, Tempo Change · last practised 19 days ago", a 12-week map and "Best calendar week: 34 min over 4 days, the week of Nov 23". Full-page phone shots still draw the tab bar part-way down: the capture, not the app.
+
+### Async windows and inputs
+
+None added. The page still derives everything in render from the two queries it already read; no new effect, timer, write or request. The chart button, "Show all" and the Period choice are synchronous state.
+
+### Review checklist, self-review
+
+- Predicates: one each for "has a period to compare with" (`periodBeforeHasPractice`), "lists records" (`hasRecords`) and the neglect rule (`neglectedLoops`), each used by the page and tested alone.
+- Rounded values compared as shown: `totalChange` on whole minutes and "<1 min" against "0 min"; a loop is neglected by calendar days (`daysBetween`), not 24-hour spans, so a clock change can't move it.
+- Lists read in full: unchanged (`fetchAllPages` for sessions and loops); e2e helpers check every `error`, including the new `addLoopLeftAlone` and the 365-row insert.
+- Tests that say "nothing": the year case asserts seven texts before asserting none overlap and that the page has more chart text than the chart before asserting none is small; the seed case asserts the period before has practice before reading its change lines.
+- Test cleanup: the `user` fixture as before; the temporary screenshot spec was deleted.
+
+### Known gaps
+
+- Dates follow the browser's locale inside English copy (plan, Carried forward).
+- Label boxes are estimated (0.66 em a character), not measured; the e2e measures the real ones for one data set.
+- When the best day is next to the last, the best's percent gives way and its dot stays (the year screenshot): the dot is unlabelled but the row and table say it.
+- The neglected block was not walked by hand with 30 loops or a 100-character name; component tests and the design audit cover its wrapping and targets.
+
+### Manual verify
+
+1. `npm run db:seed`, sign in as `demo@drumpal.test`, open Stats: three totals; "Single bar" under "Not practised lately" goes to its practice screen.
+2. A user with one session: no change lines, no Records, a 12-week map.
+3. A loop with a session on most days of a year: "Chart" shows a line with three dots and two dated ends at 390 px.
+
+### Results
+
+`npx tsc -b` clean; `stats.spec.ts` 18 of 18 and `design.spec.ts` "the library, the song page…" 3 of 3 at phone, tablet and desktop (`E2E_PORT=4183`, this worktree's stack on 54421). The full e2e suite was not run. `npm run check` green.

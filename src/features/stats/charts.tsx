@@ -1,28 +1,46 @@
 /**
  * The Stats page's charts: SVG drawn by the app on the design tokens, no
- * chart library (Unit 16). The geometry is chartScale.ts and the data
- * totals.ts and loopProgress.ts, all pure; these only draw. Every graphic
- * carries the numbers and dates it stands for (Unit 17), and is an `img`
- * named by a one-line summary with those numbers in a visually hidden table,
- * so a screen reader gets the data rather than a picture of it.
+ * chart library (Unit 16). The geometry is chartScale.ts and
+ * speedChartLayout.ts and the data totals.ts and loopProgress.ts, all pure;
+ * these only draw. Every graphic carries the numbers and dates it stands for
+ * (Unit 17), and is an `img` named by a one-line summary with those numbers
+ * in a visually hidden table, so a screen reader gets the data rather than a
+ * picture of it.
+ *
+ * Size (17 QA issue 10): a chart's text is in the SVG's own units and grows
+ * with the picture, so each chart caps its width (`chartWidthClass`, the
+ * heatmap's own limits) to keep that text between 10 px on a 390 px phone and
+ * about the page's own size on a laptop. `stats.spec.ts` measures it.
  */
 import {
   barRects,
-  labelledIndexes,
   linePoints,
   niceCeiling,
   pathOf,
   sparklinePoints,
   speedAxis,
 } from './chartScale';
-import { shortDate } from './dateLabels';
+import { axisDates, shortDate } from './dateLabels';
 import { HEAT_CLASSES } from './heatmapShades';
 import type { SpeedDay } from './loopProgress';
+import {
+  approxTextWidth,
+  axisDatesShown,
+  bestDayIndex,
+  clearLabels,
+  dottedDays,
+  percentLabelOrder,
+  textBox,
+  type TextAnchor,
+} from './speedChartLayout';
 import { daysLabel } from './streak';
 import {
+  barMinutesLabel,
   dailySummary,
+  heatmapLine,
   heatmapMonths,
   heatmapSummary,
+  heatmapWeekRows,
   minutesLabel,
   type HeatmapDay,
   type PracticeDay,
@@ -31,6 +49,16 @@ import {
 const weekdayFormat = new Intl.DateTimeFormat(undefined, { weekday: 'narrow' });
 const dayOfMonthFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric' });
 const monthFormat = new Intl.DateTimeFormat(undefined, { month: 'short' });
+
+/**
+ * The bar and line charts are 280 units wide with 9-unit text: full width on
+ * a phone (11.5 px text at 390 px), and no wider than 28rem, where that text
+ * is 14.4 px.
+ */
+const chartWidthClass = 'w-full max-w-md';
+/** The font size of every label in the bar and line charts, in their units. */
+const CHART_FONT = 9;
+const chartTextClass = 'text-[9px]';
 
 /** `valueHeight` is the room above the bars for each day's minutes; `labelHeight` holds the weekday and the date. */
 const BAR_CHART = { width: 280, height: 96, gap: 4, labelHeight: 26, valueHeight: 12 } as const;
@@ -50,14 +78,13 @@ export function DailyMinutesChart({ days, now }: { days: readonly PracticeDay[];
         viewBox={`0 ${-valueHeight} ${width} ${height + labelHeight + valueHeight}`}
         role="img"
         aria-label={summary}
-        className="w-full max-w-xl"
+        className={chartWidthClass}
         data-testid="daily-minutes-chart"
       >
         <line x1="0" x2={width} y1={height} y2={height} strokeWidth="1" className="stroke-line" />
         {rects.map((rect, index) => {
           const day = days[index];
           if (!day) return null;
-          const wholeMinutes = Math.floor(day.seconds / 60);
           const middle = rect.x + rect.width / 2;
           const tick = day.today ? 'fill-ink font-bold' : 'fill-ink-muted';
           return (
@@ -85,13 +112,18 @@ export function DailyMinutesChart({ days, now }: { days: readonly PracticeDay[];
                   x={middle}
                   y={rect.y - 3}
                   textAnchor="middle"
-                  className={`text-[9px] tabular-nums ${day.today ? 'fill-ink font-bold' : 'fill-ink-soft'}`}
+                  className={`${chartTextClass} tabular-nums ${day.today ? 'fill-ink font-bold' : 'fill-ink-soft'}`}
                 >
-                  {wholeMinutes < 1 ? '<1' : wholeMinutes}
+                  {barMinutesLabel(day.seconds)}
                 </text>
               )}
               {/* Today is in bold, not the word: "Today" was wider than its bar. */}
-              <text x={middle} y={height + 11} textAnchor="middle" className={`text-[9px] ${tick}`}>
+              <text
+                x={middle}
+                y={height + 11}
+                textAnchor="middle"
+                className={`${chartTextClass} ${tick}`}
+              >
                 {weekdayFormat.format(day.date)}
               </text>
               {/* The day of the month under it, so a bar can be put to a date. */}
@@ -99,7 +131,7 @@ export function DailyMinutesChart({ days, now }: { days: readonly PracticeDay[];
                 x={middle}
                 y={height + 22}
                 textAnchor="middle"
-                className={`text-[8px] tabular-nums ${tick}`}
+                className={`${chartTextClass} tabular-nums ${tick}`}
               >
                 {dayOfMonthFormat.format(day.date)}
               </text>
@@ -108,8 +140,7 @@ export function DailyMinutesChart({ days, now }: { days: readonly PracticeDay[];
         })}
       </svg>
       <figcaption className="text-sm text-ink-muted" data-testid="daily-summary">
-        {minutesLabel(seconds)} over {practised} of the last {days.length} days. Each bar is a
-        day&apos;s minutes; today is the last.
+        {minutesLabel(seconds)} over {practised} of the last {days.length} days.
       </figcaption>
       <table className="sr-only">
         <caption>Minutes practised per day</caption>
@@ -138,15 +169,26 @@ const CELL_STEP = CELL + CELL_GAP;
 /** Today's outline sits in the gap around its cell, so it shows on an empty and a full day alike. */
 const TODAY_RING = 1.5;
 /** Room over the cells for the months' names, and beside them for the weekdays'. */
-const HEATMAP_TOP = 13;
-const HEATMAP_LEFT = 12;
+const HEATMAP_TOP = 14;
+const HEATMAP_LEFT = 13;
 /** The rows that carry their weekday's letter: Monday, Wednesday, Friday. */
 const LABELLED_ROWS = [0, 2, 4];
+/**
+ * The map's text is 10 of its units, and the map is drawn at 1 to 1.4 px a
+ * unit: never under 10 px (26 weeks are 351 units, which a 390 px phone's
+ * 358 px of page just holds; a narrower one scrolls the map in its own box),
+ * and never the 20 px a short map stretched across a laptop would make it.
+ * In rem, so it follows the reader's font size as the page does.
+ */
+const HEATMAP_SCALE = { min: 1, max: 1.4 } as const;
+const heatmapTextClass = 'fill-ink-muted text-[10px]';
+const remOf = (px: number) => `${px / 16}rem`;
 
 /**
- * Practice days for the last 26 weeks, a column a week, Monday at the top,
- * with the months along the top, and under it how many of those days were
- * practised and the best week.
+ * Practice days, a column a week, Monday at the top, with the months along
+ * the top: from the first practice week, 12 to 26 weeks (`practiceHeatmap`).
+ * Under it how many of those days were practised and the best week; behind
+ * it, for a screen reader, a row a week.
  */
 export function PracticeHeatmap({
   weeks,
@@ -155,11 +197,12 @@ export function PracticeHeatmap({
   weeks: readonly (readonly HeatmapDay[])[];
   now: Date;
 }) {
-  const { daysShown, daysPractised, bestWeek } = heatmapSummary(weeks);
-  const summary = `Practised on ${daysPractised} of the last ${daysShown} days.`;
+  const { bestWeek, ...counts } = heatmapSummary(weeks);
+  const summary = heatmapLine(counts);
   const width = weeks.length * CELL_STEP - CELL_GAP;
   const height = 7 * CELL_STEP - CELL_GAP;
   const edge = TODAY_RING * 2;
+  const units = width + HEATMAP_LEFT + edge;
 
   return (
     <figure className="flex flex-col gap-2">
@@ -167,10 +210,14 @@ export function PracticeHeatmap({
       <div className="overflow-x-auto">
         <svg
           // Room for today's ring round a cell on the edge.
-          viewBox={`${-HEATMAP_LEFT} ${-HEATMAP_TOP} ${width + HEATMAP_LEFT + edge} ${height + HEATMAP_TOP + edge}`}
+          viewBox={`${-HEATMAP_LEFT} ${-HEATMAP_TOP} ${units} ${height + HEATMAP_TOP + edge}`}
           role="img"
           aria-label={summary}
-          className="h-auto w-full max-w-xl min-w-80"
+          className="h-auto w-full"
+          style={{
+            minWidth: remOf(units * HEATMAP_SCALE.min),
+            maxWidth: remOf(units * HEATMAP_SCALE.max),
+          }}
           data-testid="practice-heatmap"
         >
           {heatmapMonths(weeks).map(({ column, date }) => (
@@ -178,7 +225,7 @@ export function PracticeHeatmap({
               key={column}
               x={column * CELL_STEP}
               y={-4}
-              className="fill-ink-muted text-[9px]"
+              className={heatmapTextClass}
               data-testid="heatmap-month"
             >
               {monthFormat.format(date)}
@@ -190,8 +237,8 @@ export function PracticeHeatmap({
               <text
                 key={row}
                 x={-HEATMAP_LEFT}
-                y={row * CELL_STEP + CELL - 1.5}
-                className="fill-ink-muted text-[9px]"
+                y={row * CELL_STEP + CELL - 1}
+                className={heatmapTextClass}
               >
                 {weekdayFormat.format(day.date)}
               </text>
@@ -239,10 +286,11 @@ export function PracticeHeatmap({
         <span>
           <span data-testid="heatmap-days">{summary}</span>
           {bestWeek && (
+            // "Calendar": Monday to Sunday, unlike the rolling "Last 7 days" up the page (17 QA issue 6).
             <span data-testid="heatmap-best-week">
               {' '}
-              Best week: {minutesLabel(bestWeek.seconds)} over {daysLabel(bestWeek.days)}, the week
-              of {shortDate(bestWeek.start, now)}.
+              Best calendar week: {minutesLabel(bestWeek.seconds)} over {daysLabel(bestWeek.days)},
+              the week of {shortDate(bestWeek.start, now)}.
             </span>
           )}
         </span>
@@ -273,6 +321,26 @@ export function PracticeHeatmap({
           </span>
         </span>
       </figcaption>
+      {/* A row a week, not a row a day (17 QA issue 3): the days' own minutes are a hover away. */}
+      <table className="sr-only">
+        <caption>Practice days by week</caption>
+        <thead>
+          <tr>
+            <th scope="col">Week starting</th>
+            <th scope="col">Days practised</th>
+            <th scope="col">Practice</th>
+          </tr>
+        </thead>
+        <tbody>
+          {heatmapWeekRows(weeks).map((week) => (
+            <tr key={week.start.getTime()}>
+              <th scope="row">{shortDate(week.start, now)}</th>
+              <td>{week.days}</td>
+              <td>{minutesLabel(week.seconds)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </figure>
   );
 }
@@ -291,19 +359,35 @@ const LINE_CHART = {
   bottom: 10,
   dateHeight: 14,
 } as const;
-/** A point's percent ("100%" at 9px) needs this much of the line to itself, and a date ("26 Nov") this much. */
+/** With few enough days for every point to be labelled, a percent ("100%") needs this much of the line to itself. */
 const PERCENT_LABEL_GAP = 34;
-const DATE_LABEL_GAP = 50;
+/** The least air between the two dates under the plot. */
+const DATE_GAP = 8;
+/** How far a point's percent stands over it, and an axis label's baseline under its line. */
+const LABEL_LIFT = 6;
+const AXIS_LABEL_DROP = 3;
 
 /** Where a label hangs from its point: the ends lean inwards so they aren't cut off. */
-const anchorOf = (index: number, count: number) =>
+const anchorOf = (index: number, count: number): TextAnchor =>
   count === 1 ? 'middle' : index === 0 ? 'start' : index === count - 1 ? 'end' : 'middle';
+
+interface ChartLabel {
+  text: string;
+  x: number;
+  baseline: number;
+  anchor: TextAnchor;
+}
+
+const boxOf = (label: ChartLabel) => textBox({ ...label, fontSize: CHART_FONT });
 
 /**
  * One loop's working speed on each day it was practised (`dailySpeeds`: the
  * speed with the most play time that day), oldest first, against full speed
- * (100%). Points carry their percent and the axis their dates, as many of
- * each as fit; the table has them all.
+ * (100%). What the line carries depends on how many days it has
+ * (speedChartLayout.ts): a dot and a percent a day while they fit, then dots
+ * with the first, best and last day's percents, then past thirty days the
+ * line alone with those three days marked. The first and last dates stand
+ * under the plot's two ends; the table has every day.
  */
 export function SpeedChart({
   days,
@@ -328,17 +412,74 @@ export function SpeedChart({
     days.map((day) => ({ time: day.date.getTime(), value: day.percent })),
     inner,
   ).map((point) => ({ x: point.x + left, y: point.y + top }));
-  const xs = plotted.map((point) => point.x);
   const fullSpeedY = baseline - ((100 - axis.min) / (axis.max - axis.min)) * inner.height;
-  const ends = [0, days.length - 1];
-  const withPercent = labelledIndexes(xs, {
-    minGap: PERCENT_LABEL_GAP,
-    // The best day, the latest of equals, so a line that ends on its best labels that point once.
-    keep: [...ends, percents.lastIndexOf(Math.max(...percents))],
+
+  const axisLabels: ChartLabel[] = [
+    { text: '100%', x: 0, baseline: fullSpeedY + AXIS_LABEL_DROP, anchor: 'start' },
+    // An axis that starts at full speed has named its lowest percent already.
+    ...(axis.min === 100
+      ? []
+      : [
+          {
+            text: `${axis.min}%`,
+            x: 0,
+            baseline: baseline + AXIS_LABEL_DROP,
+            anchor: 'start' as const,
+          },
+        ]),
+  ];
+
+  const best = bestDayIndex(percents);
+  const dotted = dottedDays(days.length, best);
+  // Offered in priority order (last, first, best, the rest), kept unless they would overlap.
+  const offered = percentLabelOrder(
+    plotted.map((point) => point.x),
+    best,
+    PERCENT_LABEL_GAP,
+  ).flatMap((index) => {
+    const point = plotted[index];
+    const day = days[index];
+    if (!point || !day) return [];
+    const label: ChartLabel = {
+      text: `${day.percent}%`,
+      x: point.x,
+      baseline: point.y - LABEL_LIFT,
+      anchor: anchorOf(index, days.length),
+    };
+    return [{ index, label }];
   });
-  const withDate = labelledIndexes(xs, { minGap: DATE_LABEL_GAP, keep: ends });
+  const percentLabels = clearLabels(
+    offered.map(({ label }) => boxOf(label)),
+    axisLabels.map(boxOf),
+  )
+    .flatMap((kept) => offered[kept] ?? [])
+    .sort((a, b) => a.index - b.index);
+
   const firstDay = days[0];
   const lastDay = days[days.length - 1];
+  const dateBaseline = height + dateHeight - 4;
+  const dateLabels: ChartLabel[] = [];
+  if (firstDay && lastDay && days.length === 1) {
+    dateLabels.push({
+      text: shortDate(lastDay.date, now),
+      x: plotted[0]?.x ?? left,
+      baseline: dateBaseline,
+      anchor: 'middle',
+    });
+  } else if (firstDay && lastDay) {
+    const [firstText, lastText] = axisDates(firstDay.date, lastDay.date);
+    const fits = axisDatesShown({
+      firstWidth: approxTextWidth(firstText, CHART_FONT),
+      lastWidth: approxTextWidth(lastText, CHART_FONT),
+      room: inner.width,
+      gap: DATE_GAP,
+    });
+    if (fits === 'both') {
+      dateLabels.push({ text: firstText, x: left, baseline: dateBaseline, anchor: 'start' });
+    }
+    dateLabels.push({ text: lastText, x: width - right, baseline: dateBaseline, anchor: 'end' });
+  }
+
   const summary =
     !firstDay || !lastDay
       ? `No sessions of ${loopName} yet.`
@@ -352,7 +493,7 @@ export function SpeedChart({
         viewBox={`0 0 ${width} ${height + dateHeight}`}
         role="img"
         aria-label={summary}
-        className="w-full max-w-xl"
+        className={chartWidthClass}
         data-testid="speed-chart"
       >
         <line
@@ -363,9 +504,6 @@ export function SpeedChart({
           strokeWidth="1"
           className="stroke-line"
         />
-        <text x="0" y={baseline + 3} className="fill-ink-muted text-[9px] tabular-nums">
-          {axis.min}%
-        </text>
         {/* Full speed: the goal the line is read against, named on the axis. */}
         <line
           x1={left}
@@ -376,9 +514,16 @@ export function SpeedChart({
           strokeDasharray="4 3"
           className="stroke-success"
         />
-        <text x="0" y={fullSpeedY + 3} className="fill-success text-[9px] tabular-nums">
-          100%
-        </text>
+        {axisLabels.map((label) => (
+          <text
+            key={label.text}
+            x={label.x}
+            y={label.baseline}
+            className={`${chartTextClass} tabular-nums ${label.text === '100%' ? 'fill-success' : 'fill-ink-muted'}`}
+          >
+            {label.text}
+          </text>
+        ))}
         {plotted.length > 1 && (
           <path
             d={pathOf(plotted)}
@@ -390,8 +535,7 @@ export function SpeedChart({
         )}
         {plotted.map((point, index) => {
           const day = days[index];
-          if (!day) return null;
-          const anchor = anchorOf(index, days.length);
+          if (!day || !dotted.has(index)) return null;
           return (
             <g
               key={day.key}
@@ -404,31 +548,35 @@ export function SpeedChart({
                   {shortDate(day.date, now)}: {day.percent}%, {minutesLabel(day.seconds)}
                 </title>
               </circle>
-              {/* The number the point stands for, over it. */}
-              {withPercent.has(index) && (
-                <text
-                  x={point.x}
-                  y={point.y - 6}
-                  textAnchor={anchor}
-                  className="fill-ink-soft text-[9px] tabular-nums"
-                >
-                  {day.percent}%
-                </text>
-              )}
-              {/* When: under the plot, below its point. */}
-              {withDate.has(index) && (
-                <text
-                  x={point.x}
-                  y={height + dateHeight - 4}
-                  textAnchor={anchor}
-                  className="fill-ink-muted text-[9px]"
-                >
-                  {shortDate(day.date, now)}
-                </text>
-              )}
             </g>
           );
         })}
+        {/* The number a point stands for, over it. */}
+        {percentLabels.map(({ index, label }) => (
+          <text
+            key={index}
+            x={label.x}
+            y={label.baseline}
+            textAnchor={label.anchor}
+            className={`fill-ink-soft ${chartTextClass} tabular-nums`}
+            data-testid="speed-label"
+          >
+            {label.text}
+          </text>
+        ))}
+        {/* When: the first and last practice day, under the plot's two ends. */}
+        {dateLabels.map((label) => (
+          <text
+            key={label.anchor}
+            x={label.x}
+            y={label.baseline}
+            textAnchor={label.anchor}
+            className={`fill-ink-muted ${chartTextClass}`}
+            data-testid="speed-date"
+          >
+            {label.text}
+          </text>
+        ))}
       </svg>
       <table className="sr-only">
         <caption>Speed of {loopName} on each practice day</caption>
@@ -458,7 +606,9 @@ const SPARKLINE = { width: 64, height: 24, pad: 4 } as const;
 /**
  * A loop's speed over its practice days in a row of the progress list: the
  * shape only, beside the row's own "70% → 85%", so it is hidden from screen
- * readers. Its last point is green once the loop is at full speed.
+ * readers. A line with one dot, at its end, however many days it has (never
+ * a dot a day, as the chart under the row stops drawing past thirty); the
+ * dot is green once the loop is at full speed.
  */
 export function Sparkline({ percents }: { percents: readonly number[] }) {
   const points = sparklinePoints(percents, SPARKLINE);

@@ -1,10 +1,8 @@
 import { useId, useState } from 'react';
 import { Icon } from '@/components/icons';
 import { ProgressBar } from '@/components/ProgressMarks';
-import { ghostButtonClass } from '@/components/styles';
+import { ghostButtonClass, smallHeadingClass } from '@/components/styles';
 import { nextUpBadges, type BadgeProgress } from './badges';
-
-const subheadingClass = 'text-xs font-semibold tracking-wider text-ink-muted uppercase';
 
 /**
  * Badges without the wall (Unit 17): the earned ones in a line, then "Next
@@ -39,7 +37,7 @@ export function BadgeSection({ badges }: { badges: readonly BadgeProgress[] }) {
 
       {nextUp.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h3 id={`${restId}-next`} className={subheadingClass}>
+          <h3 id={`${restId}-next`} className={smallHeadingClass}>
             Next up
           </h3>
           <LockedBadges badges={nextUp} labelledBy={`${restId}-next`} />

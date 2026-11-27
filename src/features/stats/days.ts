@@ -30,6 +30,16 @@ export function addDays(date: Date, days: number): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 }
 
+/**
+ * Calendar days from one date's day to another's (negative when `to` is the
+ * earlier): counted on the calendar, so a 23- or 25-hour day is still one.
+ */
+export function daysBetween(from: Date, to: Date): number {
+  const dayNumber = (date: Date) =>
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000;
+  return Math.round(dayNumber(to) - dayNumber(from));
+}
+
 /** Midnight at the start of a day key's day. */
 export function dateOfDayKey(key: DayKey): Date {
   const [year = 0, month = 1, day = 1] = key.split('-').map(Number);

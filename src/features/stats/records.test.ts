@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { inTimeZone } from '@/test/timeZone';
-import { practiceRecords } from './records';
+import { hasRecords, practiceRecords } from './records';
 import type { StatsSession } from './totals';
 
 const at = (year: number, month: number, day: number, hour = 12, minute = 0) =>
@@ -18,6 +18,22 @@ function session(date: Date, duration_seconds = 60, loop_id = 'a'): StatsSession
     repeats: 1,
   };
 }
+
+// 17 QA issue 7: on day one every record is that one session, said three times.
+describe('hasRecords', () => {
+  it('is false with no sessions, and with any number of sessions on one day', () => {
+    expect(hasRecords([])).toBe(false);
+    expect(hasRecords([session(at(2026, 11, 3, 8))])).toBe(false);
+    expect(hasRecords([session(at(2026, 11, 3, 8)), session(at(2026, 11, 3, 23, 59))])).toBe(false);
+  });
+
+  it('is true from the second practice day, a minute past midnight included', () => {
+    expect(hasRecords([session(at(2026, 11, 3, 23, 59)), session(at(2026, 11, 4, 0, 1))])).toBe(
+      true,
+    );
+    expect(hasRecords([session(at(2026, 11, 3)), session(at(2026, 6, 1))])).toBe(true);
+  });
+});
 
 describe('practiceRecords', () => {
   it('has no records with no sessions', () => {

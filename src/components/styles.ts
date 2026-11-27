@@ -118,6 +118,9 @@ export const dangerCardClass = `rounded-card ${dangerSurface}`;
 /** A section's heading inside a page: an h2, or a fieldset's legend. */
 export const sectionHeadingClass = 'text-lg font-bold tracking-tight';
 
+/** A small heading inside a section (an h3), or the label over a figure: quiet capitals. */
+export const smallHeadingClass = 'text-xs font-semibold tracking-wider text-ink-muted uppercase';
+
 /** A link to another page, on a line of its own (every use so far): a 44 px target like a button. */
 export const linkClass = `inline-flex min-h-touch items-center rounded-sm font-medium text-brand underline underline-offset-4 hover:text-brand-hover ${focusRing}`;
 

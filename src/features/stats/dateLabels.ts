@@ -29,3 +29,18 @@ export function dateSpan(start: Date, end: Date, now: Date, locale?: string): st
   const last = shortDate(end, now, locale);
   return first === last ? first : `${first} – ${last}`;
 }
+
+/**
+ * The two dates under a loop's chart, its first and last practice day: each
+ * with its year only when the two are in different years (17 QA issue 1: a
+ * first date with its year ran under the next one). Within one year neither
+ * needs it: the two only place the line between them.
+ */
+export function axisDates(first: Date, last: Date, locale?: string): [string, string] {
+  const format = new Intl.DateTimeFormat(locale, {
+    day: 'numeric',
+    month: 'short',
+    ...(first.getFullYear() === last.getFullYear() ? {} : { year: 'numeric' }),
+  });
+  return [format.format(first), format.format(last)];
+}

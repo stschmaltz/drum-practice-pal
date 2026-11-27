@@ -37,6 +37,36 @@ export async function loopsOf(user: E2eUser) {
   return data;
 }
 
+/**
+ * Puts a second loop on the user's one song, by the service role, with a
+ * single five-minute session `daysAgo` days back: a loop practised once and
+ * left, which the Stats page names under "Not practised lately" from 7 days.
+ */
+export async function addLoopLeftAlone(user: E2eUser, name: string, daysAgo: number) {
+  const song = await admin.from('songs').select('id').eq('user_id', user.id).single();
+  if (song.error) throw song.error;
+  const loopId = crypto.randomUUID();
+  const loop = await admin.from('loops').insert({
+    id: loopId,
+    user_id: user.id,
+    song_id: song.data.id,
+    name,
+    start_bar: 1,
+    end_bar: 2,
+  });
+  if (loop.error) throw loop.error;
+  const session = await admin.from('practice_sessions').insert({
+    id: crypto.randomUUID(),
+    user_id: user.id,
+    loop_id: loopId,
+    started_at: new Date(Date.now() - daysAgo * 86_400_000).toISOString(),
+    duration_seconds: 300,
+    speed_ratio: 0.6,
+    repeats: 10,
+  });
+  if (session.error) throw session.error;
+}
+
 /** The practice screen's speed in large type, its round nudges (each saved as made) and Session complete (Unit 16). */
 export const practiceSpeed = (page: Page) => page.getByTestId('practice-speed');
 export const nudge = (page: Page, which: 'Slower' | 'Faster') =>
