@@ -174,6 +174,7 @@ Handoff notes written before the Visual design unit was added call the release u
 | 14  | Songs with recordings                       | 13         |
 | 15  | Play-along player, markers, recording loops | 14         |
 | 16  | Songs first and practice progress           | 13         |
+| 17  | Stats that say something                    | 16         |
 
 ### 00 Scaffold, conventions, CI, preview deploys
 
@@ -589,6 +590,30 @@ Numbered 16 when main was merged in: main had taken 14 and 15 for recordings whi
 **Carried forward**
 
 None yet.
+
+### 17 Stats that say something
+
+Shane after using Unit 16's Stats page (2026-11-27): the idea is good, but the charts don't say enough. Make the page useful, fun and motivating, with enough detail to be interesting, and remove what is only there for fluff. **Not shipped automatically:** the PR is made ready and Shane reviews it. Song links (Unit 14) come after.
+
+**For whom and when:** a drummer between sessions asking three things: am I showing up, is each loop getting faster, and what have I been neglecting. Every number on the page answers one of them; a graphic that shows a shape without its numbers and dates goes or gains them.
+
+- **Totals compare with the period before:** Week and Month show each total with its change against the previous week or month ("42 min, 12 more than last week"); All time shows none. The streak line gives the current and the longest streak.
+- **Last two weeks:** each bar carries its minutes, and its weekday and day of the month under it; the caption gives the total and how many of the 14 days were practised.
+- **Loop progress replaces "Speed over time":** a list of the loops practised (active first, last practised first, six shown with a "Show all"), each row with where its speed started and where it is now ("70% → 85%, up 15"), play time, days practised and a small sparkline; a row opens that loop's chart under it. The chart plots one point per practice day at the speed with the most play time that day (`dailySpeeds`), never a session's last speed: a quick try at 100% to see how far off it is must not read as a day at 100%. It has the dates on its axis and the percent on its points. Each row links to the loop's practice screen.
+- **Where the time went:** play time per song in the chosen period, as bars with their minutes, most first (five songs, then "Other").
+- **Records:** longest streak, most practice in one day (with its date), longest single session.
+- **Practice days heatmap stays** (Shane asked for it in 16 QA) and gains its numbers: days practised of the days shown, and the best week.
+- **Badges, less wall:** earned ones, then "Next up": the three unearned badges closest to done, with their progress; the rest behind a "Show all badges" disclosure.
+- **Goes:** the lone "Speed over time" picker, and any caption that only restates the heading.
+- Everything stays derived on the client from sessions and loops (no migration), in pure modules under `src/features/stats/` taking `now`, with SVG drawn by the app on the tokens and a text alternative per graphic, as Unit 16 set.
+
+**Acceptance:** with the seed user, every number on the page can be checked against their sessions (a spec does); a loop whose only 100% is a one-minute try after ten minutes at 80% shows that day at 80%; a new user still sees the one empty state; nothing overflows at 390 px.
+
+**Test focus:** the per-day speed rule (ties, one session, a try at full speed), period comparisons across a month and year boundary and a DST change, the records, "next up" ordering. **QA focus:** one session ever, 30 loops, a year of history, a phone in portrait. **Human check:** Shane reviews the PR and the screenshots.
+
+**Carried forward**
+
+- A session stores only the speed it ended at (`sessionTracker`), so a session of ten minutes at 80% that ends on a nudge to 100% is still logged at 100%. The chart's per-day rule softens it; logging the speed with the most play time in the session would fix it at the source.
 
 ## Open human checks
 
