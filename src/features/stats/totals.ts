@@ -5,7 +5,14 @@
  */
 import type { PracticeSession } from '@/features/practice/sessions';
 import type { Loop } from '@/features/loops/loopForm';
-import { addDays, dayKeyOf, dayKeyOfIso, startOfDay, type DayKey } from './days';
+import {
+  addDays,
+  dateOfDayKey,
+  dayKeyOf,
+  dayKeyOfIso,
+  startOfDay,
+  type DayKey,
+} from './days';
 
 export type StatsSession = Pick<
   PracticeSession,
@@ -180,6 +187,44 @@ export function speedHistory(sessions: readonly StatsSession[], loopId: string):
       speedRatio: session.speed_ratio,
     }))
     .sort((a, b) => a.time - b.time || a.sessionId.localeCompare(b.sessionId));
+}
+
+export interface SpeedDay {
+  key: DayKey;
+  /** Midnight, local time. */
+  date: Date;
+  /** The speed that had the most play time that day. */
+  speedRatio: number;
+  /** All of the day's play time on the loop, at any speed. */
+  seconds: number;
+}
+
+/**
+ * One loop's working speed on each day it was practised, oldest first: the
+ * speed-over-time chart. A day's speed is the one with the most play time (as
+ * the whole percent the app shows), not the last or the fastest: a minute's
+ * try at 100% to see how far off it is must not read as a day at 100%. A tie
+ * goes to the slower speed, for the same reason.
+ */
+export function dailySpeeds(sessions: readonly StatsSession[], loopId: string): SpeedDay[] {
+  const days = new Map<DayKey, { total: number; byPercent: Map<number, number> }>();
+  for (const session of sessions) {
+    if (session.loop_id !== loopId) continue;
+    const key = dayKeyOfIso(session.started_at);
+    const day = days.get(key) ?? { total: 0, byPercent: new Map<number, number>() };
+    const percent = Math.round(session.speed_ratio * 100);
+    day.total += session.duration_seconds;
+    day.byPercent.set(percent, (day.byPercent.get(percent) ?? 0) + session.duration_seconds);
+    days.set(key, day);
+  }
+  return [...days]
+    .map(([key, day]) => {
+      const [percent] = [...day.byPercent].sort(
+        ([percentA, secondsA], [percentB, secondsB]) => secondsB - secondsA || percentA - percentB,
+      )[0] ?? [100];
+      return { key, date: dateOfDayKey(key), speedRatio: percent / 100, seconds: day.total };
+    })
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
 }
 
 /** "4:12" for minutes and seconds, "1:04:12" from an hour up: the practice screen's live time. */

@@ -8,27 +8,30 @@
 import { ratioToPercent } from '@/features/player/speed';
 import { barRects, linePoints, niceCeiling, pathOf, speedAxis } from './chartScale';
 import { HEAT_CLASSES } from './heatmapShades';
-import type { HeatmapDay, PracticeDay, SpeedPoint } from './totals';
+import type { HeatmapDay, PracticeDay, SpeedDay } from './totals';
 import { minutesLabel } from './totals';
 
 const dayFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
 const weekdayFormat = new Intl.DateTimeFormat(undefined, { weekday: 'narrow' });
 
-const BAR_CHART = { width: 280, height: 96, gap: 4, labelHeight: 16 } as const;
+/** `valueHeight` is the room above the bars for each day's minutes; `labelHeight` holds the weekday and the date. */
+const BAR_CHART = { width: 280, height: 96, gap: 4, labelHeight: 26, valueHeight: 12 } as const;
+const dayOfMonthFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric' });
 
-/** Minutes per day for the last 14 days, today marked. */
+/** Minutes per day for the last 14 days, each bar with its minutes and its date, today marked. */
 export function DailyMinutesChart({ days }: { days: readonly PracticeDay[] }) {
   const minutes = days.map((day) => day.seconds / 60);
   const max = niceCeiling(Math.max(...minutes, 0), 5);
   const rects = barRects(minutes, { ...BAR_CHART, max });
   const total = days.reduce((sum, day) => sum + day.seconds, 0);
+  const practised = days.filter((day) => day.seconds > 0).length;
   const summary = `Minutes practised per day, last ${days.length} days: ${minutesLabel(total)} in all.`;
-  const { width, height, labelHeight } = BAR_CHART;
+  const { width, height, labelHeight, valueHeight } = BAR_CHART;
 
   return (
     <figure className="flex flex-col gap-2">
       <svg
-        viewBox={`0 0 ${width} ${height + labelHeight}`}
+        viewBox={`0 ${-valueHeight} ${width} ${height + labelHeight + valueHeight}`}
         role="img"
         aria-label={summary}
         className="w-full max-w-xl"
@@ -38,8 +41,20 @@ export function DailyMinutesChart({ days }: { days: readonly PracticeDay[] }) {
         {rects.map((rect, index) => {
           const day = days[index];
           if (!day) return null;
+          const wholeMinutes = Math.floor(day.seconds / 60);
           return (
             <g key={day.key}>
+              {/* The number the bar stands for, on top of it; an empty day has none. */}
+              {day.seconds > 0 && (
+                <text
+                  x={rect.x + rect.width / 2}
+                  y={rect.y - 3}
+                  textAnchor="middle"
+                  className={`text-[9px] tabular-nums ${day.today ? 'fill-ink font-bold' : 'fill-ink-soft'}`}
+                >
+                  {wholeMinutes < 1 ? '<1' : wholeMinutes}
+                </text>
+              )}
               {/* A faint column behind every day, so an empty one still has its place. */}
               <rect
                 x={rect.x}
@@ -61,18 +76,28 @@ export function DailyMinutesChart({ days }: { days: readonly PracticeDay[] }) {
                   before; the caption and the table say which bar is today. */}
               <text
                 x={rect.x + rect.width / 2}
-                y={height + labelHeight - 3}
+                y={height + 11}
                 textAnchor="middle"
                 className={`text-[9px] ${day.today ? 'fill-ink font-bold' : 'fill-ink-muted'}`}
               >
                 {weekdayFormat.format(day.date)}
+              </text>
+              {/* The day of the month under it, so a bar can be put to a date. */}
+              <text
+                x={rect.x + rect.width / 2}
+                y={height + 22}
+                textAnchor="middle"
+                className={`text-[8px] tabular-nums ${day.today ? 'fill-ink font-bold' : 'fill-ink-muted'}`}
+              >
+                {dayOfMonthFormat.format(day.date)}
               </text>
             </g>
           );
         })}
       </svg>
       <figcaption className="text-sm text-ink-muted">
-        Up to {max} min a day. Today is the last bar.
+        {minutesLabel(total)} over {practised} of the last {days.length} days, in minutes a day.
+        Today is the last bar.
       </figcaption>
       <table className="sr-only">
         <caption>Minutes practised per day</caption>
@@ -184,19 +209,20 @@ export function PracticeHeatmap({ weeks }: { weeks: readonly (readonly HeatmapDa
   );
 }
 
-const LINE_CHART = { width: 280, height: 120, pad: 8 } as const;
+/** `pad` leaves room for a percent over the top point; `dateHeight` holds the dates under the plot. */
+const LINE_CHART = { width: 280, height: 120, pad: 14, dateHeight: 14 } as const;
+/** Every point carries its percent up to this many; beyond it only the first, the last and the best do. */
+const MAX_LABELLED_POINTS = 8;
 
-/** One loop's speed at each of its sessions, oldest first, against full speed (100%). */
-export function SpeedChart({
-  points,
-  loopName,
-}: {
-  points: readonly SpeedPoint[];
-  loopName: string;
-}) {
-  const percents = points.map((point) => ratioToPercent(point.speedRatio));
+/**
+ * One loop's working speed on each day it was practised (`dailySpeeds`: the
+ * speed with the most play time that day), oldest first, against full speed
+ * (100%), with the dates along the bottom.
+ */
+export function SpeedChart({ days, loopName }: { days: readonly SpeedDay[]; loopName: string }) {
+  const percents = days.map((day) => ratioToPercent(day.speedRatio));
   const axis = speedAxis(percents);
-  const { width, height, pad } = LINE_CHART;
+  const { width, height, pad, dateHeight } = LINE_CHART;
   const inner = {
     width: width - pad * 2,
     height: height - pad * 2,
@@ -204,21 +230,31 @@ export function SpeedChart({
     yMax: axis.max,
   };
   const plotted = linePoints(
-    points.map((point, index) => ({ time: point.time, value: percents[index] ?? 0 })),
+    days.map((day, index) => ({ time: day.date.getTime(), value: percents[index] ?? 0 })),
     inner,
   ).map((point) => ({ x: point.x + pad, y: point.y + pad }));
   const fullSpeedY = pad + inner.height - ((100 - axis.min) / (axis.max - axis.min)) * inner.height;
   const first = percents[0];
   const last = percents[percents.length - 1];
+  const firstDay = days[0];
+  const lastDay = days[days.length - 1];
+  const best = percents.indexOf(Math.max(...percents));
+  const labelled = (index: number) =>
+    days.length <= MAX_LABELLED_POINTS ||
+    index === 0 ||
+    index === days.length - 1 ||
+    index === best;
   const summary =
-    first === undefined || last === undefined
+    first === undefined || last === undefined || !firstDay || !lastDay
       ? `No sessions of ${loopName} yet.`
-      : `Speed of ${loopName} over ${points.length} ${points.length === 1 ? 'session' : 'sessions'}: from ${first}% to ${last}%.`;
+      : days.length === 1
+        ? `Speed of ${loopName}: ${last}% on ${dayFormat.format(lastDay.date)}, its one practice day.`
+        : `Speed of ${loopName} over ${days.length} practice days: from ${first}% on ${dayFormat.format(firstDay.date)} to ${last}% on ${dayFormat.format(lastDay.date)}.`;
 
   return (
     <figure className="flex flex-col gap-2">
       <svg
-        viewBox={`0 0 ${width} ${height}`}
+        viewBox={`0 0 ${width} ${height + dateHeight}`}
         role="img"
         aria-label={summary}
         className="w-full max-w-xl"
@@ -242,15 +278,14 @@ export function SpeedChart({
         >
           100%
         </text>
-        <text x={pad} y={height - 1} className="fill-ink-muted text-[9px]">
-          {axis.min}%
-        </text>
-        {/* At 100% the full-speed line's own label says it; a second one would sit on the dashes. */}
-        {axis.max !== 100 && (
-          <text x={pad} y={pad + 2} className="fill-ink-muted text-[9px]">
-            {axis.max}%
-          </text>
-        )}
+        <line
+          x1={pad}
+          x2={width - pad}
+          y1={height - pad}
+          y2={height - pad}
+          strokeWidth="1"
+          className="stroke-line"
+        />
         {plotted.length > 1 && (
           <path
             d={pathOf(plotted)}
@@ -260,30 +295,66 @@ export function SpeedChart({
             className="stroke-selected-line"
           />
         )}
-        {plotted.map((point, index) => (
-          <circle
-            key={points[index]?.sessionId ?? index}
-            cx={point.x}
-            cy={point.y}
-            r="3"
-            className="fill-selected-line"
-          />
-        ))}
+        {plotted.map((point, index) => {
+          const day = days[index];
+          if (!day) return null;
+          return (
+            <g key={day.key}>
+              <circle cx={point.x} cy={point.y} r="3" className="fill-selected-line">
+                <title>
+                  {dayFormat.format(day.date)}: {percents[index]}%, {minutesLabel(day.seconds)}
+                </title>
+              </circle>
+              {/* The number the point stands for, over it. */}
+              {labelled(index) && (
+                <text
+                  x={point.x}
+                  y={point.y - 6}
+                  textAnchor={index === 0 ? 'start' : index === days.length - 1 ? 'end' : 'middle'}
+                  className="fill-ink-soft text-[9px] tabular-nums"
+                >
+                  {percents[index]}%
+                </text>
+              )}
+            </g>
+          );
+        })}
+        {/* When: the first and the last practice day, under the ends of the line. */}
+        {firstDay && (
+          <text x={pad} y={height + dateHeight - 4} className="fill-ink-muted text-[9px]">
+            {dayFormat.format(firstDay.date)}
+          </text>
+        )}
+        {lastDay && days.length > 1 && (
+          <text
+            x={width - pad}
+            y={height + dateHeight - 4}
+            textAnchor="end"
+            className="fill-ink-muted text-[9px]"
+          >
+            {dayFormat.format(lastDay.date)}
+          </text>
+        )}
       </svg>
-      <figcaption className="text-sm text-ink-muted">{summary}</figcaption>
+      <figcaption className="text-sm text-ink-muted">
+        {summary} Each point is the speed you spent the most time at that day, so a quick try at
+        full speed doesn&apos;t count as getting there.
+      </figcaption>
       <table className="sr-only">
-        <caption>Speed of {loopName} at each session</caption>
+        <caption>Speed of {loopName} on each practice day</caption>
         <thead>
           <tr>
-            <th scope="col">Session</th>
+            <th scope="col">Day</th>
             <th scope="col">Speed</th>
+            <th scope="col">Practice</th>
           </tr>
         </thead>
         <tbody>
-          {points.map((point, index) => (
-            <tr key={point.sessionId}>
-              <th scope="row">{dayFormat.format(new Date(point.time))}</th>
+          {days.map((day, index) => (
+            <tr key={day.key}>
+              <th scope="row">{dayFormat.format(day.date)}</th>
               <td>{percents[index]}%</td>
+              <td>{minutesLabel(day.seconds)}</td>
             </tr>
           ))}
         </tbody>

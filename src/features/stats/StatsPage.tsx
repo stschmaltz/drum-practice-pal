@@ -22,7 +22,7 @@ import {
   hasPracticeHistory,
   minutesLabel,
   practiceHeatmap,
-  speedHistory,
+  dailySpeeds,
   statsRangeFrom,
   statsTotals,
   STATS_RANGE_LABELS,
@@ -251,7 +251,7 @@ function SpeedOverTime({
               ))}
             </select>
           </div>
-          <SpeedChart points={speedHistory(sessions, chosen.id)} loopName={chosen.name} />
+          <SpeedChart days={dailySpeeds(sessions, chosen.id)} loopName={chosen.name} />
         </>
       ) : (
         <p className="text-ink-muted">Practise a loop to see its speed over time.</p>
