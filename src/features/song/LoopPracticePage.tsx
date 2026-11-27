@@ -329,15 +329,17 @@ function PracticePlayer({
             · <PlayerStatusText snapshot={snapshot} />
           </p>
         </div>
-        <div className="col-span-2 row-start-2 justify-self-center lg:col-span-1 lg:col-start-2 lg:row-start-1 short:col-span-1 short:col-start-2 short:row-start-1">
+        {/* Play sits with the speed, in the middle: the two things pressed while practising
+            are one reach apart, not a screen's width (Shane, 2026-11-27). */}
+        <div className="col-span-2 row-start-2 flex items-center justify-self-center gap-4 lg:col-span-1 lg:col-start-2 lg:row-start-1 short:col-span-1 short:col-start-2 short:row-start-1">
           <PracticeSpeed loop={loop} player={player} snapshot={snapshot} />
+          <span className="contents" {...PRACTICE_PLAY_ATTRIBUTES}>
+            <PlayPauseButton player={player} snapshot={snapshot} round gate={playGate} />
+          </span>
         </div>
         <div className="col-start-2 row-start-1 flex items-center justify-self-end gap-1 lg:col-start-3 short:col-start-3">
           <WholeSongToggle practice={practice} snapshot={snapshot} />
           <ShortcutsButton onOpen={shortcuts.openHelp} compact />
-          <span className="contents" {...PRACTICE_PLAY_ATTRIBUTES}>
-            <PlayPauseButton player={player} snapshot={snapshot} round gate={playGate} />
-          </span>
         </div>
       </div>
       {snapshot.status === 'error' && <PlayerStatusLine snapshot={snapshot} />}

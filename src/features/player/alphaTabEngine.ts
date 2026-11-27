@@ -102,6 +102,11 @@ export function createAlphaTabEngine({
   // renders, in case bars further down only get their bounds then.
   api.postRenderFinished.on(highlight.draw);
   api.renderer.partialRenderFinished.on(highlight.draw);
+  // Before the metronome writes, so it sees the cymbals' channel as taken.
+  let cymbalChannel: number | null = null;
+  api.midiLoad.on((file) => {
+    cymbalChannel = liftCymbals(file);
+  });
   const metronome = createMetronomeTrack(api);
   api.midiLoad.on(metronome.write);
   api.midiLoaded.on(metronome.applyVolume);
@@ -110,11 +115,25 @@ export function createAlphaTabEngine({
   // Track levels (the drum boost) are channel volumes the synth forgets with each
   // new MIDI, as it does the metronome's: sent again at the same two moments.
   const trackVolumes = new Map<number, number>();
+  const mutedTracks = new Set<number>();
   const applyTrackVolumes = () => {
+    if (!api.player) return;
     for (const [trackIndex, volume] of trackVolumes) {
       const track = api.score?.tracks[trackIndex];
-      if (track && api.player) api.changeTrackVolume([track], volume);
+      if (track) api.changeTrackVolume([track], volume);
     }
+    // The cymbals' channel belongs to no track, so alphaTab's track mute and
+    // volume never reach it: it follows the drum track's from here.
+    if (cymbalChannel === null) return;
+    const drums = api.score?.tracks.find(
+      (track) => track.playbackInfo.primaryChannel === PERCUSSION_CHANNEL,
+    );
+    if (!drums) return;
+    const drumVolume = trackVolumes.get(drums.index) ?? drums.playbackInfo.volume / 16;
+    api.player.setChannelVolume(
+      cymbalChannel,
+      mutedTracks.has(drums.index) ? 0 : drumVolume * CYMBAL_GAIN,
+    );
   };
   api.midiLoaded.on(applyTrackVolumes);
   // alphaTab 1.9 sets every rendered track back to the file's own volume right
@@ -201,8 +220,12 @@ export function createAlphaTabEngine({
       metronome.setVoice(voice);
     },
     setTrackMuted(trackIndex, muted) {
+      if (muted) mutedTracks.add(trackIndex);
+      else mutedTracks.delete(trackIndex);
       const track = api.score?.tracks[trackIndex];
       if (track) api.changeTrackMute([track], muted);
+      // The cymbals follow the drum track's mute.
+      applyTrackVolumes();
     },
     setTrackVolume(trackIndex, volume) {
       trackVolumes.set(trackIndex, volume);
@@ -619,6 +642,52 @@ function createMetronomeTrack(api: alphaTab.AlphaTabApi) {
       return true;
     },
   };
+}
+
+/**
+ * GM keys of the crashes, rides, splash and china. In MuseScore General's kit
+ * (public/drumkit) they come out some ten times quieter than its snare and
+ * forty times quieter than its kick, so a crash was lost under the band.
+ */
+export const CYMBAL_KEYS: ReadonlySet<number> = new Set([49, 51, 52, 53, 55, 57, 59]);
+
+/** The cymbals' channel volume over the drum track's. Tune by ear here. */
+export const CYMBAL_GAIN = 8;
+
+/**
+ * Moves the drum channel's cymbal notes to a channel of their own that plays
+ * the same kit, so they can be turned up apart from the rest of it (a channel
+ * volume is the only gain alphaTab's synth has; velocity tops out at 127).
+ * Returns that channel, or null for a song with no cymbal notes. It leans on
+ * the same two synth facts as writeMetronome below: the kit on another channel
+ * by bank select, and samples loaded only for keys seen on the drum channel.
+ */
+export function liftCymbals(file: alphaTab.midi.MidiFile): number | null {
+  const { midi } = alphaTab;
+  const used = new Set<number>();
+  const cymbalNotes: alphaTab.midi.NoteEvent[] = [];
+  for (const track of file.tracks) {
+    for (const event of track.events) {
+      if (!('channel' in event) || typeof event.channel !== 'number') continue;
+      used.add(event.channel);
+      const isNote = event instanceof midi.NoteOnEvent || event instanceof midi.NoteOffEvent;
+      if (isNote && event.channel === PERCUSSION_CHANNEL && CYMBAL_KEYS.has(event.noteKey)) {
+        cymbalNotes.push(event);
+      }
+    }
+  }
+  const target = file.tracks[0];
+  if (!target || cymbalNotes.length === 0) return null;
+  const channel = freeChannel(used);
+  const keys = new Set(cymbalNotes.map((note) => note.noteKey));
+  for (const note of cymbalNotes) note.channel = channel;
+  target.events.unshift(
+    ...[...keys].map((key) => new midi.NoteOnEvent(0, 0, PERCUSSION_CHANNEL, key, 0)),
+    new midi.ControlChangeEvent(0, 0, channel, midi.ControllerType.BankSelectCoarse, 1),
+    new midi.ControlChangeEvent(0, 0, channel, midi.ControllerType.BankSelectFine, 0),
+    new midi.ProgramChangeEvent(0, 0, channel, 0),
+  );
+  return channel;
 }
 
 /**
