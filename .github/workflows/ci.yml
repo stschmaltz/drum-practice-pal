@@ -108,8 +108,11 @@ jobs:
       # --yes: hosted changes ask for confirmation, which CI cannot give. A migration
       # that fails (a check an existing row breaks) rolls back and stops here.
       - run: npx supabase db push --remote --yes
+      # Hosted types carry a `__InternalSupabase` header (the server's PostgREST
+      # version) that the local stack's don't; it says nothing about the schema.
       - name: Hosted schema matches the committed types
         run: |
           npx supabase gen types typescript --remote --schema public \
             | npx prettier --stdin-filepath database.types.ts \
+            | sed '/Allows to automatically instantiate createClient/,/^  };$/d' \
             | diff - src/lib/database.types.ts
