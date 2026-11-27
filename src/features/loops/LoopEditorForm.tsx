@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
@@ -34,6 +34,9 @@ type DetailFields = Pick<LoopFormValues, 'name'>;
  * `layout`: `panel` in the loop panel; `bar` for the practice screen's "Save
  * as loop" sheet, where the fields share a row and the button says what it
  * does there.
+ *
+ * Where the form stays for another loop after a save, its caller keys it (a
+ * new form each time) and says what was saved in a `LoopSavedNote` outside it.
  */
 export function LoopEditorForm({
   songId,
@@ -47,7 +50,6 @@ export function LoopEditorForm({
   onSaved,
   onCancel,
   layout = 'panel',
-  note,
   cancelLabel = 'Cancel',
 }: {
   songId: string;
@@ -63,8 +65,6 @@ export function LoopEditorForm({
   onSaved: (saved: Loop) => void;
   onCancel: () => void;
   layout?: 'panel' | 'bar';
-  /** Said above the fields, as a status: the loop just saved, when the form stays for the next. */
-  note?: ReactNode;
   /** The second button's words: "Done" once a loop has been saved and the form stayed. */
   cancelLabel?: string;
 }) {
@@ -153,11 +153,6 @@ export function LoopEditorForm({
       onSubmit={onSubmit}
       noValidate
     >
-      {note && (
-        <p role="status" className="text-sm text-ink" data-testid="loop-saved-note">
-          {note}
-        </p>
-      )}
       <p className="text-sm text-ink-soft" aria-live="polite" data-testid="loop-bars-hint">
         {hint}
       </p>

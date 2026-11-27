@@ -9,7 +9,7 @@ import {
   buttonClass,
   focusRing,
   ghostButtonClass,
-  linkClass,
+  lockableLinkClass,
   primaryButtonClass,
   sectionHeadingClass,
 } from '@/components/styles';
@@ -47,6 +47,7 @@ import {
 import { ConfirmDeleteLoop } from './ConfirmDeleteLoop';
 import { FinishPrompt } from './FinishPrompt';
 import { LoopEditorForm } from './LoopEditorForm';
+import { LoopSavedNote } from './LoopSavedNote';
 import { speedLabel } from './loopLabels';
 import { editorOnPanel } from './loopPanelContent';
 import { LoopSpeedControl } from './LoopSpeedControl';
@@ -245,53 +246,63 @@ function LoopPanelBody({
     if (editor.loopId !== null && !editedLoop) {
       return <DeletedLoopNotice onBack={closeForm} />;
     }
+    const savedNow = editedLoop ? null : (lastSaved ?? null);
     return (
-      <LoopEditorForm
-        // A different loop is a different form: its typed name starts over.
-        key={editor.loopId ?? `new-${savedHere.length}`}
-        songId={songId}
-        barCount={barCount}
-        loop={editedLoop}
-        editor={editor}
-        player={player}
-        snapshot={snapshot}
-        onBarsChange={practice.setEditorBars}
-        onSavingChange={practice.setEditorSaving}
-        onSaved={(saved) => {
-          closeForm();
-          if (editedLoop) {
-            outcome?.onEdited?.(saved);
-            return;
-          }
-          if (outcome?.keepsAdding) {
-            // The form stays for the next loop: nothing is selected, so the whole song is
-            // still there to pick bars from.
-            setSavedHere((loops) => [...loops, saved]);
-            practice.openEditor(null);
-            outcome.onCreated?.(saved);
-            return;
-          }
-          // A new loop is what the user wants to practice next; an edit leaves playback as it is.
-          if (outcome?.onCreated) outcome.onCreated(saved);
-          else practice.selectLoop(saved.id);
-        }}
-        onCancel={() => {
-          closeForm();
-          outcome?.onCancelled?.();
-        }}
-        note={
-          !editedLoop && lastSaved ? (
-            <>
-              Saved “{lastSaved.name}”.{' '}
-              <Link to={loopPracticePath(songId, lastSaved.id)} className={linkClass}>
-                Practise it
-              </Link>{' '}
-              or pick bars for another.
-            </>
-          ) : undefined
-        }
-        cancelLabel={!editedLoop && lastSaved ? 'Done' : undefined}
-      />
+      <div className="flex flex-col">
+        {/* Outside the keyed form: one status region whose text changes at each save. */}
+        <LoopSavedNote saved={savedNow} count={savedHere.length}>
+          {savedNow && (
+            <Link
+              to={loopPracticePath(songId, savedNow.id)}
+              className={lockableLinkClass}
+              // Following it unmounts the form: while the next loop's save is on its way that
+              // would lose its draft, its retry id and its error. Locked, not removed: focus
+              // may be on it.
+              aria-disabled={editor.saving || undefined}
+              onClick={(event) => {
+                if (editor.saving) event.preventDefault();
+              }}
+            >
+              Practise it
+            </Link>
+          )}
+        </LoopSavedNote>
+        <LoopEditorForm
+          // A different loop is a different form: its typed name starts over.
+          key={editor.loopId ?? `new-${savedHere.length}`}
+          songId={songId}
+          barCount={barCount}
+          loop={editedLoop}
+          editor={editor}
+          player={player}
+          snapshot={snapshot}
+          onBarsChange={practice.setEditorBars}
+          onSavingChange={practice.setEditorSaving}
+          onSaved={(saved) => {
+            closeForm();
+            if (editedLoop) {
+              outcome?.onEdited?.(saved);
+              return;
+            }
+            if (outcome?.keepsAdding) {
+              // The form stays for the next loop: nothing is selected, so the whole song is
+              // still there to pick bars from.
+              setSavedHere((loops) => [...loops, saved]);
+              practice.openEditor(null);
+              outcome.onCreated?.(saved);
+              return;
+            }
+            // A new loop is what the user wants to practice next; an edit leaves playback as it is.
+            if (outcome?.onCreated) outcome.onCreated(saved);
+            else practice.selectLoop(saved.id);
+          }}
+          onCancel={() => {
+            closeForm();
+            outcome?.onCancelled?.();
+          }}
+          cancelLabel={savedNow ? 'Done' : undefined}
+        />
+      </div>
     );
   }
 

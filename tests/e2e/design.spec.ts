@@ -210,9 +210,9 @@ test('the controls bar fits a phone in three rows, and spills nowhere at 320 px'
     const region = await controls(page).boundingBox();
     if (!region) throw new Error('No controls bar');
     const boxes = await controlBoxes(page);
-    // Back to start, Metronome, Mute drums, Drums only, Speed, volume, and the count-in's
-    // Off / 1 bar / 2 bars (its mode shows only once a count-in is chosen).
-    expect(boxes, `${width} px: controls on show`).toHaveLength(9);
+    // Back to start, Metronome, Mute drums, Drums only, Mute all, Speed, volume, and the
+    // count-in's Off / 1 bar / 2 bars (its mode shows only once a count-in is chosen).
+    expect(boxes, `${width} px: controls on show`).toHaveLength(10);
     if (width >= 360) {
       expect(rowsOf(boxes), `${width} px: rows of ${JSON.stringify(boxes)}`).toBeLessThanOrEqual(3);
     }

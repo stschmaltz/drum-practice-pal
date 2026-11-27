@@ -21,6 +21,7 @@ import {
   type StorageCall,
 } from '@/test/fakeSupabase';
 import { FakePlayerEngine, startOfBar, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
+import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { historyBack, renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
 import { LoopPracticePage } from './LoopPracticePage';
@@ -537,6 +538,104 @@ describe('LoopPracticePage', () => {
 
       historyBack();
       expect(await screen.findByText('At song overview')).toBeInTheDocument();
+    });
+
+    /** In the whole song, picks the bars, names the loop and presses Save as loop. */
+    async function saveAs(
+      { user, engine }: Awaited<ReturnType<typeof openChorus>>,
+      name: string,
+      firstBar: number,
+      lastBar: number,
+    ) {
+      tap(engine, firstBar);
+      tap(engine, lastBar);
+      await user.type(screen.getByRole('textbox', { name: 'Name' }), name);
+      await user.click(screen.getByRole('button', { name: 'Save as loop' }));
+    }
+    const savedNote = () => screen.getByTestId('loop-saved-note');
+
+    // PR 31 review: a status mounted with its text is often not read out. One region, on the
+    // page from the moment the sheet opens, whose text changes at each save.
+    it('says each save in one status region that is there, empty, before the first', async () => {
+      const view = await openChorus();
+      await view.user.click(wholeSong());
+      const note = savedNote();
+      expect(note).toHaveAttribute('role', 'status');
+      expect(note).toBeEmptyDOMElement();
+
+      await saveAs(view, 'Intro', 3, 5);
+      await waitFor(() => expect(note).toHaveTextContent('Saved “Intro”.'));
+      // The fields are a new form; the region is the one that was there.
+      expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('');
+      expect(savedNote()).toBe(note);
+
+      await saveAs(view, 'Outro', 14, 15);
+      await waitFor(() => expect(note).toHaveTextContent('Saved “Outro”.'));
+      expect(savedNote()).toBe(note);
+    });
+
+    it('"Practise it" is locked while the next loop is saving, so its form and draft stay', async () => {
+      const view = await openChorus();
+      await view.user.click(wholeSong());
+      await saveAs(view, 'Intro', 3, 5);
+      await waitFor(() => expect(savedNote()).toHaveTextContent('Saved “Intro”.'));
+      const practise = screen.getByRole('button', { name: 'Practise it' });
+      expectUnlocked(practise);
+
+      const release = loops.holdNext('insert');
+      await saveAs(view, 'Outro', 14, 15);
+      expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
+      expectLocked(practise);
+      await view.user.click(practise);
+
+      // Nothing was left: the same loop, the sheet and the save still on its way.
+      await settle();
+      expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Saving…' })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Outro');
+
+      release();
+      await waitFor(() => expect(savedNote()).toHaveTextContent('Saved “Outro”.'));
+      expectUnlocked(screen.getByRole('button', { name: 'Practise it' }));
+    });
+
+    it('a save that fails behind a locked "Practise it" keeps its draft and says so', async () => {
+      const view = await openChorus();
+      await view.user.click(wholeSong());
+      await saveAs(view, 'Intro', 3, 5);
+      await waitFor(() => expect(savedNote()).toHaveTextContent('Saved “Intro”.'));
+
+      const release = loops.holdNext('insert');
+      loops.failNext('insert', 'permission denied');
+      await saveAs(view, 'Outro', 14, 15);
+      await screen.findByRole('button', { name: 'Saving…' });
+      await view.user.click(screen.getByRole('button', { name: 'Practise it' }));
+      release();
+
+      expect(await screen.findByText(/Couldn't save the loop\./)).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Outro');
+      expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeInTheDocument();
+    });
+
+    it('"Practise it" opens the saved loop at its saved speed and hands focus to Play', async () => {
+      const view = await openChorus();
+      await view.user.click(wholeSong());
+      await saveAs(view, 'Intro', 3, 5);
+      await waitFor(() => expect(savedNote()).toHaveTextContent('Saved “Intro”.'));
+      // The loop being practised moves on to 76%; the one saved was saved at 71%.
+      await view.user.click(screen.getByRole('button', { name: 'Faster by 5%' }));
+      await waitFor(() => expect(speed()).toHaveTextContent('76%'));
+
+      await view.user.click(screen.getByRole('button', { name: 'Practise it' }));
+
+      expect(await screen.findByRole('heading', { level: 1, name: 'Intro' })).toBeInTheDocument();
+      await waitFor(() => expect(speed()).toHaveTextContent('71%'));
+      expect(view.engine.setSpeed).toHaveBeenLastCalledWith(0.708333);
+      // The button and its sheet have gone: focus is on Play, not on <body>.
+      await waitFor(() => expect(playButton()).toHaveFocus());
+      // Opening a loop at its own speed is no change of speed to save.
+      await settle();
+      expect(loops.sent('update')).toEqual([{ speed_ratio: 0.76 }]);
     });
 
     it('"Done" after a save goes back to the loop being practised', async () => {

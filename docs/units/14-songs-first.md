@@ -393,3 +393,38 @@ Build, from Shane's practice session (PR #31): no Session complete pop-up; a sum
 ### Checks
 
 - `npm run check` green. e2e against the stack on 54421, port 4283, phone and desktop: `practice.spec.ts`, `journey.spec.ts` and `design.spec.ts` green (tablet not run).
+
+## PR 31 review (2026-11-27)
+
+Build (fixes), from Copilot's comments on "Saving a loop stays put" and two CI failures. Each fix had a failing test first.
+
+### A. Copilot comments
+
+1. **The saved note was a status mounted with its text** (inside the keyed form). `LoopSavedNote` is now rendered by both callers outside the keyed form: there, empty, from the moment the form opens, and only its text changes at each save (`data-testid="loop-saved-note"` kept). `LoopEditorForm`'s `note` prop is gone. Two loops saved under one name are still two sayings (a no-break space on every other one).
+2. **LoopPanel: "Practise it" stayed usable while the next loop saved.** Locked while `editor.saving`: `aria-disabled` and a click that is refused (`preventDefault` on the link).
+3. **LoopPracticePage: the same** for its "Practise it" button; the handler refuses too.
+4. **LoopPracticePage: "Practise it" took focus with it to `<body>`.** `PracticePlayer`, which outlives the sheet, hands focus to Play (`focusWhenReady(findPracticePlay)`).
+5. **LoopPracticePage: "Practise it" kept the speed playing.** It opens the loop with `practice.openLoop(saved)`: the loop and its saved speed.
+
+`docs/review-checklist.md`: an example under section 1's "Input during a pending write" (an exit left open while a save is pending), and under section 6's live-region row (a region that arrives holding its text).
+
+### B. `design.spec.ts` "the controls bar fits a phone in three rows…"
+
+The bar already fits: with Mute all the five tiles share the first row at 390, 375, 360 and 320 px (measured: rows at y 221, 299 and 360 at 390 px), nothing spills at 320 px, every target is 44 px. The failure was the test's own count of the controls on show, 9, written before Mute all; it is 10 now. No layout change was needed, so none was made.
+
+### C. `loop-scroll.spec.ts` count-in cases on a phone
+
+`chooseCountIn` and `chooseCountInMode` (`tests/e2e/playerPage.ts`) click the option's radio input with `dispatchEvent('click')` and keep the assertion on the checked value. `clearOfStickyBars` is removed (nothing else used it).
+
+### Async windows and inputs
+
+- **The next loop's insert pending, with a note from the save before.** "Practise it" (press, Enter): refused, nothing unmounts. Taps on the score, the whole-song toggle, the fields and Cancel: locked as before. The insert fails: the form, its draft, its id and its error are still there, and "Practise it" unlocks. It succeeds: the note names the new loop.
+- The lock follows `editor.saving`, which the form reports from an effect: a press in the render before that effect has run is not refused. The window is one commit.
+
+### Known gaps
+
+- The song overview's practice summary (above) is itself a `role="status"` that is on the page with its text from the first render, which the task asked for so nothing moves; a screen reader may not announce it on arrival. It is reachable by reading the page.
+
+### Checks
+
+- `npm run check` green. e2e (stack on 54421, port 4283): `design.spec.ts` at phone and desktop; `loop-scroll.spec.ts` and `count-in.spec.ts` at phone, the count-in cases with `--repeat-each=3`; `journey.spec.ts` and `practice-screen.spec.ts` at phone and desktop.

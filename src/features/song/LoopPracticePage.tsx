@@ -10,11 +10,17 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { LoadingLine } from '@/components/StatusMessages';
-import { linkClass, quietButtonClass, quietPressedButtonClass } from '@/components/styles';
+import {
+  linkClass,
+  lockableLinkClass,
+  quietButtonClass,
+  quietPressedButtonClass,
+} from '@/components/styles';
 import { Icon } from '@/components/icons';
 import type { Song } from '@/features/library/songForm';
 import { FinishPrompt } from '@/features/loops/FinishPrompt';
 import { LoopEditorForm } from '@/features/loops/LoopEditorForm';
+import { LoopSavedNote } from '@/features/loops/LoopSavedNote';
 import { barsLabel, shouldAskToFinish, type Loop } from '@/features/loops/loopForm';
 import { PracticeSpeed } from '@/features/loops/PracticeSpeed';
 import { useLoopPractice, type LoopPractice } from '@/features/loops/useLoopPractice';
@@ -374,6 +380,14 @@ function PracticePlayer({
           practice={practice}
           player={player}
           snapshot={snapshot}
+          onPractise={(saved) => {
+            practice.closeEditor();
+            // The loop and its saved speed, as a link to it would open it: the speed
+            // playing now is the loop being left's, nudged since the save or not.
+            practice.openLoop(saved);
+            // The button goes with its sheet: focus to Play, the next thing to press.
+            focusWhenReady(findPracticePlay);
+          }}
         />
       )}
     </div>
@@ -421,12 +435,15 @@ function SaveAsLoopSheet({
   practice,
   player,
   snapshot,
+  onPractise,
 }: {
   songId: string;
   barCount: number;
   practice: LoopPractice;
   player: PlayerService | null;
   snapshot: PlayerSnapshot;
+  /** "Practise it" on the loop just saved. From the screen, which outlives the sheet. */
+  onPractise: (saved: Loop) => void;
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const sheetHeight = useHeightOf(sheetRef);
@@ -444,6 +461,25 @@ function SaveAsLoopSheet({
         data-testid="save-as-loop"
         className="fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 max-h-[60dvh] overflow-y-auto rounded-t-card border-t border-line bg-surface p-4 shadow-sheet md:right-gutter md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+var(--spacing-gutter))] md:border-x"
       >
+        {/* Outside the keyed form: one status region whose text changes at each save. */}
+        <LoopSavedNote saved={lastSaved ?? null} count={savedHere.length}>
+          {lastSaved && (
+            // A button, not a link: this screen switches loop in place, and its URL follows.
+            <button
+              type="button"
+              className={lockableLinkClass}
+              // Leaving unmounts the form: while the next loop's save is on its way that would
+              // lose its draft, its retry id and its error. Locked, not disabled: focus may be
+              // on it.
+              aria-disabled={editor.saving || undefined}
+              onClick={() => {
+                if (!editor.saving) onPractise(lastSaved);
+              }}
+            >
+              Practise it
+            </button>
+          )}
+        </LoopSavedNote>
         <LoopEditorForm
           // A new form for each loop saved: its own client id, an empty name.
           key={savedHere.length}
@@ -463,25 +499,6 @@ function SaveAsLoopSheet({
             practice.openEditor(null);
           }}
           onCancel={practice.closeEditor}
-          note={
-            lastSaved ? (
-              <>
-                Saved “{lastSaved.name}”.{' '}
-                {/* A button, not a link: this screen switches loop in place, and its URL follows. */}
-                <button
-                  type="button"
-                  className={linkClass}
-                  onClick={() => {
-                    practice.closeEditor();
-                    practice.selectLoop(lastSaved.id);
-                  }}
-                >
-                  Practise it
-                </button>{' '}
-                or pick bars for another.
-              </>
-            ) : undefined
-          }
           cancelLabel={lastSaved ? 'Done' : undefined}
         />
       </div>
