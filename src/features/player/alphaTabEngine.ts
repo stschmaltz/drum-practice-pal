@@ -117,7 +117,10 @@ export function createAlphaTabEngine({
     }
   };
   api.midiLoaded.on(applyTrackVolumes);
-  api.playerReady.on(applyTrackVolumes);
+  // alphaTab 1.9 sets every rendered track back to the file's own volume right
+  // after it fires playerReady (its readyForPlayback handler), which undid the
+  // boost. A microtask runs after that handler, so ours is the last word.
+  api.playerReady.on(() => queueMicrotask(applyTrackVolumes));
 
   return {
     on(event, handler) {
