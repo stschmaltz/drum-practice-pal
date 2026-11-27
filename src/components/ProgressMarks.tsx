@@ -1,5 +1,5 @@
 /**
- * The one mark of progress each list row carries (Unit 14): a ring for a
+ * The one mark of progress each list row carries (Unit 16): a ring for a
  * song's mastered loops, a thin bar for a loop's speed towards full speed.
  * Decoration beside the words that say the same (`aria-hidden`): a row's
  * text is "2 of 4 loops mastered" or "92%", never the mark alone.

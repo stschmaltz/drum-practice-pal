@@ -34,7 +34,7 @@ import {
 const RANGE_PARAM = 'range';
 
 /**
- * /stats (Unit 14): practice time, days, passes and loops mastered over the
+ * /stats (Unit 16): practice time, days, passes and loops mastered over the
  * week, the month or all time; minutes a day for two weeks; a heatmap of
  * practice days for half a year; one loop's speed over time; and the badges.
  * All worked out here from every session and loop the user has (nothing is
@@ -66,7 +66,7 @@ export function StatsPage() {
   } else if (!sessions.data || !loops.data) {
     body = <LoadingLine>Loading your stats…</LoadingLine>;
   } else if (!hasPracticeHistory(sessions.data, loops.data)) {
-    // 14 QA issue 5: not four zeros, empty charts and ten locked badges.
+    // 16 QA issue 5: not four zeros, empty charts and ten locked badges.
     body = (
       <EmptyState
         icon="chart"

@@ -90,7 +90,7 @@ test('the library, the song page with its loops, and the home page with a loop',
   await expectWellDrawn(page, 'song, jam');
   await expectFocusRings(page, 'song, jam');
 
-  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8, target: 110 });
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
   await openLoopPanel(page);
   await expect(loopItem(page, 'Verse')).toBeVisible();
   await expectWellDrawn(page, 'song, loop panel');
@@ -112,7 +112,7 @@ test('the library, the song page with its loops, and the home page with a loop',
   await expectWellDrawn(page, 'song overview');
   await expectFocusRings(page, 'song overview');
 
-  // No practice yet: Stats is one card pointing to Songs (14 QA issue 5).
+  // No practice yet: Stats is one card pointing to Songs (16 QA issue 5).
   await navLink(page, 'Stats').click();
   await expect(page.getByText(/^No practice yet/)).toBeVisible();
   await expectWellDrawn(page, 'stats, no practice');
@@ -125,7 +125,7 @@ test('the library, the song page with its loops, and the home page with a loop',
   await expectWellDrawn(page, 'practice');
   await expectFocusRings(page, 'practice');
 
-  // A short session, summed up in the sheet at the foot of the window (14 QA issue 4).
+  // A short session, summed up in the sheet at the foot of the window (16 QA issue 4).
   await playButton(page).click();
   await playFor(page, 3_000);
   await expect(sessionComplete(page)).toBeVisible();

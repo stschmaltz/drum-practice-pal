@@ -55,6 +55,10 @@ const settingsRow: Settings = {
   metronome_volume: 0.8,
   count_in_bars: 0,
   count_in_mode: 'start',
+  metronome_sound: 'click',
+  metronome_accent: true,
+  metronome_accent_sound: 'click',
+  metronome_subdivision: 1,
   drums_muted_default: false,
 };
 // 90 BPM from bar 9 (the tempo-change fixture): 71% of it is 64 BPM.
@@ -113,7 +117,7 @@ const location = () => screen.getByTestId('location');
 
 /**
  * Loads the score and sounds. Waits for Play to be on unless `beforeTheLoop`: then the loops
- * read is held, and Play stays off until the loop is open (14 Test bug 1).
+ * read is held, and Play stays off until the loop is open (16 Test bug 1).
  */
 async function loadPlayer({ beforeTheLoop = false } = {}) {
   await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
@@ -181,18 +185,54 @@ describe('LoopPracticePage', () => {
     expect(engines).toHaveLength(0);
   });
 
-  it('nudges the speed with the round buttons and saves it', async () => {
+  it('nudges the speed with the round buttons and saves each nudge as it is made', async () => {
+    serve();
+    const user = renderPractice(CHORUS_ID);
+    await loadPlayer();
+    await waitFor(() => expect(speed()).toHaveTextContent('71%'));
+    // Opening the loop at its saved speed is no change of speed: nothing is sent.
+    await settle();
+    expect(loops.sent('update')).toEqual([]);
+
+    await user.click(screen.getByRole('button', { name: 'Faster by 5%' }));
+    expect(speed()).toHaveTextContent('76%');
+    await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.76 }]));
+    expect(screen.queryByRole('button', { name: 'Save speed' })).not.toBeInTheDocument();
+  });
+
+  it('saves nothing when a loop key moves to another loop at its own speed', async () => {
     serve();
     const user = renderPractice(CHORUS_ID);
     await loadPlayer();
     await waitFor(() => expect(speed()).toHaveTextContent('71%'));
 
-    await user.click(screen.getByRole('button', { name: 'Faster by 5%' }));
-    expect(speed()).toHaveTextContent('76%');
-    await user.click(screen.getByRole('button', { name: 'Save speed' }));
+    await user.keyboard('{ArrowLeft}');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Verse' })).toBeInTheDocument();
+    expect(speed()).toHaveTextContent('100%');
+    await settle();
+    expect(loops.sent('update')).toEqual([]);
+  });
 
-    await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.76 }]));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save speed' })).toBeDisabled());
+  it('asks "Mark finished?" once the speed is worked up to 100%, not for a loop opened there unpractised', async () => {
+    serve([loopRow(CHORUS_ID, { ...chorus, speed_ratio: 0.9 }), verse]);
+    const user = renderPractice(CHORUS_ID);
+    await loadPlayer();
+    await waitFor(() => expect(speed()).toHaveTextContent('90%'));
+    expect(screen.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Faster by 5%' }));
+    await settle();
+    expect(screen.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Faster by 5%' }));
+    expect(await screen.findByTestId('finish-prompt')).toHaveTextContent(
+      "You're playing it at full speed",
+    );
+
+    // Verse was saved at 100% and never practised: nothing to ask about yet.
+    await user.keyboard('{ArrowLeft}');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Verse' })).toBeInTheDocument();
+    await settle();
+    expect(screen.queryByTestId('finish-prompt')).not.toBeInTheDocument();
   });
 
   it('moves to the next loop with a loop key, and the URL follows, replaced', async () => {
@@ -453,7 +493,7 @@ describe('LoopPracticePage', () => {
     });
   });
 
-  describe('Play before the loop is open (14 Test bug 1)', () => {
+  describe('Play before the loop is open (16 Test bug 1)', () => {
     /** The sounds are in, from a list cached on an earlier visit, while the fresh read is held. */
     async function soundsInBeforeTheRead() {
       serve();

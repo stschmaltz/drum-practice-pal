@@ -477,7 +477,7 @@ describe('LibraryPage layout (12 UX pass)', () => {
     expect(more.closest('.relative.z-10')).not.toBe(card);
   });
 
-  // 14 QA issue 3: one quiet "More" per row, as the song's loop rows have, not two text buttons.
+  // 16 QA issue 3: one quiet "More" per row, as the song's loop rows have, not two text buttons.
   it('keeps each song’s Edit and Delete in its More menu', async () => {
     serveLibrary(library);
     const { user } = renderLibrary();
@@ -497,7 +497,7 @@ describe('LibraryPage layout (12 UX pass)', () => {
     ).toEqual(['Edit', 'Delete']);
   });
 
-  it('lays the songs out as plain rows between dividers (Unit 14), not cards', async () => {
+  it('lays the songs out as plain rows between dividers (Unit 16), not cards', async () => {
     serveLibrary(library);
     renderLibrary();
     await screen.findByRole('heading', { name: 'Your songs (3)' });

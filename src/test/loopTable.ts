@@ -15,7 +15,6 @@ export function loopRow(id: string, overrides: Partial<Loop> = {}): Loop {
     start_bar: 5,
     end_bar: 8,
     speed_ratio: 1,
-    target_ratio: null,
     status: 'active',
     finished_at: null,
     last_practiced_at: null,

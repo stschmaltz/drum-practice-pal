@@ -17,6 +17,16 @@ import type { EngineEvents, EngineMount, PlayerEngine } from './playerEngine';
 import { movedBeyondTap, type PointerPoint } from './tapGesture';
 import { NOTATION_SCALE, SCORE_RESOURCES } from './scoreTheme';
 import { barStartTempos } from './tempo';
+import {
+  DEFAULT_METRONOME_VOICE,
+  freeChannel,
+  isSameVoice,
+  metronomeKeys,
+  metronomeNotes,
+  PERCUSSION_CHANNEL,
+  type MetronomeBeat,
+  type MetronomeVoice,
+} from './metronomeSounds';
 
 /** Engine events the engine raises itself rather than forwarding from alphaTab. */
 type TapEvents = Pick<EngineEvents, 'barTapped' | 'barsDragged'>;
@@ -76,6 +86,10 @@ export function createAlphaTabEngine({
   // renders, in case bars further down only get their bounds then.
   api.postRenderFinished.on(highlight.draw);
   api.renderer.partialRenderFinished.on(highlight.draw);
+  const metronome = createMetronomeTrack(api);
+  api.midiLoad.on(metronome.write);
+  api.midiLoaded.on(metronome.applyVolume);
+  api.playerReady.on(metronome.applyVolume);
 
   return {
     on(event, handler) {
@@ -89,19 +103,18 @@ export function createAlphaTabEngine({
       return score !== null && api.load(score, trackIndexes);
     },
 
-    async loadSoundFont(url) {
-      const response = await fetch(url, { signal: soundFontDownload.signal });
-      // The dev server and the Workers SPA fallback answer a missing file with index.html.
-      const type = response.headers.get('content-type') ?? '';
-      if (!response.ok || type.includes('text/html')) {
-        throw new Error(`Soundfont not found at ${url} (${response.status})`);
-      }
-      const bytes = new Uint8Array(await response.arrayBuffer());
+    async loadSoundFont(urls) {
+      const fonts = await Promise.all(
+        urls.map((url) => fetchSoundFont(url, soundFontDownload.signal)),
+      );
       if (soundFontDownload.signal.aborted) return;
-      // False when alphaTab has no player (no Web Audio); without this the page would wait forever.
-      if (!api.loadSoundFont(bytes, false)) {
-        throw new Error('alphaTab has no player to load sounds into');
-      }
+      fonts.forEach((bytes, index) => {
+        // The first replaces whatever was loaded (a retry), the rest go over it.
+        // False when alphaTab has no player (no Web Audio); without this the page would wait forever.
+        if (!api.loadSoundFont(bytes, index > 0)) {
+          throw new Error('alphaTab has no player to load sounds into');
+        }
+      });
     },
 
     setLayout(next) {
@@ -136,7 +149,10 @@ export function createAlphaTabEngine({
       api.playbackSpeed = ratio;
     },
     setMetronomeVolume(volume) {
-      api.metronomeVolume = volume;
+      metronome.setVolume(volume);
+    },
+    setMetronomeVoice(voice) {
+      metronome.setVoice(voice);
     },
     setTrackMuted(trackIndex, muted) {
       const track = api.score?.tracks[trackIndex];
@@ -439,4 +455,103 @@ function pointOf(event: MouseEvent): PointerPoint {
 
 function toLayoutMode(layout: LayoutChoice): alphaTab.LayoutMode {
   return layout === 'page' ? alphaTab.LayoutMode.Page : alphaTab.LayoutMode.Horizontal;
+}
+
+async function fetchSoundFont(url: string, signal: AbortSignal): Promise<Uint8Array> {
+  const response = await fetch(url, { signal });
+  // The dev server and the Workers SPA fallback answer a missing file with index.html.
+  const type = response.headers.get('content-type') ?? '';
+  if (!response.ok || type.includes('text/html')) {
+    throw new Error(`Soundfont not found at ${url} (${response.status})`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+/**
+ * Plays the metronome as notes of our own (metronomeSounds.ts) in place of
+ * alphaTab's, which are one fixed sound. The MIDI is rewritten on alphaTab's
+ * midiLoad, before it goes to the synth; the notes get a channel of their
+ * own, whose volume is the metronome's.
+ */
+function createMetronomeTrack(api: alphaTab.AlphaTabApi) {
+  let voice: MetronomeVoice = DEFAULT_METRONOME_VOICE;
+  let volume = 0;
+  let channel: number | null = null;
+
+  const applyVolume = () => {
+    // alphaTab's own metronome stays silent: its ticks are gone from the MIDI anyway.
+    api.metronomeVolume = 0;
+    if (channel !== null) api.player?.setChannelVolume(channel, volume);
+  };
+
+  return {
+    write(file: alphaTab.midi.MidiFile) {
+      channel = writeMetronome(file, voice);
+    },
+
+    /** Sent again once the synth has the MIDI: the channel is new to it. */
+    applyVolume,
+
+    setVolume(next: number) {
+      volume = next;
+      applyVolume();
+    },
+
+    /** Rebuilds the MIDI, which stops playback; the position is kept. */
+    setVoice(next: MetronomeVoice) {
+      if (isSameVoice(voice, next)) return;
+      voice = next;
+      if (channel === null || !api.score) return;
+      const tick = api.tickPosition;
+      api.loadMidiForScore();
+      api.tickPosition = tick;
+    },
+  };
+}
+
+/**
+ * Takes alphaTab's metronome events out of a generated MIDI file and writes
+ * `voice`'s notes in their place, on a channel no track uses. Returns that
+ * channel, or null for a file with no track to write to.
+ *
+ * Two things lean on alphaTab 1.9's synth (alphaTabEngine.metronome.test.ts
+ * checks the file it is given): it loads a percussion preset's samples only for
+ * keys played on the drum channel, so each key is also sent there once,
+ * silently, before anything else; and a bank select of 128 (MSB 1, LSB 0) then
+ * program 0 makes a channel other than the drum channel play the drum kit.
+ */
+export function writeMetronome(file: alphaTab.midi.MidiFile, voice: MetronomeVoice): number | null {
+  const { midi } = alphaTab;
+  const beats: MetronomeBeat[] = [];
+  const used = new Set<number>();
+  for (const track of file.tracks) {
+    const kept = track.events.filter((event) => {
+      if (event instanceof midi.AlphaTabMetronomeEvent) {
+        beats.push({
+          tick: event.tick,
+          counter: event.metronomeNumerator,
+          durationInTicks: event.metronomeDurationInTicks,
+        });
+        return false;
+      }
+      if ('channel' in event && typeof event.channel === 'number') used.add(event.channel);
+      return true;
+    });
+    track.events.splice(0, track.events.length, ...kept);
+  }
+  const target = file.tracks[0];
+  if (!target) return null;
+  const channel = freeChannel(used);
+  // At the very start, so a silent drum-channel note can't end one of the song's.
+  target.events.unshift(
+    ...metronomeKeys(voice).map((key) => new midi.NoteOnEvent(0, 0, PERCUSSION_CHANNEL, key, 0)),
+    new midi.ControlChangeEvent(0, 0, channel, midi.ControllerType.BankSelectCoarse, 1),
+    new midi.ControlChangeEvent(0, 0, channel, midi.ControllerType.BankSelectFine, 0),
+    new midi.ProgramChangeEvent(0, 0, channel, 0),
+  );
+  for (const note of metronomeNotes(beats, voice)) {
+    target.addEvent(new midi.NoteOnEvent(0, note.tick, channel, note.key, note.velocity));
+    target.addEvent(new midi.NoteOffEvent(0, note.offTick, channel, note.key, 0));
+  }
+  return channel;
 }

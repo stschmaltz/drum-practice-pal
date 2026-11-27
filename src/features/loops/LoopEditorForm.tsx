@@ -3,7 +3,6 @@ import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
-import { percentToRatio } from '@/features/player/speed';
 import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { randomUuid } from '@/lib/randomUuid';
@@ -23,7 +22,7 @@ import { selectionHint } from './rangeSelection';
 import { useCreateLoop, useUpdateLoop } from './useLoops';
 import { editorBarFields, type LoopEditor } from './useLoopPractice';
 
-type DetailFields = Pick<LoopFormValues, 'name' | 'targetPercent'>;
+type DetailFields = Pick<LoopFormValues, 'name'>;
 
 /**
  * The form for a new loop, or for editing `loop`. The bars come from the
@@ -180,16 +179,6 @@ export function LoopEditorForm({
         placeholder="Chorus fill"
         onChange={(name) => edit({ name })}
       />
-      <Field
-        label="Target speed % (optional)"
-        value={values.targetPercent}
-        error={errors.targetPercent}
-        readOnly={saving}
-        inputMode="numeric"
-        className="w-24"
-        note={targetNote(values.targetPercent, tempo)}
-        onChange={(targetPercent) => edit({ targetPercent })}
-      />
       {!loop && (
         <p className="text-sm text-ink-muted" data-testid="loop-new-speed">
           Saves at the speed playing now: {speedLabel(snapshot.speedRatio, tempo)}.
@@ -211,13 +200,6 @@ export function LoopEditorForm({
       )}
     </form>
   );
-}
-
-/** The BPM a typed whole-percent target gives, once there is a tempo to work it out from. */
-function targetNote(targetPercent: string, tempo: number | null): string | undefined {
-  const percent = Number(targetPercent.trim().replace(/%$/, ''));
-  if (tempo === null || !Number.isInteger(percent) || percent <= 0) return undefined;
-  return speedLabel(percentToRatio(percent), tempo);
 }
 
 /** Whether there is a mouse to drag with; the hint only offers a drag where it works. */

@@ -5,6 +5,7 @@ import {
   libraryRedirect,
   loopPracticePath,
   newLoopPath,
+  showsScore,
   songPath,
   songPlayPath,
 } from './routes';
@@ -38,4 +39,17 @@ it.each([
 it('keeps the library’s search and sort on its way to the songs list', () => {
   expect(libraryRedirect('?q=fill&sort=added')).toBe('/?q=fill&sort=added');
   expect(libraryRedirect('')).toBe('/');
+});
+
+it.each([
+  [songPlayPath(SONG), true],
+  [`${songPlayPath(SONG)}/`, true],
+  [loopPracticePath(SONG, LOOP), true],
+  [songPath(SONG), false],
+  ['/', false],
+  ['/stats', false],
+  ['/settings', false],
+  [`${songPath(SONG)}/loops`, false],
+])('%s draws the score: %s', (pathname, expected) => {
+  expect(showsScore(pathname)).toBe(expected);
 });

@@ -45,7 +45,10 @@ describe('PlayerService loading', () => {
     expect(service.getSnapshot().status).toBe('loading');
     expect(engine.loadScore).toHaveBeenCalledWith(bytes, [2]);
     expect(engine.loadSoundFont).toHaveBeenCalledTimes(1);
-    expect(engine.loadSoundFont).toHaveBeenCalledWith('/soundfont/sonivox.sf2');
+    expect(engine.loadSoundFont).toHaveBeenCalledWith([
+      '/soundfont/sonivox.sf2',
+      '/drumkit/drums.sf3',
+    ]);
   });
 
   it('renders the first track when the song has no drum track', () => {
@@ -358,6 +361,63 @@ describe('PlayerService live changes', () => {
     expect(listener).not.toHaveBeenCalled();
     service.setSpeed(1.1);
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PlayerService metronome voice', () => {
+  const cowbell = {
+    sound: 'cowbell',
+    accent: false,
+    accentSound: 'click',
+    subdivision: 2,
+  } as const;
+
+  it('gives the engine the starting voice before the score, so the first MIDI has it', () => {
+    const { engine, service } = setup({ options: { metronomeVoice: cowbell } });
+    service.load(bytes);
+    expect(engine.setMetronomeVoice).toHaveBeenCalledWith(cowbell);
+    expect(engine.setMetronomeVoice.mock.invocationCallOrder[0]).toBeLessThan(
+      engine.loadScore.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(service.getSnapshot().metronomeVoice).toEqual(cowbell);
+  });
+
+  it('changes the voice while paused', () => {
+    const { engine, service } = setup();
+    service.load(bytes);
+    engine.finishLoading();
+    engine.setMetronomeVoice.mockClear();
+
+    expect(service.setMetronomeVoice(cowbell)).toBe(true);
+    expect(engine.setMetronomeVoice).toHaveBeenCalledWith(cowbell);
+    expect(service.getSnapshot()).toMatchObject({ status: 'ready', metronomeVoice: cowbell });
+  });
+
+  it('refuses a change while playing or counting in: it would rebuild the MIDI', () => {
+    const { engine, service } = playing();
+    engine.setMetronomeVoice.mockClear();
+    expect(service.setMetronomeVoice(cowbell)).toBe(false);
+    expect(engine.setMetronomeVoice).not.toHaveBeenCalled();
+    expect(service.getSnapshot().metronomeVoice).toEqual(DEFAULT_PLAYER_OPTIONS.metronomeVoice);
+
+    const counting = setup({ options: { countInBars: 1 } });
+    counting.service.load(bytes);
+    counting.engine.finishLoading();
+    counting.service.play();
+    expect(counting.service.getSnapshot().status).toBe('countingIn');
+    expect(counting.service.setMetronomeVoice(cowbell)).toBe(false);
+  });
+
+  it('sends nothing for the voice already set, and refuses once the player has failed', () => {
+    const { engine, service } = setup();
+    service.load(bytes);
+    engine.finishLoading();
+    engine.setMetronomeVoice.mockClear();
+    expect(service.setMetronomeVoice({ ...DEFAULT_PLAYER_OPTIONS.metronomeVoice })).toBe(true);
+    expect(engine.setMetronomeVoice).not.toHaveBeenCalled();
+
+    engine.fire('error', { error: new Error('worker died') });
+    expect(service.setMetronomeVoice(cowbell)).toBe(false);
   });
 });
 

@@ -2,7 +2,7 @@ import { screen } from '@testing-library/react';
 import type { UserEvent } from '@testing-library/user-event';
 
 /**
- * A song row's "More" button (14 QA issue 3: Edit and Delete live in its
+ * A song row's "More" button (16 QA issue 3: Edit and Delete live in its
  * menu). Focus hand-overs to the row's Edit or Delete land on it.
  */
 export const moreButton = (title: string) =>

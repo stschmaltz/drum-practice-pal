@@ -1,6 +1,6 @@
 /**
  * The Stats page's numbers and chart data, worked out from the user's
- * sessions and loops. Pure: nothing here is stored (docs/plan.md, Unit 14),
+ * sessions and loops. Pure: nothing here is stored (docs/plan.md, Unit 16),
  * and every function takes `now` so tests pick the day.
  */
 import type { PracticeSession } from '@/features/practice/sessions';
@@ -75,7 +75,7 @@ export function statsTotals(
 /**
  * Whether there is anything to show: a session, or a loop marked finished
  * (which can happen without one). Without either every number is 0 and every
- * chart empty, and the page says so instead (14 QA issue 5).
+ * chart empty, and the page says so instead (16 QA issue 5).
  */
 export function hasPracticeHistory(
   sessions: readonly StatsSession[],

@@ -25,7 +25,7 @@ export function canPlay(player: PlayerService | null, snapshot: PlayerSnapshot):
 /**
  * Play/Pause on a loop's practice screen (its button and Space). The sounds
  * can be in before the loop is open (a cached list, the fresh read not back),
- * and a Play then would play the whole song with no range (14 Test bug 1), so
+ * and a Play then would play the whole song with no range (16 Test bug 1), so
  * starting also waits for the loop. Pausing never does.
  */
 export function canPlayLoopPractice(
@@ -63,4 +63,16 @@ export function canUseDrumToggles(player: PlayerService | null, snapshot: Player
  */
 export function canPickBars(snapshot: PlayerSnapshot): boolean {
   return showsScoreBars(snapshot);
+}
+
+/**
+ * The metronome's sounds and subdivision: an option like the others, but only
+ * while nothing plays or counts in, since applying one rebuilds the song's
+ * MIDI (PlayerService.setMetronomeVoice).
+ */
+export function canChangeMetronomeVoice(
+  player: PlayerService | null,
+  snapshot: PlayerSnapshot,
+): player is PlayerService {
+  return canChangeOptions(player, snapshot) && !isRunning(snapshot.status);
 }

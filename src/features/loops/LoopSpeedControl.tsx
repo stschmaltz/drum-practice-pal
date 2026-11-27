@@ -1,6 +1,6 @@
 import { useId, useState, type KeyboardEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
-import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
+import { buttonClass, inputClass, labelClass } from '@/components/styles';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import {
   nudgeSpeedRatio,
@@ -12,7 +12,6 @@ import { bpmAtSpeed } from '@/features/player/tempo';
 import { failureCopy } from '@/lib/errorCopy';
 import type { Loop } from './loopForm';
 import { LOOP_SPEED_ATTRIBUTES } from './loopFocus';
-import { speedLabel } from './loopLabels';
 import { useLoopSpeed } from './useLoopSpeed';
 
 /** The nudge buttons, in percent. */
@@ -20,23 +19,21 @@ const NUDGES = [-5, -1, 1, 5] as const;
 
 /**
  * The playing loop's speed as % and BPM, each editable, with nudge buttons.
- * Changes go to the player at once and to the loop only on "Save speed". BPM
+ * Changes go to the player at once, and the screen saves them to the loop
+ * as they happen (`useSaveLoopSpeed`); this shows how that is going. BPM
  * is the speed times the tempo at the loop's first bar, never stored; a typed
  * BPM sets the exact ratio it implies.
  */
 export function LoopSpeedControl({
-  songId,
   loop,
   player,
   snapshot,
 }: {
-  songId: string;
   loop: Loop;
   player: PlayerService | null;
   snapshot: PlayerSnapshot;
 }) {
-  const { update, online, canSetSpeed, sending, tempo, ratio, unsaved, setSpeed, save } =
-    useLoopSpeed(songId, loop, player, snapshot);
+  const { saves, canSetSpeed, tempo, ratio, setSpeed } = useLoopSpeed(loop, player, snapshot);
 
   return (
     <div
@@ -77,27 +74,12 @@ export function LoopSpeedControl({
           </button>
         ))}
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <button
-          type="button"
-          className={primaryButtonClass}
-          disabled={!unsaved || sending}
-          onClick={save}
-        >
-          Save speed
-        </button>
-        <p className="text-sm text-ink-muted" data-testid="loop-saved-speed">
-          Saved: {speedLabel(loop.speed_ratio, tempo)}
-        </p>
-      </div>
-      {update.isPending && !online && (
+      {saves.waiting && (
         <p role="status" className="text-sm text-ink-muted" data-testid="loop-speed-queued">
           Saved on this device. It's sent when you're back online.
         </p>
       )}
-      {update.isError && (
-        <ErrorAlert>Couldn't save the speed. {failureCopy(update.error)}</ErrorAlert>
-      )}
+      {saves.error && <ErrorAlert>Couldn't save the speed. {failureCopy(saves.error)}</ErrorAlert>}
     </div>
   );
 }

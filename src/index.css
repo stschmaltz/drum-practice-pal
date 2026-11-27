@@ -3,7 +3,7 @@
 /*
  * A short window: a phone on its side (390 px tall). The practice screen's
  * sticky bar draws one row there, so the score keeps most of the height
- * (14 QA issue 7). In rem, like the width breakpoints, so it follows the
+ * (16 QA issue 7). In rem, like the width breakpoints, so it follows the
  * browser's default font size.
  */
 @custom-variant short (@media (max-height: 30rem));
@@ -90,8 +90,8 @@
 
   /*
    * Breakpoints, written out (they are Tailwind's defaults) because code reads
-   * them too: `md` is the player's page layout and the sidebar (layout.ts),
-   * `lg` the loop panel's column (loopPanelLayout.ts). Tests keep them equal.
+   * them too: `md` is the player's page layout and the sidebar (layout.ts).
+   * Tests keep it equal. `lg` is where the loop sheet moves to a corner.
    */
   --breakpoint-md: 48rem;
   --breakpoint-lg: 64rem;

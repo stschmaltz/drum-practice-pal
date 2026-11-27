@@ -1,6 +1,6 @@
 /**
  * Builders for in-app paths. The route table is in src/App.tsx. Three levels
- * (Unit 14): Songs (`/`), a song's overview, then practising one loop or
+ * (Unit 16): Songs (`/`), a song's overview, then practising one loop or
  * playing the whole song.
  */
 import { isUuid } from './randomUuid';
@@ -45,3 +45,12 @@ export function legacyLoopRedirect(songId: string, params: URLSearchParams): str
 
 /** `/library` from earlier builds: the songs list, with its search and sort kept. */
 export const libraryRedirect = (search: string) => `${SONGS_PATH}${search}`;
+
+/**
+ * Whether a path is a screen that draws the score (the whole song or a loop's
+ * practice screen). Those take the whole width beside the sidebar; other
+ * pages, the song's overview included, keep a readable line length.
+ */
+export function showsScore(pathname: string): boolean {
+  return /^\/songs\/[^/]+\/(play|loops\/[^/]+)\/?$/.test(pathname);
+}

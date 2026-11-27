@@ -4,13 +4,8 @@
  * share it. Speed conversion lives in the player's speed.ts.
  */
 import type { Database } from '@/lib/database.types';
-import {
-  isValidBarRange,
-  LOOP_NAME_MAX_LENGTH,
-  SPEED_RATIO_MAX,
-  SPEED_RATIO_MIN,
-} from '@/lib/schema';
-import { percentToRatio, ratioToPercent } from '@/features/player/speed';
+import { isValidBarRange, LOOP_NAME_MAX_LENGTH } from '@/lib/schema';
+import { ratioToPercent } from '@/features/player/speed';
 
 type LoopRow = Database['public']['Tables']['loops']['Row'];
 
@@ -21,7 +16,6 @@ export const LOOP_FIELDS = [
   'start_bar',
   'end_bar',
   'speed_ratio',
-  'target_ratio',
   'status',
   'finished_at',
   'last_practiced_at',
@@ -30,7 +24,7 @@ export const LOOP_FIELDS = [
 
 /** A literal, so supabase-js can type the selected row. Tested against LOOP_FIELDS. */
 export const LOOP_SELECT =
-  'id, song_id, name, start_bar, end_bar, speed_ratio, target_ratio, status, finished_at, last_practiced_at, created_at';
+  'id, song_id, name, start_bar, end_bar, speed_ratio, status, finished_at, last_practiced_at, created_at';
 
 export type LoopField = (typeof LOOP_FIELDS)[number];
 export type Loop = Pick<LoopRow, LoopField>;
@@ -45,14 +39,13 @@ export const LOOP_EDIT_FIELDS = [
   'start_bar',
   'end_bar',
   'speed_ratio',
-  'target_ratio',
   'status',
 ] as const satisfies readonly LoopField[];
 
 export type LoopEdit = Pick<Loop, (typeof LOOP_EDIT_FIELDS)[number]>;
 
-/** What the form decides; the speed is saved from the player ("Save speed"), not typed here. */
-export type LoopDetails = Pick<Loop, 'name' | 'start_bar' | 'end_bar' | 'target_ratio'>;
+/** What the form decides; the speed follows what the loop is played at, not typed here. */
+export type LoopDetails = Pick<Loop, 'name' | 'start_bar' | 'end_bar'>;
 
 /**
  * A new loop as the client sends it: the id is chosen here so a retry can't
@@ -65,20 +58,17 @@ export interface LoopFormValues {
   name: string;
   startBar: string;
   endBar: string;
-  /** Whole percent, or empty for no target. */
-  targetPercent: string;
 }
 
 /** The two bar fields, which the score can fill in as well as the keyboard. */
 export type LoopBarFields = Pick<LoopFormValues, 'startBar' | 'endBar'>;
 
-export type LoopFormErrors = Partial<Record<'name' | 'bars' | 'targetPercent', string>>;
+export type LoopFormErrors = Partial<Record<'name' | 'bars', string>>;
 
 export const EMPTY_LOOP_FORM: LoopFormValues = {
   name: '',
   startBar: '',
   endBar: '',
-  targetPercent: '',
 };
 
 export function loopFormValues(loop: LoopDetails): LoopFormValues {
@@ -86,7 +76,6 @@ export function loopFormValues(loop: LoopDetails): LoopFormValues {
     name: loop.name,
     startBar: String(loop.start_bar),
     endBar: String(loop.end_bar),
-    targetPercent: loop.target_ratio === null ? '' : String(ratioToPercent(loop.target_ratio)),
   };
 }
 
@@ -130,18 +119,8 @@ export function parseLoopForm(values: LoopFormValues, barCount: number): ParsedL
   const range = formBarRange(values, barCount);
   if (!range) errors.bars = barsError(values, barCount);
 
-  const target = parseTargetPercent(values.targetPercent);
-  if (target === 'invalid') {
-    errors.targetPercent = `Enter a target from ${ratioToPercent(SPEED_RATIO_MIN)} to ${ratioToPercent(SPEED_RATIO_MAX)}%, or leave it empty.`;
-  }
-
-  if (!range || target === 'invalid' || Object.keys(errors).length > 0) {
-    return { ok: false, errors };
-  }
-  return {
-    ok: true,
-    details: { name, start_bar: range.startBar, end_bar: range.endBar, target_ratio: target },
-  };
+  if (!range || Object.keys(errors).length > 0) return { ok: false, errors };
+  return { ok: true, details: { name, start_bar: range.startBar, end_bar: range.endBar } };
 }
 
 function barsError(values: LoopFormValues, barCount: number): string {
@@ -150,17 +129,6 @@ function barsError(values: LoopFormValues, barCount: number): string {
   if (startBar === null || endBar === null) return 'Choose the first and last bar.';
   if (startBar > endBar) return "The last bar can't come before the first.";
   return `Bars go from 1 to ${barCount} in this song.`;
-}
-
-/** Empty is no target (null). Anything that isn't a whole percent within the speed bounds is invalid. */
-function parseTargetPercent(text: string): number | null | 'invalid' {
-  const trimmed = text.trim().replace(/%$/, '').trim();
-  if (trimmed === '') return null;
-  if (!/^\d+$/.test(trimmed)) return 'invalid';
-  const percent = Number(trimmed);
-  const min = ratioToPercent(SPEED_RATIO_MIN);
-  const max = ratioToPercent(SPEED_RATIO_MAX);
-  return percent >= min && percent <= max ? percentToRatio(percent) : 'invalid';
 }
 
 /** Only the fields that differ, so a save never rewrites what another device just changed. */
@@ -173,20 +141,9 @@ export function changedLoopFields(saved: LoopEdit, edit: Partial<LoopEdit>): Par
   return changes;
 }
 
-/**
- * What saving the edit form sends: the details that differ from the saved loop.
- * A target that shows as the saved one's percent is not a change. The field
- * holds whole percents, so reading it back would rewrite a finer target
- * (85.5556% shows as 86) that the user never touched.
- */
+/** What saving the edit form sends: the details that differ from the saved loop. */
 export function changedLoopDetails(saved: LoopEdit, details: LoopDetails): Partial<LoopEdit> {
-  const changes = changedLoopFields(saved, details);
-  if (showsAsSameTarget(saved.target_ratio, details.target_ratio)) delete changes.target_ratio;
-  return changes;
-}
-
-function showsAsSameTarget(saved: number | null, typed: number | null): boolean {
-  return saved !== null && typed !== null && ratioToPercent(saved) === ratioToPercent(typed);
+  return changedLoopFields(saved, details);
 }
 
 /**
@@ -274,19 +231,35 @@ export function barsLabel(startBar: number, endBar: number): string {
 }
 
 /**
- * The loop's saved speed has reached its target, so the app asks "Mark
- * finished?". It only asks: a loop is never finished for the user. Compares
- * the saved speed, not the one playing, so a nudge past the target that was
- * never saved doesn't count. Compares the whole percents the loop's line
- * shows, not the stored ratios: a speed typed as a BPM (85 at a tempo of 120 is
- * 0.708333) shows as "71%" beside "target 71%", and must count as there.
+ * Every loop aims at the song's own speed: 100%. Not stored, so it can't drift
+ * per loop; the "Mark finished?" prompt and the home page's bar read it here.
  */
-export function hasReachedTarget(
-  loop: Pick<Loop, 'status' | 'speed_ratio' | 'target_ratio'>,
-): boolean {
+export const TARGET_SPEED_RATIO = 1;
+
+/**
+ * The loop's saved speed has reached full speed, so the app asks "Mark
+ * finished?". It only asks: a loop is never finished for the user. Compares
+ * the saved speed, the one the loop was last played at, as the whole percent
+ * its line shows: a speed typed as a BPM (119 at a tempo of 120 is 0.991667)
+ * shows as "99%", and 100% means it shows as "100%".
+ */
+export function hasReachedTarget(loop: Pick<Loop, 'status' | 'speed_ratio'>): boolean {
   return (
     loop.status === 'active' &&
-    loop.target_ratio !== null &&
-    ratioToPercent(loop.speed_ratio) >= ratioToPercent(loop.target_ratio)
+    ratioToPercent(loop.speed_ratio) >= ratioToPercent(TARGET_SPEED_RATIO)
   );
+}
+
+/**
+ * Whether the playing loop is worth asking about: at full speed, and either
+ * its speed has moved since it was chosen (it was worked up to 100%) or it
+ * was practised before. A loop just saved at 100% hasn't been worked on yet,
+ * so it isn't asked about until it has been.
+ */
+export function shouldAskToFinish(
+  loop: Pick<Loop, 'status' | 'speed_ratio' | 'last_practiced_at'>,
+  speedMovedSinceChosen: boolean,
+): boolean {
+  if (!hasReachedTarget(loop)) return false;
+  return speedMovedSinceChosen || loop.last_practiced_at !== null;
 }

@@ -23,8 +23,9 @@ import { startCountIn } from './countInRunner';
 import { createEmitter, type Handler } from './emitter';
 import type { LayoutChoice } from './layout';
 import type { PlayerEngine } from './playerEngine';
+import { isSameVoice, type MetronomeVoice } from './metronomeSounds';
 import { clampVolume, effectiveMetronomeVolume, type PlayerOptions } from './playerOptions';
-import { PLAYER_SOUND_FONT_URL } from './soundFont';
+import { PLAYER_SOUND_FONT_URLS } from './soundFont';
 import { clampSpeedRatio } from './speed';
 import { orderedBars } from './tapGesture';
 import { tempoAtBar } from './tempo';
@@ -137,7 +138,7 @@ export interface PlayerServiceConfig {
   /** From songs.drum_track_index: the track that renders and that "Mute drums" mutes. */
   drumTrackIndex: number | null;
   options: PlayerOptions;
-  soundFontUrl?: string;
+  soundFontUrls?: readonly string[];
   wakeLock?: WakeLockControl;
   /** Runs inside the play tap, before the engine starts. */
   unlockAudio?: () => void;
@@ -154,6 +155,7 @@ export function initialPlayerSnapshot(
     speedRatio: clampSpeedRatio(options.speedRatio),
     metronomeOn: options.metronomeOn,
     metronomeVolume: clampVolume(options.metronomeVolume),
+    metronomeVoice: options.metronomeVoice,
     drumsMuted: drumTrackIndex !== null && options.drumsMuted,
     countInBars: options.countInBars,
     countInMode: options.countInMode,
@@ -174,7 +176,7 @@ export function initialPlayerSnapshot(
 export class PlayerService {
   private readonly engine: PlayerEngine;
   private readonly drumTrackIndex: number | null;
-  private readonly soundFontUrl: string;
+  private readonly soundFontUrls: readonly string[];
   private readonly wakeLock: WakeLockControl;
   private readonly unlockAudio: () => void;
   private readonly clicks: ClickOutput;
@@ -223,7 +225,7 @@ export class PlayerService {
   constructor(engine: PlayerEngine, config: PlayerServiceConfig) {
     this.engine = engine;
     this.drumTrackIndex = config.drumTrackIndex;
-    this.soundFontUrl = config.soundFontUrl ?? PLAYER_SOUND_FONT_URL;
+    this.soundFontUrls = config.soundFontUrls ?? PLAYER_SOUND_FONT_URLS;
     this.wakeLock = config.wakeLock ?? screenWakeLock();
     this.unlockAudio = config.unlockAudio ?? (() => preferPlaybackAudioSession());
     this.clicks = config.clicks ?? webClickOutput();
@@ -273,6 +275,8 @@ export class PlayerService {
     });
     this.wakeLock.setActive(false);
     this.requestSoundFont();
+    // Before the score, so the first MIDI already has the right clicks.
+    this.engine.setMetronomeVoice(this.snapshot.metronomeVoice);
     if (!this.engine.loadScore(bytes, [this.drumTrackIndex ?? 0])) this.fail('score');
   }
 
@@ -291,7 +295,7 @@ export class PlayerService {
   private requestSoundFont(): void {
     if (this.soundFontRequested) return;
     this.soundFontRequested = true;
-    this.engine.loadSoundFont(this.soundFontUrl).catch(() => {
+    this.engine.loadSoundFont(this.soundFontUrls).catch(() => {
       // So a later load or retry tries again instead of waiting forever for sounds.
       this.soundFontRequested = false;
       this.fail('soundFont');
@@ -469,6 +473,21 @@ export class PlayerService {
     if (this.disposed) return;
     this.update({ metronomeVolume: clampVolume(volume) });
     this.applyMetronome();
+  }
+
+  /**
+   * The metronome's sounds and subdivision. Not a live option: the engine
+   * rebuilds the song's MIDI for it, which would stop playback, so it is
+   * refused (false) while playing or counting in. See canChangeMetronomeVoice.
+   */
+  setMetronomeVoice(voice: MetronomeVoice): boolean {
+    if (this.disposed || isRunning(this.snapshot.status) || this.snapshot.status === 'error') {
+      return false;
+    }
+    if (isSameVoice(voice, this.snapshot.metronomeVoice)) return true;
+    this.update({ metronomeVoice: voice });
+    this.engine.setMetronomeVoice(voice);
+    return true;
   }
 
   /**

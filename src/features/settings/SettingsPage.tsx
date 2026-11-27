@@ -18,9 +18,12 @@ import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreferenc
 import { characterKeysLabel } from '@/features/shortcuts/shortcuts';
 import { useCharacterKeysOn } from '@/features/shortcuts/useCharacterKeysOn';
 import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_LABELS } from '@/features/player/countInLabels';
+import { MetronomeVoiceFields } from '@/features/player/MetronomeVoiceFields';
+import { metronomeVoiceFromSettings } from '@/features/player/playerOptions';
 import { COUNT_IN_BAR_OPTIONS, type CountInMode } from '@/lib/schema';
 import {
   changedSettings,
+  metronomeVoiceSettings,
   percentToVolume,
   validateSettings,
   volumeToPercent,
@@ -59,6 +62,10 @@ export function SettingsPage() {
     </div>
   );
 }
+
+/** A radio drawn as a pill. The radio is visible, so its own focus ring shows; the pill shows which is chosen. */
+const pillClass =
+  'flex min-h-touch cursor-pointer items-center gap-2 rounded-control border border-field-line px-4 transition-colors duration-150 hover:bg-raised has-[:checked]:border-selected-line has-[:checked]:bg-selected';
 
 /** What each fieldset needs: the values on screen, their errors, and a way to edit them. */
 interface FieldsetProps {
@@ -154,6 +161,8 @@ function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
   const volumeId = useId();
   const volumeErrorId = `${volumeId}-error`;
   const volumePercent = volumeToPercent(values.metronome_volume);
+  const voiceError =
+    errors.metronome_sound ?? errors.metronome_accent_sound ?? errors.metronome_subdivision;
 
   return (
     <fieldset className="flex flex-col gap-3">
@@ -196,6 +205,11 @@ function MetronomeFieldset({ values, errors, edit }: FieldsetProps) {
           </span>
         )}
       </div>
+      <MetronomeVoiceFields
+        voice={metronomeVoiceFromSettings(values)}
+        onChange={(voice) => edit(metronomeVoiceSettings(voice))}
+      />
+      {voiceError && <p className="text-sm text-danger">{voiceError}</p>}
     </fieldset>
   );
 }
@@ -210,11 +224,7 @@ function CountInFieldset({ values, errors, edit }: FieldsetProps) {
       <legend className={`mb-2 ${sectionHeadingClass}`}>Count-in</legend>
       <div role="radiogroup" aria-label="Count-in length" className="flex flex-wrap gap-2">
         {COUNT_IN_BAR_OPTIONS.map((bars) => (
-          <label
-            key={bars}
-            // The radio is visible, so its own focus ring shows; the pill shows which is chosen.
-            className="flex min-h-touch cursor-pointer items-center gap-2 rounded-control border border-field-line px-4 transition-colors duration-150 hover:bg-raised has-[:checked]:border-selected-line has-[:checked]:bg-selected"
-          >
+          <label key={bars} className={pillClass}>
             <input
               type="radio"
               name="count_in_bars"

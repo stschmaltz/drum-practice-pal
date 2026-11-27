@@ -8,7 +8,6 @@ import {
   openLoopPanel,
   saveLoopSpeed,
   saveNewLoop,
-  saveSpeedButton,
   exitLoop,
 } from './loopsPage';
 import {
@@ -47,8 +46,8 @@ import {
 } from './practicePage';
 
 // Unit 09: practice sessions and progress. Loop play time is logged, a loop
-// has a history, a loop at its target asks "Mark finished?", and the home page
-// lists what is on the go and what is finished.
+// has a history, a loop at full speed asks "Mark finished?", and a song's
+// overview lists what is on the go and what is mastered (Unit 16).
 
 test('a minute of loop practice is logged as one session with its speed and duration', async ({
   page,
@@ -105,13 +104,13 @@ test('a short go is not logged, and jam mode never is', async ({ page, user }) =
   expect(await sessionsOf(user)).toEqual([]);
 });
 
-test('hitting the target asks "Mark finished?", and finish and reopen move the loop between tabs', async ({
+test('reaching full speed asks "Mark finished?", and finish and reopen move the loop between the song lists', async ({
   page,
   user,
 }) => {
   await shortSessions(page, 2);
   await openFixture(page, user, 'groove-120', 'Groove 120');
-  await saveNewLoop(page, { name: 'Fill', firstBar: 3, lastBar: 4, target: 90 });
+  await saveNewLoop(page, { name: 'Fill', firstBar: 3, lastBar: 4 });
   await saveLoopSpeed(page, 80);
   const prompt = loopPanel(page).getByTestId('finish-prompt');
   await expect(prompt).toHaveCount(0);
@@ -121,12 +120,13 @@ test('hitting the target asks "Mark finished?", and finish and reopen move the l
   await playFor(page, 3_000);
   await expect(sessionLogged(page)).toContainText('of Fill at 80%');
 
-  // Reaching the target asks; it does not finish the loop.
+  // Under full speed nothing asks; reaching it asks, and does not finish the loop.
   await openLoopPanel(page);
-  await commit(loopPercentField(page), '90');
+  await commit(loopPercentField(page), '95');
+  await expect.poll(async () => (await loopsOf(user))[0]?.speed_ratio).toBe(0.95);
   await expect(prompt).toHaveCount(0);
-  await saveSpeedButton(page).click();
-  await expect(prompt).toContainText("You've reached your target of 90%");
+  await commit(loopPercentField(page), '100');
+  await expect(prompt).toContainText("You're playing it at full speed");
   expect((await loopsOf(user))[0]?.status).toBe('active');
 
   await prompt.getByRole('button', { name: 'Mark finished' }).click();
@@ -141,7 +141,7 @@ test('hitting the target asks "Mark finished?", and finish and reopen move the l
   await expect(page.getByTestId('song-facts')).toContainText('1 of 1 mastered');
   await expect(overviewList(page, 'on the go')).toHaveCount(0);
   const finished = overviewItem(page, 'mastered', 'Fill');
-  await expect(finished).toContainText('Bars 3 to 4 · 90%');
+  await expect(finished).toContainText('Bars 3 to 4 · 100%');
   await expect(finished).toContainText('Last practised today');
 
   await finished.getByRole('button', { name: 'More actions for Fill' }).click();
@@ -165,7 +165,7 @@ test('a song lists its loops by last practised and opens one on its practice scr
   await shortSessions(page, 2);
   await openFixture(page, user, 'tempo-change', 'Tempo Change');
   await saveNewLoop(page, { name: 'First saved', firstBar: 1, lastBar: 2 });
-  await saveNewLoop(page, { name: 'Late one', firstBar: 9, lastBar: 10, target: 100 });
+  await saveNewLoop(page, { name: 'Late one', firstBar: 9, lastBar: 10 });
   await saveLoopSpeed(page, 70);
   await playLoopButton(page, 'Late one').click();
   await playFor(page, 3_000);
@@ -198,7 +198,7 @@ test('a song lists its loops by last practised and opens one on its practice scr
   expect((await sessionsOf(user)).every((session) => session.speed_ratio === 0.7)).toBe(true);
 });
 
-// 14 QA issue 7: at 844 x 390 the practice bar took 157 px of the 390 while playing. In a short
+// 16 QA issue 7: at 844 x 390 the practice bar took 157 px of the 390 while playing. In a short
 // window it is one row, its buttons still 44 px or more.
 test('on a phone on its side the practice bar is one row and leaves the score most of the height', async ({
   page,
@@ -227,7 +227,7 @@ test('on a phone on its side the practice bar is one row and leaves the score mo
   await playButton(page).click();
 });
 
-// 14 QA issue 4: Session complete came in above the score and pushed it down (215 px on a
+// 16 QA issue 4: Session complete came in above the score and pushed it down (215 px on a
 // phone), so a bar tapped as it came was the one below the finger. It comes, and goes, with
 // the score where it was.
 test('Session complete comes and goes without moving the score', async ({ page, user }) => {

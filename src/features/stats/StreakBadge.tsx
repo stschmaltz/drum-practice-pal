@@ -3,7 +3,7 @@ import { useAllSessions } from '@/features/practice/useSessions';
 import { currentStreak, daysLabel } from './streak';
 
 /**
- * The practice streak in the Songs header (Unit 14): a flame and the number
+ * The practice streak in the Songs header (Unit 16): a flame and the number
  * of days, nothing at all at 0 or before the sessions have been read.
  */
 export function StreakBadge() {

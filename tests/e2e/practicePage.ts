@@ -2,7 +2,7 @@
 /**
  * Locators and steps for practice sessions and the home page (Unit 09), used
  * by practice.spec.ts: what the database holds for a user, the "Practice
- * logged" notice, a loop's history, a song overview's lists (Unit 14), and the
+ * logged" notice, a loop's history, a song overview's lists (Unit 16), and the
  * ways a spec shortens, watches and interrupts a session.
  */
 import type { Locator, Page } from '@playwright/test';
@@ -37,12 +37,10 @@ export async function loopsOf(user: E2eUser) {
   return data;
 }
 
-/** The practice screen's speed in large type, its round nudges, its Save speed and Session complete (Unit 14). */
+/** The practice screen's speed in large type, its round nudges (each saved as made) and Session complete (Unit 16). */
 export const practiceSpeed = (page: Page) => page.getByTestId('practice-speed');
 export const nudge = (page: Page, which: 'Slower' | 'Faster') =>
   page.getByRole('button', { name: `${which} by 5%` });
-export const practiceSaveSpeed = (page: Page) =>
-  page.getByRole('group', { name: 'Loop speed' }).getByRole('button', { name: 'Save speed' });
 export const sessionComplete = (page: Page) => page.getByTestId('session-complete');
 
 /** From a song's overview, a loop's round play button: its practice screen, ready for Play. */

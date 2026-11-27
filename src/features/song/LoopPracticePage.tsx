@@ -6,10 +6,12 @@ import { LoadingLine } from '@/components/StatusMessages';
 import { linkClass } from '@/components/styles';
 import type { Song } from '@/features/library/songForm';
 import { FinishPrompt } from '@/features/loops/FinishPrompt';
-import { barsLabel, hasReachedTarget, type Loop } from '@/features/loops/loopForm';
+import { barsLabel, shouldAskToFinish, type Loop } from '@/features/loops/loopForm';
 import { PracticeSpeed } from '@/features/loops/PracticeSpeed';
 import { useLoopPractice } from '@/features/loops/useLoopPractice';
 import { useLoops } from '@/features/loops/useLoops';
+import { useSaveLoopSpeed } from '@/features/loops/useSaveLoopSpeed';
+import { useSpeedMovedSinceChosen } from '@/features/loops/useSpeedMovedSinceChosen';
 import { canPlayLoopPractice, type PlayGate } from '@/features/player/controlGates';
 import { PlayerControls, PlayPauseButton } from '@/features/player/PlayerControls';
 import type { PlayerOptions } from '@/features/player/playerOptions';
@@ -39,7 +41,7 @@ import { useRequestedLoop } from './useRequestedLoop';
 import { announcementText, useSongShortcuts } from './useSongShortcuts';
 
 /**
- * /songs/:id/loops/:loopId, the practice screen (Unit 14). Lazy-loaded with
+ * /songs/:id/loops/:loopId, the practice screen (Unit 16). Lazy-loaded with
  * the player. One loop, set up as a link to it always has (its range,
  * looping and saved speed: `useLoopPractice.openLoop`), with the session's
  * play time and passes, the score, the speed and one big Play/Pause. The
@@ -169,6 +171,9 @@ function PracticePlayer({
   const stickyBarHeight = useHeightOf(stickyBarRef);
   const practice = useLoopPractice(player, snapshot, loops.data);
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
+  // Every change of the loop's speed is saved as it is made (no "Save speed").
+  useSaveLoopSpeed(song.id, practice.activeLoop, snapshot.speedRatio);
+  const speedMoved = useSpeedMovedSinceChosen(practice.activeLoop);
   useRequestedLoop(
     loopId,
     player !== null && snapshot.barCount !== null,
@@ -202,7 +207,7 @@ function PracticePlayer({
   const completedLoopName = loops.data?.find((each) => each.id === completed?.record.loopId)?.name;
   const askToFinish =
     practice.activeLoop !== null &&
-    hasReachedTarget(practice.activeLoop) &&
+    shouldAskToFinish(practice.activeLoop, speedMoved) &&
     declinedFinish !== finishQuestionKey(practice.activeLoop);
   const nothingToShow = snapshot.error === 'score' || snapshot.error === 'engine';
 
@@ -229,24 +234,12 @@ function PracticePlayer({
       ) : (
         <SessionNotice tracker={tracker} loops={loops.data} showLogged={false} />
       )}
-      {askToFinish && practice.activeLoop && (
-        <FinishPrompt
-          songId={song.id}
-          loop={practice.activeLoop}
-          onDecline={() => {
-            setDeclinedFinish(finishQuestionKey(loop));
-            focusWhenReady(findPracticePlay);
-          }}
-          // The prompt goes once the loop is finished: focus goes on to Play.
-          onFinished={() => focusWhenReady(findPracticePlay)}
-        />
-      )}
       <div
         ref={stickyBarRef}
         data-testid="practice-bar"
         className={`sticky top-0 ${fullBleedBarClass} flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]`}
       >
-        <PracticeSpeed songId={song.id} loop={loop} player={player} snapshot={snapshot} />
+        <PracticeSpeed loop={loop} player={player} snapshot={snapshot} />
         <span className="contents" {...PRACTICE_PLAY_ATTRIBUTES}>
           <PlayPauseButton player={player} snapshot={snapshot} round gate={playGate} />
         </span>
@@ -261,6 +254,20 @@ function PracticePlayer({
         snapshot={snapshot}
         hidden={nothingToShow}
       />
+      {/* Under the score, not above it: it comes with the first session of a loop played at
+          full speed, and above the score it would push the bar under the finger down. */}
+      {askToFinish && practice.activeLoop && (
+        <FinishPrompt
+          songId={song.id}
+          loop={practice.activeLoop}
+          onDecline={() => {
+            setDeclinedFinish(finishQuestionKey(loop));
+            focusWhenReady(findPracticePlay);
+          }}
+          // The prompt goes once the loop is finished: focus goes on to Play.
+          onFinished={() => focusWhenReady(findPracticePlay)}
+        />
+      )}
       <PlayerControls
         player={player}
         snapshot={snapshot}

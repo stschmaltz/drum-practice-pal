@@ -338,7 +338,7 @@ describe('useOutboxReplay', () => {
 });
 
 describe('loop edits, round trips and lost answers', () => {
-  const loop = loopRow('a', { speed_ratio: 1, target_ratio: 0.855556 });
+  const loop = loopRow('a', { speed_ratio: 1, name: 'Verse' });
 
   it('a speed typed as a BPM is kept on the device and sent at its exact ratio, after a reload too', async () => {
     answerWith(loop);
@@ -388,7 +388,7 @@ describe('loop edits, round trips and lost answers', () => {
     expect(loopUpdates()).toEqual([{ speed_ratio: 0.8 }, { speed_ratio: 0.8 }]);
     expect(
       queryClient.getQueryData<Loop[]>(loopKeys.forSong(USER, LOOP_SONG_ID))?.[0],
-    ).toMatchObject({ speed_ratio: 0.8, target_ratio: 0.855556 });
+    ).toMatchObject({ speed_ratio: 0.8, name: 'Verse' });
     await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
   });
 });

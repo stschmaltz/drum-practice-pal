@@ -36,7 +36,7 @@ import {
 } from './loopFocus';
 import {
   barsLabel,
-  hasReachedTarget,
+  shouldAskToFinish,
   loopsByStatus,
   loopsInPanelOrder,
   type Loop,
@@ -48,9 +48,10 @@ import { speedLabel } from './loopLabels';
 import { editorOnPanel } from './loopPanelContent';
 import { LoopSpeedControl } from './LoopSpeedControl';
 import { LoopStatusButton } from './LoopStatusButton';
-import { loopPanelIsSheet, playLoopClosesPanel } from './useLoopPanelOpen';
+import { playLoopClosesPanel } from './useLoopPanelOpen';
 import type { useLoops } from './useLoops';
 import type { LoopPractice } from './useLoopPractice';
+import { useSpeedMovedSinceChosen } from './useSpeedMovedSinceChosen';
 
 interface LoopPanelProps {
   songId: string;
@@ -102,7 +103,7 @@ export function LoopPanel({
   const playLoop = (loop: Loop) => {
     // The sheet lies over the score and the count-in number; the press that starts
     // a loop gives them back. Its header goes on naming the loop.
-    if (playLoopClosesPanel(loopPanelIsSheet(), snapshot.status)) onOpenChange(false);
+    if (playLoopClosesPanel(snapshot.status)) onOpenChange(false);
     practice.playLoop(loop);
   };
 
@@ -110,17 +111,16 @@ export function LoopPanel({
     <aside
       aria-label="Loops"
       data-testid="loop-panel"
-      // Phone: fixed just above the tab bar (3.5rem plus its border). Tablet in
-      // portrait (md): no tab bar, so on the safe area, and as wide as the content
-      // column to the right of the sidebar (the page's gutter each side), not under
-      // it. From lg: a column beside the score that stays put while the page scrolls.
-      className={`fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 rounded-t-card border-t border-line bg-surface shadow-sheet md:right-gutter md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+var(--spacing-gutter))] md:border-x lg:sticky lg:inset-x-auto lg:top-20 lg:bottom-auto lg:z-auto lg:max-h-[calc(100dvh-6rem)] lg:w-80 lg:shrink-0 lg:self-start lg:overflow-y-auto lg:rounded-card lg:border lg:shadow-card ${
-        open ? '' : 'lg:hidden'
-      }`}
+      // A sheet over the score at every size, so the score always has the whole
+      // width. Phone: fixed just above the tab bar (3.5rem plus its border). From md:
+      // no tab bar, so on the safe area, and as wide as the content column to the
+      // right of the sidebar (the page's gutter each side), not under it. From lg:
+      // the bottom-right corner only, so most of the score stays readable beside it.
+      className="fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 rounded-t-card border-t border-line bg-surface shadow-sheet md:right-gutter md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+var(--spacing-gutter))] md:border-x lg:left-auto lg:w-[26rem]"
     >
       <button
         type="button"
-        className={`flex min-h-touch w-full items-center justify-between gap-3 rounded-t-card px-4 text-left font-semibold lg:hidden ${focusRing} focus-visible:-outline-offset-2`}
+        className={`flex min-h-touch w-full items-center justify-between gap-3 rounded-t-card px-4 text-left font-semibold ${focusRing} focus-visible:-outline-offset-2`}
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => onOpenChange(!open)}
@@ -143,8 +143,8 @@ export function LoopPanel({
         id={bodyId}
         hidden={!open}
         // The sheet stops well short of the top so the score stays in reach above it;
-        // on a tall tablet less of the window, so a few lines of the score stay readable.
-        className="max-h-[45dvh] overflow-y-auto p-4 pt-1 md:max-h-[min(40dvh,30rem)] lg:max-h-none lg:overflow-visible lg:pt-4"
+        // on a tall tablet or a laptop less of the window, so the score stays readable.
+        className="max-h-[45dvh] overflow-y-auto p-4 pt-1 md:max-h-[min(40dvh,30rem)]"
       >
         <LoopPanelBody
           songId={songId}
@@ -174,7 +174,7 @@ type LoopListProps = LoopPanelBodyProps & {
   onStatusSet: (loop: Loop, status: LoopStatus) => void;
   /** "Delete loop" was pressed: the item leaves once the server confirms, taking focus with it. */
   onDeletePressed: (loop: Loop) => void;
-  /** The playing loop's saved speed has reached its target and the user hasn't said "Not yet". */
+  /** The playing loop's saved speed has reached full speed and the user hasn't said "Not yet". */
   askToFinish: boolean;
   onDeclineFinish: () => void;
 };
@@ -192,6 +192,7 @@ function LoopPanelBody({
   // "Not yet" to "Mark finished?", for the loop at the speed it was asked about:
   // saving a faster speed asks again. Here, not in the card, which the form replaces.
   const [declinedFinish, setDeclinedFinish] = useState<string | null>(null);
+  const speedMoved = useSpeedMovedSinceChosen(activeLoop);
   // The form replaces the list, and with it the button that opened it; focus goes back there.
   const focusWhenReady = useFocusWhenReady();
   const formOpener = useRef<LoopFormOpener | null>(null);
@@ -233,7 +234,7 @@ function LoopPanelBody({
     }
     return (
       <LoopEditorForm
-        // A different loop is a different form: its typed name and target start over.
+        // A different loop is a different form: its typed name starts over.
         key={editor.loopId ?? 'new'}
         songId={songId}
         barCount={barCount}
@@ -288,7 +289,7 @@ function LoopPanelBody({
         onDeletePressed={followDelete}
         askToFinish={
           activeLoop !== null &&
-          hasReachedTarget(activeLoop) &&
+          shouldAskToFinish(activeLoop, speedMoved) &&
           declinedFinish !== finishQuestionKey(activeLoop)
         }
         onDeclineFinish={() => {
@@ -504,7 +505,6 @@ function LoopListItem({
         </p>
         <p className="text-sm text-ink-muted">
           {barsLabel(loop.start_bar, loop.end_bar)} · {speedLabel(loop.speed_ratio, tempo)}
-          {loop.target_ratio !== null && ` · target ${speedLabel(loop.target_ratio, tempo)}`}
         </p>
         <p className="text-sm text-ink-muted" data-testid="loop-last-practiced">
           {lastPracticedLabel(loop.last_practiced_at, new Date())}
@@ -512,7 +512,7 @@ function LoopListItem({
       </div>
       {active && (
         <section aria-label={`Practising ${loop.name}`} className="flex flex-col gap-3">
-          <LoopSpeedControl songId={songId} loop={loop} player={player} snapshot={snapshot} />
+          <LoopSpeedControl loop={loop} player={player} snapshot={snapshot} />
           {active.askToFinish && (
             <FinishPrompt
               songId={songId}

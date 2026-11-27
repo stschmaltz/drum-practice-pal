@@ -17,7 +17,6 @@ import {
   nudge,
   overviewItem,
   playFor,
-  practiceSaveSpeed,
   practiceSpeed,
   sessionComplete,
   sessionCount,
@@ -25,14 +24,14 @@ import {
   shortSessions,
 } from './practicePage';
 
-// Unit 13, redrawn for Unit 14's three levels: the whole first run, at each of
+// Unit 13, redrawn for Unit 16's three levels: the whole first run, at each of
 // the three sizes, through the UI a new user meets. Sign in with the emailed
 // code, upload, jam the whole song, make a loop from the song's overview,
-// practise it on its practice screen, see Session complete, reach the target,
+// practise it on its practice screen, see Session complete, reach full speed,
 // finish it, and Done is back on the song. Each step's own spec covers its
 // edges; this one proves they join up.
 
-test('first run: sign in, upload, jam, make a loop, practise, hit the target, finish', async ({
+test('first run: sign in, upload, jam, make a loop, practise, hit full speed, finish', async ({
   page,
   user,
 }) => {
@@ -82,17 +81,16 @@ test('first run: sign in, upload, jam, make a loop, practise, hit the target, fi
   await backTo(page, 'Groove 120').click();
   await page.getByRole('link', { name: 'New loop' }).click();
   await expect(loopForm(page)).toBeVisible({ timeout: 20_000 });
-  await fillLoopForm(page, { name: 'Groove', firstBar: 5, lastBar: 6, target: 90 });
+  await fillLoopForm(page, { name: 'Groove', firstBar: 5, lastBar: 6 });
   await expect(page).toHaveURL(/\/songs\/[^/]+\/loops\/[^/]+$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Groove' })).toBeVisible();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(practiceSpeed(page)).toHaveText('100%');
 
-  // Practise it at 80%: four nudges down, saved, then play.
+  // Practise it at 80%: four nudges down, each saved as it is made, then play.
   for (let i = 0; i < 4; i++) await nudge(page, 'Slower').click();
   await expect(practiceSpeed(page)).toHaveText('80%');
-  await practiceSaveSpeed(page).click();
-  await expect(practiceSaveSpeed(page)).toBeDisabled();
+  await expect.poll(async () => (await loopsOf(user))[0]?.speed_ratio).toBe(0.8);
   await playButton(page).click();
   await playFor(page, 3_000);
 
@@ -104,12 +102,11 @@ test('first run: sign in, upload, jam, make a loop, practise, hit the target, fi
   await sessionCount(user).toBe(1);
   expect((await sessionsOf(user))[0]?.speed_ratio).toBe(0.8);
 
-  // Hit the target: the loop asks, and is finished only when told.
-  await nudge(page, 'Faster').click();
-  await nudge(page, 'Faster').click();
-  await practiceSaveSpeed(page).click();
+  // Hit full speed: the loop asks, and is finished only when told.
+  for (let i = 0; i < 4; i++) await nudge(page, 'Faster').click();
+  await expect(practiceSpeed(page)).toHaveText('100%');
   const prompt = page.getByTestId('finish-prompt');
-  await expect(prompt).toContainText("You've reached your target of 90%");
+  await expect(prompt).toContainText("You're playing it at full speed");
   expect((await loopsOf(user))[0]?.status).toBe('active');
   await prompt.getByRole('button', { name: 'Mark finished' }).click();
   await expect.poll(async () => (await loopsOf(user))[0]?.status).toBe('finished');
@@ -118,7 +115,7 @@ test('first run: sign in, upload, jam, make a loop, practise, hit the target, fi
   await summary.getByRole('button', { name: 'Done' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Groove 120' })).toBeVisible();
   await expect(page.getByTestId('song-facts')).toContainText('1 of 1 mastered');
-  await expect(overviewItem(page, 'mastered', 'Groove')).toContainText('Bars 5 to 6 · 90%');
+  await expect(overviewItem(page, 'mastered', 'Groove')).toContainText('Bars 5 to 6 · 100%');
   expect(await sessionsOf(user)).toHaveLength(1);
 
   // And the songs list has the streak, and the song mastered.

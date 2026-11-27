@@ -1,5 +1,5 @@
 /**
- * The heatmap's fill for a day by its heat level (14 QA issue 6): a quiet
+ * The heatmap's fill for a day by its heat level (16 QA issue 6): a quiet
  * `raised` cell for none, then four steps of the brand, each at least 3:1
  * against the page and against an empty cell, so a practised day never reads
  * as an empty one. No imports, so tests/unit/designTokens.test.ts can check

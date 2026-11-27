@@ -7,19 +7,26 @@ import { resetFakeSupabase } from '@/test/fakeSupabase';
 import { startOfBar } from '@/test/fakePlayerEngine';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
-import { testQueryClient, wrapperFor } from '@/test/render';
+import { settle, testQueryClient, wrapperFor } from '@/test/render';
 import type { Loop } from './loopForm';
+import { loopKeys } from './loopKeys';
 import { LoopSpeedControl } from './LoopSpeedControl';
 import { useLoops } from './useLoops';
+import { useSaveLoopSpeed } from './useSaveLoopSpeed';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
-/** The control for the saved loop `loopId`, read through the loops cache like the panel does. */
+/**
+ * The control for the saved loop `loopId`, read through the loops cache like
+ * the panel does, with that loop active and its speed saved as it changes,
+ * as on the song page.
+ */
 function Control({ player, loopId }: { player: PlayerService; loopId: string }) {
   const snapshot = usePlayerSnapshot(player);
   const loop = useLoops(LOOP_SONG_ID).data?.find((row) => row.id === loopId);
+  useSaveLoopSpeed(LOOP_SONG_ID, loop ?? null, snapshot.speedRatio);
   if (!loop) return <p>Loading loops…</p>;
-  return <LoopSpeedControl songId={LOOP_SONG_ID} loop={loop} player={player} snapshot={snapshot} />;
+  return <LoopSpeedControl loop={loop} player={player} snapshot={snapshot} />;
 }
 
 /**
@@ -30,18 +37,20 @@ async function renderControl(loop: Loop) {
   const table = serveLoopTable([loop]);
   const { engine, player } = loopPlayer();
   player.setSpeed(loop.speed_ratio);
-  render(<Control player={player} loopId={loop.id} />, { wrapper: wrapperFor(testQueryClient()) });
+  const queryClient = testQueryClient();
+  render(<Control player={player} loopId={loop.id} />, { wrapper: wrapperFor(queryClient) });
   const group = within(await screen.findByRole('group', { name: 'Loop speed' }));
   return {
     user: userEvent.setup(),
     table,
     engine,
     player,
+    queryClient,
     percent: () => group.getByLabelText('Speed %'),
     bpm: () => group.getByLabelText('BPM'),
     nudge: (name: string) => group.getByRole('button', { name }),
-    save: () => group.getByRole('button', { name: 'Save speed' }),
-    saved: () => screen.getByTestId('loop-saved-speed'),
+    /** The loop's speed as the table holds it now. */
+    stored: () => table.rows()[0]?.speed_ratio,
   };
 }
 
@@ -58,16 +67,15 @@ beforeEach(() => {
 
 describe('LoopSpeedControl readout', () => {
   it.each([
-    ['before the tempo change', before, '80', '96', 'Saved: 80% (96 BPM)'],
-    ['after the tempo change', after, '100', '90', 'Saved: 100% (90 BPM)'],
-    ['across the tempo change', across, '50', '60', 'Saved: 50% (60 BPM)'],
+    ['before the tempo change', before, '80', '96'],
+    ['after the tempo change', after, '100', '90'],
+    ['across the tempo change', across, '50', '60'],
   ])(
     'a loop %s shows its speed as % and as BPM at its first bar',
-    async (_where, loop, percent, bpm, savedLabel) => {
+    async (_where, loop, percent, bpm) => {
       const view = await renderControl(loop);
       expect(view.percent()).toHaveValue(percent);
       expect(view.bpm()).toHaveValue(bpm);
-      expect(view.saved()).toHaveTextContent(savedLabel);
     },
   );
 
@@ -89,7 +97,6 @@ describe('LoopSpeedControl readout', () => {
     serveLoopTable([before]);
     render(
       <LoopSpeedControl
-        songId={LOOP_SONG_ID}
         loop={before}
         player={null}
         snapshot={initialPlayerSnapshot(0, DEFAULT_PLAYER_OPTIONS)}
@@ -102,8 +109,6 @@ describe('LoopSpeedControl readout', () => {
     for (const button of screen.getAllByRole('button', { name: /^(Slower|Faster) by/ })) {
       expect(button).toBeDisabled();
     }
-    // The percent alone, until a tempo is known.
-    expect(screen.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 80%');
   });
 
   // Unit 13 Test (05 QA issue 3): after a player failure the speed is off here as in the controls bar.
@@ -231,8 +236,7 @@ describe('LoopSpeedControl typing a speed', () => {
     await view.user.clear(view.bpm());
     await view.user.type(view.bpm(), '100{Enter}');
     await view.user.click(view.nudge('Faster by 5%'));
-    await view.user.click(view.save());
-    await waitFor(() => expect(view.table.sent('update')).toHaveLength(1));
+    await waitFor(() => expect(view.table.sent('update')).toHaveLength(2));
 
     expect(view.engine.restartCalls()).toBe(restarts);
     expect(view.player.getSnapshot().status).toBe('playing');
@@ -279,77 +283,75 @@ describe('LoopSpeedControl nudges', () => {
   });
 });
 
-describe('LoopSpeedControl Save speed', () => {
-  it('is offered only while the speed playing differs from the saved one', async () => {
+describe('LoopSpeedControl saving', () => {
+  it('has no "Save speed": each change of speed is saved as it is made, and only that column', async () => {
     const view = await renderControl(before);
-    expect(view.save()).toBeDisabled();
-
-    await view.user.click(view.nudge('Faster by 5%'));
-    expect(view.save()).toBeEnabled();
-    // Until it is saved the loop keeps its old speed.
-    expect(view.saved()).toHaveTextContent('Saved: 80% (96 BPM)');
+    expect(screen.queryByRole('button', { name: 'Save speed' })).not.toBeInTheDocument();
+    await settle();
+    // Opening at the saved speed sends nothing.
     expect(view.table.sent('update')).toEqual([]);
 
-    await view.user.click(view.nudge('Slower by 5%'));
-    expect(view.save()).toBeDisabled();
-  });
-
-  it('writes the speed playing now, and only that column', async () => {
-    const view = await renderControl(before);
+    await view.user.click(view.nudge('Faster by 5%'));
     await view.user.clear(view.bpm());
     await view.user.type(view.bpm(), '85{Enter}');
-    await view.user.click(view.save());
 
-    await waitFor(() => expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.708333 }]));
-    await waitFor(() => expect(view.saved()).toHaveTextContent('Saved: 71% (85 BPM)'));
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.85 }, { speed_ratio: 0.708333 }]),
+    );
     expect(view.table.rows()[0]).toMatchObject({ speed_ratio: 0.708333, name: before.name });
-    expect(view.save()).toBeDisabled();
   });
 
-  it('cannot be pressed twice while a save is on its way', async () => {
+  it('a value typed and put back with Escape saves nothing', async () => {
+    const view = await renderControl(before);
+    await view.user.clear(view.percent());
+    await view.user.type(view.percent(), '150{Escape}');
+    await view.user.tab();
+    await settle();
+    expect(view.table.sent('update')).toEqual([]);
+  });
+
+  it('changes made while a save is on its way go after it, in order, the last one kept', async () => {
     const view = await renderControl(before);
     const release = view.table.holdNext('update');
     await view.user.click(view.nudge('Faster by 5%'));
-    await view.user.click(view.save());
-
-    await waitFor(() => expect(view.saved()).toHaveTextContent('Saved: 85% (102 BPM)'));
-    expect(view.save()).toBeDisabled();
-    // A different speed meanwhile still can't start a second save alongside the first.
     await view.user.click(view.nudge('Faster by 1%'));
-    expect(view.save()).toBeDisabled();
+    await settle();
+    expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.85 }]);
 
     release();
-    await waitFor(() => expect(view.save()).toBeEnabled());
-    expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.85 }]);
+    await waitFor(() =>
+      expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.85 }, { speed_ratio: 0.86 }]),
+    );
+    await waitFor(() => expect(view.stored()).toBe(0.86));
+    expect(view.percent()).toHaveValue('86');
   });
 
-  it('a failed save says so, keeps the old saved speed and the speed playing, and can be retried', async () => {
+  it('a failed save says so and keeps the speed playing; the next change saves again and clears it', async () => {
     const view = await renderControl(before);
     view.table.failNext('update', 'permission denied');
     await view.user.click(view.nudge('Faster by 5%'));
-    await view.user.click(view.save());
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       "Couldn't save the speed. Something went wrong. Try again.",
     );
-    await waitFor(() => expect(view.saved()).toHaveTextContent('Saved: 80% (96 BPM)'));
+    expect(view.stored()).toBe(0.8);
     expect(view.percent()).toHaveValue('85');
-    expect(view.save()).toBeEnabled();
-
-    await view.user.click(view.save());
-    await waitFor(() => expect(view.table.rows()[0]?.speed_ratio).toBe(0.85));
-    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
-    expect(view.saved()).toHaveTextContent('Saved: 85% (102 BPM)');
-  });
-
-  it('a new speed clears the message about the failed one', async () => {
-    const view = await renderControl(before);
-    view.table.failNext('update', 'offline');
-    await view.user.click(view.nudge('Faster by 5%'));
-    await view.user.click(view.save());
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
 
     await view.user.click(view.nudge('Faster by 1%'));
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await waitFor(() => expect(view.stored()).toBe(0.86));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  });
+
+  it('a speed saved on another device is shown, not written back over with the one playing', async () => {
+    const view = await renderControl(before);
+    await view.user.click(view.nudge('Faster by 5%'));
+    await waitFor(() => expect(view.stored()).toBe(0.85));
+
+    view.table.setRows([{ ...before, speed_ratio: 0.6 }]);
+    await act(() =>
+      view.queryClient.invalidateQueries({ queryKey: loopKeys.forSong('user-1', LOOP_SONG_ID) }),
+    );
+    await settle();
+    expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.85 }]);
   });
 });

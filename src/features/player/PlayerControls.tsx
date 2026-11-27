@@ -19,7 +19,15 @@ import {
   type CountInMode,
 } from '@/lib/schema';
 import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_SHORT_LABELS } from './countInLabels';
-import { canChangeOptions, canPlay, canUseDrumToggles, type PlayGate } from './controlGates';
+import {
+  canChangeMetronomeVoice,
+  canChangeOptions,
+  canPlay,
+  canUseDrumToggles,
+  type PlayGate,
+} from './controlGates';
+import { MetronomeVoiceFields } from './MetronomeVoiceFields';
+import { metronomeVoiceSummary } from './metronomeSounds';
 import { isRunning, type PlayerService, type PlayerSnapshot } from './PlayerService';
 import { percentToRatio, ratioToPercent, SPEED_STEP_PERCENT } from './speed';
 
@@ -49,9 +57,9 @@ interface PlayerControlsProps extends PlayerViewProps {
   /** Absent: never folds (every screen but the song page). */
   fold?: ControlsFold;
   /**
-   * A loop is playing, and its own speed control (with "Save speed") is the
-   * one to use: the slider gives way to a button that shows it. Two speed
-   * controls that look alike, of which only one saves, read as one that saves.
+   * A loop is playing, and its own speed control (% and BPM, nudges) is the
+   * one to use: the slider gives way to a button that shows it, so there is
+   * one speed control on screen, not two that look alike.
    */
   onShowLoopSpeed?: (() => void) | null;
   /** False where the screen has a speed control of its own (the practice screen's). */
@@ -228,6 +236,8 @@ export function PlayerControls({
           onModeChange={(mode) => player?.setCountInMode(mode)}
         />
       )}
+
+      {!folded && <MetronomeVoiceControls player={player} snapshot={snapshot} />}
 
       {fold?.canFold && <FoldToggle folded={folded} onFoldedChange={fold.onFoldedChange} />}
     </section>
@@ -423,6 +433,45 @@ function CountInControls({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * The metronome's sounds for this song. Unlike the bar's other options they
+ * wait for playback to stop: applying one rebuilds the song's MIDI.
+ */
+function MetronomeVoiceControls({ player, snapshot }: PlayerViewProps) {
+  const noteId = useId();
+  const waitsForPause = canChangeOptions(player, snapshot) && isRunning(snapshot.status);
+  const voice = snapshot.metronomeVoice;
+  return (
+    // Closed by default: chosen once in a while, and open it would push the score
+    // a screen down on a phone. Native details, so it needs no state or keys.
+    <details className="group text-sm lg:basis-full">
+      <summary
+        className={`${ghostButtonClass} w-fit cursor-pointer list-none [&::-webkit-details-marker]:hidden`}
+      >
+        <Icon name="metronome" />
+        Metronome sounds
+        <span className="text-ink-muted">{metronomeVoiceSummary(voice)}</span>
+        <Icon name="chevronDown" className="size-4 group-open:rotate-180" />
+      </summary>
+      <div className="flex flex-col gap-1 pt-2">
+        <MetronomeVoiceFields
+          voice={voice}
+          soundLabel="Metronome sound"
+          disabled={!canChangeMetronomeVoice(player, snapshot)}
+          describedBy={waitsForPause ? noteId : undefined}
+          onChange={(next) => player?.setMetronomeVoice(next)}
+        />
+        {/* Off controls say why they are off. */}
+        {waitsForPause && (
+          <p id={noteId} className="text-ink-muted">
+            Pause to change the metronome's sounds.
+          </p>
+        )}
+      </div>
+    </details>
   );
 }
 

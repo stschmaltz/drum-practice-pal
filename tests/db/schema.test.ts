@@ -31,6 +31,10 @@ describe('signup', () => {
       metronome_on: true,
       count_in_bars: 0,
       count_in_mode: 'start',
+      metronome_sound: 'click',
+      metronome_accent: true,
+      metronome_accent_sound: 'click',
+      metronome_subdivision: 1,
       drums_muted_default: false,
     });
   });
@@ -114,8 +118,6 @@ describe('loops constraints', () => {
   it.each([
     ['speed_ratio', 0.24],
     ['speed_ratio', 2.01],
-    ['target_ratio', 0.2],
-    ['target_ratio', 2.5],
     ['name', ''],
   ])('rejects %s = %j', async (field, value) => {
     await expect(insertLoop(user, songId, { [field]: value })).rejects.toMatchObject({

@@ -46,7 +46,7 @@ import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import { BackLink, SongGate } from './SongGate';
 
 /**
- * /songs/:id, a song's overview (Unit 14): how much of it is mastered, and its
+ * /songs/:id, a song's overview (Unit 16): how much of it is mastered, and its
  * loops, the ones on the go first (last practised first), then the mastered
  * ones. Each loop opens its practice screen; "New loop" and "Play whole song"
  * open the player. This screen loads no player and no file, so a loop's speed

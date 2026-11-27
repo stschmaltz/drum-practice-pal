@@ -1,6 +1,6 @@
 /**
  * The Stats page's charts: SVG drawn by the app on the design tokens, no
- * chart library (Unit 14). The geometry is chartScale.ts and the data
+ * chart library (Unit 16). The geometry is chartScale.ts and the data
  * totals.ts, both pure; these only draw. Each chart is an `img` named by a
  * one-line summary, with the numbers it draws in a visually hidden table, so
  * a screen reader gets the data rather than a picture of it.

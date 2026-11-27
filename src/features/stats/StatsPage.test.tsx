@@ -108,7 +108,7 @@ describe('StatsPage', () => {
     ).toBeInTheDocument();
   });
 
-  // 14 QA issue 6: practised days on the brand, empty ones a quiet cell, and today ringed.
+  // 16 QA issue 6: practised days on the brand, empty ones a quiet cell, and today ringed.
   it('marks today on the heatmap whether or not it was practised, and fills practised days', async () => {
     serve({ sessions: sessions.filter((each) => each.id !== 's1'), loops });
     renderStats();
@@ -137,7 +137,7 @@ describe('StatsPage', () => {
     expect(byLabel('7-day streak')).toHaveTextContent('2 of 7 days in a row');
   });
 
-  // 14 QA issue 5: a new user's Stats was a page of zeros and empty charts.
+  // 16 QA issue 5: a new user's Stats was a page of zeros and empty charts.
   describe('with no practice yet', () => {
     it('says so, with a way to Songs, in place of zeros and empty charts', async () => {
       serve({ sessions: [], loops: [] });

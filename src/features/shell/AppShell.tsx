@@ -6,6 +6,7 @@ import { SignOutButton } from '@/features/auth/SignOutButton';
 import { OfflineBanner } from '@/features/offline/OfflineBanner';
 import { useOutboxReplay } from '@/features/offline/useOutboxReplay';
 import { useSignedInUser } from '@/lib/auth';
+import { showsScore } from '@/lib/routes';
 import { isNavItemActive, NAV_ITEMS } from './navItems';
 
 // Bottom tabs below 768 px (md), a sidebar from there up: the same split the
@@ -14,6 +15,9 @@ export function AppShell() {
   const user = useSignedInUser();
   // Writes an earlier page queued and never heard back about go once the user is known.
   useOutboxReplay();
+  // The score is the app's most important spot: a screen that draws it takes the
+  // whole width beside the sidebar. Other pages keep a readable line length.
+  const fullWidth = showsScore(useLocation().pathname);
 
   return (
     <div className="min-h-dvh md:flex">
@@ -41,7 +45,11 @@ export function AppShell() {
 
       {/* Bottom padding keeps content clear of the fixed tab bar and the iOS home indicator.
           min-w-0 lets main shrink below a wide child (alphaTab's rendered score) when the window narrows. */}
-      <main className="mx-auto w-full min-w-0 max-w-5xl p-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:p-gutter">
+      <main
+        className={`mx-auto w-full min-w-0 p-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:p-gutter ${
+          fullWidth ? '' : 'max-w-5xl'
+        }`}
+      >
         <OfflineBanner />
         <Outlet />
       </main>

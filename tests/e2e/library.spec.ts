@@ -33,7 +33,7 @@ test('uploads a Guitar Pro file with its metadata, and warns on a duplicate', as
   await expect(page.getByRole('status').filter({ hasText: 'Added “Tempo Change”.' })).toBeVisible();
   const list = page.getByRole('list');
   await expect(list.getByRole('link', { name: 'Tempo Change' })).toBeVisible();
-  // One line under the name on the list (Unit 14); the file's facts are on the song's overview.
+  // One line under the name on the list (Unit 16); the file's facts are on the song's overview.
   await expect(list.getByTestId('song-line')).toHaveText('Fixture · No loops yet');
 
   const [row] = await songRows(user);

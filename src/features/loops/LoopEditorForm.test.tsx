@@ -90,7 +90,6 @@ async function renderForm({ loops, editing, initialEditor, speedRatio }: FormOpt
     firstBar: () => form.getByLabelText('First bar'),
     lastBar: () => form.getByLabelText('Last bar'),
     name: () => form.getByLabelText('Name'),
-    target: () => form.getByLabelText(/Target speed/),
     save: () => form.getByRole('button', { name: /^(Save loop|Saving…)$/ }),
     cancel: () => form.getByRole('button', { name: 'Cancel' }),
     hint: () => screen.getByTestId('loop-bars-hint'),
@@ -115,7 +114,6 @@ const chorus = loopRow('chorus', {
   start_bar: 5,
   end_bar: 8,
   speed_ratio: 0.708333,
-  target_ratio: 1,
 });
 
 beforeEach(() => {
@@ -135,7 +133,6 @@ describe('LoopEditorForm for a new loop', () => {
     expect(view.firstBar()).toHaveValue('');
     expect(view.lastBar()).toHaveValue('');
     expect(view.name()).toHaveValue('');
-    expect(view.target()).toHaveValue('');
     expect(view.hint()).toHaveTextContent('Tap the first bar on the score, then the last.');
     expect(view.hint()).not.toHaveTextContent('drag');
   });
@@ -173,22 +170,9 @@ describe('LoopEditorForm for a new loop', () => {
     expect(note()).toHaveTextContent('50% (45 BPM)');
   });
 
-  it('shows the BPM a typed target gives at the loop’s first bar', async () => {
-    const view = await renderForm();
-    await fill(view, { first: '9', last: '12' });
-    await view.user.type(view.target(), '120');
-    expect(view.form.getByText('120% (108 BPM)')).toBeInTheDocument();
-    // Read out with the field, not only drawn beside it (Unit 13).
-    expect(view.target()).toHaveAccessibleDescription('120% (108 BPM)');
-    // Not a whole percent: no BPM is made up for it.
-    await view.user.type(view.target(), '.5');
-    expect(view.form.queryByText(/BPM\)$/, { selector: 'span' })).not.toBeInTheDocument();
-  });
-
-  it('saves the name, bars and target with the speed playing now, under an id of its own', async () => {
+  it('saves the name and bars with the speed playing now, under an id of its own', async () => {
     const view = await renderForm({ speedRatio: 0.708333 });
     await fill(view, { first: '9', last: '12', name: '  Second half  ' });
-    await view.user.type(view.target(), '95');
     await view.user.click(view.save());
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
@@ -204,7 +188,6 @@ describe('LoopEditorForm for a new loop', () => {
       end_bar: 12,
       // The exact ratio playing, not 71%.
       speed_ratio: 0.708333,
-      target_ratio: 0.95,
     });
     // The saved row, as the server returned it.
     expect(onSaved.mock.calls[0]?.[0]).toEqual(view.table.rows()[0]);
@@ -231,7 +214,6 @@ describe('LoopEditorForm for a new loop', () => {
     expect(view.table.sent('insert')[0]).toMatchObject({
       start_bar: Number(first),
       end_bar: Number(last),
-      target_ratio: null,
     });
   });
 
@@ -281,35 +263,6 @@ describe('LoopEditorForm for a new loop', () => {
     expect(view.name()).toBeInvalid();
     expect(view.name()).toHaveAccessibleDescription(message);
     expect(view.table.sent('insert')).toEqual([]);
-  });
-
-  it.each(['24', '201', 'fast', '90.5'])('refuses the target %j', async (target) => {
-    const view = await renderForm();
-    await fill(view, { first: '1', last: '4', name: 'Loop' });
-    await view.user.type(view.target(), target);
-    await view.user.click(view.save());
-
-    expect(
-      view.form.getByText('Enter a target from 25 to 200%, or leave it empty.'),
-    ).toBeInTheDocument();
-    expect(view.target()).toBeInvalid();
-    expect(view.target()).toHaveAccessibleDescription(
-      /Enter a target from 25 to 200%, or leave it empty\./,
-    );
-    expect(view.table.sent('insert')).toEqual([]);
-  });
-
-  it.each([
-    ['25', 0.25],
-    ['200', 2],
-    ['90%', 0.9],
-  ])('accepts the target %j', async (target, ratio) => {
-    const view = await renderForm();
-    await fill(view, { first: '1', last: '4', name: 'Loop' });
-    await view.user.type(view.target(), target);
-    await view.user.click(view.save());
-    await waitFor(() => expect(view.table.sent('insert')).toHaveLength(1));
-    expect(view.table.sent('insert')[0]).toMatchObject({ target_ratio: ratio });
   });
 
   it('takes its messages away as soon as the form is edited', async () => {
@@ -435,14 +388,13 @@ describe('LoopEditorForm for a new loop', () => {
 });
 
 describe('LoopEditorForm editing a loop', () => {
-  it('opens on the saved name, bars and target, and has no speed to save', async () => {
+  it('opens on the saved name and bars, and has no speed or target to set', async () => {
     const view = await renderForm({ editing: chorus });
     expect(screen.getByRole('form', { name: 'Edit Chorus fill' })).toBeInTheDocument();
     expect(view.name()).toHaveValue('Chorus fill');
     expect(view.firstBar()).toHaveValue('5');
     expect(view.lastBar()).toHaveValue('8');
-    expect(view.target()).toHaveValue('100');
-    expect(view.form.getByText('100% (120 BPM)')).toBeInTheDocument();
+    expect(view.form.queryByLabelText(/Target/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('loop-new-speed')).not.toBeInTheDocument();
   });
 
@@ -457,15 +409,12 @@ describe('LoopEditorForm editing a loop', () => {
     ['the name', 'name', 'Last chorus', { name: 'Last chorus' }],
     ['the first bar', 'first', '3', { start_bar: 3 }],
     ['the last bar', 'last', '12', { end_bar: 12 }],
-    ['the target', 'target', '110', { target_ratio: 1.1 }],
-    ['the target, cleared', 'target', '', { target_ratio: null }],
   ] as const)('sends only %s when only that changed', async (_what, field, text, changes) => {
     const view = await renderForm({ editing: chorus });
     const input = {
       name: view.name(),
       first: view.firstBar(),
       last: view.lastBar(),
-      target: view.target(),
     }[field];
     await replace(view, input, text);
     await view.user.click(view.save());
@@ -473,38 +422,6 @@ describe('LoopEditorForm editing a loop', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(view.table.sent('update')).toEqual([changes]);
     expect(view.table.rows()[0]).toMatchObject({ ...changes, speed_ratio: 0.708333 });
-  });
-
-  it('leaves alone a target that is not a whole percent unless the target is changed', async () => {
-    // 85.5556% is shown as 86; saving the name must not turn it into 0.86.
-    const fine = { ...chorus, target_ratio: 0.855556 };
-    const view = await renderForm({ editing: fine });
-    expect(view.target()).toHaveValue('86');
-    await replace(view, view.name(), 'Renamed');
-    await replace(view, view.lastBar(), '7');
-    // Typed over with what it already showed: still not a change.
-    await replace(view, view.target(), '86');
-    await view.user.click(view.save());
-
-    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    expect(view.table.sent('update')).toEqual([{ name: 'Renamed', end_bar: 7 }]);
-    expect(view.table.rows()[0]).toMatchObject({ target_ratio: 0.855556 });
-  });
-
-  it('with only such a target on show and nothing changed, sends nothing', async () => {
-    const fine = { ...chorus, target_ratio: 0.855556 };
-    const view = await renderForm({ editing: fine });
-    await view.user.click(view.save());
-    expect(onSaved).toHaveBeenCalledWith(fine);
-    expect(view.table.sent('update')).toEqual([]);
-  });
-
-  it('a target changed to another percent is sent, whatever the saved one was', async () => {
-    const view = await renderForm({ editing: { ...chorus, target_ratio: 0.855556 } });
-    await replace(view, view.target(), '87');
-    await view.user.click(view.save());
-    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    expect(view.table.sent('update')).toEqual([{ target_ratio: 0.87 }]);
   });
 
   it('never writes the speed, even when another speed is playing', async () => {
@@ -527,7 +444,7 @@ describe('LoopEditorForm editing a loop', () => {
 
   it('shows a change made on another device in every field the user has not touched, and does not overwrite it', async () => {
     const view = await renderForm({ editing: chorus });
-    await replace(view, view.target(), '90');
+    await replace(view, view.firstBar(), '6');
 
     view.table.setRows([{ ...chorus, name: 'Renamed elsewhere', end_bar: 12 }]);
     await act(() =>
@@ -535,11 +452,11 @@ describe('LoopEditorForm editing a loop', () => {
     );
     await waitFor(() => expect(view.name()).toHaveValue('Renamed elsewhere'));
     expect(view.lastBar()).toHaveValue('12');
-    expect(view.target()).toHaveValue('90');
+    expect(view.firstBar()).toHaveValue('6');
 
     await view.user.click(view.save());
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    expect(view.table.sent('update')).toEqual([{ target_ratio: 0.9 }]);
+    expect(view.table.sent('update')).toEqual([{ start_bar: 6 }]);
     expect(view.table.rows()[0]).toMatchObject({ name: 'Renamed elsewhere', end_bar: 12 });
   });
 
@@ -547,12 +464,10 @@ describe('LoopEditorForm editing a loop', () => {
     const view = await renderForm({ editing: chorus });
     await replace(view, view.name(), '   ');
     await replace(view, view.lastBar(), '4');
-    await replace(view, view.target(), '500');
     await view.user.click(view.save());
 
     expect(view.form.getByText('Give the loop a name.')).toBeInTheDocument();
     expect(view.form.getByText("The last bar can't come before the first.")).toBeInTheDocument();
-    expect(view.form.getByText(/Enter a target from 25 to 200%/)).toBeInTheDocument();
     expect(view.table.sent('update')).toEqual([]);
     expect(onSaved).not.toHaveBeenCalled();
   });

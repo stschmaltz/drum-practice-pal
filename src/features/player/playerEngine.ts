@@ -8,6 +8,7 @@ import type { BarIndexRange } from './barHighlight';
 import type { BarTicks, TickRange } from './barTicks';
 import type { Meter } from './countIn';
 import type { LayoutChoice } from './layout';
+import type { MetronomeVoice } from './metronomeSounds';
 
 export type EngineEvents = {
   /** The score parsed. Fires once per load. */
@@ -54,8 +55,11 @@ export interface PlayerEngine {
   on<K extends keyof EngineEvents>(event: K, handler: (payload: EngineEvents[K]) => void): void;
   /** Renders only `trackIndexes`; every track still plays. False when the bytes were refused. */
   loadScore(bytes: Uint8Array, trackIndexes: number[]): boolean;
-  /** Rejects when the soundfont can't be fetched. */
-  loadSoundFont(url: string): Promise<void>;
+  /**
+   * Loads the soundfonts in order, each over the last, once all are fetched
+   * (so playback never starts on the first alone). Rejects when one can't be.
+   */
+  loadSoundFont(urls: readonly string[]): Promise<void>;
   setLayout(layout: LayoutChoice): void;
   /** Must start audio synchronously: on iOS this has to run inside the tap. */
   play(): void;
@@ -70,6 +74,13 @@ export interface PlayerEngine {
   seek(tick: number): void;
   setSpeed(ratio: number): void;
   setMetronomeVolume(volume: number): void;
+  /**
+   * What the metronome plays. Set before loadScore it applies to the first
+   * MIDI; a change after that rebuilds the MIDI, which stops playback (the
+   * position is kept), so the service only sends one while nothing runs.
+   * Sending the voice already set does nothing.
+   */
+  setMetronomeVoice(voice: MetronomeVoice): void;
   setTrackMuted(trackIndex: number, muted: boolean): void;
   setPlaybackRange(range: TickRange | null): void;
   setLooping(looping: boolean): void;

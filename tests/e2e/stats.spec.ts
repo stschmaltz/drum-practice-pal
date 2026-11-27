@@ -4,7 +4,7 @@ import { createAdminClient, findUserIdsByEmail } from '../../scripts/supabase-ad
 import { expect, signIn, test, type E2eUser } from './auth';
 import { loopsOf, navLink, sessionsOf } from './practicePage';
 
-// Unit 14: the Stats page's numbers are sums over the user's sessions in the
+// Unit 16: the Stats page's numbers are sums over the user's sessions in the
 // database, worked out on the device.
 
 const admin = createAdminClient();

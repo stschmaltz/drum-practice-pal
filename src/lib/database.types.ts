@@ -15,7 +15,6 @@ export type Database = {
           speed_ratio: number;
           start_bar: number;
           status: Database['public']['Enums']['loop_status'];
-          target_ratio: number | null;
           updated_at: string;
           user_id: string;
         };
@@ -31,7 +30,6 @@ export type Database = {
           speed_ratio?: number;
           start_bar: number;
           status?: Database['public']['Enums']['loop_status'];
-          target_ratio?: number | null;
           updated_at?: string;
           user_id?: string;
         };
@@ -46,7 +44,6 @@ export type Database = {
           speed_ratio?: number;
           start_bar?: number;
           status?: Database['public']['Enums']['loop_status'];
-          target_ratio?: number | null;
           updated_at?: string;
           user_id?: string;
         };
@@ -151,7 +148,11 @@ export type Database = {
           count_in_mode: Database['public']['Enums']['count_in_mode'];
           created_at: string;
           drums_muted_default: boolean;
+          metronome_accent: boolean;
+          metronome_accent_sound: Database['public']['Enums']['metronome_sound'];
           metronome_on: boolean;
+          metronome_sound: Database['public']['Enums']['metronome_sound'];
+          metronome_subdivision: number;
           metronome_volume: number;
           updated_at: string;
           user_id: string;
@@ -162,7 +163,11 @@ export type Database = {
           count_in_mode?: Database['public']['Enums']['count_in_mode'];
           created_at?: string;
           drums_muted_default?: boolean;
+          metronome_accent?: boolean;
+          metronome_accent_sound?: Database['public']['Enums']['metronome_sound'];
           metronome_on?: boolean;
+          metronome_sound?: Database['public']['Enums']['metronome_sound'];
+          metronome_subdivision?: number;
           metronome_volume?: number;
           updated_at?: string;
           user_id: string;
@@ -172,7 +177,11 @@ export type Database = {
           count_in_mode?: Database['public']['Enums']['count_in_mode'];
           created_at?: string;
           drums_muted_default?: boolean;
+          metronome_accent?: boolean;
+          metronome_accent_sound?: Database['public']['Enums']['metronome_sound'];
           metronome_on?: boolean;
+          metronome_sound?: Database['public']['Enums']['metronome_sound'];
+          metronome_subdivision?: number;
           metronome_volume?: number;
           updated_at?: string;
           user_id?: string;
@@ -189,6 +198,14 @@ export type Database = {
     Enums: {
       count_in_mode: 'start' | 'every_repeat';
       loop_status: 'active' | 'finished';
+      metronome_sound:
+        | 'click'
+        | 'side_stick'
+        | 'hi_hat'
+        | 'cowbell'
+        | 'claves'
+        | 'woodblock_high'
+        | 'woodblock_low';
     };
     CompositeTypes: {
       [_ in never]: never;
@@ -302,6 +319,15 @@ export const Constants = {
     Enums: {
       count_in_mode: ['start', 'every_repeat'],
       loop_status: ['active', 'finished'],
+      metronome_sound: [
+        'click',
+        'side_stick',
+        'hi_hat',
+        'cowbell',
+        'claves',
+        'woodblock_high',
+        'woodblock_low',
+      ],
     },
   },
 } as const;

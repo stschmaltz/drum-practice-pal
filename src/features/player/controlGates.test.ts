@@ -51,7 +51,7 @@ describe('canPlay', () => {
 
 describe('canPlayLoopPractice', () => {
   it.each<[PlayerStatus, boolean, boolean]>([
-    // 14 Test bug 1: the sounds are in before the loop is open; Play would play the whole song.
+    // 16 Test bug 1: the sounds are in before the loop is open; Play would play the whole song.
     ['ready', false, false],
     ['ready', true, true],
     ['loading', true, false],

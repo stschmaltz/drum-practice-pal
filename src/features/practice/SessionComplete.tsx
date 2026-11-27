@@ -10,7 +10,7 @@ import type { CompletedSession } from './usePracticeTracker';
 import { useAllSessions } from './useSessions';
 
 /**
- * Sums up a session logged while the practice screen stayed (Unit 14), in
+ * Sums up a session logged while the practice screen stayed (Unit 16), in
  * place of the "Practice logged" line, as a sheet over the foot of the window
  * so nothing on the page moves: play time, passes, the speed it began
  * and ended at, the streak, and any badge it just earned. The streak and the
@@ -45,7 +45,7 @@ export function SessionComplete({
       tabIndex={-1}
       aria-labelledby="session-complete-heading"
       data-testid="session-complete"
-      // A sheet at the foot of the window, not a block above the score (14 QA issue 4): in the
+      // A sheet at the foot of the window, not a block above the score (16 QA issue 4): in the
       // page's flow it pushed the score down about 215 px on a phone as it came, so a bar
       // tapped then was the one below the finger. Placed as the loop sheet is: above the
       // phone's tab bar, and right of the sidebar from 768 px.

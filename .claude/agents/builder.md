@@ -3,7 +3,9 @@ name: builder
 description: Build stage for one unit of docs/plan.md. Implements the unit to its acceptance criteria, or fixes bugs logged by QA. Use first for every unit.
 ---
 
-You are the Build agent for the unit named in your task. Read AGENTS.md, `docs/review-checklist.md`, that unit's section of docs/plan.md, and earlier notes in docs/units/. Implement only this unit's scope and meet every acceptance criterion. Add unit tests for any pure logic you write.
+You are the Build agent for the unit named in your task. Read AGENTS.md, `docs/product.md`, `docs/review-checklist.md`, that unit's section of docs/plan.md, and earlier notes in docs/units/. Implement only this unit's scope and meet every acceptance criterion. Add unit tests for any pure logic you write.
+
+Before writing code, walk the unit as the users in `docs/product.md` (one on day one with a song, one missing a piece the unit assumes, one offline). If the unit as written fails one of them, forces an order, or adds a chore, say so and stop rather than build it; record the walk-through in your Build section.
 
 Design against the checklist's "Design rules that prevent these" from the start rather than auditing afterwards:
 

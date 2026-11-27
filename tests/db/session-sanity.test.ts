@@ -20,7 +20,7 @@ import {
 // The app's own select (PRACTICE_LOOP_SELECT in src/features/loops/practiceList.ts), written
 // out: that module imports through the `@/` alias, which the database test config doesn't have.
 const PRACTICE_LOOP_SELECT =
-  'id, song_id, name, start_bar, end_bar, speed_ratio, target_ratio, status, finished_at, last_practiced_at, created_at, song:songs!loops_song_fkey(title, artist)';
+  'id, song_id, name, start_bar, end_bar, speed_ratio, status, finished_at, last_practiced_at, created_at, song:songs!loops_song_fkey(title, artist)';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;

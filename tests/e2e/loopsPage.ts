@@ -2,8 +2,8 @@
 /**
  * Locators and steps for the song page's loop panel (Unit 08), shared by
  * loops.spec.ts, loop-scroll.spec.ts and count-in.spec.ts. The panel is a
- * bottom sheet below 1024 px (a phone, a tablet in portrait) and a column
- * beside the score from there up; these steps work on both.
+ * sheet over the score at every size (full width below 1024 px, the
+ * bottom-right corner from there), opened and closed by its header.
  */
 import type { Locator, Page } from '@playwright/test';
 import { expect } from './auth';
@@ -14,7 +14,6 @@ export const loopForm = (page: Page) => loopPanel(page).getByRole('form');
 export const firstBarField = (page: Page) => loopForm(page).getByLabel('First bar');
 export const lastBarField = (page: Page) => loopForm(page).getByLabel('Last bar');
 export const loopNameField = (page: Page) => loopForm(page).getByLabel('Name');
-export const targetField = (page: Page) => loopForm(page).getByLabel(/Target speed/);
 export const saveLoopButton = (page: Page) =>
   loopForm(page).getByRole('button', { name: 'Save loop' });
 export const newLoopButton = (page: Page) =>
@@ -23,9 +22,6 @@ export const activeLoopLine = (page: Page) => page.getByTestId('active-loop');
 export const loopSpeed = (page: Page) => loopPanel(page).getByRole('group', { name: 'Loop speed' });
 export const loopPercentField = (page: Page) => loopSpeed(page).getByLabel('Speed %');
 export const loopBpmField = (page: Page) => loopSpeed(page).getByLabel('BPM');
-export const saveSpeedButton = (page: Page) =>
-  loopSpeed(page).getByRole('button', { name: 'Save speed' });
-export const savedSpeed = (page: Page) => loopPanel(page).getByTestId('loop-saved-speed');
 
 /** One saved loop's entry in the panel's list. */
 export const loopItem = (page: Page, name: string) =>
@@ -36,37 +32,17 @@ export const playLoopButton = (page: Page, name: string) =>
   loopItem(page, name).getByRole('button', { name: new RegExp(`^(Play|Restart) loop ${name}$`) });
 
 /**
- * Mirrors loopPanelLayout.ts: the loop panel is a column from this width, a
- * sheet below. Apart from the player's 768 px layout breakpoint
- * (`expectedLayout`): a tablet in portrait has page layout and the sheet.
- * The app's query is 64rem; in px only at Playwright's default 16 px font
- * size, so a spec that changes the font size can't use these steps.
- */
-const LOOP_COLUMN_MIN_WIDTH = 1024;
-
-/** Where the app should draw the loop panel at the page's current viewport. */
-export const expectedLoopPanel = (page: Page): 'sheet' | 'column' =>
-  (page.viewportSize()?.width ?? 0) >= LOOP_COLUMN_MIN_WIDTH ? 'column' : 'sheet';
-
-/**
- * The sheet's header, which opens and closes it. Hidden from 1024 px. The
- * panel's own child, so an open "More" button inside it, which also carries
- * `aria-controls`, isn't matched too (Copilot review on #18).
+ * The sheet's header, which opens and closes it. The panel's own child, so an
+ * open "More" button inside it, which also carries `aria-controls`, isn't
+ * matched too (Copilot review on #18).
  */
 export const loopSheetHeader = (page: Page) =>
   loopPanel(page).locator(':scope > button[aria-controls]');
 
-/** The column's toggle beside the status line. Hidden below 1024 px. */
-const columnToggle = (page: Page) => page.getByRole('button', { name: /^(Show|Hide) loops$/ });
+/** What opens and closes the panel; its `aria-expanded` says whether it is open. */
+export const loopPanelToggle = loopSheetHeader;
 
-/**
- * Whatever opens and closes the panel at this width, the one toggle on show
- * there; its `aria-expanded` says whether the panel is open.
- */
-export const loopPanelToggle = (page: Page) =>
-  expectedLoopPanel(page) === 'sheet' ? loopSheetHeader(page) : columnToggle(page);
-
-/** Opens the loop panel if it is closed: the sheet below 1024 px, the column from there. */
+/** Opens the loop panel if it is closed. */
 export async function openLoopPanel(page: Page): Promise<void> {
   const toggle = loopPanelToggle(page);
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
@@ -83,8 +59,6 @@ export interface NewLoop {
   name: string;
   firstBar: number;
   lastBar: number;
-  /** Whole percent; left empty when not given. */
-  target?: number;
 }
 
 /**
@@ -105,7 +79,6 @@ export async function fillLoopForm(page: Page, loop: NewLoop): Promise<void> {
   await firstBarField(page).fill(String(loop.firstBar));
   await lastBarField(page).fill(String(loop.lastBar));
   await loopNameField(page).fill(loop.name);
-  if (loop.target !== undefined) await targetField(page).fill(String(loop.target));
   await saveLoopButton(page).click();
 }
 
@@ -127,12 +100,14 @@ export async function commit(field: Locator, text: string): Promise<void> {
   await field.press('Enter');
 }
 
-/** Sets the playing loop's speed to a whole percent and saves it as the loop's speed, opening the panel first. */
+/**
+ * Sets the playing loop's speed to a whole percent, opening the panel first.
+ * The loop saves it by itself; this waits until the loop's line shows it.
+ */
 export async function saveLoopSpeed(page: Page, percent: number): Promise<void> {
   await openLoopPanel(page);
   await commit(loopPercentField(page), String(percent));
-  await saveSpeedButton(page).click();
-  await expect(saveSpeedButton(page)).toBeDisabled();
+  await expect(activeLoopLine(page)).toContainText(` · ${percent}%`);
 }
 
 /**

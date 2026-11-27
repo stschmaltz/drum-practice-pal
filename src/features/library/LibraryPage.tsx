@@ -27,7 +27,7 @@ const SORT_LABELS: Record<LibrarySort, string> = {
 const DEFAULT_SORT: LibrarySort = 'practiced';
 
 /**
- * `/`, Songs (Unit 14; the library until then): every song with how much of
+ * `/`, Songs (Unit 16; the library until then): every song with how much of
  * it is mastered, searched and sorted, plus the upload. The header carries
  * the practice streak.
  */

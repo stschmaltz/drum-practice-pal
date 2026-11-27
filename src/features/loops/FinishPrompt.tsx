@@ -1,13 +1,12 @@
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { Icon } from '@/components/icons';
 import { ghostButtonClass, inlineIconClass, primaryButtonClass } from '@/components/styles';
-import { ratioToPercent } from '@/features/player/speed';
 import { failureCopy } from '@/lib/errorCopy';
 import type { Loop } from './loopForm';
 import { useSetLoopStatus } from './useLoops';
 
 /**
- * Asks whether a loop that has reached its target speed is done. It only
+ * Asks whether a loop that has reached full speed is done. It only
  * asks: a loop is never finished for the user, and "Not yet" leaves it as it is.
  */
 export function FinishPrompt({
@@ -31,8 +30,7 @@ export function FinishPrompt({
     >
       <p className="text-sm text-ink">
         <Icon name="check" className={`${inlineIconClass} size-4 text-success`} />
-        You've reached your target of {ratioToPercent(loop.target_ratio ?? loop.speed_ratio)}%. Mark
-        this loop finished?
+        You're playing it at full speed. Mark this loop finished?
       </p>
       <div className="flex flex-wrap gap-2">
         <button

@@ -5,6 +5,7 @@ import {
   COUNT_IN_MODES,
   GP_FILES_BUCKET,
   GP_FILE_MAX_BYTES,
+  METRONOME_SUBDIVISIONS,
   METRONOME_VOLUME_MAX,
   METRONOME_VOLUME_MIN,
   LOOP_NAME_MAX_LENGTH,
@@ -114,6 +115,12 @@ describe('matches the migrations', () => {
   it('count-in modes', () => {
     const modes = COUNT_IN_MODES.map((mode) => `'${mode}'`).join(', ');
     expect(schema).toContain(`create type public.count_in_mode as enum (${modes})`);
+  });
+
+  it('metronome subdivisions', () => {
+    expect(readMigration('20261128000000_metronome_sounds.sql')).toContain(
+      `metronome_subdivision in (${METRONOME_SUBDIVISIONS.join(', ')})`,
+    );
   });
 
   it('text lengths', () => {

@@ -17,16 +17,21 @@ import { loopKeys } from './loopKeys';
 import { LoopPanel } from './LoopPanel';
 import { useLoopPractice } from './useLoopPractice';
 import { useLoops } from './useLoops';
+import { useSaveLoopSpeed } from './useSaveLoopSpeed';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
 const BODY_ID = 'loop-panel-body';
 
-/** The panel wired as the song page wires it: one loops query, the practice hook, one open state. */
+/**
+ * The panel wired as the song page wires it: one loops query, the practice
+ * hook, the speed saved as it changes, one open state.
+ */
 function Panel({ player, startsOpen }: { player: PlayerService; startsOpen: boolean }) {
   const snapshot = usePlayerSnapshot(player);
   const loops = useLoops(LOOP_SONG_ID);
   const practice = useLoopPractice(player, snapshot, loops.data);
+  useSaveLoopSpeed(LOOP_SONG_ID, practice.activeLoop, snapshot.speedRatio);
   const [open, setOpen] = useState(startsOpen);
   return (
     <LoopPanel
@@ -48,7 +53,6 @@ const late = loopRow('late', {
   start_bar: 9,
   end_bar: 12,
   speed_ratio: 0.5,
-  target_ratio: 1,
 });
 
 interface PanelOptions {
@@ -92,6 +96,16 @@ function renderPanel({
       await user.click(
         panel.getByRole('menuitem', { name: action === 'History' ? /history$/ : action }),
       );
+    },
+    /**
+     * "Play loop X", then the sheet opened again if the press closed it (it does
+     * when it starts playback), as the user does to reach the playing loop's
+     * controls. The sheet's own tests press "Play loop" with `press`.
+     */
+    playLoop: async (name: string) => {
+      await user.click(await panel.findByRole('button', { name: `Play loop ${name}` }));
+      const header = panel.getByRole('button', { name: /(Open|Close)$/ });
+      if (header.getAttribute('aria-expanded') !== 'true') await user.click(header);
     },
     /** Loop X's "More" button, which stands for the actions in its menu. */
     more: (name: string) => panel.getByRole('button', { name: moreFor(name) }),
@@ -187,13 +201,13 @@ describe('LoopPanel open and closed', () => {
     await view.refetch();
     await waitFor(() => expect(view.header()).toHaveTextContent('Loops (1)'));
     await view.user.click(view.header());
-    await view.press('Play loop Intro');
+    await view.playLoop('Intro');
     expect(view.header()).toHaveTextContent('Loop: Intro');
   });
 
   it('keeps the playing loop going while closed', async () => {
     const view = renderPanel();
-    await view.press('Play loop Intro');
+    await view.playLoop('Intro');
     await view.user.click(view.header());
     expect(view.player.getSnapshot()).toMatchObject({
       range: { startBar: 1, endBar: 4 },
@@ -203,7 +217,7 @@ describe('LoopPanel open and closed', () => {
 });
 
 describe('LoopPanel list', () => {
-  it('says it is loading, then lists the loops by first bar with bars, speed, BPM and target', async () => {
+  it('says it is loading, then lists the loops by first bar with bars, speed and BPM', async () => {
     let release: () => void = () => {};
     const view = renderPanel({
       loops: [late, intro],
@@ -216,10 +230,8 @@ describe('LoopPanel list', () => {
 
     await waitFor(() => expect(view.names()).toEqual(['Intro', 'Late']));
     expect(view.item('Intro').getByText('Bars 1 to 4 · 80% (96 BPM)')).toBeInTheDocument();
-    // Bar 9 is at 90 in the file: half speed is 45, and the 100% target is 90.
-    expect(
-      view.item('Late').getByText('Bars 9 to 12 · 50% (45 BPM) · target 100% (90 BPM)'),
-    ).toBeInTheDocument();
+    // Bar 9 is at 90 in the file: half speed is 45.
+    expect(view.item('Late').getByText('Bars 9 to 12 · 50% (45 BPM)')).toBeInTheDocument();
   });
   it('names a one-bar loop as one bar', async () => {
     const view = renderPanel({
@@ -232,7 +244,7 @@ describe('LoopPanel list', () => {
   it('until the score has loaded: percent only, nothing to play, no new loop', async () => {
     const view = renderPanel({ loaded: false });
     await waitFor(() => expect(view.names()).toEqual(['Intro', 'Late']));
-    expect(view.item('Late').getByText('Bars 9 to 12 · 50% · target 100%')).toBeInTheDocument();
+    expect(view.item('Late').getByText('Bars 9 to 12 · 50%')).toBeInTheDocument();
     expect(view.play('Intro')).toBeDisabled();
     expect(view.panel.getByRole('button', { name: 'New loop' })).toBeDisabled();
     // The form needs the score's bar count, as "New loop" does (bug hunt S3). Deleting needs no score.
@@ -329,7 +341,7 @@ describe('LoopPanel list', () => {
 
   it('a failed refetch keeps the list and the playing loop', async () => {
     const view = renderPanel();
-    await view.press('Play loop Intro');
+    await view.playLoop('Intro');
     view.table.failNext('select', 'offline');
     await view.refetch();
 
@@ -342,7 +354,7 @@ describe('LoopPanel list', () => {
 describe('LoopPanel playing a loop', () => {
   it('Play loop starts it at its bars and saved speed, and shows it as the one being practiced', async () => {
     const view = renderPanel();
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
 
     expect(view.engine.play).toHaveBeenCalledTimes(1);
     expect(view.player.getSnapshot()).toMatchObject({
@@ -364,7 +376,7 @@ describe('LoopPanel playing a loop', () => {
 
   it('Restart loop goes back to the first bar at the speed playing now, without stopping', async () => {
     const view = renderPanel();
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     act(() => {
       view.engine.fire('stateChanged', { playing: true });
       view.engine.fire('position', { tick: startOfBar(9) });
@@ -390,7 +402,7 @@ describe('LoopPanel playing a loop', () => {
 
   it('Exit loop leaves the loop, and its speed control goes', async () => {
     const view = renderPanel();
-    await view.press('Play loop Intro');
+    await view.playLoop('Intro');
     await view.press('Exit loop');
 
     expect(view.panel.queryByRole('region', { name: /Practicing/ })).not.toBeInTheDocument();
@@ -401,7 +413,7 @@ describe('LoopPanel playing a loop', () => {
   // 12 QA after the UX pass, issue 4: Exit loop goes with the loop's playing state.
   it('Exit loop hands focus to that loop’s Play loop, not to the page', async () => {
     const view = renderPanel();
-    await view.press('Play loop Intro');
+    await view.playLoop('Intro');
     await view.press('Exit loop');
 
     await waitFor(() => expect(view.play('Intro')).toHaveFocus());
@@ -538,29 +550,12 @@ describe('LoopPanel Play loop and the sheet', () => {
     expect(view.engine.play).toHaveBeenCalledTimes(1);
   });
 
-  it('from 1024 px, the column, nothing closes it: starting, switching, restarting, or a count-in', async () => {
+  it('on a laptop the panel is the sheet too: Play loop closes it', async () => {
     atWidth(TABLET_LANDSCAPE);
     const view = renderPanel();
     await view.press('Play loop Late');
-    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
-    view.enginePlays();
-    await view.press('Play loop Intro');
-    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
-    await view.press('Restart loop Intro');
-    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
-
-    act(() => {
-      view.player.pause();
-      view.engine.fire('stateChanged', { playing: false });
-      view.player.setCountInBars(2);
-    });
-    await view.press('Play loop Late');
-    expect(view.player.getSnapshot().status).toBe('countingIn');
-    await view.press('Play loop Intro');
-    expect(view.player.getSnapshot()).toMatchObject({ status: 'countingIn', barNumber: 1 });
-    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
-    expect(view.panel.getByRole('group', { name: 'Loop speed' })).toBeVisible();
-    act(() => view.player.pause());
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+    expect(view.engine.play).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -731,7 +726,7 @@ describe('LoopPanel new and edited loops', () => {
 
   it('editing another loop leaves the playing loop playing', async () => {
     const view = renderPanel();
-    await view.press('Play loop Intro');
+    await view.playLoop('Intro');
     await view.press('Edit Late');
     // The form's bars are on show; the bars playing are still Intro's.
     expect(view.player.getSnapshot()).toMatchObject({
@@ -753,7 +748,7 @@ describe('LoopPanel new and edited loops', () => {
 
   it('a renamed playing loop shows its new name everywhere', async () => {
     const view = renderPanel();
-    await view.press('Play loop Intro');
+    await view.playLoop('Intro');
     await view.press('Edit Intro');
     await rename(view, 'Opening');
     await view.press('Save loop');
@@ -830,7 +825,7 @@ describe('LoopPanel deleting a loop', () => {
 
   it('deleting a loop that is not playing leaves the playing one alone', async () => {
     const view = renderPanel();
-    await view.press('Play loop Intro');
+    await view.playLoop('Intro');
     await view.press('Delete Late');
     await view.user.click(confirmFor(view, 'Late').getByRole('button', { name: 'Delete loop' }));
 
@@ -877,7 +872,7 @@ describe('LoopPanel finishing a loop', () => {
     start_bar: 9,
     end_bar: 12,
     speed_ratio: 1,
-    target_ratio: 1,
+    last_practiced_at: '2026-11-20T10:00:00Z',
   });
   const prompt = (view: ReturnType<typeof renderPanel>) =>
     within(view.panel.getByRole('group', { name: 'Mark finished?' }));
@@ -889,27 +884,25 @@ describe('LoopPanel finishing a loop', () => {
       .getAllByRole('listitem')
       .map((li) => li.querySelector('p')?.textContent ?? '');
 
-  it('does not ask while the saved speed is under the target, however fast it is playing', async () => {
+  it('does not ask while the loop is under full speed', async () => {
     const view = renderPanel();
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
 
     await view.press('Faster by 5%');
-    act(() => view.player.setSpeed(1.2));
+    await waitFor(() => expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.55 }]));
 
     expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
   });
 
-  it('asks once the saved speed reaches the target, and finishes nothing by itself', async () => {
+  it('asks once the loop is played at full speed, and finishes nothing by itself', async () => {
     const view = renderPanel();
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
     act(() => view.player.setSpeed(1));
 
-    await view.press('Save speed');
-
     expect(await view.panel.findByTestId('finish-prompt')).toHaveTextContent(
-      "You've reached your target of 100%. Mark this loop finished?",
+      "You're playing it at full speed. Mark this loop finished?",
     );
     expect(view.table.sent('update')).toEqual([{ speed_ratio: 1 }]);
     expect(savedLate(view)?.status).toBe('active');
@@ -917,9 +910,23 @@ describe('LoopPanel finishing a loop', () => {
     expect(view.player.getSnapshot().status).toBe('playing');
   });
 
-  it('"Not yet" takes the question away until a faster speed is saved', async () => {
+  it('does not ask about a loop saved at full speed and never practised', async () => {
+    const fresh = loopRow('late', { ...atTarget, last_practiced_at: null });
+    const view = renderPanel({ loops: [intro, fresh] });
+    await view.playLoop('Late');
+    view.enginePlays();
+    await settle();
+    expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+
+    // Brought down and back up to full speed, it has been worked on: it asks.
+    await view.press('Slower by 5%');
+    await view.press('Faster by 5%');
+    expect(await view.panel.findByTestId('finish-prompt')).toBeInTheDocument();
+  });
+
+  it('"Not yet" takes the question away until the loop is played faster', async () => {
     const view = renderPanel({ loops: [intro, atTarget] });
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
 
     await view.user.click(prompt(view).getByRole('button', { name: 'Not yet' }));
@@ -932,13 +939,12 @@ describe('LoopPanel finishing a loop', () => {
     expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
 
     await view.press('Faster by 5%');
-    await view.press('Save speed');
     expect(await view.panel.findByTestId('finish-prompt')).toBeInTheDocument();
   });
 
   it('"Mark finished" moves the loop under Finished, keeps it playing, and stops asking', async () => {
     const view = renderPanel({ loops: [intro, atTarget] });
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
 
     await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
@@ -980,7 +986,7 @@ describe('LoopPanel finishing a loop', () => {
     });
     expect(await view.panel.findByText('Every loop of this song is finished.')).toBeInTheDocument();
 
-    await view.press('Play loop Intro');
+    await view.playLoop('Intro');
 
     expect(view.engine.play).toHaveBeenCalledTimes(1);
     expect(view.player.getSnapshot().range).toEqual({ startBar: 1, endBar: 4 });
@@ -1014,7 +1020,7 @@ describe('LoopPanel finishing a loop', () => {
 
   it('a refused "Mark finished" from the prompt brings the prompt back with the reason', async () => {
     const view = renderPanel({ loops: [intro, atTarget] });
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
     const refuse = view.table.holdNext('update');
     view.table.failNext('update', 'nope');
@@ -1039,24 +1045,19 @@ describe('LoopPanel finishing a loop', () => {
     expect(view.item('Late').getByRole('alert')).toHaveTextContent("Couldn't change the loop.");
   });
 
-  it('asks when the speed shows as the target’s percent, though its ratio is a hair under', async () => {
-    // A speed typed as a BPM is kept as a fine ratio (85 at a tempo of 120 is 0.708333);
-    // the target field holds whole percents.
-    const view = renderPanel({
-      loops: [loopRow('late', { ...atTarget, speed_ratio: 0.708333, target_ratio: 0.71 })],
-    });
-    await view.press('Play loop Late');
+  it('asks when the speed shows as 100%, though its ratio is a hair under', async () => {
+    // A speed typed as a BPM is kept as a fine ratio: 99.5% shows as "100%".
+    const view = renderPanel({ loops: [loopRow('late', { ...atTarget, speed_ratio: 0.995 })] });
+    await view.playLoop('Late');
     view.enginePlays();
 
-    expect(view.item('Late').getByText(/71% \(64 BPM\) · target 71% \(64 BPM\)/)).toBeVisible();
-    expect(await view.panel.findByTestId('finish-prompt')).toHaveTextContent(
-      "You've reached your target of 71%.",
-    );
+    expect(view.item('Late').getByText(/· 100% \(90 BPM\)/)).toBeVisible();
+    expect(await view.panel.findByTestId('finish-prompt')).toBeInTheDocument();
   });
 
   it('while the prompt’s "Mark finished" is on its way, the list’s button is locked and a press sends nothing', async () => {
     const view = renderPanel({ loops: [intro, atTarget] });
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
     const release = view.table.holdNext('update');
     await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
@@ -1082,13 +1083,13 @@ describe('LoopPanel finishing a loop', () => {
       finished_at: '2026-11-20T10:00:00Z',
     });
     const view = renderPanel({ loops: [intro, finishedAtTarget] });
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
     expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument();
     const release = view.table.holdNext('update');
     await view.press('Reopen Late');
 
-    // Reopened at its target, so the prompt asks at once, with the reopen still pending.
+    // Reopened at full speed, so the prompt asks at once, with the reopen still pending.
     const finish = await prompt(view).findByRole('button', { name: 'Mark finished' });
     expectLocked(finish);
     await view.user.click(finish);
@@ -1109,9 +1110,9 @@ describe('LoopPanel finishing a loop', () => {
     await waitFor(() => expect(finishedNames(view)).toEqual(['Late']));
   });
 
-  it('"Save speed" pressed while "Mark finished" is on its way waits for it, and neither undoes the other', async () => {
+  it('a speed change while "Mark finished" is on its way waits for it, and neither undoes the other', async () => {
     const view = renderPanel({ loops: [intro, atTarget] });
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
     const release = view.table.holdNext('update');
     await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
@@ -1120,7 +1121,6 @@ describe('LoopPanel finishing a loop', () => {
     // Loop edits go one at a time (their scope), so the speed isn't sent until the finish
     // has its answer: no answer can come back from before the other write.
     await view.press('Slower by 5%');
-    await view.press('Save speed');
     await settle();
     expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
     expect(finishedNames(view)).toEqual(['Late']);
@@ -1140,20 +1140,6 @@ describe('LoopPanel finishing a loop', () => {
     await waitFor(() => expectUnlocked(view.panel.getByRole('button', { name: 'Reopen Late' })));
     expect(finishedNames(view)).toEqual(['Late']);
     expect(view.item('Late').getByText(/· 95% \(86 BPM\)/)).toBeInTheDocument();
-  });
-
-  it('a finer target survives finishing and reopening: only the status is sent', async () => {
-    const view = renderPanel({
-      loops: [loopRow('late', { ...late, speed_ratio: 0.708333, target_ratio: 0.855556 })],
-    });
-
-    await view.press('Mark finished Late');
-    await view.press('Reopen Late');
-
-    await waitFor(() =>
-      expect(view.table.sent('update')).toEqual([{ status: 'finished' }, { status: 'active' }]),
-    );
-    expect(view.table.rows()[0]).toMatchObject({ speed_ratio: 0.708333, target_ratio: 0.855556 });
   });
 });
 
@@ -1309,7 +1295,7 @@ describe('LoopPanel keeping focus', () => {
     start_bar: 9,
     end_bar: 12,
     speed_ratio: 1,
-    target_ratio: 1,
+    last_practiced_at: '2026-11-20T10:00:00Z',
   });
 
   it('New loop moves focus into the form, not to a field, and Cancel gives it back to New loop', async () => {
@@ -1380,7 +1366,7 @@ describe('LoopPanel keeping focus', () => {
 
   it('the prompt’s Mark finished hands focus to the loop’s Reopen', async () => {
     const view = renderPanel({ loops: [intro, atTarget] });
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
 
     const prompt = within(view.panel.getByRole('group', { name: 'Mark finished?' }));
@@ -1394,7 +1380,7 @@ describe('LoopPanel keeping focus', () => {
   // 12 Review (after UX pass): the prompt goes with its "Not yet", which took focus to <body>.
   it('the prompt’s Not yet hands focus to the loop’s speed, just above where the prompt was', async () => {
     const view = renderPanel({ loops: [intro, atTarget] });
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
 
     const prompt = within(view.panel.getByRole('group', { name: 'Mark finished?' }));
@@ -1481,7 +1467,7 @@ describe('LoopPanel keeping focus', () => {
 
   it('with the prompt’s write on its way, focus is on the loop’s Reopen at once', async () => {
     const view = renderPanel({ loops: [intro, atTarget] });
-    await view.press('Play loop Late');
+    await view.playLoop('Late');
     view.enginePlays();
     const release = view.table.holdNext('update');
 
@@ -1502,25 +1488,20 @@ describe('LoopPanel offline', () => {
   const online = () => act(() => onlineManager.setOnline(true));
   const queuedNote = (view: View) => view.panel.queryByTestId('loop-speed-queued');
 
-  it('a speed saved offline shows at once, says it waits, can be saved again behind it, and both go in order', async () => {
+  it('a speed changed offline shows at once, says it waits, and every change goes in order once back', async () => {
     const view = renderPanel();
-    await view.press('Play loop Intro');
+    await view.playLoop('Intro');
     offline();
 
     await view.press('Slower by 5%');
-    await view.press('Save speed');
     expect(await view.panel.findByTestId('loop-speed-queued')).toHaveTextContent(
       "Saved on this device. It's sent when you're back online.",
     );
-    expect(view.panel.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 75%');
+    expect(view.item('Intro').getByText(/· 75% \(90 BPM\)/)).toBeInTheDocument();
 
-    // Waiting for the connection is not "being sent": a second save can queue behind it.
     await view.press('Slower by 5%');
-    const save = view.panel.getByRole('button', { name: 'Save speed' });
-    expect(save).toBeEnabled();
-    await view.user.click(save);
     await waitFor(() =>
-      expect(view.panel.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 70%'),
+      expect(view.item('Intro').getByText(/· 70% \(84 BPM\)/)).toBeInTheDocument(),
     );
     await settle();
     expect(view.table.sent('update')).toEqual([]);
@@ -1531,25 +1512,6 @@ describe('LoopPanel offline', () => {
     );
     await waitFor(() => expect(queuedNote(view)).not.toBeInTheDocument());
     expect(view.table.rows().find((row) => row.id === 'intro')?.speed_ratio).toBe(0.7);
-    expect(view.panel.getByTestId('loop-saved-speed')).toHaveTextContent('Saved: 70%');
-  });
-
-  it('"Save speed" is locked while a save is being sent, once the connection is back', async () => {
-    const view = renderPanel();
-    await view.press('Play loop Intro');
-    offline();
-    await view.press('Slower by 5%');
-    await view.press('Save speed');
-    await view.panel.findByTestId('loop-speed-queued');
-
-    const release = view.table.holdNext('update');
-    online();
-    await waitFor(() => expect(view.table.sent('update')).toHaveLength(1));
-    await view.press('Slower by 5%');
-    const save = view.panel.getByRole('button', { name: 'Save speed' });
-    expect(save).toBeDisabled();
-    release();
-    await waitFor(() => expect(save).toBeEnabled());
   });
 
   it('a loop finished offline moves at once, its Reopen is locked until the write has gone, and other loops can still change', async () => {

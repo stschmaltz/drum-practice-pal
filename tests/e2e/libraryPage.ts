@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
 import type { E2eUser } from './auth';
 
-/** On the songs list, a song row's Edit or Delete, from its "More" menu (14 QA issue 3). */
+/** On the songs list, a song row's Edit or Delete, from its "More" menu (16 QA issue 3). */
 export async function chooseSongAction(
   page: Page,
   title: string,

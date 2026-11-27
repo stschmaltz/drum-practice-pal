@@ -1,4 +1,4 @@
-# Unit 14: Songs first and practice progress
+# Unit 16: Songs first and practice progress
 
 ## Build
 
@@ -33,7 +33,7 @@ Changed:
 - Dead code: `loopLabels.ts`, `practiceList.ts` and their tests.
 - Tests: `App.test.tsx`, `AppShell.test.tsx`, `LibraryPage.test.tsx`, `SongListItem.test.tsx`, `SongPage.test.tsx` (renders `/songs/:id/play`; its `?loop=` cases now live in `LoopPracticePage.test.tsx`), `songForm.test.ts`, `designTokens.test.ts` (graphic pairs).
 - e2e: `playerPage.ts` (`openSongOverview`, `openSongPlayer`; `openFixture` lands on jam mode), `practicePage.ts` (practice screen and overview steps), `loopsPage.ts` (`fillLoopForm`), `journey.spec.ts` (rewritten for the three levels), `practice.spec.ts`, `design.spec.ts` (overview, practice and stats screens audited), `auth.spec.ts`, `library.spec.ts`, `offline.spec.ts`, `player.spec.ts`, `drums-only.spec.ts`.
-- `AGENTS.md`: new "Songs first, practice screen and stats (from Unit 14)" section; the practice folder line.
+- `AGENTS.md`: new "Songs first, practice screen and stats (from Unit 16)" section; the practice folder line.
 
 ### Decisions
 
@@ -120,7 +120,7 @@ Changed:
 
 ## QA
 
-Run against this worktree's own stack (`drum-practice-pal-u14`, API 54421), a fresh `npm run build -- --mode development` previewed on 4193 (rebuilt after each fix). Screens walked at 390x844, 820x1180 and 1440x900, plus 844x390 (a phone in landscape), with a throwaway QA spec (deleted after) that seeded 50 songs, a song with 30 loops (4 finished), sessions on four days and a streak of 3. 95 screenshots in `docs/units/14-shots/` (`<screen>-<phone|tablet|desktop>.png`; `-full` are whole pages; `landscape-*`, `offline-*`, `empty-*` and `*-slow` as named). `docs/product.md` doesn't exist, so the product judgement below is against the plan's Unit 14 section and the signed-off direction.
+Run against this worktree's own stack (`drum-practice-pal-u14`, API 54421), a fresh `npm run build -- --mode development` previewed on 4193 (rebuilt after each fix). Screens walked at 390x844, 820x1180 and 1440x900, plus 844x390 (a phone in landscape), with a throwaway QA spec (deleted after) that seeded 50 songs, a song with 30 loops (4 finished), sessions on four days and a streak of 3. 95 screenshots in `docs/units/14-shots/` (`<screen>-<phone|tablet|desktop>.png`; `-full` are whole pages; `landscape-*`, `offline-*`, `empty-*` and `*-slow` as named). `docs/product.md` doesn't exist, so the product judgement below is against the plan's Unit 16 section and the signed-off direction.
 
 ### Criteria
 
@@ -175,7 +175,7 @@ PASS, with one major issue (1) for Build to decide on; no blockers.
 
 ## Build (QA fix round 1)
 
-Fixes for Test bug 1 and QA issue 1, then QA issues 3 to 8, which Shane added to this round (3, 5 and 6 first, then 4, 7 and 8). Each change has a test that failed before it: the component tests against the code before the change, and the new e2e checks against QA's build of the old code, still served on 4193 (the Session complete check failed there with the score 214 px lower, the landscape bar check with a 157 px bar, the New loop check with bar 1 under the sheet). `docs/product.md` doesn't exist, so the walk-through is against the plan's Unit 14 section. A drummer on day one with a song: New loop on a phone now shows the bars to tap, and Stats says there is nothing yet and points to Songs. One missing a piece (a cached list, the fresh read not back): Play waits for the loop instead of playing the whole song. One offline: nothing here adds a network step. The songs list's menu offers Edit and Delete offline as the buttons did, and their form and question stay off with their notes. Nothing forces an order or adds a chore.
+Fixes for Test bug 1 and QA issue 1, then QA issues 3 to 8, which Shane added to this round (3, 5 and 6 first, then 4, 7 and 8). Each change has a test that failed before it: the component tests against the code before the change, and the new e2e checks against QA's build of the old code, still served on 4193 (the Session complete check failed there with the score 214 px lower, the landscape bar check with a 157 px bar, the New loop check with bar 1 under the sheet). `docs/product.md` doesn't exist, so the walk-through is against the plan's Unit 16 section. A drummer on day one with a song: New loop on a phone now shows the bars to tap, and Stats says there is nothing yet and points to Songs. One missing a piece (a cached list, the fresh read not back): Play waits for the loop instead of playing the whole song. One offline: nothing here adds a network step. The songs list's menu offers Edit and Delete offline as the buttons did, and their form and question stay off with their notes. Nothing forces an order or adds a chore.
 
 ### Summary
 
@@ -214,7 +214,7 @@ Fixes for Test bug 1 and QA issue 1, then QA issues 3 to 8, which Shane added to
 
 ### Known gaps
 
-- `loop-scroll.spec.ts`'s two phone count-in cases ("Play loop with a 1-bar / 2-bar count-in…") fail at 390x844. They fail the same way with this round's `SongPage` change reverted (run on a fresh build), so they come from before this round. They fail when run alone too, so they are not the load flake the Build note suspected. `chooseCountIn`'s click on the count-in label never lands: Playwright reports the sticky jam bar, and then the open loop sheet's header (left open by `saveNewLoop`), intercepting it. Not one of this round's issues, so not touched. Next: a Build fix for the step (close the sheet and bring the controls clear of the sticky bar before `chooseCountIn`), or a look at whether Unit 14's layout moved the count-in under them.
+- `loop-scroll.spec.ts`'s two phone count-in cases ("Play loop with a 1-bar / 2-bar count-in…") fail at 390x844. They fail the same way with this round's `SongPage` change reverted (run on a fresh build), so they come from before this round. They fail when run alone too, so they are not the load flake the Build note suspected. `chooseCountIn`'s click on the count-in label never lands: Playwright reports the sticky jam bar, and then the open loop sheet's header (left open by `saveNewLoop`), intercepting it. Not one of this round's issues, so not touched. Next: a Build fix for the step (close the sheet and bring the controls clear of the sticky bar before `chooseCountIn`), or a look at whether Unit 16's layout moved the count-in under them.
 - Session complete now covers the lower part of the score (on a phone the controls bar too) until Keep going or Done.
 - Not checked on a real phone: the landscape bar, the sheet over the score, the heatmap's orange in a dim room.
 
@@ -234,3 +234,42 @@ Fixes for Test bug 1 and QA issue 1, then QA issues 3 to 8, which Shane added to
   - design, stats, library, practice and journey: 94 passed and 8 skipped in the first run, which failed 6. Those were two specs at three sizes each, both from this round's changes: the library's press on the row's top right corner, now where "More" is, and the design audit opening Stats for a user with no session, now the empty state. Both specs were updated, and their rerun passed at all three sizes (6 of 6).
   - loop-scroll, loops, shortcuts and offline: 145 passed, 18 skipped, 2 failed (the two phone count-in cases under Known gaps).
 - Not run: the full `npm run e2e`.
+
+## Merge of main
+
+`origin/main` (the practice-feedback work, metronome sounds, CI e2e shards, `/design`, `docs/product.md`) merged into `unit-14`, left staged and uncommitted for the orchestrator.
+
+### Numbering
+
+Main's `docs/plan.md` had taken 14 (Songs with recordings) and 15 (play-along player) while this unit was built. This unit is **Unit 16** now: the plan's table and section, `AGENTS.md`'s section heading ("from Unit 16"), this note's title, and every "Unit 14" / "14 QA" / "14 Test" comment in `src/` and `tests/` (main's code had none of its own). The note keeps its file name, `docs/units/14-songs-first.md` (no clash; main has no 14 note), and so does `docs/units/14-shots/`. Units 14 and 15 gained a Carried forward line each: their scope still names the library card and the On the go page's Songs tab, which this unit replaced, so they are to be walked again against the Songs list, the overview and the practice screen before Build.
+
+### What conflicted, and how each was resolved
+
+- **`src/features/practice/OnTheGoPage.tsx` and its test** (deleted here, edited on main for the 100% target): kept deleted. Main's change there was the progress bar towards full speed; the overview's loop rows already draw it (`fullSpeedFraction`, `"n% to full speed"` on the practice screen), so nothing moved.
+- **`loopLabels.ts` and its test**: this side, without `targetProgress` (only the deleted page used it; main had rewritten it for the 100% target).
+- **`LoopSpeedControl.tsx`, and with it `useLoopSpeed.ts` and `PracticeSpeed.tsx`** (not conflicted, but on the old model): main's autosave carried into both speed controls. `useLoopSpeed(loop, player, snapshot)` no longer takes a song id or saves; it returns the gate, the tempo, `setSpeed` and `saves` (`useLoopSpeedSaves`: "Saved on this device" while one waits offline, the latest failure). `PracticeSpeed` lost "Save speed" and the "Saved: …" line, as the panel's control did on main.
+- **`SongPage.tsx`** (jam page): main's flat layout (the loop panel a sheet over a full-width score at every size, no "Show loops" / "Hide loops", no `lg:` column) with this side's back link, `useLinkedLoopForm` and `outcome`; `useSaveLoopSpeed` added. Main's in-file `ScoreBox`, `SessionNotice`, `ShortcutsButton` and `useHeightOf` stayed in `playerScreen.tsx` / `useHeightOf.ts` where this unit had moved them, with main's changes to them applied (no `lg:scroll-mb-4`, comments without the column).
+- **`LoopPracticePage.tsx`** (not conflicted): `useSaveLoopSpeed` added, so a nudge or a speed key on the practice screen is saved as it is made; "Mark finished?" now asks `shouldAskToFinish(loop, speedMoved)` as the panel does, not `hasReachedTarget`. The panel's "has the speed moved since this loop was chosen" state moved out of `LoopPanel` into `useSpeedMovedSinceChosen` (`src/features/loops/`), used by both, so the two screens ask by the same rule.
+- **`LoopPanel.tsx`**: main's sheet-at-every-size markup and `shouldAskToFinish` with this side's `outcome`, `ConfirmDeleteLoop` and `FinishPrompt` moved to their own files; main's new prompt copy ("You're playing it at full speed. Mark this loop finished?") went into `FinishPrompt.tsx`. `LoopSpeedControl` no longer takes `songId`. The section's label stays "Practising …".
+- **`PlayerControls.tsx`**: both imports (`type PlayGate` and main's `canChangeMetronomeVoice`, `MetronomeVoiceFields`, `metronomeVoiceSummary`); the "Metronome sounds" disclosure is on the jam page and the practice screen alike, since both use `PlayerControls`.
+- **`AppShell.tsx`**: this side's nav (`Link` with `isNavItemActive`) and main's full width for the score, but by screen rather than `useMatch('/songs/:id')`, which is now the overview (no score, a readable line length): `showsScore(pathname)` in `src/lib/routes.ts` (pure, tested) is true for `/songs/:id/play` and `/songs/:id/loops/:loopId`.
+- **`tests/e2e/journey.spec.ts`**: this side's three-level journey, with main's rules: no target in the loop form, the four nudges down to 80% saved as made (polled in the database), then four nudges up to 100% bring "You're playing it at full speed"; the mastered row reads "Bars 5 to 6 · 100%". `practiceSaveSpeed` is gone from `practicePage.ts`.
+- **`tests/e2e/practice.spec.ts`**: this side's overview checks with main's 100% (`"Bars 3 to 4 · 100%"`); the test's title now says the song's lists, not tabs.
+- **`AGENTS.md`**: both sections, main's "Speed, target and sound" before this unit's; main's lines edited where this unit changed the ground under them (`useSaveLoopSpeed` is on both loop screens; the full width is `showsScore`; the 100% bar is `fullSpeedFraction`, not the deleted `targetProgress`; "Mark finished?" on both screens with `useSpeedMovedSinceChosen`). Main's new rules (writing Shane's changed instructions into the docs, `docs/product.md`, additive migrations, metronome sounds) are kept as they came.
+- **`docs/plan.md`**: main's unit table and sections plus this unit as 16 (above); this unit's "Not in this unit" line now says `target_ratio` was dropped after 13 rather than "another branch removes it".
+- `LoopPracticePage.test.tsx`'s settings row gained main's four metronome columns. Its "Save speed" test became: each nudge is saved as made, opening a loop saves nothing, a loop key to another loop saves nothing, and "Mark finished?" asks once the speed is worked up to 100% but not for a loop opened there unpractised.
+
+### Two things the merge changed besides the conflicts
+
+- **"Mark finished?" on the practice screen sits under the score now, above the controls bar.** With the 100% target, every loop saved at 100% asks once it has been practised, so the prompt now comes with the first session of such a loop. Above the sticky bar it pushed the score down 110 to 130 px as it came (`practice.spec.ts` "Session complete comes and goes without moving the score" failed at all three sizes; the same defect class as 16 QA issue 4). Under the score it moves nothing. On a phone it may be below the window, behind Session complete while that is up; Shane to judge at the kit.
+- **`loops.spec.ts` "a mouse drag across bars…" (desktop) measures its bars again before the second drag.** Main's sheet at every size means the open form now brings the score up above the sheet at 1440 px too (`scoreOnScreen: 'picking-bars'`), so the points measured before the first drag were stale. Test-only.
+
+### Database
+
+`npm run db:reset` on this worktree's stack (54421) applied `20261128000000_metronome_sounds.sql` and `20261129000000_drop_target_ratio.sql`; `npm run db:types` left `src/lib/database.types.ts` unchanged (it already matches main's).
+
+### Checks
+
+- `npm run check`: green (typecheck, lint, format, 4,627 passed, 2 skipped).
+- e2e on a fresh build (`E2E_PORT=4199`, this worktree's stack) at phone, tablet and desktop, one run of journey, practice, loops, loop-scroll, player, stats, design, library and shortcuts: 285 passed, 42 skipped, 6 failed. Three were "Session complete comes and goes without moving the score" and one was the desktop drag, both fixed as above; practice and journey at all three sizes and the drag at desktop then passed on rerun. The other two are the known phone count-in cases in loop-scroll ("Play loop with a 1-bar / 2-bar count-in"), which still fail as before the merge.
+- Not run: the full `npm run e2e`, and no second confirming run (the coordinator's instruction).

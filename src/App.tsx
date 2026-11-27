@@ -55,7 +55,7 @@ export function App() {
           </RequireAuth>
         }
       >
-        {/* Songs, then a song, then a loop's practice or the whole song (Unit 14). */}
+        {/* Songs, then a song, then a loop's practice or the whole song (Unit 16). */}
         <Route index element={<LibraryPage />} />
         <Route path="library" element={<LibraryRedirect />} />
         <Route path="songs/:id" element={<SongOverviewPage />} />

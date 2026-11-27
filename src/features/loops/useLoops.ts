@@ -192,7 +192,7 @@ interface LoopEditContext {
  * Optimistic: shows the edit at once and rolls back only that loop's sent
  * fields when the server refuses it. A connection that is missing or drops
  * is not a refusal: offline the edit waits (TanStack Query pauses it) and a
- * dropped request is tried again, so "Save speed" or "Mark finished" made at
+ * dropped request is tried again, so a speed change or "Mark finished" made at
  * the kit with no Wi-Fi stays on screen and goes when the connection is
  * back. Until the server has answered, the edit is kept in the outbox, so a
  * reload or a closed tab doesn't lose it.
@@ -247,7 +247,7 @@ export function loopEditOptions(queryClient: QueryClient, userId: string, songId
         revertLoopEdit(loop, before, changes),
       );
     },
-    // Two controls write one loop ("Save speed" and the edit form), so another
+    // Two controls write one loop (the speed as it changes, and the edit form), so another
     // edit of it may be pending. The server's row can be from before that edit:
     // taken whole, its old bars would move the playing loop back until the edit
     // lands. Then only the sent fields are taken; the refetch once every write
@@ -286,6 +286,38 @@ export function isStatusWriteOf(variables: unknown, loopId: string): boolean {
   if (typeof variables !== 'object' || variables === null) return false;
   const { loopId: writtenId, changes } = variables as Partial<LoopUpdate>;
   return writtenId === loopId && changes?.status !== undefined;
+}
+
+/** Whether a mutation's variables are a write of this loop's speed. */
+export function isSpeedWriteOf(variables: unknown, loopId: string): boolean {
+  if (typeof variables !== 'object' || variables === null) return false;
+  const { loopId: writtenId, changes } = variables as Partial<LoopUpdate>;
+  return writtenId === loopId && changes?.speed_ratio !== undefined;
+}
+
+/**
+ * How the saves of one loop's speed are going (`useSaveLoopSpeed` sends them
+ * from the song page), read from the mutation cache: `waiting` while one is
+ * held offline, and the latest one's failure, if it failed.
+ */
+export function useLoopSpeedSaves(loopId: string) {
+  const user = useSignedInUser();
+  const writes = useMutationState({
+    filters: {
+      mutationKey: loopKeys.writes(user.id),
+      predicate: (mutation) => isSpeedWriteOf(mutation.state.variables, loopId),
+    },
+    select: (mutation) => ({
+      status: mutation.state.status,
+      paused: mutation.state.isPaused,
+      error: mutation.state.error,
+    }),
+  });
+  const latest = writes.at(-1);
+  return {
+    waiting: writes.some((write) => write.status === 'pending' && write.paused),
+    error: latest?.status === 'error' ? latest.error : null,
+  };
 }
 
 /**

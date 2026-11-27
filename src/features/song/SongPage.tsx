@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { PageHeader } from '@/components/PageHeader';
-import { Icon } from '@/components/icons';
-import { buttonClass, pressedButtonClass } from '@/components/styles';
 import type { Song } from '@/features/library/songForm';
 import type { Loop } from '@/features/loops/loopForm';
 import { findLoopSpeed } from '@/features/loops/loopFocus';
@@ -11,6 +9,7 @@ import { panelShowsLoopSpeed } from '@/features/loops/loopPanelContent';
 import { useLoopPanelOpen } from '@/features/loops/useLoopPanelOpen';
 import { useLoopPractice, type LoopPractice } from '@/features/loops/useLoopPractice';
 import { useLoops } from '@/features/loops/useLoops';
+import { useSaveLoopSpeed } from '@/features/loops/useSaveLoopSpeed';
 import { canPickBars } from '@/features/player/controlGates';
 import { PlayerControls, PlayPauseButton } from '@/features/player/PlayerControls';
 import type { PlayerOptions } from '@/features/player/playerOptions';
@@ -46,7 +45,7 @@ import { useStaysOnScreen } from './useStaysOnScreen';
  * /songs/:id/play, "Play whole song". Lazy-loaded from App.tsx with the
  * player. Jam mode (Unit 06): the whole song with a following cursor, tap a
  * bar to go there, and the speed and BPM at the current bar, with the
- * count-in (Unit 07) counted over the score. Loops (Unit 08) sit beside it: a
+ * count-in (Unit 07) counted over the score. Loops (Unit 08) are a sheet over it: a
  * saved bar range plays on repeat at its saved speed, and while the loop form
  * is open a tap on the score picks a bar instead of seeking. Time spent
  * playing a loop is logged as practice sessions (Unit 09). Keys and pedals
@@ -55,7 +54,7 @@ import { useStaysOnScreen } from './useStaysOnScreen';
  * `?new=1` (the song overview's "New loop") opens the loop form for a new
  * loop, and its save goes on to that loop's practice screen; `?edit=<id>`
  * (a loop's Edit on the overview) opens it on that loop, and its save or
- * Cancel goes back to the song (Unit 14).
+ * Cancel goes back to the song (Unit 16).
  */
 export function SongPage() {
   const { id = '' } = useParams();
@@ -169,6 +168,8 @@ function SongPlayer({
   const loops = useLoops(songId);
   const practice = useLoopPractice(player, snapshot, loops.data);
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
+  // Every change of the playing loop's speed is saved as it is made (no "Save speed").
+  useSaveLoopSpeed(songId, practice.activeLoop, snapshot.speedRatio);
   const linkedForm = useLinkedLoopForm(songId, snapshot, practice, loops.data);
   const shortcuts = useSongShortcuts({ player, practice, loops: loops.data });
   const loopPanel = useLoopPanelOpen();
@@ -188,7 +189,7 @@ function SongPlayer({
       // the fold rather than on running, so Hide controls brings it back as well: the user had
       // scrolled up to that button, and in phone landscape kept still the score was off the window.
       // Picking bars waits for the panel to be open: the open sheet's room at the page's end is
-      // what lets the window scroll the score up above it (14 QA issue 1: a form opened by
+      // what lets the window scroll the score up above it (16 QA issue 1: a form opened by
       // `?new=1` opens the sheet in the next render, and a scroll before that went nowhere).
       scoreOnScreen:
         pickingBars && loopPanel.open ? 'picking-bars' : fold.folded ? 'playing' : null,
@@ -202,7 +203,7 @@ function SongPlayer({
     : snapshot.barTempo;
   // The controls bar's slider gives way to the playing loop's own speed control: this shows it.
   const showLoopSpeed = () => {
-    // Open already (the column), nothing re-renders to run a hand-over: focus it now.
+    // Open already, nothing re-renders to run a hand-over: focus it now.
     if (loopPanel.open) {
       findLoopSpeed()?.focus();
       return;
@@ -216,14 +217,13 @@ function SongPlayer({
     // while the sheet is open, leaves room to scroll the score up above it: below 768 px the
     // score box is one line of music, so the page alone is too short to bring it clear.
     <div
-      className={`flex flex-col gap-3 lg:pb-0 ${
+      className={`flex flex-col gap-3 ${
         loopPanel.open ? 'pb-[calc(45dvh+4rem)] md:pb-[calc(min(40dvh,30rem)+4rem)]' : 'pb-12'
       }`}
       style={{ '--jam-bar-height': `${stickyBarHeight}px` } as CSSProperties}
     >
       <JamBar ref={stickyBarRef} player={player} snapshot={snapshot} tempo={readoutTempo} />
-      {/* Above the two columns: beside the panel the controls would be squeezed. Folded
-          while playing, it is a strip that sticks under the sticky bar. */}
+      {/* Folded while playing, the controls are a strip that sticks under the sticky bar. */}
       <div
         ref={controlsRef}
         // No style prop: useStaysOnScreen writes the room it holds as this element's bottom margin.
@@ -241,73 +241,35 @@ function SongPlayer({
           onShowLoopSpeed={panelShowsLoopSpeed(practice, snapshot) ? showLoopSpeed : null}
         />
       </div>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <PlayerStatusLine snapshot={snapshot} />
-            <div className="flex gap-2">
-              <ShortcutsButton onOpen={shortcuts.openHelp} />
-              <LoopPanelToggle
-                open={loopPanel.open}
-                panelBodyId={loopPanel.bodyId}
-                onOpenChange={setLoopPanelOpen}
-              />
-            </div>
-          </div>
-          <SessionNotice tracker={tracker} loops={loops.data} />
-          <ScoreBox
-            scrollRef={scrollRef}
-            scoreRef={scoreRef}
-            snapshot={snapshot}
-            hidden={nothingToShow}
-          />
-        </div>
-        <LoopPanel
-          songId={songId}
-          player={player}
-          snapshot={snapshot}
-          practice={practice}
-          loops={loops}
-          open={loopPanel.open}
-          onOpenChange={setLoopPanelOpen}
-          bodyId={loopPanel.bodyId}
-          outcome={linkedForm}
-        />
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <PlayerStatusLine snapshot={snapshot} />
+        <ShortcutsButton onOpen={shortcuts.openHelp} />
       </div>
+      <SessionNotice tracker={tracker} loops={loops.data} />
+      {/* The score has the page's whole width; the loop sheet lies over it when open. */}
+      <ScoreBox
+        scrollRef={scrollRef}
+        scoreRef={scoreRef}
+        snapshot={snapshot}
+        hidden={nothingToShow}
+      />
+      <LoopPanel
+        songId={songId}
+        player={player}
+        snapshot={snapshot}
+        practice={practice}
+        loops={loops}
+        open={loopPanel.open}
+        onOpenChange={setLoopPanelOpen}
+        bodyId={loopPanel.bodyId}
+        outcome={linkedForm}
+      />
       <ShortcutOverlay open={shortcuts.helpOpen} onClose={shortcuts.closeHelp} />
       {/* On the page from the start: a live region added with its text is often not read. */}
       <p role="status" className="sr-only" data-testid="shortcut-announcement">
         {announcementText(shortcuts.announcement)}
       </p>
     </div>
-  );
-}
-
-/**
- * Shows or hides the loop panel from 1024 px, where it is a column beside the
- * score. Hidden below (a phone, a tablet in portrait): the sheet's own header
- * is the one toggle there.
- */
-function LoopPanelToggle({
-  open,
-  panelBodyId,
-  onOpenChange,
-}: {
-  open: boolean;
-  panelBodyId: string;
-  onOpenChange: (open: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`max-lg:hidden ${open ? pressedButtonClass : buttonClass} whitespace-nowrap`}
-      aria-expanded={open}
-      aria-controls={panelBodyId}
-      onClick={() => onOpenChange(!open)}
-    >
-      <Icon name="loop" />
-      {open ? 'Hide loops' : 'Show loops'}
-    </button>
   );
 }
 

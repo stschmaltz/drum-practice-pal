@@ -63,12 +63,12 @@ export function ScoreBox({
         hidden={hidden}
         // jam-score: the cursor, highlight and tap styles in index.css. The bottom scroll
         // margin keeps the box clear of the loop sheet's header (and on a phone the
-        // fixed tab bar under it) when playback scrolls it into view; the column from
-        // lg covers nothing (useJamMode sets the top one from the sticky bar's height).
+        // fixed tab bar under it) when playback scrolls it into view (useJamMode sets the
+        // top one from the sticky bar's height).
         // Below 768 px the score is one line of music scrolling sideways, so the box is as tall
         // as that line (alphaTab sizes it) rather than a fixed height of blank paper under it.
         // At least as tall as the count-in number drawn over it.
-        className="jam-score relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:h-[60dvh] md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))] lg:scroll-mb-4"
+        className="jam-score relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card md:h-[60dvh] md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))]"
       >
         <div ref={scoreRef} />
       </div>
@@ -79,7 +79,7 @@ export function ScoreBox({
 /**
  * What became of the last practice session: logged, kept on the device until
  * the connection is back, or refused with a way to send it again. Above the
- * score, because below 1024 px the loop panel is a closed sheet while practising.
+ * score, because the loop panel is a closed sheet while practising.
  */
 export function SessionNotice({
   tracker,

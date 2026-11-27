@@ -56,7 +56,7 @@ export function masterySummary({ finished, total }: Mastery): string {
 /**
  * "8% to full speed", "Full speed", "10% over full speed": a loop's speed
  * against 100%, as the whole percents shown. Full speed is always 100% here
- * (docs/plan.md, Unit 14: no target speed).
+ * (docs/plan.md, Unit 16: no target speed).
  */
 export function fullSpeedLabel(percent: number): string {
   if (percent === 100) return 'Full speed';

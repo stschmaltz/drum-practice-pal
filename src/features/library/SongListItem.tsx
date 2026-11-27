@@ -82,7 +82,7 @@ export function SongListItem({
   }, [editing, song.id, onEditingChange]);
 
   return (
-    // A plain row between the list's dividers (Unit 14). relative: the title's link stretches
+    // A plain row between the list's dividers (Unit 16). relative: the title's link stretches
     // over the whole row (its ::after), and the row's buttons and its delete question sit above
     // that (relative z-10), so nothing is nested.
     <li
@@ -101,7 +101,7 @@ export function SongListItem({
       ) : (
         <div className="flex items-start gap-2">
           <SongSummary song={song} mastery={mastery} />
-          {/* Quiet secondary actions in "More" (14 QA issue 3), as the song's loop rows have
+          {/* Quiet secondary actions in "More" (16 QA issue 3), as the song's loop rows have
               them. Its button stands for Edit and Delete in the focus hand-overs
               (`findItemControl` falls back to it), and sits above the stretched link. */}
           {mode === 'view' && (

@@ -75,14 +75,12 @@ describe('createLoop', () => {
     start_bar: 5,
     end_bar: 8,
     speed_ratio: 0.708333,
-    target_ratio: 1,
   };
 
   it('inserts the loop for the user and returns the saved row', async () => {
     const saved = loopRow('new-id', {
       name: 'Chorus fill',
       speed_ratio: 0.708333,
-      target_ratio: 1,
     });
     queryResult.mockResolvedValueOnce(ok(saved));
 
@@ -99,16 +97,7 @@ describe('createLoop', () => {
     await createLoop(USER, newLoop);
     const [row] = opArgs(calls()[0]!, 'insert') as [Record<string, unknown>];
     expect(Object.keys(row).sort()).toEqual(
-      [
-        'end_bar',
-        'id',
-        'name',
-        'song_id',
-        'speed_ratio',
-        'start_bar',
-        'target_ratio',
-        'user_id',
-      ].sort(),
+      ['end_bar', 'id', 'name', 'song_id', 'speed_ratio', 'start_bar', 'user_id'].sort(),
     );
   });
 

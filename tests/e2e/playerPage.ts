@@ -44,7 +44,7 @@ export async function openSongOverview(page: Page, title: string) {
 
 /**
  * From the songs list (`/`), the song's overview and then "Play whole song":
- * jam mode, where the earlier units' specs run (Unit 14 put it a level down).
+ * jam mode, where the earlier units' specs run (Unit 16 put it a level down).
  */
 export async function openSongPlayer(page: Page, title: string) {
   await openSongOverview(page, title);

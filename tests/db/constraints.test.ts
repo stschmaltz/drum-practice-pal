@@ -108,9 +108,6 @@ describe('loops edges', () => {
   it.each([
     ['speed_ratio', SPEED_RATIO_MIN],
     ['speed_ratio', SPEED_RATIO_MAX],
-    ['target_ratio', SPEED_RATIO_MIN],
-    ['target_ratio', SPEED_RATIO_MAX],
-    ['target_ratio', null],
   ])('accepts %s = %j', async (field, value) => {
     const id = await insertLoop(user, songId, { [field]: value });
     expect((await loopById(id))[field as 'speed_ratio']).toBe(value);
@@ -136,8 +133,6 @@ describe('loops edges', () => {
   it.each([
     ['speed_ratio', 0.1],
     ['speed_ratio', 2.5],
-    ['target_ratio', 0.24],
-    ['target_ratio', 2.01],
   ])('rejects an update to %s = %j', async (field, value) => {
     const id = await insertLoop(user, songId);
     const { error } = await user.client
