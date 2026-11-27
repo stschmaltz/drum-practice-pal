@@ -72,6 +72,22 @@ describe('LoginPage', () => {
     expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
   });
 
+  it('asks for no code where the email carries only the link', async () => {
+    vi.stubEnv('VITE_SIGN_IN_CODE', 'off');
+    try {
+      const user = renderLogin();
+      await sendEmail(user, 'drummer@drumpal.test');
+
+      const status = await screen.findByRole('status');
+      expect(status).toHaveTextContent('Open it on this device to sign in.');
+      expect(status).not.toHaveTextContent('code');
+      expect(screen.queryByLabelText('Code')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Send again' })).toBeInTheDocument();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('shows why the email could not be sent and keeps the email form', async () => {
     fakeSupabase.auth.signInWithOtp.mockResolvedValue({
       data: null,

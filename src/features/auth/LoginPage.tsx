@@ -16,6 +16,7 @@ import {
   primaryButtonClass,
 } from '@/components/styles';
 import { safeNextPath, type LoginRedirectState } from './loginRedirect';
+import { signInCodeOffered } from './signInCode';
 import { useSendSignInEmail, useVerifySignInCode } from './useAuthActions';
 import {
   normalizeEmail,
@@ -176,37 +177,43 @@ function CodeStep({
     if (normalized && isOnline()) verifyCode.mutate({ email, code: normalized });
   };
 
+  const codeOffered = signInCodeOffered();
+
   return (
     <div className="flex flex-col gap-4">
       <p role="status" className="text-ink-soft">
-        Check <strong className="break-all">{email}</strong> for a sign-in link. Open it on this
-        device, or type the {SIGN_IN_CODE_LENGTH}-digit code from the email below.
+        Check <strong className="break-all">{email}</strong> for a sign-in link.{' '}
+        {codeOffered
+          ? `Open it on this device, or type the ${SIGN_IN_CODE_LENGTH}-digit code from the email below.`
+          : 'Open it on this device to sign in.'}
       </p>
-      <form className="flex flex-col gap-3" onSubmit={onSubmit}>
-        <label className={`flex flex-col gap-1 ${labelClass}`}>
-          Code
-          <input
-            className={`${inputClass} text-center font-mono text-xl tracking-[0.4em]`}
-            name="code"
-            autoComplete="one-time-code"
-            inputMode="numeric"
-            pattern={SIGN_IN_CODE_PATTERN}
-            required
-            value={code}
-            onChange={(event) => setCode(event.target.value)}
-          />
-        </label>
-        <button
-          type="submit"
-          className={primaryButtonClass}
-          disabled={verifyCode.isPending || offline}
-        >
-          {verifyCode.isPending ? 'Checking…' : 'Sign in with code'}
-        </button>
-        {verifyCode.error && (
-          <ErrorAlert>That code didn't work. {signInFailureCopy(verifyCode.error)}</ErrorAlert>
-        )}
-      </form>
+      {codeOffered && (
+        <form className="flex flex-col gap-3" onSubmit={onSubmit}>
+          <label className={`flex flex-col gap-1 ${labelClass}`}>
+            Code
+            <input
+              className={`${inputClass} text-center font-mono text-xl tracking-[0.4em]`}
+              name="code"
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              pattern={SIGN_IN_CODE_PATTERN}
+              required
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+            />
+          </label>
+          <button
+            type="submit"
+            className={primaryButtonClass}
+            disabled={verifyCode.isPending || offline}
+          >
+            {verifyCode.isPending ? 'Checking…' : 'Sign in with code'}
+          </button>
+          {verifyCode.error && (
+            <ErrorAlert>That code didn't work. {signInFailureCopy(verifyCode.error)}</ErrorAlert>
+          )}
+        </form>
+      )}
       <div className="flex flex-wrap gap-2 text-sm">
         <button
           type="button"
