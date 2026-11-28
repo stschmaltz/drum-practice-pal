@@ -196,7 +196,9 @@ export function LineUp({
         <label className={`${messageRowClass} text-xs/4 text-ink-soft`}>
           {/* The label gives way to what is wrong, in the same place and the same room. */}
           {typedInvalid ? (
-            <span role="alert" className="w-24 shrink-0 text-danger">
+            // Three lines in this width: a tighter leading keeps them inside the row's 44 px,
+            // so a refused time moves nothing under the video (19 QA).
+            <span role="alert" className="w-24 shrink-0 leading-3.5 text-danger">
               {LINE_UP_COPY.typedInvalid}
             </span>
           ) : (

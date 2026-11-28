@@ -238,3 +238,149 @@ Nothing bigger found.
 - `npm run check`: 5908 passed, 2 skipped (5794 before).
 - `npm run test:db`: 290 passed.
 - `E2E_PORT=4283 npx playwright test tests/e2e/recordings.spec.ts tests/e2e/journey.spec.ts tests/e2e/shortcuts.spec.ts`: 96 passed at phone, tablet and desktop. `tests/e2e/design.spec.ts -g "a song’s recordings"`: 3 passed.
+
+## QA
+
+Verdict: **FAIL**, on four major issues (1 to 4 below). Nothing blocks the main path: on a phone in portrait, a tablet and a laptop a lined-up video is followed correctly through everything tried. Two of the majors are the phone on its side, one is a slow connection, one is the phone's keyboard for "Type a time".
+
+### How it was run
+
+- The dev server on port 5283 (already running, left running) against the 54421 stack, headless Chromium driven by Playwright scripts, at 390x844, 820x1180, 1440x900, 320x700 and 844x390; all but the laptop as touch viewports (taps), the laptop with a mouse.
+- **Real YouTube videos, and YouTube was reachable throughout:** `aqz-KE-bpKQ` (10 min 35 s, the "long video"), `M7lc1UVf-VE` (as Drumless) and `jNQXAC9IVRw` (19 s, a video that ends inside the tab). The video's clock was read from the `<video>` element inside YouTube's frame and the marked bar from `window.__drumPalPlayer`, both in the same instant. Seeks were made on YouTube's own seek slider and speeds in its own Playback settings menu (the phone and sideways runs; the laptop run set `video.currentTime` and `playbackRate`, before the selectors for YouTube's current player were found).
+- Eight throwaway users made by "Dev: sign in" (`qa19-…@drumpal.test`), all deleted at the end by the ids recorded, files first. `demo@drumpal.test` was never used. Nothing was reset or seeded.
+- Not possible here: hearing anything, a real phone keyboard, Safari or Firefox, an advert (none turned up in some thirty plays).
+- Screenshots: `docs/units/19-shots/qa-<size>-NN-….png`.
+
+### Acceptance criteria
+
+| Criterion                                                                                                                                                      | Result                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A lined-up video marks the bar it is on and keeps it on screen at phone, tablet and desktop sizes, through pause, seek, a speed change and a repeat in the tab | **Pass** at 390x844, 820x1180 and 1440x900. **Fail** at 844x390 for the first four bars (issue 1), and at any size when YouTube's script arrives after the video was started (issue 3). At 320x700 bar 1 is half behind the tab bar (issue 8) |
+| "Bar 1 starts now" and the nudges are saved with the link and are there on another device                                                                      | **Pass** (a second browser context shows the same "Bar 1 at 0:05.58" after a reload, and Play on the video is all it takes)                                                                                                                   |
+| A tap on a bar seeks the video to it; Space plays and pauses the video                                                                                         | **Pass** (touch and mouse, playing and paused, a repeated bar included)                                                                                                                                                                       |
+| An unlined link, a Spotify link and a song with no links behave as before, and nothing is requested from YouTube before a recording is opened                  | **Pass**                                                                                                                                                                                                                                      |
+| Or type the time: the accepted forms, refused input, nothing moves, needs no playing video                                                                     | **Pass** after the cosmetic fix below                                                                                                                                                                                                         |
+| Or type the time: the saved time typed back sends nothing                                                                                                      | **Fail** for a time saved by a press (issue 5); passes for a typed time                                                                                                                                                                       |
+
+### What was walked, and what was measured
+
+**Lining up** (each of the five sizes)
+
+- Unlined: the prompt and "Bar 1 starts now", drawn off until the video plays; Space before the first tap gives "Press Play on the video once…" and plays nothing.
+- "Bar 1 starts now" at about 0:04: the saved time lay between the clock read just before the press and just after it in all five presses (4.022 to 4.034 saved 4.03, 4.059 to 4.106 saved 4.10 and so on), so the press itself adds no lateness. The line became "Bar 1 at 0:04.10. Drifting? Nudge the tab.", focus went to "Line up again", the live region said "Lined up. Bar 1 at 0:04.10."
+- Lined up early (0:02) and late (0:20) with the song at 0:05, then nudged or typed back: the mark moved a quarter second a press, at once, and two quick presses added up (0:04.10, two "Tab later", 0:04.60; two writes). "Tab earlier" at 0:00.10 lands on 0:00.00 and is then off (a press sends nothing); "Tab later" is off at 12:00:00.00.
+- "Line up again": the prompt is back with Cancel, focus on "Bar 1 starts now", the old line-up still marking bars; Cancel puts focus back on "Line up again".
+- A slow save (2.5 s a write): three nudges showed 0:05.50 after 130 ms, then 5.25, 5.5 and 5.75 were sent in order and the line ended on 0:05.75. A save that fails: "Couldn't save where bar 1 starts. The server couldn't be reached…", the value rolled back, focus kept, and the next nudge started from the right value.
+
+**Type a time**
+
+- Opened empty on an unlined link (no video playing, saved fine) and on the saved time on a lined one ("0:04.28"). Focus goes to the field; Escape and Cancel put it back on "Bar 1 starts now"; Enter and Save both save and put it on "Line up again".
+- Accepted: `0:07.25`, `83.5` (shown 1:23.50), `1:02:03.5`, `1m30s`, `7,5`, `0:05` with spaces round it, `90s`, `2m`, `0`, `43200`, `1:2:3`, `0:5.5`. One write each.
+- Refused with "A time in the video, like 0:07 or 1:23.5", `aria-invalid`, no write: empty, `abc`, `-1`, `43201`, `1:60`, `1:75.5`, `1:2:3:4`, `.5`, `7.`, `1h2m3s`, `0:07:`, `1e3`, `٧`, `12:00:00.001`, `NaN`, `5 s`. Typing again clears the message. `1m90s` is taken as 2:30.
+
+**Following** (Groove 120, bar 1 at 0:05)
+
+| Run                                                         | Samples         | Mark behind the video's clock                   | Mark ahead |
+| ----------------------------------------------------------- | --------------- | ----------------------------------------------- | ---------- |
+| 1x, 34 s, laptop / phone / sideways                         | about 1100 each | 0 to 0.23 s, mean 0.11 s                        | never      |
+| 1x, bar 1 at 0:05.13, 30 s                                  | about 970 each  | 0 to 0.10 s                                     | never      |
+| 0.5x in YouTube's menu, 60 s (phone, sideways)              | 1953            | 0 to 0.08 s of video time                       | never      |
+| 1.5x in YouTube's menu, 22 s (phone, sideways)              | 715             | 0 to 0.31 s of video time (0.21 s of wall time) | never      |
+| Repeats, 21 s; Tempo Change, 39.5 s (phone, tablet, laptop) | 700 / 1290      | 0 to 0.22 s                                     | never      |
+
+- The lag is the 250 ms poll: it is a fixed fraction of that for a whole song when the bars are a multiple of a quarter second long. At both speeds the marked bar matched the video's clock outside that window in every sample.
+- Before bar 1 and past the tab's last bar nothing is marked. Pause in the video: the mark stays. A seek on YouTube's slider: the mark is on the right bar within the next poll. The 19 s video ended inside the tab: the mark stays on the bar it ended in.
+- Repeats: the marks went 1, 2, 3, 4, 3, 4, 5, 6, 7, 8. A tap on bar 3 from bar 1 went to its first pass (0:09), from the second pass and from bar 5 to its second (0:13). Tempo change: right through the change at bar 9; a tap on bar 12 went to 0:29.00.
+- Each bar on show for a whole pass at 390, 820 and 1440 (about 18 samples a bar, none off). On a phone the page turns every four bars (the window's scroll went 390, 731, 1119, 1507).
+- Follow off for 22 s: the mark went from bar 1 to 12 and neither the window nor the score box moved. Follow on again: the bar is on show at once. A hand scroll to the top with Follow on is left alone inside the bar and followed again at the next.
+- Space: plays and pauses, and the page doesn't scroll.
+
+**The rest**
+
+- Source switching: Original (following), Drumless (its own frame, unlined, nothing marked), Tab (controls and cursor back, no frame, no mark), Original again (a new frame: nothing marked and Space says to tap it until it has been played). Each link keeps its own line-up.
+- Rotation while following: the same frame, the video plays on, nothing scrolls sideways (see issue 7 for where the bar is).
+- Offline mid-follow: the frame gives way to its note, the mark goes, "You're offline. Lining the tab up needs a connection.", the nudges and "Line up again" `aria-disabled`, Follow still a toggle. Back online: a new frame at 0:00 that has to be tapped, then followed from the saved line-up.
+- "Manage recordings", Original pointed at another video: the prompt is back on the play screen and Drumless keeps its line-up.
+- YouTube's script blocked: "The tab can't follow this video: its player isn't answering here.", and the video plays as in Unit 14.
+- Requests to any YouTube or Google host: **none** on the Songs list, Stats, Settings, the overviews (links saved), the Tab player, a Spotify-only song's play screen or a song with no links. On opening a recording: the frame on `www.youtube-nocookie.com`, then `www.youtube.com/iframe_api` and the widget script it loads, and from inside YouTube's own frame `i.ytimg.com`, `yt3.ggpht.com`, `fonts.gstatic.com`, `www.gstatic.com`, `www.google.com` and `jnn-pa.googleapis.com`.
+- 44 px: every control of the line-up is 44 px tall in every state at every size; the narrowest is 63 px wide (sideways).
+- Nothing moves: the score's top and the bar's height were the same in every state of the line-up (prompt, the first-tap note, typing, lined up, nudged, lining up again, a 12-hour time) at every size, except the two cases in issues 10 and 13.
+- Focus: prompt to "Line up again" after a press; back to "Bar 1 starts now" on "Line up again"; the field on "Type a time"; nudges and Follow keep it. Nothing fell to `<body>`.
+- Live region: "Lined up. Bar 1 at 0:04.10." and "Bar 1 at 0:04.60." (see issue 11 for what isn't said).
+
+### Issues
+
+**Major**
+
+1. **A phone on its side shows no score for the first four bars.** 844x390, a lined-up link, a fresh load, Play on the video. The score box starts below the fold (its top at 461 px in a 390 px window) and the follow moves the window 16 px a bar: bar 1 at 445 to 582, bar 2 at 429, bar 3 at 413, bar 4 at 397. From bar 5 it is right. Turning Follow on from the top of the page does the same. `qa-sideways-60-bar-1-off-show-at-start.png`. At the top of the page the recording bar isn't stuck yet and is taller than what is left of the window, so the room the bar is measured against is empty.
+2. **A phone on its side hides the line-up's controls under the video.** The line-up is 206 px wide there. Unlined: "Type a time" runs under the video ("Type a ti"). After "Line up again": Cancel is wholly under it and can't be tapped (the frame takes the tap), so the only ways back to the nudges are lining up again or typing the same time. Lined up: "Tab earlier" and "Follow" are 63 px wide and their words spill out. At the top of the page "Bar 1 starts now" is below the fold. `qa-sideways-07-line-up-again.png`, `qa-sideways-05-lined-up.png`, `qa-sideways-01-unlined.png`.
+3. **A video that is already playing when YouTube's script arrives is never followed.** Delay `https://www.youtube.com/iframe_api` by 8 s (a slow connection), open a lined-up recording, tap the video. When the script lands the video is at 0:09 and nothing is marked; 8 s later still nothing; Space says "Press Play on the video once…" while it plays. A pause and a play in the video's own controls starts the following. The wrapper only learns "started" from a state change, and none comes for a video that was playing before it attached; reading the player's state at "ready" would cover it. `qa-phone-71-playing-but-not-followed.png`.
+4. **"Type a time" asks a phone for the decimal keypad** (`inputmode="decimal"`), which has digits and a decimal point: no colon and no letters. So on a phone the forms the field itself suggests ("0:07.25", "1:23.5", "1m30s") can't be typed, and the saved time it opens on can only be deleted; seconds alone ("83.5") work. Read from the attribute, not seen on a device (headless Chromium has no keyboard): **confirm on the phone**; if the keypad there has a colon this is nothing.
+
+**Minor**
+
+5. **The saved time typed back sends a write when it was saved by a press.** A press saves to the millisecond (2.018) and the field shows the hundredth ("0:02.02"), so Enter on the untouched field sends `{"bar_one_seconds":2.02}`. Seen at 390, 820 and 320. The line-up moves by up to 5 ms; the plan says it sends nothing. Compare what is shown, or save a press to the hundredth.
+6. **A nudge from a page that hasn't seen the link change puts the old video's line-up on the new one.** Device A follows Original; device B points Original at another video (its line-up is cleared); A, not reloaded, presses "Tab later": the write lands on the same row, and B now shows "Bar 1 at 0:05.83" for a video nobody lined up. Scope the write by the address the page knows.
+7. **After a rotation the marked bar is off screen until the next bar starts.** 390x844 to 844x390 while following: the bar was at 533 to 630 px in a 390 px window until the next bar change; back to portrait, behind the tab bar for the same stretch. Paused, it stays there. The follow acts on a change of bar, not on a change of layout.
+8. **320x700.** Bar 1 is half behind the tab bar for its two seconds from a fresh load (577 to 714 px with the tab bar at 643; `qa-small-60-bar-1-off-show-at-start.png`). After "Line up again" the row is 24 px wider than the page: Cancel is cut off and the page scrolls sideways (`qa-small-07-line-up-again.png`). There the page also turns every two bars.
+9. **"Bar 1 starts now" is off with nothing saying why.** Before the video is played, and whenever it is paused, the button is drawn off and a tap on it does and says nothing. A first-timer has no cue to play the video first. Pausing on the downbeat and pressing, the most exact way to line up by hand, isn't possible (see Questions).
+10. **A failed save's message moves the score:** 4.6 px at 390 px, 20.6 px at 320 px (three and five lines in the words' row), back when the next save lands. The code's comment allows it; it is the one state of the line-up that moves the page.
+11. **Not said to a screen reader:** the "Press Play on the video once…" note (Space then does nothing and says nothing) and "its player isn't answering here".
+12. **A line-up can't be taken away,** only replaced. A link lined up against the wrong tab keeps marking bars; Follow off stops the scrolling, not the mark.
+
+**Cosmetic**
+
+13. **Fixed here:** a refused typed time made the line-up 4 px taller at every size (three 16 px lines in a 44 px row), moving the score by 4 px. The alert's leading is now 14 px (`LineUp.tsx`); the line-up measured 88 px before and after the refusal at all five sizes.
+14. `1h2m3s`, which is how YouTube writes a time over an hour, is refused; `1m90s` is accepted as 2:30.
+15. While typing, the field sits directly on the Save button with no gap (`qa-phone-03-type-a-time.png`).
+
+### Judged as the product (docs/product.md)
+
+- **Can a drummer read along on a phone in portrait now? Yes.** The video, "Open in YouTube" and the line-up take 351 px; 436 px of score is left above the tab bar, which is four lines of one bar each, and nobody has to touch the phone after Play. That is job 4 (read along) done where Unit 14 left a flick every few seconds. The weak spot is the page turn: the bar that has just left the view is put at the top, so in the last bar before a turn there is nothing ahead to read, and a drummer reads ahead. See Questions.
+- **Is per-bar marking enough?** For "where are we", yes, and it is honest: the mark trails by up to a quarter second (an eighth note at 120 BPM), which is invisible on a bar and would be wrong on a beat. Whether it is enough to read a busy bar from is for the kit.
+- **Taps to sound, first time:** Songs, the song, "Original", Play on the video: four from the app open, and a fifth, optional, for "Bar 1 starts now". Every later time, four, none of them for the following. A hard fill: one tap on its bar.
+- **Missing a piece:** no link, a Spotify link, no drum track, an unlined link, offline: each is what it was. Nothing nags about lining up.
+- **What trips them:**
+  - The off button with no reason (issue 9).
+  - "Tab earlier / Tab later" still needs a thought: if the mark is behind the music you press "Tab earlier". The time beside it helps.
+  - A dropped connection mid-song takes the video away and brings it back at 0:00 needing a tap (Unit 14's rule that no frame is drawn offline). The video would have played on from its buffer. It costs more now that the tab is following it.
+  - A phone on its side (issues 1 and 2), which reads as unfinished. Nothing else does.
+- **Is the line-up understandable the first time?** The sentence and its button read as one instruction, and after the press the result explains itself (a bar lights up and moves). The gap is the moment before: nothing says the video has to be playing.
+- **No chore, no forced order:** the line-up is the one thing the app can't see, asked once per link, never required.
+
+### The plan's open questions
+
+- _Per bar, or a beat line too?_ **Keep per bar.** Measured lag is 0 to 0.25 s before any drift between the tab and the recording; at 120 BPM a beat line would be up to half a beat behind.
+- _Should a tap seek, or line up to that bar?_ **Keep seek.** It worked every time, a repeated bar included, and it is the one-tap way to a hard part.
+- _Follow on by default?_ **Yes.** Off is one tap and is respected.
+- From Build's Carried forward, the script from `www.youtube.com`: **keep the documented API.** YouTube's own frame already asks `www.google.com`, `gstatic.com` and `googleapis.com` once it is open, so driving it by `postMessage` would buy little, and nothing is asked before a recording is opened.
+- From Build's Carried forward, a reaction time at the press: the press itself is exact to the clock (above); how late a person is, is for the kit.
+
+### Questions for Shane
+
+1. **When should the page turn?** Now: when the marked bar has left the view, it goes to the top. Option: turn a line early, so the line after the marked one is always on show. Recommendation: turn early. It costs nothing on a tablet and is what makes a phone readable across a turn.
+2. **Line up while paused?** Now "Bar 1 starts now" only works while the video plays. Option: also when paused on a started video (scrub to the downbeat, press). Recommendation: allow it, and have the off button say "Press Play on the video first" when tapped.
+3. **The keyboard for "Type a time" on a phone:** the decimal keypad (seconds only, quick) or the full keyboard (colon and "1m30s", slower). Recommendation: the full keyboard, since the field shows and suggests "0:07.25". Check issue 4 on the phone first.
+4. **A phone on its side under a video:** do you use it? If yes, issues 1 and 2 are a small Build round. If not, the cheap answer is still to fix the scroll (1) and let the line-up's row wrap.
+5. **Taking a line-up away** (issue 12): a "Remove" beside "Line up again", or leave it until a wrong line-up happens. Recommendation: leave it.
+6. **A connection that drops mid-song** removes a playing video. Keep an already-playing frame and only refuse to draw a new one offline? Recommendation: yes, in Unit 15, where the player is worked on again.
+
+### Human checks (from the plan, for Shane)
+
+- At the kit: line a song up and play along on the tablet and on a phone in portrait.
+- Whether per-bar marking is enough to read from.
+- How far a real recording drifts from its tab over a song, and whether the nudges are enough.
+- Added by this stage: the phone's keyboard on "Type a time" (issue 4); iPhone and iPad Safari (everything here ran on Chromium: the player API in an iOS frame, `playsinline`, Space from a Bluetooth keyboard); a video with an advert in it, if one turns up (does the mark hold still?).
+
+### Not covered
+
+- Sound of any kind, Safari, Firefox, a real touch screen.
+- An advert, a video that refuses embedding, a loop left set up on Tab keeping its mark.
+- A second device picking a line-up up without a reload (a reload does; a synthetic focus event in a headless page did not refetch, which proves nothing about a real window).
+- A tab longer than the 16-bar fixtures; "a long song" was a long video over a short tab.
+
+### Verify
+
+- `npm run check`: green.
+- `E2E_PORT=4283 npx playwright test tests/e2e/recordings.spec.ts tests/e2e/design.spec.ts -g "recording|line-up|Unit 19|follows|video|a song’s recordings"`: 57 passed, after the cosmetic fix.
+- `src/features/recordings/LineUp.typed.test.tsx`: 8 passed.
