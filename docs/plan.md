@@ -124,6 +124,7 @@ If QA finds a real bug, a Build agent fixes it from QA's notes, then Test and QA
 - One branch and one PR per unit; one commit per stage.
 - Every stage ends green: `npm run check`, and `npm run e2e` once e2e covers real flows.
 - An open issue that a stage hands to a later unit gets a line in that unit's **Carried forward** list below, with the note it came from. Handoff notes are long; a later agent shouldn't have to find the issue by rereading all of them. The unit that picks an item up deletes its line.
+- Carried forward lists are kept short (AGENTS.md, Stage workflow): a question for Shane is asked in the unit's report with a recommendation, never parked as a line; nothing is carried a third time (the next Review fixes it, accepts it in writing, moves it to Open human checks, or deletes it); a unit that changes a screen rewrites the lines about that screen.
 - **Human check** items are for Shane on a real device (mostly iOS audio). Agents can't hear playback.
 
 **Prompt templates** (swap in the unit number and name)
