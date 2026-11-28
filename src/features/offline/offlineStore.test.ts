@@ -4,12 +4,7 @@ import { loopKeys } from '@/features/loops/loopKeys';
 import type { SessionRecord } from '@/features/practice/sessionTracker';
 import { offlineDb, type OutboxEntry } from './offlineDb';
 import { clearOfflineData } from './offlineData';
-import {
-  outboxEntries,
-  putOutboxEntry,
-  removeOutboxEntry,
-  takeLeftoverOutboxEntries,
-} from './outbox';
+import { outboxEntries, putOutboxEntry, takeLeftoverOutboxEntries } from './outbox';
 import {
   PERSISTED_CACHE_BUSTER,
   queryPersister,
@@ -101,25 +96,33 @@ async function leftBehind(...entries: OutboxEntry[]) {
   await offlineDb.outbox.bulkPut(entries);
 }
 
+/** Queues an entry as a send on this page does, the row written; gives back the send's hold. */
+async function queued(entry: OutboxEntry) {
+  const hold = putOutboxEntry(entry);
+  await hold.stored;
+  return hold;
+}
+
+const idsOf = (leftover: { entry: OutboxEntry }[]) => leftover.map(({ entry }) => entry.id);
+
 describe('outbox', () => {
-  it('keeps an entry until it is removed, once however often it is queued', async () => {
-    await putOutboxEntry(session('a'));
-    await putOutboxEntry(session('a'));
+  it('keeps an entry until its send lets go of it', async () => {
+    const hold = await queued(session('a'));
     expect(await outboxEntries('u1')).toHaveLength(1);
-    await removeOutboxEntry('a');
+    await hold.release();
     expect(await outboxEntries('u1')).toEqual([]);
   });
 
   it("gives the replay an earlier page's entries, the user's own only, oldest first", async () => {
     await leftBehind(session('late', 'u1', 30), session('early', 'u1', 10), session('x', 'u2', 5));
     const taken = await takeLeftoverOutboxEntries('u1');
-    expect(taken.map((entry) => entry.id)).toEqual(['early', 'late']);
+    expect(idsOf(taken)).toEqual(['early', 'late']);
   });
 
   it('never gives the replay what this page is sending itself', async () => {
-    await putOutboxEntry(session('mine'));
+    await queued(session('mine'));
     await leftBehind(session('theirs'));
-    expect((await takeLeftoverOutboxEntries('u1')).map((entry) => entry.id)).toEqual(['theirs']);
+    expect(idsOf(await takeLeftoverOutboxEntries('u1'))).toEqual(['theirs']);
   });
 
   it('gives each entry to one replay, when two start together', async () => {
@@ -128,14 +131,135 @@ describe('outbox', () => {
       takeLeftoverOutboxEntries('u1'),
       takeLeftoverOutboxEntries('u1'),
     ]);
-    expect([...first, ...second].map((entry) => entry.id).sort()).toEqual(['a', 'b']);
+    expect(idsOf([...first, ...second]).sort()).toEqual(['a', 'b']);
+  });
+
+  it("holds what the replay took until the replay lets go, whatever the entry's own send does", async () => {
+    await leftBehind(session('left'));
+    const [taken] = await takeLeftoverOutboxEntries('u1');
+    // The replay's mutation queues it again for itself, and has its answer.
+    const send = await queued(session('left'));
+    await send.release();
+    expect(idsOf(await takeLeftoverOutboxEntries('u1'))).toEqual([]);
+    expect(await outboxEntries('u1')).toHaveLength(1);
+
+    await taken!.release();
+    expect(await outboxEntries('u1')).toEqual([]);
+  });
+
+  it('never gives the replay an entry whose removal is still on its way (14.6)', async () => {
+    const hold = await queued(session('answered'));
+    // The replay's read is in flight when the answer arrives: it finds the row still there.
+    const taking = takeLeftoverOutboxEntries('u1');
+    const removing = hold.release();
+    expect(await taking).toEqual([]);
+    await removing;
+    expect(await outboxEntries('u1')).toEqual([]);
+  });
+
+  it('gives the replay nothing when it starts just after a removal does', async () => {
+    const hold = await queued(session('answered'));
+    const removing = hold.release();
+    const taking = takeLeftoverOutboxEntries('u1');
+    expect(await taking).toEqual([]);
+    await removing;
+  });
+
+  it('keeps an entry claimed when it is queued again while its last removal is on its way', async () => {
+    const first = await queued(session('again'));
+    const removing = first.release();
+    const again = putOutboxEntry(session('again'));
+    await Promise.all([removing, again.stored]);
+    expect((await outboxEntries('u1')).map((entry) => entry.id)).toEqual(['again']);
+    // This page is sending it again, so a replay started now must leave it alone.
+    expect(await takeLeftoverOutboxEntries('u1')).toEqual([]);
+
+    // And the second send's answer takes the row out and gives the id up.
+    await again.release();
+    expect(await outboxEntries('u1')).toEqual([]);
+    await leftBehind(session('again'));
+    expect(idsOf(await takeLeftoverOutboxEntries('u1'))).toEqual(['again']);
+  });
+
+  it('keeps an answered entry from the replay when its row could not be deleted', async () => {
+    const hold = await queued(session('stuck'));
+    const refuse = vi.spyOn(offlineDb.outbox, 'delete').mockRejectedValueOnce(new Error('quota'));
+    await hold.release();
+    refuse.mockRestore();
+    expect(await outboxEntries('u1')).toHaveLength(1);
+    expect(await takeLeftoverOutboxEntries('u1')).toEqual([]);
+  });
+
+  // Copilot review on #37: two sends of one id at once (a session's "Try again" pressed
+  // twice). The row is every such send's copy, so it goes with the last of them.
+  describe('queued by two sends at once', () => {
+    // Holds outlive a test (the module's state is this page's), so each test has its own id.
+    it.each([
+      { answeredFirst: 'the earlier send', order: [0, 1] },
+      { answeredFirst: 'the later send', order: [1, 0] },
+    ] as const)(
+      "stays, and stays this page's, when $answeredFirst is answered first; the other takes it out",
+      async ({ order }) => {
+        const holds = [await queued(session('twice')), await queued(session('twice'))] as const;
+
+        await holds[order[0]].release();
+        expect((await outboxEntries('u1')).map((entry) => entry.id)).toEqual(['twice']);
+        expect(await takeLeftoverOutboxEntries('u1')).toEqual([]);
+
+        await holds[order[1]].release();
+        expect(await outboxEntries('u1')).toEqual([]);
+      },
+    );
+
+    it('is there for the next page when this one closes with one send unanswered', async () => {
+      const [first] = [await queued(session('closed')), await queued(session('closed'))] as const;
+      await first.release();
+
+      // A new page: the same database, none of this page's holds.
+      vi.resetModules();
+      const nextPage = await import('./outbox');
+      expect(idsOf(await nextPage.takeLeftoverOutboxEntries('u1'))).toEqual(['closed']);
+    });
+
+    it("lets one send go once: a second release of the same hold is not the other send's", async () => {
+      const [first] = [await queued(session('once')), await queued(session('once'))] as const;
+      await first.release();
+      await first.release();
+      expect(await outboxEntries('u1')).toHaveLength(1);
+      expect(await takeLeftoverOutboxEntries('u1')).toEqual([]);
+    });
+
+    it('is taken out by the later send when its answer comes while the row is being deleted for the earlier', async () => {
+      const first = await queued(session('during'));
+      const realDelete = offlineDb.outbox.delete.bind(offlineDb.outbox);
+      let finish!: () => void;
+      const heldDelete = new Promise<void>((resolve) => (finish = resolve));
+      const deleting = vi.spyOn(offlineDb.outbox, 'delete').mockImplementationOnce(((key: string) =>
+        (async () => {
+          await realDelete(key);
+          await heldDelete;
+        })()) as never);
+      const removing = first.release();
+      // Queued again and answered at once, all inside the first removal.
+      const second = await queued(session('during'));
+      await second.release();
+      expect(await outboxEntries('u1')).toEqual([]);
+      // The first removal is still on its way, so the id is still this page's.
+      await leftBehind(session('during'));
+      expect(await takeLeftoverOutboxEntries('u1')).toEqual([]);
+
+      finish();
+      await removing;
+      deleting.mockRestore();
+      expect(idsOf(await takeLeftoverOutboxEntries('u1'))).toEqual(['during']);
+    });
   });
 
   it('is emptied by a sign-out, with a write begun before it kept out', async () => {
-    await putOutboxEntry(session('a'));
+    await queued(session('a'));
     const late = putOutboxEntry(session('b'));
     await clearOfflineData();
-    await late;
+    await late.stored;
     expect(await outboxEntries('u1')).toEqual([]);
   });
 });
@@ -261,7 +385,7 @@ describe('saveCacheWhenHidden', () => {
 describe('clearOfflineData (sign-out)', () => {
   it("leaves nothing of anyone's on the device: song files, queued writes and the persisted cache", async () => {
     await loadSongFile('u1', 's1', async () => bytes(1));
-    await putOutboxEntry(session('a'));
+    await queued(session('a'));
     await queryPersister.persistClient({
       timestamp: Date.now(),
       buster: PERSISTED_CACHE_BUSTER,

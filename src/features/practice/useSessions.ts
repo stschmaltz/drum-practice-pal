@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { songKeys } from '@/features/library/useSongs';
 import { loopKeys } from '@/features/loops/loopKeys';
-import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
+import { putOutboxEntry, type OutboxHold } from '@/features/offline/outbox';
 import { useSignedInUser } from '@/lib/auth';
 import { queuedWriteRetry } from '@/lib/network';
 import { sendRefreshingToken } from '@/lib/tokenRefresh';
@@ -82,9 +82,10 @@ function refetchLoopsWhenIdle(queryClient: QueryClient, userId: string) {
 /**
  * Keeps a session on this device until the server has it (outbox.ts), so
  * practice done offline, or on a page closed before its log got through, is
- * logged at the next start. Called before every send, whichever way it goes.
+ * logged at the next start. Called before every send, whichever way it goes;
+ * the caller releases the hold it gets once that send has its answer.
  */
-export function queueSession(userId: string, record: SessionRecord): Promise<void> {
+export function queueSession(userId: string, record: SessionRecord): OutboxHold {
   return putOutboxEntry({ kind: 'session', id: record.id, userId, queuedAt: Date.now(), record });
 }
 
@@ -99,18 +100,25 @@ function logSessionOptions(queryClient: QueryClient, userId: string) {
   return {
     mutationKey: sessionKeys.logs(userId),
     mutationFn: (record: SessionRecord) => sendRefreshingToken(() => logSession(userId, record)),
-    onMutate: (record: SessionRecord) => queueSession(userId, record),
+    onMutate: async (record: SessionRecord): Promise<OutboxHold> => {
+      const queued = queueSession(userId, record);
+      await queued.stored;
+      return queued;
+    },
     ...queuedWriteRetry,
     onSuccess: (result: LogSessionResult, record: SessionRecord) => {
       if (result === 'logged') sessionLogged(queryClient, userId, record);
       else sessionLoopGone(queryClient, userId);
     },
     // Answered either way: logged, its loop gone, or refused (it would be refused again).
+    // Only this send's hold: another send of the same session (a second "Try again") may
+    // still be on its way, and the row is its copy too.
     onSettled: (
       _result: LogSessionResult | undefined,
       _error: Error | null,
-      record: SessionRecord,
-    ) => removeOutboxEntry(record.id),
+      _record: SessionRecord,
+      queued: OutboxHold | undefined,
+    ) => queued?.release(),
   };
 }
 

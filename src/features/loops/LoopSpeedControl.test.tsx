@@ -1,9 +1,16 @@
+import { AuthRetryableFetchError } from '@supabase/supabase-js';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DEFAULT_PLAYER_OPTIONS } from '@/features/player/playerOptions';
 import { initialPlayerSnapshot, type PlayerService } from '@/features/player/PlayerService';
 import { SPEED_RATIO_MAX, SPEED_RATIO_MIN } from '@/lib/schema';
-import { resetFakeSupabase } from '@/test/fakeSupabase';
+import {
+  FAKE_AUTH_STORAGE_KEY,
+  fakeSession,
+  fakeSupabase,
+  queryResult,
+  resetFakeSupabase,
+} from '@/test/fakeSupabase';
 import { startOfBar } from '@/test/fakePlayerEngine';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
@@ -353,5 +360,83 @@ describe('LoopSpeedControl saving', () => {
     );
     await settle();
     expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.85 }]);
+  });
+});
+
+// Unit 20 Test (13.23): the speed saves itself (`useSaveLoopSpeed`); with supabase-js's
+// session lost to a refresh that found no connection, the save must wait, not be refused.
+describe('LoopSpeedControl saving with no session in memory, one still stored', () => {
+  const cachedSpeed = (view: Awaited<ReturnType<typeof renderControl>>) =>
+    view.queryClient.getQueryData<Loop[]>(loopKeys.forSong('user-1', LOOP_SONG_ID))?.[0]
+      ?.speed_ratio;
+
+  /** No session until `sessionBack()`; the stored one is still there. */
+  function loseSession() {
+    localStorage.setItem(FAKE_AUTH_STORAGE_KEY, JSON.stringify(fakeSession()));
+    let lost = true;
+    fakeSupabase.auth.getSession.mockImplementation(async () =>
+      lost
+        ? { data: { session: null }, error: new AuthRetryableFetchError('Failed to fetch', 0) }
+        : { data: { session: fakeSession() }, error: null },
+    );
+    return () => {
+      lost = false;
+    };
+  }
+  const asked = () => fakeSupabase.auth.getSession.mock.calls.length;
+
+  it('sends nothing, says nothing went wrong and keeps the speed; it is saved once when the session is back', async () => {
+    const view = await renderControl(before);
+    const sessionBack = loseSession();
+    await view.user.click(view.nudge('Faster by 5%'));
+
+    await waitFor(() => expect(asked()).toBe(1));
+    await settle();
+    expect(view.table.sent('update')).toEqual([]);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(view.percent()).toHaveValue('85');
+    expect(cachedSpeed(view)).toBe(0.85);
+    expect(view.stored()).toBe(0.8);
+
+    sessionBack();
+    await waitFor(() => expect(view.stored()).toBe(0.85), { timeout: 3000 });
+    await settle();
+    expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.85 }]);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(view.percent()).toHaveValue('85');
+  });
+
+  it('speeds changed while the first save is held back go after it, in order, the last one kept', async () => {
+    const view = await renderControl(before);
+    const sessionBack = loseSession();
+    await view.user.click(view.nudge('Faster by 5%'));
+    await waitFor(() => expect(asked()).toBe(1));
+    await view.user.click(view.nudge('Faster by 1%'));
+    await settle();
+    expect(view.table.sent('update')).toEqual([]);
+    expect(view.percent()).toHaveValue('86');
+
+    sessionBack();
+    await waitFor(() => expect(view.stored()).toBe(0.86), { timeout: 3000 });
+    expect(view.table.sent('update')).toEqual([{ speed_ratio: 0.85 }, { speed_ratio: 0.86 }]);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('a 42501 with a session in memory is still a refusal: it says so, and the saved speed goes back', async () => {
+    const view = await renderControl(before);
+    localStorage.setItem(FAKE_AUTH_STORAGE_KEY, JSON.stringify(fakeSession()));
+    queryResult.mockImplementationOnce(async () => ({
+      data: null,
+      error: { message: 'permission denied for table loops', code: '42501' },
+    }));
+    await view.user.click(view.nudge('Faster by 5%'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save the speed.");
+    await waitFor(() => expect(cachedSpeed(view)).toBe(0.8));
+    expect(view.stored()).toBe(0.8);
+    // The speed playing is the user's; only what is saved went back.
+    expect(view.player.getSnapshot().speedRatio).toBe(0.85);
+    await settle();
+    expect(asked()).toBe(1);
   });
 });
