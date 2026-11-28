@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import type { Page } from '@playwright/test';
-import { expect, test } from './auth';
+import { expect, signIn, test, type E2eUser } from './auth';
 import {
   chooseLoopAction,
   closeLoopPanel,
@@ -16,6 +16,7 @@ import {
   loopPanelToggle,
   loopPercentField,
   loopSpeed,
+  newLoopButton,
   openLoopPanel,
   saveLoopButton,
   saveNewLoop,
@@ -30,6 +31,7 @@ import {
   chooseCountInMode,
   expectedLayout,
   openFixture,
+  openSongPlayer,
   overlaps,
   playButton,
   recordedStatuses,
@@ -37,13 +39,14 @@ import {
   scoreBox,
   scrollScoreToStart,
   status,
+  uploadFixture,
   viewport,
   scoreSettled,
   windowScrollSettled,
   type Box,
   type Point,
 } from './playerPage';
-import { backTo, overviewItem } from './practicePage';
+import { addLoops, backTo, openPractice, overviewItem } from './practicePage';
 
 // Unit 08, QA fix round 1: on a phone "Play loop" closes the sheet, and the score
 // box scrolls to the bar a count-in counts into, or a paused loop starts on.
@@ -743,3 +746,529 @@ for (const turned of [false, true]) {
     });
   }
 }
+
+// Unit 20, batch 4: the loop sheet when playback starts from outside it (13.32), where the
+// reopened sheet's list is (13.28b), and bars typed into the loop form (13.27a). The focus
+// hand-over after "Play loop" (13.28a) is in shortcuts.spec.ts, with the keys.
+
+/** The player's status, the sheet and the highlighted bars, read in the page in one instant. */
+const sheetAndBarsNow = (page: Page) =>
+  page.evaluate(() => {
+    const player = (window as unknown as RecorderWindow).__drumPalPlayer;
+    if (!player) throw new Error('No player on window.__drumPalPlayer');
+    const frame = document.querySelector('[data-testid="score-viewport"]')?.getBoundingClientRect();
+    const first = document.querySelector('.bar-highlight > div')?.getBoundingClientRect();
+    const header = document.querySelector('[data-testid="loop-panel"] > button[aria-controls]');
+    const x = first ? first.x + 20 : 0;
+    const y = first ? first.y + first.height / 2 : 0;
+    return {
+      status: player.getSnapshot().status,
+      sheetExpanded: header?.getAttribute('aria-expanded') ?? null,
+      /** Whether the start of the highlighted bars is in the score box; null with no highlight. */
+      firstBarInBox:
+        frame && first
+          ? x >= frame.left && x <= frame.right && y >= frame.top && y <= frame.bottom
+          : null,
+    };
+  });
+
+/** How long after a count-in begins the sheet it closes may still be seen open. */
+const SHEET_CLOSED_BY_MS = 250;
+
+for (const start of ['Play in the page’s bar', 'Space'] as const) {
+  // 08 QA fix round 1, N1: the sheet stays open after a loop is saved, and Play then counted in
+  // with the number behind it.
+  test(`${start}, with the sheet open and a count-in, closes the sheet: on every beat the number is in the clear (13.32)`, async ({
+    user,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await openFixture(page, user, 'groove-120', 'Groove 120');
+    // Half speed: a beat lasts a second, so each one is on show long enough to measure.
+    await setSpeed(page, 50);
+    await chooseCountIn(page, 1);
+    await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 6 });
+    await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'true');
+    await recordGeometry(page);
+
+    if (start === 'Space') {
+      // Focus is where the save left it, on "New loop" in the sheet: Space plays from anywhere.
+      await expect(newLoopButton(page)).toBeFocused();
+      await page.keyboard.press('Space');
+    } else {
+      await playButton(page).click();
+    }
+    await expect(status(page)).toContainText('Counting in');
+
+    // The sheet's header takes focus that was in the sheet (it would fall to <body>); focus
+    // on the page's own Play is left where it is.
+    await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(start === 'Space' ? loopPanelToggle(page) : playButton(page)).toBeFocused();
+    await expect(loopPanel(page)).toContainText('Loop: Verse');
+
+    await expect(status(page)).not.toContainText('Counting in', { timeout: 15_000 });
+    await expect(playButton(page)).toHaveText('Pause');
+    const counted = (await samples(page)).filter((sample) => sample.status === 'countingIn');
+    const onBeats = counted.filter((sample) => sample.beat !== null);
+    expect(onBeats.map((sample) => sample.beat)).toEqual(beatsOf(1));
+
+    // The sheet closes in an effect of the render that shows the count-in, so the first
+    // frames can still have it open (seen with Space under a full parallel run, never with a
+    // click); from a quarter of a second in it is closed, which is before the second beat.
+    const afterItClosed = counted.filter((sample) => sample.sinceCountIn >= SHEET_CLOSED_BY_MS);
+    expect(afterItClosed.map((sample) => sample.beat)).toEqual(
+      expect.arrayContaining(beatsOf(1).slice(1)),
+    );
+    for (const sample of afterItClosed) {
+      const at = `count-in beat ${sample.beat ?? '(before the first)'}`;
+      expect(sample.sheetExpanded, at).toBe('false');
+      // Nothing of the sheet is over the number: only its header is left, under the score.
+      const sheetOverNumber =
+        sample.panel !== null && sample.number !== null && overlaps(sample.panel, sample.number);
+      expect(sheetOverNumber, at).toBe(false);
+    }
+    for (const sample of onBeats) {
+      const at = `count-in beat ${sample.beat}`;
+      expect(sample.number, at).not.toBeNull();
+      expect(overlaps(sample.scoreBox, sample.number!), at).toBe(true);
+    }
+    const settled = onBeats.filter((sample) => sample.sinceCountIn >= WINDOW_SETTLED_MS);
+    expect(settled.length).toBeGreaterThanOrEqual(3);
+    for (const sample of settled) {
+      const at = `count-in beat ${sample.beat}`;
+      expect(inside(sample.visible, sample.number!), at).toBe(true);
+      expect(sample.numberCovered, at).toBe(false);
+    }
+
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Play');
+  });
+}
+
+// 20 batch 4 Build, Decisions: only the count-in that starts a run closes the sheet. One opened
+// on purpose during a count-in, or while the loop plays (for its speed), is not closed under
+// the finger at every pass.
+test('with a count-in before every repeat, a sheet opened during the count-in stays open through the downbeat, and one opened mid-loop stays open over each repeat’s count-in (13.32)', async ({
+  user,
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  // Two bars at 120 BPM: four seconds of count-in to open the sheet in.
+  await chooseCountIn(page, 2);
+  await chooseCountInMode(page, 'every_repeat');
+  await saveNewLoop(page, { name: 'Round', firstBar: 5, lastBar: 6 });
+  await closeLoopPanel(page);
+  await recordGeometry(page);
+  await recordStatuses(page);
+
+  await playButton(page).click();
+  await expect(status(page)).toContainText('Counting in');
+  await loopPanelToggle(page).click();
+  // Opened while it still counted: both read in the same instant.
+  expect(await sheetAndBarsNow(page)).toMatchObject({
+    status: 'countingIn',
+    sheetExpanded: 'true',
+  });
+
+  // Through the rest of the count-in and the downbeat.
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect(status(page)).not.toContainText('Counting in', { timeout: 10_000 });
+  expect(await sheetAndBarsNow(page)).toMatchObject({ status: 'playing', sheetExpanded: 'true' });
+
+  // Closed and opened again while the loop plays, as for its speed.
+  await loopPanelToggle(page).click();
+  await loopPanelToggle(page).click();
+  expect(await sheetAndBarsNow(page)).toMatchObject({ status: 'playing', sheetExpanded: 'true' });
+  await expect(loopSpeed(page)).toBeVisible();
+
+  await expect
+    .poll(async () => (await recordedStatuses(page)).join(' '), { timeout: 60_000 })
+    .toContain('countingIn playing countingIn playing countingIn playing');
+  const all = await samples(page);
+  await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'true');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+
+  // Every frame measured in the two repeats' count-ins had the sheet open.
+  for (const countInNumber of [2, 3]) {
+    const ofThisOne = all.filter(
+      (sample) => sample.status === 'countingIn' && sample.countInNumber === countInNumber,
+    );
+    expect(ofThisOne.length, `count-in ${countInNumber}`).toBeGreaterThanOrEqual(4);
+    for (const sample of ofThisOne) {
+      expect(sample.sheetExpanded, `count-in ${countInNumber}, beat ${sample.beat}`).toBe('true');
+    }
+  }
+});
+
+/** The sheet's scrolling body, under its header. */
+const loopSheetBody = (page: Page) => loopPanel(page).locator(':scope > div[id]');
+
+/**
+ * Whether the playing loop's item is in the part of the sheet's list that
+ * shows (the list's box, cut by the window): all of it, or, being taller than
+ * the list (it holds the speed control and "Exit loop"), from its top down.
+ */
+const playingLoopOnShowInSheet = (page: Page) =>
+  loopSheetBody(page).evaluate((list) => {
+    const item = list.querySelector('[data-testid="active-loop"]')?.getBoundingClientRect();
+    if (!item || item.height === 0) return 'no playing loop drawn';
+    const box = list.getBoundingClientRect();
+    const top = Math.max(box.top, 0);
+    const bottom = Math.min(box.bottom, window.innerHeight);
+    const startsInside = item.top >= top - 2 && item.top < bottom;
+    const allInside = startsInside && item.bottom <= bottom + 2;
+    // LIST_SCROLL_GAP_PX in LoopPanel.tsx is 8: the item's top just under the sheet's header.
+    const fromItsTop = startsInside && item.top <= top + 16;
+    return allInside || fromItsTop ? 'on show' : 'out of sight';
+  });
+
+/** Where the window and the score box are: neither may move when the sheet opens. */
+const pagePlace = async (page: Page) => ({
+  scrollY: await page.evaluate(() => window.scrollY),
+  scoreBox: await scoreBox(page),
+});
+
+const TWELVE_LOOPS = Array.from({ length: 12 }, (_, index) => ({
+  name: `Loop ${String(index + 1).padStart(2, '0')}`,
+  firstBar: index + 1,
+  lastBar: index + 1,
+}));
+
+// 08 QA fix round 1, N4.
+test('reopened, a long list of loops is scrolled to the playing loop, and neither the window nor the score moves (13.28b)', async ({
+  user,
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await signIn(page, user, '/');
+  await uploadFixture(page, 'groove-120', 'Groove 120');
+  await addLoops(user, TWELVE_LOOPS);
+  await openSongPlayer(page, 'Groove 120');
+  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+  await scoreSettled(page);
+
+  await openLoopPanel(page);
+  await expect(loopPanel(page).getByRole('listitem')).toHaveCount(12);
+  // Enough loops to scroll: the list is more than twice as tall as the sheet shows.
+  const list = await loopSheetBody(page).evaluate((body) => ({
+    all: body.scrollHeight,
+    shown: body.clientHeight,
+  }));
+  expect(list.all).toBeGreaterThan(list.shown * 2);
+
+  // The last loop, at the end of the list. The press closes the sheet.
+  await playLoopButton(page, 'Loop 12').click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'false');
+  await windowScrollSettled(page);
+  const closedPlace = await pagePlace(page);
+
+  await openLoopPanel(page);
+  await expectLooping(page, 'Loop 12');
+  expect(await playingLoopOnShowInSheet(page)).toBe('on show');
+  // What the sheet is opened for while a loop plays: its speed, all of it in reach.
+  await expect(loopSpeed(page)).toBeInViewport({ ratio: 1 });
+  expect(await pagePlace(page)).toEqual(closedPlace);
+
+  // The list is the user's to scroll while it is open: to the top, the playing loop far below.
+  await loopSheetBody(page).evaluate((body) => body.scrollTo({ top: 0, behavior: 'instant' }));
+  expect(await playingLoopOnShowInSheet(page)).toBe('out of sight');
+  await page.waitForTimeout(300);
+  expect(await playingLoopOnShowInSheet(page)).toBe('out of sight');
+
+  // Closed and opened again, it is back on the playing loop.
+  await closeLoopPanel(page);
+  await openLoopPanel(page);
+  expect(await playingLoopOnShowInSheet(page)).toBe('on show');
+  // Long enough for a scroll of the window or the score to have started and ended.
+  await page.waitForTimeout(300);
+  expect(await pagePlace(page)).toEqual(closedPlace);
+  // It was playing all the while.
+  await expect(playButton(page)).toHaveText('Pause');
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+});
+
+/** A laptop window short enough that the score box shows two of this song's four lines. */
+const SHORT_LAPTOP = { width: 1440, height: 480 };
+
+/**
+ * Opens the 16-bar song with its last bars out of the score box at every size.
+ * At 1440 x 900 all of it is on show and nothing can scroll (why the specs
+ * above skip the desktop), so the desktop project gets a short window.
+ */
+async function openWithBarsOutOfSight(
+  page: Page,
+  user: E2eUser,
+  projectName: string,
+): Promise<void> {
+  if (projectName === 'desktop') await page.setViewportSize(SHORT_LAPTOP);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await scrollScoreToStart(page);
+}
+
+// 08 QA issue 2, what was left: bars typed into the form were highlighted where nobody was looking.
+test('bars typed into the loop form bring their first bar on screen, as soon as they make a range (13.27a)', async ({
+  user,
+  page,
+}, testInfo) => {
+  await openWithBarsOutOfSight(page, user, testInfo.project.name);
+  await openLoopPanel(page);
+  await newLoopButton(page).click();
+  await expect(loopForm(page)).toBeVisible();
+  // Opening the form brings the score on screen above the sheet; typing must not move the window.
+  const windowBefore = await windowScrollSettled(page);
+  const atStart = await scoreScroll(page);
+
+  // One field is no range yet: nothing is highlighted, nothing moves.
+  await firstBarField(page).fill('13');
+  await page.waitForTimeout(300);
+  expect(await highlightBoxes(page)).toEqual([]);
+  expect(await scoreScroll(page)).toEqual(atStart);
+
+  await lastBarField(page).fill('14');
+  await expect.poll(async () => (await sheetAndBarsNow(page)).firstBarInBox).toBe(true);
+  const onBar13 = await scoreScroll(page);
+  expect(onBar13).not.toEqual(atStart);
+  // It is a scroll of the score box and nothing else: no seek, no playback, the window still.
+  await expect(status(page)).toHaveText('Bar 1 of 16');
+  await expect(playButton(page)).toHaveText('Play');
+  expect(await page.evaluate(() => window.scrollY)).toBe(windowBefore);
+  // Focus stays in the field being typed in.
+  await expect(lastBarField(page)).toBeFocused();
+
+  // Typed back to the top of the song: the score follows.
+  await firstBarField(page).fill('1');
+  await expect.poll(() => scoreScroll(page)).not.toEqual(onBar13);
+  await expect.poll(async () => (await sheetAndBarsNow(page)).firstBarInBox).toBe(true);
+  expect(await page.evaluate(() => window.scrollY)).toBe(windowBefore);
+});
+
+test('a bar tapped on the score with the loop form open is picked where it is: the score does not move under the finger (13.27a)', async ({
+  user,
+  page,
+}, testInfo) => {
+  const touch = testInfo.project.use.hasTouch === true;
+  await openWithBarsOutOfSight(page, user, testInfo.project.name);
+  const sideways = expectedLayout(page) === 'horizontal';
+  await openLoopPanel(page);
+  await newLoopButton(page).click();
+  await expect(loopForm(page)).toBeVisible();
+  await windowScrollSettled(page);
+
+  // Where bar 2 is: the cursor shows it. Then back to bar 1, with the score where it was.
+  const bar1 = await barCursorBox(page);
+  await seekWithoutTapping(page, 2);
+  await expect
+    .poll(async () => {
+      const cursor = await barCursorBox(page);
+      return cursor.x !== bar1.x || cursor.y !== bar1.y;
+    })
+    .toBe(true);
+  const bar2 = await barCursorBox(page);
+  await seekWithoutTapping(page, 1);
+  await expect.poll(async () => (await barCursorBox(page)).x).toBe(bar1.x);
+
+  // Half of bar 2 cut off: by the right edge in the phone's one line, by the top edge in the
+  // page layout. A typed bar 2 would be scrolled to from here.
+  const frame = await scoreBox(page);
+  const before = await scoreScroll(page);
+  await viewport(page).evaluate(
+    (box, by) => box.scrollBy({ ...by, behavior: 'instant' }),
+    sideways
+      ? { left: bar2.x + bar2.width / 2 - (frame.x + frame.width), top: 0 }
+      : { left: 0, top: bar2.y + bar2.height / 2 - frame.y },
+  );
+  const scrolled = await scoreScroll(page);
+  const shownBar2: Box = {
+    ...bar2,
+    x: bar2.x - (scrolled.left - before.left),
+    y: bar2.y - (scrolled.top - before.top),
+  };
+  expect(inside(frame, shownBar2)).toBe(false);
+  const visiblePart: Point = sideways
+    ? { x: frame.x + frame.width - bar2.width / 4, y: bar2.y + bar2.height / 2 }
+    : { x: shownBar2.x + bar2.width / 2, y: frame.y + bar2.height / 4 };
+  expect(contains(shownBar2, visiblePart)).toBe(true);
+  // Nothing (the sheet, the sticky bar) is over the point about to be tapped.
+  expect(
+    await page.evaluate(
+      ({ x, y }) =>
+        document.elementFromPoint(x, y)?.closest('[data-testid="score-viewport"]') != null,
+      visiblePart,
+    ),
+  ).toBe(true);
+  const windowBefore = await page.evaluate(() => window.scrollY);
+
+  if (touch) await page.touchscreen.tap(visiblePart.x, visiblePart.y);
+  else await page.mouse.click(visiblePart.x, visiblePart.y);
+
+  // The tap arrived: it picked bar 2, a one-bar range, which the score highlights.
+  await expect(firstBarField(page)).toHaveValue('2');
+  await expect(lastBarField(page)).toHaveValue('2');
+  await expect.poll(async () => (await highlightBoxes(page)).length).toBeGreaterThan(0);
+  // Long enough for any scroll to have started and ended.
+  await page.waitForTimeout(500);
+  expect(await scoreScroll(page)).toEqual(scrolled);
+  expect(await page.evaluate(() => window.scrollY)).toBe(windowBefore);
+
+  // The same bar typed is brought on screen: the difference is the tap, not the bar.
+  await lastBarField(page).fill('3');
+  await expect.poll(() => scoreScroll(page)).not.toEqual(scrolled);
+});
+
+test('bars typed while the song counts in or plays leave the score where the music is; paused again, they are scrolled to (13.27a)', async ({
+  user,
+  page,
+}, testInfo) => {
+  test.setTimeout(60_000);
+  await openWithBarsOutOfSight(page, user, testInfo.project.name);
+  // A quarter speed with two bars of count-in: sixteen seconds to type in, then eight a bar.
+  await setSpeed(page, 25);
+  await chooseCountIn(page, 2);
+  await openLoopPanel(page);
+  await newLoopButton(page).click();
+  await expect(loopForm(page)).toBeVisible();
+
+  // With the form open a count-in leaves the sheet open (20 batch 4 QA issue 3): taps on the
+  // score pick the form's bars for as long as it is open, so it is never hidden by Play.
+  await playButton(page).click();
+  await expect(status(page)).toHaveText('Bar 1 of 16 · Counting in…');
+  await page.waitForTimeout(SHEET_CLOSED_BY_MS * 2);
+  expect(await sheetAndBarsNow(page)).toMatchObject({
+    status: 'countingIn',
+    sheetExpanded: 'true',
+  });
+  await expect(loopForm(page)).toBeVisible();
+  await firstBarField(page).fill('13');
+  await lastBarField(page).fill('14');
+  // The bars are highlighted, out of sight, and it still counts in: read in one instant.
+  await expect.poll(async () => (await sheetAndBarsNow(page)).firstBarInBox).toBe(false);
+  await page.waitForTimeout(300);
+  expect(await sheetAndBarsNow(page)).toEqual({
+    status: 'countingIn',
+    sheetExpanded: 'true',
+    firstBarInBox: false,
+  });
+
+  // Playing: alphaTab keeps the score on its cursor, in the song's first bars.
+  await expect(status(page)).not.toContainText('Counting in', { timeout: 25_000 });
+  await expect(playButton(page)).toHaveText('Pause');
+  await firstBarField(page).fill('15');
+  await lastBarField(page).fill('16');
+  await page.waitForTimeout(300);
+  expect(await sheetAndBarsNow(page)).toEqual({
+    status: 'playing',
+    sheetExpanded: 'true',
+    firstBarInBox: false,
+  });
+
+  // Paused, the next bar typed is shown.
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+  await firstBarField(page).fill('14');
+  await expect.poll(async () => (await sheetAndBarsNow(page)).firstBarInBox).toBe(true);
+});
+
+// The practice screen's "Save as loop" form is the same component. There a whole range, typed
+// or tapped, is also what plays (the preview), and the player's own range brings it on screen.
+test('on a loop’s practice screen, bars typed into Save as loop bring their first bar on screen (13.27a)', async ({
+  user,
+  page,
+}, testInfo) => {
+  test.setTimeout(60_000);
+  await openWithBarsOutOfSight(page, user, testInfo.project.name);
+  await saveNewLoop(page, { name: 'Middle', firstBar: 7, lastBar: 8 });
+  await backTo(page, 'Groove 120').click();
+  await openPractice(page, 'Middle');
+  await page.getByRole('button', { name: 'Show whole song' }).click();
+  const form = page.getByTestId('save-as-loop');
+  await expect(form.getByLabel('First bar')).toBeVisible();
+  // The whole song is drawn, on the loop's bars.
+  await expect(viewport(page).locator('.bar-highlight > div').first()).toBeAttached();
+  await scoreSettled(page);
+  const onTheLoop = await scoreScroll(page);
+  const windowBefore = await windowScrollSettled(page);
+
+  // The top of the song: out of the box at every size while it is on the loop's bars 7 and 8.
+  await form.getByLabel('First bar').fill('1');
+  await form.getByLabel('Last bar').fill('2');
+
+  await expect.poll(() => scoreScroll(page)).not.toEqual(onTheLoop);
+  await expect.poll(async () => (await sheetAndBarsNow(page)).firstBarInBox).toBe(true);
+  await expect(playButton(page)).toHaveText('Play');
+  expect(await page.evaluate(() => window.scrollY)).toBe(windowBefore);
+});
+
+/** How far down the window the score box is, once the window has stopped moving. */
+async function settledScoreTop(page: Page): Promise<number> {
+  await windowScrollSettled(page);
+  return Math.round((await scoreBox(page)).y);
+}
+
+// 20 batch 4 Build, Known gaps: closing the sheet takes away the room it adds at the page's
+// end, in the moment the controls fold for playback. "Play loop" has always done that; Play
+// in the bar with the sheet open now does it too. This pins that the new way moves the score
+// exactly as the old one does, and writes down how far (docs/units/20-loose-ends.md, Batch 4
+// Test, bug 1).
+test('the score when playback closes the open sheet: Play in the bar moves it as far as Play loop does, no further', async ({
+  user,
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await setSpeed(page, 50);
+  await chooseCountIn(page, 2);
+  await saveNewLoop(page, { name: 'Verse', firstBar: 1, lastBar: 2 });
+  // Once through first, so every measurement starts from the same page: a loop played and paused.
+  await playLoopButton(page, 'Verse').click();
+  await expect(status(page)).toContainText('Counting in');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
+
+  /** With the sheet open and the page at `where`, how far `press` moves the score box. */
+  async function scoreMove(where: 'top' | 'end', press: () => Promise<void>) {
+    await openLoopPanel(page);
+    // Anything still scrolling the window (the last Pause's unfold) ends before it is placed.
+    await windowScrollSettled(page);
+    await page.evaluate(
+      (to) =>
+        window.scrollTo({
+          top: to === 'top' ? 0 : document.documentElement.scrollHeight,
+          behavior: 'instant',
+        }),
+      where,
+    );
+    const before = await settledScoreTop(page);
+    await press();
+    await expect(status(page)).toContainText('Counting in');
+    await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'false');
+    const counting = await settledScoreTop(page);
+    // Still counting in when it was measured.
+    expect((await sheetAndBarsNow(page)).status).toBe('countingIn');
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveText('Play');
+    const paused = await settledScoreTop(page);
+    return { before, atCountIn: counting - before, afterPause: paused - before };
+  }
+
+  for (const where of ['top', 'end'] as const) {
+    const byPlayLoop = await scoreMove(where, () => playLoopButton(page, 'Verse').click());
+    const byPlay = await scoreMove(where, () => playButton(page).click());
+    testInfo.annotations.push({
+      type: `score move, page at its ${where}`,
+      description: `Play loop ${JSON.stringify(byPlayLoop)}; Play in the bar ${JSON.stringify(byPlay)}`,
+    });
+    console.log(
+      `[${testInfo.project.name}] sheet open, page at its ${where}: Play loop ${JSON.stringify(byPlayLoop)}, Play in the bar ${JSON.stringify(byPlay)}`,
+    );
+    expect(byPlay.before, `page at its ${where}: both start from the same place`).toBe(
+      byPlayLoop.before,
+    );
+    expect(Math.abs(byPlay.atCountIn - byPlayLoop.atCountIn)).toBeLessThanOrEqual(2);
+    expect(Math.abs(byPlay.afterPause - byPlayLoop.afterPause)).toBeLessThanOrEqual(2);
+  }
+});

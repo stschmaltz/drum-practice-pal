@@ -133,7 +133,16 @@ export interface PlayerSnapshot extends PlayerOptions {
   tracks: readonly TrackMix[];
   /** The count-in beat sounding now; null outside a count-in and before its first click. */
   countIn: CountInBeat | null;
+  /**
+   * What the count-in under way is for: the `start` of a run the user asked for, or
+   * a `repeat` of the loop. Null outside a count-in. A screen can't tell the two from
+   * the statuses it saw: alphaTab may report "stopped" before "finished" at the end
+   * of a pass, and a render between them sees `ready`, then `countingIn`, as for Play.
+   */
+  countInCause: CountInCause | null;
 }
+
+export type CountInCause = 'start' | 'repeat';
 
 export type PlayerEvents = {
   position: { tick: number; barNumber: number | null };
@@ -206,6 +215,7 @@ export function initialPlayerSnapshot(
     visibleBars: null,
     tracks: [],
     countIn: null,
+    countInCause: null,
   };
 }
 
@@ -235,6 +245,8 @@ export class PlayerService {
   private pendingSeek: { bar: BarTicks; until: number } | null = null;
   /** A showBar asked for before the song was ready, done once it is (see showBar). */
   private pendingShowBar: number | null = null;
+  /** Counts what has asked for `pendingShowBar`, so only the latest asker can drop it (see showBar). */
+  private showBarRequests = 0;
   /** Cancels the count-in that is clicking now; null once it has handed over to playback. */
   private cancelCountIn: (() => void) | null = null;
   /**
@@ -436,8 +448,22 @@ export class PlayerService {
    * song is ready (a loop opened by link while the sounds load), or before the
    * notation has rendered (the sounds cached, the score still drawing), it is
    * kept and done when both are; a setRange meanwhile drops it.
+   *
+   * Returns a way to drop the request while it is still kept, for a caller that may
+   * stop wanting the bar before it can be shown (a form whose typed bars change, or
+   * that closes). It drops only its own: once anything else has asked for a bar, or
+   * a count-in has, it does nothing. Callers whose bar is the range's needn't keep it.
    */
-  showBar(barNumber: number): void {
+  showBar(barNumber: number): () => void {
+    this.showBarRequests += 1;
+    const request = this.showBarRequests;
+    this.requestShowBar(barNumber);
+    return () => {
+      if (this.showBarRequests === request) this.pendingShowBar = null;
+    };
+  }
+
+  private requestShowBar(barNumber: number): void {
     if (this.disposed) return;
     if (!this.isLoaded()) {
       this.pendingShowBar = barNumber;
@@ -456,7 +482,8 @@ export class PlayerService {
   private showPendingBar(): void {
     const shown = this.pendingShowBar;
     this.pendingShowBar = null;
-    if (shown !== null) this.showBar(shown);
+    // Not showBar: the bar is still its first asker's to drop.
+    if (shown !== null) this.requestShowBar(shown);
   }
 
   /** The tempo a 1-based bar starts at, in the file's BPM; null before the score loads or for no such bar. */
@@ -790,7 +817,11 @@ export class PlayerService {
    * heard on the downbeat. False when there is nothing to count (count-in
    * off, or no usable tempo or meter), and the caller plays straight away.
    */
-  private beginCountIn(barNumber: number): boolean {
+  private beginCountIn(
+    barNumber: number,
+    // A count-in restarted by a seek is still for what it was for; from ready it is a start.
+    cause: CountInCause = this.snapshot.countInCause ?? 'start',
+  ): boolean {
     const { countInBars, speedRatio, metronomeVolume } = this.snapshot;
     const meter = meterAtBar(this.barMeters, barNumber);
     const tempo = tempoAtBar(this.barTempos, barNumber);
@@ -816,7 +847,9 @@ export class PlayerService {
     // The count-in is for reading the bar ahead, and the engine, not playing yet, won't scroll
     // to it: the user may have scrolled away, or a repeat's pass ended lines below its start.
     this.scrollToBarWhenRendered(barNumber);
-    this.update({ status: 'countingIn', countIn: null });
+    // The bar kept to show is now the count-in's, not a screen's to drop.
+    this.showBarRequests += 1;
+    this.update({ status: 'countingIn', countIn: null, countInCause: cause });
     this.wakeLock.setActive(true);
     return true;
   }
@@ -830,7 +863,7 @@ export class PlayerService {
     if (!countsInEveryRepeat(this.snapshot) || this.haltRequested) return;
     const { status, range } = this.snapshot;
     if (status !== 'playing' && status !== 'ready') return;
-    if (!this.beginCountIn(range?.startBar ?? 1)) this.startEngine();
+    if (!this.beginCountIn(range?.startBar ?? 1, 'repeat')) this.startEngine();
   }
 
   /** Silences the count-in's remaining clicks and drops its timers; status is the caller's business. */
@@ -1007,7 +1040,10 @@ export class PlayerService {
   }
 
   /** Notifies subscribers only when a value really changed, so React doesn't re-render for nothing. */
-  private update(patch: Partial<PlayerSnapshot>): void {
+  private update(change: Partial<PlayerSnapshot>): void {
+    // A count-in's cause goes with it, whichever way the count-in ends.
+    const counting = (change.status ?? this.snapshot.status) === 'countingIn';
+    const patch = counting ? change : { ...change, countInCause: null };
     const keys = Object.keys(patch) as (keyof PlayerSnapshot)[];
     if (!keys.some((key) => this.snapshot[key] !== patch[key])) return;
     this.snapshot = { ...this.snapshot, ...patch };

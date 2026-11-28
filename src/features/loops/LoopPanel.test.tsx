@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { onlineManager } from '@tanstack/react-query';
-import { enginePlays } from '@/test/countInPlayer';
+import { engineFinishesPass, enginePlays } from '@/test/countInPlayer';
 import { expectLocked, expectUnlocked } from '@/test/locked';
 import { queryResult, resetFakeSupabase } from '@/test/fakeSupabase';
 import { startOfBar, straightBars, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
@@ -59,6 +59,8 @@ interface PanelOptions {
   loops?: Loop[];
   loaded?: boolean;
   startsOpen?: boolean;
+  /** Under StrictMode: effects run, are cleaned up and run again. */
+  strict?: boolean;
   /** Runs before the first render, to make the first load fail or hang. */
   prepare?: (table: LoopTable) => void;
 }
@@ -67,13 +69,17 @@ function renderPanel({
   loops = [intro, late],
   loaded = true,
   startsOpen = true,
+  strict = false,
   prepare,
 }: PanelOptions = {}) {
   const table = serveLoopTable(loops);
   prepare?.(table);
   const { engine, player, finishLoading } = loopPlayer({ loaded });
   const queryClient = testQueryClient();
-  render(<Panel player={player} startsOpen={startsOpen} />, { wrapper: wrapperFor(queryClient) });
+  render(<Panel player={player} startsOpen={startsOpen} />, {
+    wrapper: wrapperFor(queryClient),
+    reactStrictMode: strict,
+  });
   const panel = within(screen.getByTestId('loop-panel'));
   const user = userEvent.setup();
   return {
@@ -560,6 +566,377 @@ describe('LoopPanel Play loop and the sheet', () => {
 });
 
 // 08 QA issue 2, the part fixed: a loop chosen while paused is scrolled to.
+describe('LoopPanel and a count-in started from outside it (13.32)', () => {
+  /** Play in the page's sticky bar, Space or a pedal: playback started by the player, not the sheet. */
+  const pressPlay = (view: View) => act(() => view.player.play());
+
+  it('Play with a count-in, straight after saving a new loop, closes the sheet for the number', async () => {
+    const view = renderPanel();
+    act(() => view.player.setCountInBars(1));
+    await typeNewLoop(view, { first: '13', last: '14', name: 'Typed' });
+    await view.press('Save loop');
+    await view.panel.findByRole('region', { name: 'Practising Typed' });
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    pressPlay(view);
+
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+    expect(document.getElementById(BODY_ID)).not.toBeVisible();
+    expect(view.header()).toHaveTextContent('Loop: Typed');
+  });
+
+  // 20 batch 4 QA issue 3: the form's bars are picked by taps on the score for as long as it
+  // is open, so a sheet closed over it left a mode nobody could see.
+  it('Play with a count-in leaves the sheet open while the loop form is open, with focus where it was', async () => {
+    const view = renderPanel();
+    act(() => view.player.setCountInBars(2));
+    await typeNewLoop(view, { first: '3', last: '4', name: 'Half typed' });
+    const name = view.panel.getByLabelText('Name');
+    expect(name).toHaveFocus();
+
+    pressPlay(view);
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    await settle();
+
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(name).toBeVisible();
+    expect(name).toHaveFocus();
+    // Through the downbeat too.
+    view.enginePlays();
+    await settle();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('once the form is cancelled, the next start with a count-in closes the sheet again', async () => {
+    const view = renderPanel();
+    act(() => view.player.setCountInBars(1));
+    await typeNewLoop(view, { first: '3', last: '4', name: 'Half typed' });
+    pressPlay(view);
+    await settle();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    view.pause();
+
+    await view.press('Cancel');
+    await view.panel.findByRole('button', { name: 'New loop' });
+    pressPlay(view);
+
+    await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+  });
+
+  it('Play with no count-in leaves the sheet as it is: there is no number to hide', async () => {
+    const view = renderPanel();
+    await view.panel.findByRole('button', { name: 'Play loop Late' });
+
+    pressPlay(view);
+    view.enginePlays();
+    await settle();
+
+    expect(view.player.getSnapshot().status).toBe('playing');
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('a sheet opened during the count-in stays open through it and the downbeat', async () => {
+    const view = renderPanel({ startsOpen: false });
+    act(() => view.player.setCountInBars(2));
+    pressPlay(view);
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+
+    await view.user.click(view.header());
+    // A seek counts in again for the new bar: still the same count-in to the sheet.
+    act(() => void view.player.seekToBar(5));
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    view.enginePlays();
+    await settle();
+
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('a repeat’s count-in leaves open a sheet opened while the loop played, for its speed', async () => {
+    const view = renderPanel();
+    act(() => {
+      view.player.setCountInBars(1);
+      view.player.setCountInMode('every_repeat');
+    });
+    await view.playLoop('Late');
+    view.enginePlays();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    act(() => engineFinishesPass(view.engine, startOfBar(9)));
+    await settle();
+
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.panel.getByRole('group', { name: 'Loop speed' })).toBeVisible();
+  });
+
+  // 20 batch 4 Copilot review: alphaTab may say "stopped" before "finished", each in its
+  // own task, so React draws the `ready` between them. That is still the repeat's count-in.
+  it('a repeat’s count-in leaves the sheet open when the page drew the stop before the pass end', async () => {
+    const view = renderPanel();
+    act(() => {
+      view.player.setCountInBars(1);
+      view.player.setCountInMode('every_repeat');
+    });
+    await view.playLoop('Late');
+    view.enginePlays();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    act(() => view.engine.fire('stateChanged', { playing: false }));
+    await settle();
+    expect(view.player.getSnapshot().status).toBe('ready');
+    act(() => {
+      view.engine.fire('finished', undefined);
+      view.engine.fire('position', { tick: startOfBar(9) });
+    });
+    await settle();
+
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.panel.getByRole('group', { name: 'Loop speed' })).toBeVisible();
+  });
+
+  it('Pause during the count-in and Play again is a new start: a sheet opened meanwhile closes again', async () => {
+    const view = renderPanel({ startsOpen: false });
+    act(() => view.player.setCountInBars(2));
+    pressPlay(view);
+    await view.user.click(view.header());
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    // Called off before the downbeat: the engine was never told to play.
+    act(() => view.player.pause());
+    expect(view.player.getSnapshot().status).toBe('ready');
+    await settle();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    pressPlay(view);
+
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+  });
+
+  it('under StrictMode, closes once for the count-in and leaves open a sheet opened during it', async () => {
+    const view = renderPanel({ strict: true });
+    act(() => view.player.setCountInBars(2));
+    const more = await view.panel.findByRole('button', { name: 'More actions for Late' });
+    more.focus();
+
+    pressPlay(view);
+
+    await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+    expect(view.header()).toHaveFocus();
+
+    // The effect's second run must not read the count-in as having just begun.
+    await view.user.click(view.header());
+    await settle();
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    view.enginePlays();
+    await settle();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('focus already on the header stays there, and the sheet closes', async () => {
+    const view = renderPanel();
+    act(() => view.player.setCountInBars(1));
+    await view.panel.findByRole('button', { name: 'Play loop Late' });
+    view.header().focus();
+
+    pressPlay(view);
+
+    await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+    expect(view.header()).toHaveFocus();
+  });
+
+  it('hands focus to the header when it was in the sheet, and leaves it alone when it was not', async () => {
+    const view = renderPanel();
+    act(() => view.player.setCountInBars(1));
+    const more = await view.panel.findByRole('button', { name: 'More actions for Late' });
+    more.focus();
+
+    pressPlay(view);
+
+    await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+    expect(view.header()).toHaveFocus();
+
+    // Again, with focus on the page's own Play, outside the sheet.
+    view.pause();
+    await view.user.click(view.header());
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    try {
+      outside.focus();
+
+      pressPlay(view);
+
+      await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+      expect(outside).toHaveFocus();
+    } finally {
+      // Not React's to clean up: a failed expectation must not leave it for the next test.
+      outside.remove();
+    }
+  });
+});
+
+describe('LoopPanel focus after Play loop closes the sheet (13.28a)', () => {
+  it('Play loop hands focus to the sheet’s header, not to the button it has just hidden', async () => {
+    const view = renderPanel();
+    await view.press('Play loop Late');
+
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+    expect(view.header()).toHaveFocus();
+  });
+
+  it('by keyboard too, and Enter on the header then opens the sheet on the playing loop', async () => {
+    const view = renderPanel();
+    (await view.panel.findByRole('button', { name: 'Play loop Late' })).focus();
+    await view.user.keyboard('{Enter}');
+    expect(view.header()).toHaveFocus();
+
+    await view.user.keyboard('{Enter}');
+
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.item('Late').getByText('Now looping')).toBeVisible();
+  });
+
+  // 20 batch 4 Test, bug 2, fixed in Review: the checklist's "side effects of a refused
+  // action". The handler asks the gate `practice.playLoop` goes by, of the player, at the press.
+  it('a Play loop the player refuses at the press starts nothing, closes nothing and moves no focus', async () => {
+    const view = renderPanel();
+    const play = await view.panel.findByRole('button', { name: 'Play loop Late' });
+    await waitFor(() => expect(play).toBeEnabled());
+    play.focus();
+
+    // The sounds fail between the last render and the press: the button is still drawn enabled.
+    act(() => {
+      view.engine.fire('error', { error: new Error('boom') });
+      expect(play).toBeEnabled();
+      fireEvent.click(play);
+    });
+
+    // Refused: no loop is set up and nothing was told to play.
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'error', range: null });
+    expect(view.engine.play).not.toHaveBeenCalled();
+    expect(view.panel.queryByTestId('active-loop')).not.toBeInTheDocument();
+    expect(play).toBeDisabled();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.header()).not.toHaveFocus();
+    expect(view.header()).toHaveTextContent('Loops (2)');
+  });
+
+  // Copilot on #38: the handler re-derived only one of playLoop's refusals (canPlay). A
+  // saved loop past the end of the score as loaded is another; the sheet now goes by
+  // what `practice.playLoop` answers.
+  it('a Play loop refused for bars the loaded score lacks starts nothing, closes nothing and moves no focus', async () => {
+    // The fake score has 16 bars; the row says the loop ends on bar 17.
+    const past = loopRow('past', { name: 'Past', start_bar: 13, end_bar: 17 });
+    const view = renderPanel({ loops: [intro, past] });
+    const play = await view.panel.findByRole('button', { name: 'Play loop Past' });
+    await waitFor(() => expect(play).toBeEnabled());
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'ready', barCount: 16 });
+
+    await view.user.click(play);
+    await settle();
+
+    expect(view.engine.play).not.toHaveBeenCalled();
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'ready', range: null });
+    expect(view.panel.queryByTestId('active-loop')).not.toBeInTheDocument();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(play).toHaveFocus();
+
+    // The press is heard: a loop the score has plays, and closes the sheet.
+    await view.press('Play loop Intro');
+    expect(view.engine.play).toHaveBeenCalledTimes(1);
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('Restart loop while playing closes nothing and keeps its focus', async () => {
+    const view = renderPanel();
+    await view.playLoop('Late');
+    view.enginePlays();
+
+    await view.press('Restart loop Late');
+
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.panel.getByRole('button', { name: 'Restart loop Late' })).toHaveFocus();
+  });
+});
+
+describe('LoopPanel reopened on the playing loop (13.28b)', () => {
+  // jsdom lays nothing out: a list 300 px tall whose items are 200 px apart, 180 px each.
+  const LIST_HEIGHT = 300;
+  const ITEM_PITCH = 200;
+  const ITEM_HEIGHT = 180;
+  const list = () => document.getElementById(BODY_ID) as HTMLElement;
+  const boxAt = (top: number, height: number) => new DOMRect(0, top, 390, height);
+
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.id === BODY_ID ? LIST_HEIGHT : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.id === BODY_ID) return boxAt(500, LIST_HEIGHT);
+      if (!(this instanceof HTMLLIElement)) return boxAt(0, 0);
+      const index = Array.from(list().querySelectorAll('li')).indexOf(this);
+      return boxAt(500 + index * ITEM_PITCH - list().scrollTop, ITEM_HEIGHT);
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('opening the sheet scrolls its list to a playing loop that was out of sight', async () => {
+    const view = renderPanel();
+    await view.press('Play loop Late');
+    view.enginePlays();
+    expect(list().scrollTop).toBe(0);
+
+    await view.user.click(view.header());
+
+    // Late is the second item: 200 px down, less the gap left above it.
+    expect(view.panel.getByTestId('active-loop')).toHaveTextContent('Late');
+    expect(list().scrollTop).toBe(192);
+  });
+
+  it('leaves the list where it is when the playing loop is already on show', async () => {
+    const view = renderPanel();
+    await view.press('Play loop Intro');
+    view.enginePlays();
+
+    await view.user.click(view.header());
+
+    expect(view.panel.getByTestId('active-loop')).toHaveTextContent('Intro');
+    expect(list().scrollTop).toBe(0);
+  });
+
+  it('opening it with no loop playing scrolls nothing', async () => {
+    const view = renderPanel({ startsOpen: false });
+    list().scrollTop = 40;
+    await view.user.click(view.header());
+    await view.panel.findByRole('button', { name: 'Play loop Late' });
+    expect(list().scrollTop).toBe(40);
+  });
+
+  it('scrolls once per opening: the open list is the user’s to scroll, and the next opening finds the loop again', async () => {
+    const view = renderPanel();
+    await view.playLoop('Late');
+    view.enginePlays();
+    expect(list().scrollTop).toBe(192);
+
+    // The user scrolls back up and nudges the speed: the list stays where they put it.
+    list().scrollTop = 0;
+    await view.press('Faster by 5%');
+    await settle();
+    expect(list().scrollTop).toBe(0);
+
+    await view.user.click(view.header());
+    await view.user.click(view.header());
+    expect(list().scrollTop).toBe(192);
+  });
+});
+
 describe('LoopPanel bringing a paused loop’s first bar on screen', () => {
   async function saveTypedLoop(view: View, first: string, last: string) {
     await typeNewLoop(view, { first, last, name: 'Typed' });
@@ -567,11 +944,11 @@ describe('LoopPanel bringing a paused loop’s first bar on screen', () => {
     await view.panel.findByRole('region', { name: 'Practising Typed' });
   }
 
-  it('a loop saved from typed bars while paused scrolls to its first bar, and only once saved', async () => {
+  it('typed bars scroll to their first bar as they make a range (13.27a), and the saved loop is shown there', async () => {
     const view = renderPanel();
     await typeNewLoop(view, { first: '13', last: '14', name: 'Typed' });
-    // Typed bars are highlighted but not scrolled to (left for Unit 12).
-    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    view.engine.scrollToBar.mockClear();
 
     await view.press('Save loop');
     await view.panel.findByRole('region', { name: 'Practising Typed' });
@@ -585,10 +962,12 @@ describe('LoopPanel bringing a paused loop’s first bar on screen', () => {
     expect(view.engine.restartCalls()).toBe(1); // the one loadScore of setup
   });
 
-  it('a loop the server refuses scrolls nowhere', async () => {
+  it('a loop the server refuses scrolls nowhere more', async () => {
     const view = renderPanel();
     view.table.failNext('insert', 'nope');
     await typeNewLoop(view, { first: '13', last: '14', name: 'Typed' });
+    // Its typed bars were shown; the refused save moves the score no further.
+    view.engine.scrollToBar.mockClear();
     await view.press('Save loop');
     expect(await view.panel.findByRole('alert')).toBeInTheDocument();
     expect(view.engine.scrollToBar).not.toHaveBeenCalled();
