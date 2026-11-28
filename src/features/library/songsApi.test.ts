@@ -186,6 +186,16 @@ describe('uploadSong', () => {
       ]);
     });
 
+    // Unit 20: the client's reads no longer retry themselves. This look-up, made right
+    // after the connection dropped an answer, is the one read that still asks to.
+    it('to the insert: the look-up asks for postgrest-js’s own retries, and no other read does', async () => {
+      answerQueries(ok(null), dropped(), ok(savedRow));
+      await uploadSong(USER, gpFile());
+      const [duplicateCheck, , lookup] = queries();
+      expect(opArgs(lookup!, 'retry')).toEqual([true]);
+      expect(opArgs(duplicateCheck!, 'retry')).toBeUndefined();
+    });
+
     // Copilot review: an empty look-up can't prove the insert won't still
     // commit (it may be running yet), so removing the file could leave a
     // listed song with nothing to play. The file stays; at worst it is an orphan.

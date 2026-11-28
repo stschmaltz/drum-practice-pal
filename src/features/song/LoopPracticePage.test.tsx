@@ -25,6 +25,7 @@ import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { historyBack, renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
 import { LoopPracticePage } from './LoopPracticePage';
 import { SongOverviewPage } from './SongOverviewPage';
+import { FRESH_READ_WAIT_MS } from './useGaveUpWaiting';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -1014,6 +1015,131 @@ describe('LoopPracticePage', () => {
         startTick: startOfBar(9),
         endTick: startOfBar(13),
       });
+    });
+  });
+
+  describe('a loops read that hangs (Unit 20, 13.06)', () => {
+    const loopsKey = loopKeys.forSong(USER, SONG);
+    // Only the timers are faked, and they still run in real time, so Testing Library's
+    // waits and TanStack Query work as ever; `later` jumps the wait for the fresh read.
+    beforeEach(() =>
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true }),
+    );
+    afterEach(() => vi.useRealTimers());
+    const later = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+
+    /** The screen on a list cached at 100%, the sounds in, the fresh read (71%) held. */
+    async function openOnAHungRead(cached: Loop[] = [{ ...chorus, speed_ratio: 1 }, verse]) {
+      serve();
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(loopsKey, cached);
+      const release = loops.holdNext('select');
+      const user = renderPractice(CHORUS_ID, queryClient);
+      const engine = await loadPlayer({ beforeTheLoop: true });
+      return { user, engine, release, queryClient };
+    }
+
+    it('opens the loop from the cached list once the wait is over, and Play plays it', async () => {
+      const { user, engine } = await openOnAHungRead();
+      later(FRESH_READ_WAIT_MS - 500);
+      await settle();
+      expect(playButton()).toBeDisabled();
+      expect(engine.setLooping).not.toHaveBeenCalledWith(true);
+
+      later(500);
+
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(9),
+        endTick: startOfBar(13),
+      });
+      expect(engine.setLooping).toHaveBeenLastCalledWith(true);
+      expect(engine.setSpeed).toHaveBeenLastCalledWith(1);
+      await user.click(playButton());
+      expect(engine.play).toHaveBeenCalledTimes(1);
+    });
+
+    it('the answer that comes after all neither opens the loop again nor restarts it, and writes nothing', async () => {
+      const { user, engine, release, queryClient } = await openOnAHungRead();
+      later(FRESH_READ_WAIT_MS);
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      const before = {
+        ranges: engine.setPlaybackRange.mock.calls.length,
+        speeds: engine.setSpeed.mock.calls.length,
+        seeks: engine.seek.mock.calls.length,
+      };
+
+      release();
+
+      // The answer did land: the list holds the speed the other device saved.
+      await waitFor(() =>
+        expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.708333),
+      );
+      await settle();
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      expect(engine.pause).not.toHaveBeenCalled();
+      expect(engine.stop).not.toHaveBeenCalled();
+      expect(engine.setPlaybackRange).toHaveBeenCalledTimes(before.ranges);
+      expect(engine.setSpeed).toHaveBeenCalledTimes(before.speeds);
+      expect(engine.seek).toHaveBeenCalledTimes(before.seeks);
+      expect(playButton()).toHaveTextContent('Pause');
+      // Still the speed it was opened at; the other device's isn't written over.
+      expect(speed()).toHaveTextContent('100%');
+      expect(loops.sent('update')).toEqual([]);
+    });
+
+    it('an answer inside the wait still opens the loop at the speed it brings', async () => {
+      const { engine, release } = await openOnAHungRead();
+      later(FRESH_READ_WAIT_MS - 500);
+      release();
+      await waitFor(() => expect(speed()).toHaveTextContent('71%'));
+      await waitFor(() => expect(playButton()).toBeEnabled());
+
+      later(FRESH_READ_WAIT_MS);
+      await settle();
+      expect(engine.setSpeed).toHaveBeenLastCalledWith(0.708333);
+      // Opened once, on the answer: the wait ending afterwards opens nothing.
+      expect(engine.setSpeed.mock.calls.filter(([ratio]) => ratio === 0.708333)).toHaveLength(1);
+    });
+
+    it('still waits for a loop the cached list lacks: there is nothing to open', async () => {
+      serve();
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(loopsKey, [verse]);
+      const release = loops.holdNext('select');
+      renderPractice(CHORUS_ID, queryClient);
+      expect(await screen.findByText('Loading the loop…')).toBeInTheDocument();
+
+      later(FRESH_READ_WAIT_MS * 2);
+      await settle();
+      expect(screen.getByText('Loading the loop…')).toBeInTheDocument();
+
+      release();
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeVisible(),
+      );
+    });
+
+    it('counts the wait from the screen opening, so sounds that come in late open the loop at once', async () => {
+      serve();
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(loopsKey, [chorus, verse]);
+      loops.holdNext('select');
+      renderPractice(CHORUS_ID, queryClient);
+      await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+      later(FRESH_READ_WAIT_MS);
+
+      act(() =>
+        engines[0]!.finishLoading({
+          barCount: 16,
+          trackCount: 3,
+          barTempos: TEMPO_CHANGE_BAR_TEMPOS,
+        }),
+      );
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      expect(speed()).toHaveTextContent('71%');
     });
   });
 

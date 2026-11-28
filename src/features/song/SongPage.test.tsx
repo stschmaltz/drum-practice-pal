@@ -67,6 +67,7 @@ import {
 } from '@/test/render';
 import { readVisitSittings } from '@/features/practice/visitSittings';
 import { SongPage } from './SongPage';
+import { FRESH_READ_WAIT_MS } from './useGaveUpWaiting';
 
 /** Unfolds the controls bar, which folds to a strip while playback runs. */
 async function showControls(user: ReturnType<typeof userEvent.setup>) {
@@ -2853,6 +2854,85 @@ describe('SongPage recordings (Unit 14)', () => {
 
       release();
       expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+    });
+
+    describe('on a links read that hangs (Unit 20, 14.4b)', () => {
+      // Only the timers are faked, and they still run in real time, so Testing Library's
+      // waits and TanStack Query work as ever; `later` jumps the wait for the read.
+      beforeEach(() =>
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true }),
+      );
+      afterEach(() => vi.useRealTimers());
+      const later = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+
+      it('gives up for the tab, which needs no network, and a late answer only offers the recording', async () => {
+        serve({ links: [original] });
+        const release = links.holdNext('select');
+        renderSong(`${SONG_A}?source=original`);
+        const user = userEvent.setup();
+        expect(await screen.findByText('Loading the recording…')).toBeVisible();
+        await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+        const engine = engines[0]!;
+        act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+        later(FRESH_READ_WAIT_MS - 500);
+        await settle();
+        expect(screen.getByText('Loading the recording…')).toBeVisible();
+        expect(screen.queryByRole('button', { name: /^(Play|Pause)$/ })).not.toBeInTheDocument();
+
+        later(500);
+
+        await waitFor(() => expect(playButton()).toBeEnabled());
+        expect(screen.queryByText('Loading the recording…')).not.toBeInTheDocument();
+        noFrame();
+        // The request is dropped from the URL, so the answer can't switch the source later.
+        await waitFor(() => expect(location()).toBe(`/songs/${SONG_A}/play`));
+        await user.click(playButton());
+        act(() => engine.fire('stateChanged', { playing: true }));
+
+        release();
+
+        expect(await screen.findByRole('radio', { name: 'Original' })).not.toBeChecked();
+        await settle();
+        expect(source('Tab')).toBeChecked();
+        noFrame();
+        expect(playButton()).toHaveTextContent('Pause');
+        expect(engine.pause).not.toHaveBeenCalled();
+        expect(playedWrites()).toEqual([]);
+      });
+
+      it('an answer inside the wait shows the recording, and the wait ending changes nothing', async () => {
+        serve({ links: [original] });
+        const release = links.holdNext('select');
+        renderSong(`${SONG_A}?source=original`);
+        expect(await screen.findByText('Loading the recording…')).toBeVisible();
+        later(FRESH_READ_WAIT_MS - 500);
+
+        release();
+        expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+
+        later(FRESH_READ_WAIT_MS);
+        await settle();
+        expect(frame()).toHaveAttribute('src', EMBED_URL);
+        expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
+      });
+
+      it('a recording the cached links have shows at once and stays through the wait', async () => {
+        const queryClient = testQueryClient();
+        queryClient.setQueryData(linksKey, [original]);
+        await queryClient.invalidateQueries({ queryKey: linksKey, refetchType: 'none' });
+        serve({ links: [original] });
+        links.holdNext('select');
+        renderRoutes(<Route path="/songs/:id/play" element={<SongPage />} />, {
+          path: `/songs/${SONG_A}/play?source=original`,
+          queryClient,
+        });
+        expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+
+        later(FRESH_READ_WAIT_MS * 2);
+        await settle();
+        expect(frame()).toHaveAttribute('src', EMBED_URL);
+        expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
+      });
     });
 
     it('opens a link saved on another device since the list was cached', async () => {

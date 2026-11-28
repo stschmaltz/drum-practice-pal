@@ -6,12 +6,14 @@ import {
   SONG_LINK_KIND_LABELS,
   videoSources,
   type PlaySource,
+  isRecordingSource,
   type SourceChoice,
 } from '@/features/recordings/songLinks';
 import { useSongLinks, useUsableLinks } from '@/features/recordings/useSongLinks';
 import { useOnline } from '@/lib/network';
 import { SOURCE_PARAM } from '@/lib/routes';
 import { linkedLoopFormOf } from './linkedLoopForm';
+import { useGaveUpWaiting } from './useGaveUpWaiting';
 
 const TAB_OPTION: { value: PlaySource; label: string } = { value: 'tab', label: 'Tab' };
 
@@ -30,12 +32,21 @@ export function useSongSources(songId: string) {
   const links = useSongLinks(songId);
   const usable = useUsableLinks(links);
   const forLoopForm = linkedLoopFormOf(params) !== null;
+  const requested = params.get(SOURCE_PARAM);
+  // The read that would say whether the song has the recording is waited for, but not for
+  // ever: on a connection that hangs the screen would say "Loading the recording…" over a
+  // tab that needs no network. Once the wait is over the read counts as not coming, which
+  // is the tab with the request dropped from the URL, so the answer, if it comes after
+  // all, offers the recording in the switch and never takes the tab from someone playing it.
+  const gaveUpWaiting = useGaveUpWaiting(
+    !forLoopForm && isRecordingSource(requested) ? requested : null,
+  );
 
   const choice: SourceChoice = forLoopForm
     ? { state: 'tab', dropRequest: false }
-    : chooseSource(params.get(SOURCE_PARAM), {
+    : chooseSource(requested, {
         data: usable,
-        fetching: links.fetchStatus === 'fetching',
+        fetching: links.fetchStatus === 'fetching' && !gaveUpWaiting,
         fetchedAfterMount: links.isFetchedAfterMount,
       });
   const videos = forLoopForm ? [] : videoSources(usable ?? []);
