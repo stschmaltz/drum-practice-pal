@@ -194,6 +194,22 @@
 }
 
 /*
+ * A score that is only read, under a recording that plays (Unit 14): the paused
+ * player's bar and beat cursor aren't drawn, since standing still under a video
+ * they read as a playhead that never moves, and a bar that takes no tap doesn't
+ * look tappable. Hidden, not removed: alphaTab still places them, so they are
+ * back at the same bar the moment the tab is the source again.
+ */
+.jam-score.score-read-only .at-cursor-bar,
+.jam-score.score-read-only .at-cursor-beat {
+  visibility: hidden;
+}
+.jam-score.score-read-only .at-surface,
+.jam-score.score-read-only .at-surface * {
+  cursor: default;
+}
+
+/*
  * The bars of a loop, or the bars being picked for one: blocks the player
  * engine draws over the score (alphaTabEngine.ts, setHighlight). They never
  * take a tap meant for the bar underneath.

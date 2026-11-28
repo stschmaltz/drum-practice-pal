@@ -165,6 +165,33 @@ export function planLinkSave(fields: readonly LinkField[]): LinkSaveCheck {
   return Object.keys(errors).length > 0 ? { ok: false, errors } : { ok: true, plan };
 }
 
+/**
+ * A save still on its way, as a draft: what its fields hold, in the form each
+ * link is saved in. For a form opened again while that save is pending (the
+ * page's links can take the first form away mid-save): it has no draft of its
+ * own and is locked, and shows this, not the links as they were before the
+ * save under "Saving…". A link the plan leaves alone isn't in it, so its
+ * field shows the saved link as always.
+ */
+export function draftOfPlan(saved: readonly SongLinkRow[], plan: LinkSavePlan): LinkDraft {
+  const slotOf = (kind: SongLinkKind, id: string): LinkSlot =>
+    kind === 'other' ? otherLinkSlot(id) : kind;
+  const texts: LinkDraft['texts'] = {};
+  const added: string[] = [];
+  for (const row of saved) {
+    if (plan.removals.includes(row.id)) texts[slotOf(row.kind, row.id)] = '';
+  }
+  for (const update of plan.updates) {
+    const row = saved.find((link) => link.id === update.id);
+    if (row) texts[slotOf(row.kind, row.id)] = update.url;
+  }
+  for (const insert of plan.inserts) {
+    texts[slotOf(insert.kind, insert.id)] = insert.url;
+    if (insert.kind === 'other') added.push(insert.id);
+  }
+  return { texts, added };
+}
+
 export function isEmptyPlan(plan: LinkSavePlan): boolean {
   return plan.removals.length + plan.updates.length + plan.inserts.length === 0;
 }

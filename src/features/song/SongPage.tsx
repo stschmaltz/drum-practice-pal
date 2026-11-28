@@ -334,6 +334,8 @@ function SongPlayer({
         scoreRef={scoreRef}
         snapshot={snapshot}
         hidden={nothingToShow}
+        // Under a video the tab's cursor would stand still and read as a playhead.
+        readOnly={recording}
       />
       {/* Hidden on a recording, not unmounted: a loop save still on its way keeps its form. */}
       <div hidden={recording} className="contents">

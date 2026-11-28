@@ -18,7 +18,9 @@
  * Anything else is refused with fixed copy (`LINK_REFUSAL_COPY`).
  *
  * A paste with words round the link (a share sheet's "Check out this song:
- * https://…") is taken as its first http(s) address (`keptLinkText`).
+ * https://…") is taken as its first address (`keptLinkText`), and what a
+ * message wraps a link in or puts after it (brackets, quotes, a full stop) is
+ * never part of the link (`withoutWrapping`).
  */
 import { SONG_LINK_URL_MAX_LENGTH, type SongLinkKind, type SongLinkProvider } from '@/lib/schema';
 
@@ -71,26 +73,58 @@ const isHostOf = (host: string, domains: readonly string[]) =>
 /** A host as it is named to the user: "www." says nothing. */
 const withoutWww = (host: string) => host.replace(/^www\./, '');
 
-/** The first http(s) address among other words, up to the next space. */
-const ADDRESS_IN_TEXT = /https?:\/\/\S+/i;
-/** What a sentence puts after an address, or wraps it in: not part of it. */
-const SENTENCE_PUNCTUATION = /[.,;:!?)\]}>"'’”]+$/;
+/**
+ * The first address among other words, up to the next space: one with its
+ * http(s) scheme, or YouTube's or Spotify's own host typed without it
+ * ("Song title youtu.be/…"). Any other host needs its scheme to be told from
+ * a word with a full stop in it. A bare host counts only at the start of a
+ * word (group 1), so "evil.test/youtu.be/…" and "notyoutube.com/…" hold none.
+ */
+const ADDRESS_IN_TEXT =
+  /https?:\/\/\S+|(?:^|[^\w.@/-])((?:(?:www|m|music)\.)?(?:youtube\.com|youtu\.be|open\.spotify\.com)\/\S+)/i;
+
+/** What a message opens a link with: a bracket or a quote, never part of an address. */
+const OPENING_WRAPPERS = /^[(<[{"'‘“«]+/;
+/** What a sentence puts after a link. An address can end in one, but a pasted one never means to. */
+const TRAILING_PUNCTUATION = '.,;:!?"\'’”>»';
+const OPENING_BRACKET_OF: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+
+const countOf = (text: string, character: string) => text.split(character).length - 1;
+
+/**
+ * An address less what a message wrapped it in or put after it: opening
+ * brackets and quotes, then from its end sentence punctuation and any closing
+ * bracket with no opening bracket of its own inside the address. So
+ * "(https://youtu.be/abc)." is the video, and a Wikipedia address keeps the
+ * bracket that closes "_(band)".
+ */
+function withoutWrapping(address: string): string {
+  let kept = address.replace(OPENING_WRAPPERS, '');
+  for (;;) {
+    const last = kept.at(-1);
+    if (last === undefined) return kept;
+    const opening = OPENING_BRACKET_OF[last];
+    const strayBracket = opening !== undefined && countOf(kept, last) > countOf(kept, opening);
+    if (!strayBracket && !TRAILING_PUNCTUATION.includes(last)) return kept;
+    kept = kept.slice(0, -1);
+  }
+}
 
 /**
  * A paste with words round its link ("Song title https://youtu.be/…", a share
- * sheet's sentence): the first http(s) address in it, less the punctuation
- * the sentence put after it. Null when the words hold no such address.
+ * sheet's sentence): the first address in it, less what the sentence wrapped
+ * it in. Null when the words hold no address.
  */
 function firstAddressIn(text: string): string | null {
   const found = ADDRESS_IN_TEXT.exec(text);
-  return found ? found[0].replace(SENTENCE_PUNCTUATION, '') : null;
+  return found ? withoutWrapping(found[1] ?? found[0]) : null;
 }
 
 /**
  * What the form's field shows for what was typed or pasted: the text itself,
  * or, when it has words round a link, only the link, so what will be saved is
- * what is on show. Text that is one unbroken run, or has no http(s) address
- * in it, is left exactly as it was.
+ * what is on show. Text that is one unbroken run (someone may still be typing
+ * it), or has no address in it, is left exactly as it was.
  */
 export function keptLinkText(text: string): string {
   const trimmed = text.trim();
@@ -102,9 +136,9 @@ export function keptLinkText(text: string): string {
 export function parseSongLink(text: string): LinkParse {
   const typed = text.trim();
   if (typed === '') return refused('empty');
-  // Words round the link: the link is its first http(s) address, and without one it is no link.
-  const trimmed = /\s/.test(typed) ? firstAddressIn(typed) : typed;
-  if (trimmed === null) return refused('notALink');
+  // Words round the link: the link is the first address in them, and without one it is no link.
+  const trimmed = /\s/.test(typed) ? firstAddressIn(typed) : withoutWrapping(typed);
+  if (trimmed === null || trimmed === '') return refused('notALink');
   if (trimmed.length > SONG_LINK_URL_MAX_LENGTH) return refused('tooLong');
 
   const spotifyUri = SPOTIFY_URI.exec(trimmed);
@@ -218,10 +252,20 @@ function withoutTracking(url: URL): URL {
   return cleaned;
 }
 
-/** The frame's address for a YouTube link: the no-cookie player, inline on iOS, no other channels' videos at the end. */
+/**
+ * The frame's address for a YouTube link: the no-cookie player, inline on iOS,
+ * no other channels' videos at the end. Whatever it is given, the address is
+ * that host's `/embed/` and an 11-character id, with these parameters and no
+ * others: an id of any other shape gives no address, and a start that isn't
+ * whole seconds is left out.
+ */
 export function youTubeEmbedUrl(link: Pick<ParsedLink, 'mediaId' | 'startSeconds'>): string | null {
   if (!link.mediaId || !YOUTUBE_ID.test(link.mediaId)) return null;
-  const start = link.startSeconds === null ? '' : `&start=${link.startSeconds}`;
+  const { startSeconds } = link;
+  const start =
+    typeof startSeconds === 'number' && Number.isSafeInteger(startSeconds) && startSeconds > 0
+      ? `&start=${startSeconds}`
+      : '';
   return `https://www.youtube-nocookie.com/embed/${link.mediaId}?playsinline=1&rel=0${start}`;
 }
 
@@ -319,9 +363,40 @@ export function otherLinkLabel(link: Pick<ParsedLink, 'url'>): string {
   return `${host}${rest.slice(0, room)}…`;
 }
 
-/** An other link's accessible name: all of its address, less the scheme every link has. */
-export function otherLinkSpokenAs(link: Pick<ParsedLink, 'url'>): string {
-  return link.url.replace(/^https:\/\/(www\.)?/, '');
+/** What a recognised link is called among a song's other links; any other site goes by its address. */
+const RECOGNISED_LINK_NAMES: Partial<Record<SongLinkProvider, string>> = {
+  youtube: 'YouTube video',
+  spotify: 'Spotify track',
+};
+
+/**
+ * The names of a song's other links, in the order given: what the app
+ * recognised each as ("YouTube video", "Spotify track"), or its host and the
+ * start of its path (`otherLinkLabel`), with a number from the second of any
+ * that share a name ("YouTube video 2"). Worked out over the whole list, so a
+ * link keeps its number whether the list is folded or not.
+ */
+export function otherLinkNames(links: readonly Pick<ParsedLink, 'provider' | 'url'>[]): string[] {
+  const seen = new Map<string, number>();
+  return links.map((link) => {
+    const name = RECOGNISED_LINK_NAMES[link.provider] ?? otherLinkLabel(link);
+    const count = (seen.get(name) ?? 0) + 1;
+    seen.set(name, count);
+    return count === 1 ? name : `${name} ${count}`;
+  });
+}
+
+/**
+ * An other link's accessible name: all of its address, less the scheme every
+ * link has, after the name it shows when that name isn't its address
+ * ("YouTube video 2: youtube.com/watch?v=…").
+ */
+export function otherLinkSpokenAs(
+  link: Pick<ParsedLink, 'provider' | 'url'>,
+  name: string,
+): string {
+  const address = link.url.replace(/^https:\/\/(www\.)?/, '');
+  return RECOGNISED_LINK_NAMES[link.provider] === undefined ? address : `${name}: ${address}`;
 }
 
 /** "Original", or "Original on Spotify" for a link that leaves the app. */

@@ -3450,4 +3450,43 @@ describe('SongPage recordings (Unit 14)', () => {
       expect(playedWrites()).toEqual([]);
     });
   });
+
+  // QA (after fix round 1) issue 1: the tab's bar and beat cursor stand still under a video and
+  // read as a playhead. The score box says it is only read (`score-read-only`, which index.css
+  // draws no cursor for; recordings.spec.ts measures the cursor itself), and nothing else changes.
+  describe('the tab’s cursor under a recording (14 Review)', () => {
+    const scoreBox = () => screen.getByTestId('score-viewport');
+
+    it('isn’t drawn on a recording and is back on Tab, with the player left as it was', async () => {
+      const { user, engine } = await openSong();
+      act(() => engine.fire('position', { tick: startOfBar(9) }));
+      expect(scoreBox()).toHaveClass('jam-score');
+      expect(scoreBox()).not.toHaveClass('score-read-only');
+      const restarts = engine.restartCalls();
+
+      await choose(user, 'Original');
+      await frameShown();
+      expect(scoreBox()).toHaveClass('jam-score', 'score-read-only');
+
+      await choose(user, 'Tab');
+      await waitFor(() => expect(scoreBox()).not.toHaveClass('score-read-only'));
+      // A drawing change only: the bar is kept, and nothing was stopped, started, moved or loaded.
+      expect(await screen.findByTestId('player-status')).toHaveTextContent('Bar 9 of 16');
+      expect(engine.restartCalls()).toBe(restarts);
+      expect(engine.loadScore).toHaveBeenCalledTimes(1);
+      expect(engine.seek).not.toHaveBeenCalled();
+    });
+
+    it('isn’t drawn while the links are still read for the source the screen opened on', async () => {
+      serve({ links: [original] });
+      const release = links.holdNext('select');
+      renderSong(`${SONG_A}?source=original`);
+      expect(await screen.findByText('Loading the recording…')).toBeVisible();
+      await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+      expect(scoreBox()).toHaveClass('score-read-only');
+      release();
+      await frameShown();
+      expect(scoreBox()).toHaveClass('score-read-only');
+    });
+  });
 });

@@ -586,9 +586,28 @@ test('under a recording a phone draws the score as a page that scrolls with the 
   const onTab = await scoreShape(page);
   // The tab's own player: one line scrolled sideways on a phone, a page from 768 px.
   expect(onTab.scrollsSideways).toBe(phone);
+  // The tab's cursor is drawn on its bar and beat (so "hidden" below is said of something there).
+  const cursors = [
+    viewport(page).locator('.at-cursor-bar'),
+    viewport(page).locator('.at-cursor-beat'),
+  ];
+  for (const cursor of cursors) {
+    await expect(cursor).toHaveCount(1);
+    await expect(cursor).toHaveCSS('visibility', 'visible');
+  }
+  const surface = viewport(page).locator('.at-surface');
+  await expect(surface).toHaveCSS('cursor', 'pointer');
 
   await sourceOption(page, 'Original').click();
   await expect(recordingFrame(page)).toBeVisible();
+  // Under the video the tab's cursor isn't drawn: standing still, it reads as a playhead
+  // (QA after fix round 1, issue 1). Still there, so alphaTab places it as before. And a bar
+  // that takes no tap doesn't look tappable.
+  for (const cursor of cursors) {
+    await expect(cursor).toHaveCount(1);
+    await expect(cursor).toHaveCSS('visibility', 'hidden');
+  }
+  await expect(surface).toHaveCSS('cursor', 'default');
   await expect.poll(async () => (await scoreShape(page)).scrollsSideways).toBe(false);
   if (phone) {
     // Lines wrap down the page: the box is as tall as the whole song and scrolls with the window.
@@ -617,6 +636,9 @@ test('under a recording a phone draws the score as a page that scrolls with the 
   if (phone) {
     await expect.poll(async () => (await scoreShape(page)).height).toBeLessThan(onTab.height + 20);
   }
+  // And its cursor is drawn again, on the bar it was at.
+  for (const cursor of cursors) await expect(cursor).toHaveCSS('visibility', 'visible');
+  await expect(surface).toHaveCSS('cursor', 'pointer');
 });
 
 test('nothing on the overview moves when the links arrive on a cold load', async ({

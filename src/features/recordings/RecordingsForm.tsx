@@ -22,6 +22,7 @@ import { randomUuid } from '@/lib/randomUuid';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import { linkInputId } from './recordingFocus';
 import {
+  draftOfPlan,
   EMPTY_LINK_DRAFT,
   fieldReading,
   isEmptyPlan,
@@ -70,6 +71,7 @@ const fieldLabel = (field: LinkField, index: number) =>
  * (`useSongLinkSaves`): a form opened again meanwhile is locked on the save
  * still on its way, and a failure is shown here or, with the form gone, on
  * the overview. Cancel is the user's "I've read it": the failure goes with it.
+ * A form opened again mid-save shows what that save is sending (`draftOfPlan`).
  *
  * Opening it puts focus in the first empty link field where there is a mouse
  * or trackpad, and on the form itself on a touch screen, where a focused
@@ -99,7 +101,12 @@ export function RecordingsForm({
   useEffect(() => formRef.current?.focus({ preventScroll: true }), []);
 
   const saving = saves.saving;
-  const fields = links.data ? linkFields(links.data, draft, newIds) : null;
+  // A form with nothing typed under a save on its way was opened after that save was sent (it
+  // can't be typed in until the answer): it shows what is being saved, not empty fields under
+  // "Saving…". The form that sent it shows its own draft, as it was typed.
+  const savingElsewhere = draft === EMPTY_LINK_DRAFT ? saves.pendingPlan : null;
+  const shown = links.data && savingElsewhere ? draftOfPlan(links.data, savingElsewhere) : draft;
+  const fields = links.data ? linkFields(links.data, shown, newIds) : null;
   // With a mouse or trackpad the first empty field takes focus, ready for the paste, once the
   // fields are there. Only from the form itself, where opening put it: someone who has
   // tabbed on while the links loaded keeps their place.

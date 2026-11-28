@@ -4,6 +4,7 @@ import {
   keptLinkText,
   LINK_REFUSAL_COPY,
   otherLinkLabel,
+  otherLinkNames,
   parseSongLink,
   playAlongLabel,
   recognisedAs,
@@ -180,7 +181,8 @@ describe('parseSongLink: refusals', () => {
     ['a vbscript: address', 'vbscript:msgbox(1)', 'notHttps'],
     ['a word', 'hello', 'notALink'],
     ['a sentence', 'the one from the lesson', 'notALink'],
-    ['words with a link that has no scheme', `the song youtu.be/${VIDEO}`, 'notALink'],
+    ['words with another site’s address and no scheme', 'the song example.com/lesson', 'notALink'],
+    ['brackets round nothing', '()', 'notALink'],
     ['words round an http: link', `the song http://youtu.be/${VIDEO}`, 'notHttps'],
     [
       'words round a look-alike',
@@ -235,6 +237,21 @@ describe('youTubeEmbedUrl', () => {
       expect(youTubeEmbedUrl({ mediaId, startSeconds: null })).toBeNull();
     },
   );
+
+  // 14 Review: the address is safe by what it is built from, not by who calls it. A start
+  // that isn't whole seconds (nothing the parser gives; a value from anywhere else) is left out.
+  it.each([
+    ['text carrying a parameter', '90&autoplay=1'],
+    ['text carrying a fragment', '90#x'],
+    ['a fraction', 1.5],
+    ['a negative number', -5],
+    ['not a number', Number.NaN],
+    ['zero', 0],
+  ])('leaves out a start that is %s', (_name, startSeconds) => {
+    expect(youTubeEmbedUrl({ mediaId: VIDEO, startSeconds: startSeconds as number })).toBe(
+      `https://www.youtube-nocookie.com/embed/${VIDEO}?playsinline=1&rel=0`,
+    );
+  });
 });
 
 describe('labels', () => {
@@ -280,6 +297,30 @@ describe('labels', () => {
     [`https://${'a'.repeat(50)}.example.com/lesson/one`, `${'a'.repeat(50)}.example.com/…`],
   ])('shows the other link %s as %s', (url, label) => {
     expect(otherLinkLabel(accepted(url))).toBe(label);
+  });
+
+  // 14 Review, from QA (after fix round 1) issue 7: an other link is named for what it is.
+  it('names other links for what was recognised, and numbers the ones that share a name', () => {
+    const links = [
+      accepted(WATCH),
+      accepted('https://www.drumeo.com/beat'),
+      accepted(SPOTIFY),
+      accepted('https://youtu.be/aaaaaaaaaaa?t=90'),
+      accepted('https://www.drumeo.com/beat'),
+      accepted(`${WATCH}&t=5`),
+      // No video and no track: named by its address, like any other site.
+      accepted('https://www.youtube.com/@somedrummer'),
+    ];
+    expect(otherLinkNames(links)).toEqual([
+      'YouTube video',
+      'drumeo.com/beat',
+      'Spotify track',
+      'YouTube video 2',
+      'drumeo.com/beat 2',
+      'YouTube video 3',
+      'youtube.com/@somedrummer',
+    ]);
+    expect(otherLinkNames([])).toEqual([]);
   });
 
   it('names a button by its kind, and by where it goes when it leaves the app', () => {
@@ -459,13 +500,9 @@ describe('parseSongLink: more YouTube shapes', () => {
     }
   });
 
-  // A link lifted out of a sentence brings its punctuation. What follows the id isn't part
-  // of an id, so it is never played as some other video: it is a plain link, and says so.
+  // What follows the id and isn't a sentence's punctuation isn't part of an id either, so it
+  // is never played as some other video: it is a plain link, and says so.
   it.each([
-    ['a full stop', `https://youtu.be/${VIDEO}.`],
-    ['a bracket', `https://youtu.be/${VIDEO})`],
-    ['a comma after a watch address', `${WATCH},`],
-    ['a bracket and a full stop', `${WATCH}).`],
     ['a twelfth character', `${WATCH}x`],
     ['an encoded NUL', `${WATCH}%00`],
     ['v in capitals', `https://www.youtube.com/watch?V=${VIDEO}`],
@@ -480,13 +517,93 @@ describe('parseSongLink: more YouTube shapes', () => {
     expect(youTubeEmbedUrl(link)).toBeNull();
     expect(recognisedAs(link)).toBe('Link to YouTube. Opens in a new tab.');
   });
+});
 
-  it.each([`<https://youtu.be/${VIDEO}>`, `"https://youtu.be/${VIDEO}"`, `(${WATCH})`])(
-    'refuses %s, wrapped as a chat app wraps it',
-    (text) => {
-      expect(refusal(text)).toBe('notALink');
-    },
-  );
+// 14 Review, from QA (after fix round 1) issue 5: a link pasted alone still brings what was
+// round it, or after it, where it was copied from.
+describe('parseSongLink: a link alone, as it is copied out of a message', () => {
+  it.each([
+    ['round brackets', `(https://youtu.be/${VIDEO})`, WATCH],
+    ['angle brackets', `<https://youtu.be/${VIDEO}>`, WATCH],
+    ['square brackets', `[${WATCH}]`, WATCH],
+    ['double quotes', `"https://youtu.be/${VIDEO}"`, WATCH],
+    ['single quotes', `'${SPOTIFY}'`, SPOTIFY],
+    ['curly quotes', `“${SPOTIFY}”`, SPOTIFY],
+    ['brackets and a full stop', `(${WATCH}).`, WATCH],
+    ['angle brackets with no scheme', `<youtu.be/${VIDEO}>`, WATCH],
+    ['brackets round another site', '(https://example.com/lesson)', 'https://example.com/lesson'],
+    ['quotes round a Spotify URI', `"spotify:track:${TRACK}"`, SPOTIFY],
+  ])('takes a link alone inside %s', (_name, text, url) => {
+    expect(accepted(text).url).toBe(url);
+  });
+
+  it.each([
+    ['a full stop after a short link', `https://youtu.be/${VIDEO}.`, WATCH],
+    ['a comma after a watch address', `${WATCH},`, WATCH],
+    ['a bracket after a short link', `https://youtu.be/${VIDEO})`, WATCH],
+    ['a full stop after a start time', `${WATCH}&t=90.`, `${WATCH}&t=90s`],
+    ['a full stop after a Spotify track', `${SPOTIFY}.`, SPOTIFY],
+    ['a full stop after another site', 'https://example.com/lesson.', 'https://example.com/lesson'],
+    ['a comma after another site', 'https://example.com/lesson,', 'https://example.com/lesson'],
+    ['a full stop after a bare host', 'example.com.', 'https://example.com/'],
+    ['several marks', 'https://example.com/lesson!.,', 'https://example.com/lesson'],
+  ])('never takes %s as part of the link', (_name, text, url) => {
+    const link = accepted(text);
+    expect(link.url).toBe(url);
+    // And so a video is the video, not a link out to an address YouTube doesn't have.
+    if (url.startsWith(WATCH)) expect(link).toMatchObject({ provider: 'youtube', mediaId: VIDEO });
+  });
+
+  it.each([
+    ['alone', 'https://en.wikipedia.org/wiki/Rush_(band)'],
+    ['in brackets of its own', '(https://en.wikipedia.org/wiki/Rush_(band))'],
+    ['in a sentence', 'see https://en.wikipedia.org/wiki/Rush_(band) now'],
+    ['at a sentence’s end', 'It is at https://en.wikipedia.org/wiki/Rush_(band).'],
+    ['in brackets in a sentence', 'the band (https://en.wikipedia.org/wiki/Rush_(band)) rocks'],
+  ])('keeps a closing bracket whose opening one is in the address: %s', (_name, text) => {
+    expect(accepted(text).url).toBe('https://en.wikipedia.org/wiki/Rush_(band)');
+  });
+
+  it('keeps any kind of bracket that opens inside the address, and drops one that doesn’t', () => {
+    expect(accepted('https://example.com/a[1]]').url).toBe(
+      accepted('https://example.com/a[1]').url,
+    );
+    expect(accepted('{https://example.com/a?x={y}}').url).toBe(
+      accepted('https://example.com/a?x={y}').url,
+    );
+    expect(accepted('https://example.com/a(b)c)').url).toBe('https://example.com/a(b)c');
+  });
+
+  it.each([
+    ['YouTube’s short host', `youtu.be/${VIDEO}`, WATCH],
+    ['youtube.com', `youtube.com/watch?v=${VIDEO}`, WATCH],
+    ['www.youtube.com', `www.youtube.com/watch?v=${VIDEO}&t=90`, `${WATCH}&t=90s`],
+    ['m.youtube.com', `m.youtube.com/watch?v=${VIDEO}`, WATCH],
+    ['music.youtube.com', `music.youtube.com/watch?v=${VIDEO}`, WATCH],
+    ['Spotify', `open.spotify.com/track/${TRACK}`, SPOTIFY],
+    ['Spotify with its share parameter', `open.spotify.com/track/${TRACK}?si=abc`, SPOTIFY],
+  ])('gives %s typed without a scheme https://, alone and after a title', (_name, text, url) => {
+    expect(accepted(text).url).toBe(url);
+    expect(accepted(`Song title ${text}`).url).toBe(url);
+    expect(accepted(`Song title (${text}).`).url).toBe(url);
+    // The field then shows the address, and reads it as the same link.
+    expect(keptLinkText(`Song title ${text}`)).toBe(text);
+  });
+
+  it('takes whichever address comes first in the words, with a scheme or without', () => {
+    expect(accepted(`youtu.be/${VIDEO} or ${SPOTIFY}`).url).toBe(WATCH);
+    expect(accepted(`${SPOTIFY} or youtu.be/${VIDEO}`).url).toBe(SPOTIFY);
+  });
+
+  it.each([
+    ['inside another host’s path', `see evil.test/youtu.be/${VIDEO}`],
+    ['after a hyphen', `see evil-youtube.com/watch?v=${VIDEO}`],
+    ['at the end of a longer name', `see notyoutube.com/watch?v=${VIDEO}`],
+    ['after a sign-in part', `see user@youtu.be/${VIDEO}`],
+    ['as a subdomain of something else', `see youtu.be.evil.test/${VIDEO}`],
+  ])('finds no YouTube address %s', (_name, text) => {
+    expect(refusal(text)).toBe('notALink');
+  });
 });
 
 describe('parseSongLink: hosts in other scripts', () => {
@@ -598,7 +715,7 @@ describe('parseSongLink: more Spotify and tracking', () => {
   });
 
   it.each([
-    ['a full stop after the id', `${SPOTIFY}.`],
+    ['a twenty-third character', `${SPOTIFY}x`],
     ['the embed player’s address', `https://open.spotify.com/embed/track/${TRACK}`],
     ['another Spotify host', `https://play.spotify.com/track/${TRACK}`],
     ['two language segments', `https://open.spotify.com/intl-de/intl-fr/track/${TRACK}`],
@@ -624,6 +741,10 @@ describe('parseSongLink: what every saved link is', () => {
     `https://www.youtube.com:8443/watch?v=${VIDEO}`,
     `https://www.youtube.com\\@evil.test/watch?v=${VIDEO}`,
     `https://youtu.be/${VIDEO}).`,
+    `(https://youtu.be/${VIDEO})`,
+    'https://example.com/lesson.',
+    '(https://en.wikipedia.org/wiki/Rush_(band))',
+    `Song title open.spotify.com/track/${TRACK}.`,
     'https://www.youtube.com/@somedrummer',
     `spotify:track:${TRACK}`,
     `https://open.spotify.com/intl-de/track/${TRACK}?si=abc`,
@@ -706,8 +827,9 @@ describe('parseSongLink: a link with words round it', () => {
     ` https://youtu.be/${VIDEO}\n`,
     `youtu.be/${VIDEO}`,
     'the one from the lesson',
-    `the song youtu.be/${VIDEO}`,
+    'the song example.com/lesson',
     '',
+    `(https://youtu.be/${VIDEO})`,
     `https://youtu.be/${VIDEO}.`,
   ])('leaves %j as it was typed', (text) => {
     expect(keptLinkText(text)).toBe(text);

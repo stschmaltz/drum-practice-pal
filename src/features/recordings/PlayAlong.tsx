@@ -24,7 +24,7 @@ import { canOpenRecording, refuseUnlessCanOpen } from './recordingGate';
 import { RecordingsForm } from './RecordingsForm';
 import {
   isRecordingSource,
-  otherLinkLabel,
+  otherLinkNames,
   otherLinkSpokenAs,
   playAlongLabel,
   type SongLink,
@@ -41,7 +41,7 @@ export const OTHER_LINKS_SHOWN = 3;
  * it once the song's links are read, or a quiet "Add a recording" when it has
  * none. A YouTube link opens the song's play screen on that source; a Spotify
  * or other link leaves the app, and its button says where to. Other links are
- * a quiet list under the buttons, three of them and then "Show all n links".
+ * a quiet list of names under the buttons, three and then "Show all n links".
  * `managing` swaps the block for the form that adds, changes and removes
  * links. `actions` is the overview's own row under it (New loop).
  *
@@ -222,7 +222,8 @@ function SaveFailureAlert({ error, onDismiss }: { error: unknown; onDismiss: () 
 /**
  * The song's other links (a lesson, a drum cover): the first few, then one
  * button for the rest, so twenty of them don't push the loops off the screen.
- * Each reads as a link (its host and the start of its path), with its whole
+ * Each is named for what it is ("YouTube video", "Spotify track 2", or another
+ * site's host and the start of its path: `otherLinkNames`), with its whole
  * address in its title and its accessible name.
  */
 function OtherLinks({
@@ -236,23 +237,25 @@ function OtherLinks({
 }) {
   const [showingAll, setShowingAll] = useState(false);
   const listId = useId();
+  // Named over the whole list, so "YouTube video 2" is the same link folded or not.
+  const names = otherLinkNames(links);
   const shown = showingAll ? links : links.slice(0, OTHER_LINKS_SHOWN);
   return (
     <>
       <ul id={listId} aria-label="Other links" className="flex flex-col">
-        {shown.map((link) => (
+        {shown.map((link, index) => (
           <li key={link.id} className="min-w-0">
             <LinkOut
               link={link}
               className={`${lockableLinkClass} max-w-full gap-1.5 text-sm`}
               textClassName="line-clamp-1 wrap-anywhere"
               title={link.url}
-              // The words are a shortened address; a screen reader gets all of it.
-              spokenAs={otherLinkSpokenAs(link)}
+              // The words are a name or a shortened address; a screen reader gets all of it.
+              spokenAs={otherLinkSpokenAs(link, names[index] ?? '')}
               off={off}
               onClick={onOpen}
             >
-              {otherLinkLabel(link)}
+              {names[index]}
             </LinkOut>
           </li>
         ))}

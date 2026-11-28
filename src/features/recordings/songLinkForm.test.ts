@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyLinkSave,
+  draftOfPlan,
   EMPTY_LINK_DRAFT,
   isEmptyPlan,
   linkFields,
@@ -202,5 +203,45 @@ describe('applyLinkSave', () => {
       ],
     };
     expect(applyLinkSave([linkRow('a')], SONG, plan, '2026-11-27T09:00:00Z')).toHaveLength(1);
+  });
+});
+
+// 14 Review: a form opened again while a save is on its way shows what that save is sending.
+describe('draftOfPlan', () => {
+  const saved = [original, linkRow('a'), linkRow('b', { created_at: '2026-11-20T10:00:01Z' })];
+
+  it('gives the fields the plan’s values: a change, a removal, a first Drumless and an added link', () => {
+    const typed = draftOf(
+      {
+        original: 'youtu.be/aaaaaaaaaaa?si=abc',
+        drumless: `${SPOTIFY}?si=abc`,
+        'other:a': '',
+        'other:new': 'example.com/new',
+      },
+      ['new'],
+    );
+    const plan = planOf(saved, typed);
+    // A form opened later has ids of its own for a new Original and Drumless.
+    const shown = linkFields(saved, draftOfPlan(saved, plan), { original: 'x', drumless: 'y' });
+    expect(shown.map(({ slot, text }) => [slot, text])).toEqual([
+      ['original', 'https://www.youtube.com/watch?v=aaaaaaaaaaa'],
+      ['drumless', SPOTIFY],
+      ['other:a', ''],
+      // Left alone by the plan: shown as it is saved.
+      ['other:b', 'https://example.com/b'],
+      ['other:new', 'https://example.com/new'],
+    ]);
+  });
+
+  it('is empty for a plan that changes nothing, and leaves out a change to a link no longer saved', () => {
+    expect(draftOfPlan(saved, { removals: [], updates: [], inserts: [] })).toEqual(
+      EMPTY_LINK_DRAFT,
+    );
+    const gone = {
+      removals: ['zz'],
+      updates: [{ id: 'yy', provider: 'web' as const, url: WATCH }],
+      inserts: [],
+    };
+    expect(draftOfPlan(saved, gone)).toEqual(EMPTY_LINK_DRAFT);
   });
 });

@@ -1634,4 +1634,137 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
       noOverviewAlert();
     });
   });
+
+  describe('14 Review', () => {
+    /** An other link's words on show: its name, which stands in for the address a screen reader gets. */
+    const wordsShown = (link: HTMLElement) =>
+      link.querySelector('span[aria-hidden="true"]')?.textContent;
+
+    // QA (after fix round 1) issue 7: an other link reads as what it is, not as an address.
+    it('names other links for what the app recognised, numbering the ones that share a name', async () => {
+      const second = 'https://www.youtube.com/watch?v=aaaaaaaaaaa';
+      const at = (seconds: number) => `2026-11-21T12:00:0${seconds}Z`;
+      const user = await opened([
+        original,
+        linkRow('cover', { provider: 'youtube', url: WATCH_URL, created_at: at(1) }),
+        linkRow('playlist', { provider: 'spotify', url: SPOTIFY_URL, created_at: at(2) }),
+        linkRow('lesson', { url: 'https://www.drumeo.com/lesson?id=7', created_at: at(3) }),
+        linkRow('cover-2', { provider: 'youtube', url: second, created_at: at(4) }),
+      ]);
+      const list = await screen.findByRole('list', { name: 'Other links' });
+      await user.click(screen.getByRole('button', { name: 'Show all 4 links' }));
+      const others = within(list).getAllByRole('link');
+      expect(others.map(wordsShown)).toEqual([
+        'YouTube video',
+        'Spotify track',
+        'drumeo.com/lesson?id=7',
+        'YouTube video 2',
+      ]);
+      // The whole address is still there: for a pointer, and in the name a screen reader says.
+      expect(others.map((link) => link.getAttribute('title'))).toEqual([
+        WATCH_URL,
+        SPOTIFY_URL,
+        'https://www.drumeo.com/lesson?id=7',
+        second,
+      ]);
+      expect(others[0]).toHaveAccessibleName(
+        `YouTube video: youtube.com/watch?v=${VIDEO_ID} (opens in a new tab)`,
+      );
+      expect(others[1]).toHaveAccessibleName(
+        'Spotify track: open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC (opens in a new tab)',
+      );
+      expect(others[2]).toHaveAccessibleName('drumeo.com/lesson?id=7 (opens in a new tab)');
+      expect(others[3]).toHaveAccessibleName(
+        'YouTube video 2: youtube.com/watch?v=aaaaaaaaaaa (opens in a new tab)',
+      );
+      expect(others[3]).toHaveAttribute('href', second);
+    });
+
+    it('keeps a link’s number while the list is folded', async () => {
+      const second = 'https://www.youtube.com/watch?v=aaaaaaaaaaa';
+      await opened([
+        linkRow('cover', { provider: 'youtube', url: WATCH_URL }),
+        linkRow('cover-2', {
+          provider: 'youtube',
+          url: second,
+          created_at: '2026-11-21T12:00:01Z',
+        }),
+      ]);
+      const list = await screen.findByRole('list', { name: 'Other links' });
+      expect(within(list).getAllByRole('link').map(wordsShown)).toEqual([
+        'YouTube video',
+        'YouTube video 2',
+      ]);
+    });
+
+    // QA (after fix round 1) issue 6: "Saving…" stood over empty fields.
+    it('a form opened again while its save is on its way shows what is being saved', async () => {
+      const lesson = linkRow('lesson', { url: 'https://www.drumeo.com/lesson?id=7' });
+      const cover = linkRow('cover', {
+        url: 'https://example.com/cover',
+        created_at: '2026-11-21T12:00:01Z',
+      });
+      const user = await opened([original, lesson, cover]);
+      await manage(user);
+      // A change, a first Drumless, a removal and an added link, typed as a person types them.
+      await user.clear(field('Original'));
+      await user.type(field('Original'), `youtu.be/aaaaaaaaaaa?si=abc`);
+      await user.type(field('Drumless'), `${SPOTIFY_URL}?si=abc`);
+      await user.click(formButton('Remove Other link 1'));
+      await user.click(formButton('Add another link'));
+      await user.type(field('Other link 3'), 'https://example.com/new');
+      // The first step is held: nothing of the save has landed while the form is reopened.
+      const release = links.holdNext('delete');
+      await user.click(save());
+      await savingShown();
+      await user.click(screen.getByRole('link', { name: 'New loop' }));
+      expect(await screen.findByText('At whole song')).toBeVisible();
+      historyBack();
+      await screen.findByRole('link', { name: 'Tab' });
+
+      await manage(user);
+      expect(save()).toHaveTextContent('Saving…');
+      // What the save is sending, in the form it is saved in; an untouched field as it is saved.
+      expect(field('Original')).toHaveValue('https://www.youtube.com/watch?v=aaaaaaaaaaa');
+      expect(field('Drumless')).toHaveValue(SPOTIFY_URL);
+      expect(field('Other link 1')).toHaveValue('');
+      expect(field('Other link 2')).toHaveValue(cover.url);
+      expect(field('Other link 3')).toHaveValue('https://example.com/new');
+      for (const name of ['Original', 'Drumless', 'Other link 1', 'Other link 2', 'Other link 3']) {
+        expect(field(name)).toHaveAttribute('readonly');
+      }
+      // Still locked: what it shows can't be changed or sent a second time.
+      expectLocked(formButton('Cancel'));
+      fireEvent.submit(form());
+      await settle();
+      expect(links.sent('delete')).toHaveLength(1);
+
+      // Its answer: the fields show what is saved, which is the same, and nothing was added twice.
+      release();
+      await waitFor(() => expectUnlocked(save()));
+      expect(field('Original')).toHaveValue('https://www.youtube.com/watch?v=aaaaaaaaaaa');
+      expect(field('Drumless')).toHaveValue(SPOTIFY_URL);
+      expect(field('Other link 1')).toHaveValue(cover.url);
+      expect(field('Other link 2')).toHaveValue('https://example.com/new');
+      expect(within(form()).queryByRole('textbox', { name: /^Other link 3/ })).toBeNull();
+      expect(links.rows().map((row) => row.url)).toEqual([
+        'https://www.youtube.com/watch?v=aaaaaaaaaaa',
+        cover.url,
+        SPOTIFY_URL,
+        'https://example.com/new',
+      ]);
+    });
+
+    it('the form that sent the save keeps showing what was typed while it saves', async () => {
+      const user = await opened();
+      await addRecording(user);
+      await user.type(field('Original'), `youtu.be/${VIDEO_ID}`);
+      const release = links.holdNext('insert');
+      await user.click(save());
+      await savingShown();
+      expect(field('Original')).toHaveValue(`youtu.be/${VIDEO_ID}`);
+      release();
+      await waitFor(() => noForm());
+    });
+  });
 });

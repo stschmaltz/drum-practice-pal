@@ -66,6 +66,8 @@ export function useSaveSongLinks(songId: string) {
  * - `saving`: a save is on its way, whoever sent it. The form locks on it, so
  *   one opened again meanwhile can't send a second over the first.
  * - `isSaving()`: the same, asked of the cache at a press.
+ * - `pendingPlan`: what that save is sending, for a form opened again meanwhile
+ *   to show under its "Saving…" (`draftOfPlan`); null when none is on its way.
  * - `error`: the latest save's failure, until the next save or `forgetFailure`.
  *   A mutation nobody watches is collected after five minutes, and it goes then.
  */
@@ -76,9 +78,15 @@ export function useSongLinkSaves(songId: string) {
   // In the order they were sent.
   const saves = useMutationState({
     filters: { mutationKey },
-    select: (mutation) => ({ status: mutation.state.status, error: mutation.state.error }),
+    select: (mutation) => ({
+      status: mutation.state.status,
+      error: mutation.state.error,
+      // Every mutation under this key is `useSaveSongLinks`'s, whose variables are its plan.
+      plan: mutation.state.variables as LinkSavePlan | undefined,
+    }),
   });
   const latest = saves.at(-1);
+  const pending = saves.find((save) => save.status === 'pending');
 
   const isSaving = () => queryClient.isMutating({ mutationKey }) > 0;
   /** The failure has been read: said once more nowhere. */
@@ -92,7 +100,8 @@ export function useSongLinkSaves(songId: string) {
   }, [queryClient, user.id, songId]);
 
   return {
-    saving: saves.some((save) => save.status === 'pending'),
+    saving: pending !== undefined,
+    pendingPlan: pending?.plan ?? null,
     isSaving,
     error: latest?.status === 'error' ? latest.error : null,
     forgetFailure,

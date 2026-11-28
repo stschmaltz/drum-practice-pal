@@ -45,7 +45,8 @@ Two migrations add checks that existing rows can fail, and one failing row stops
   select id from loops where name !~ '\S';
   ```
 
-- [ ] `20261130000000_song_links.sql` (Unit 14) needs no check: it creates `song_links` and adds the nullable `songs.last_played_at`, and its checks are on the new table only. It is additive, so the build before it keeps working.
+- [ ] `20261130000000_song_links.sql` (Unit 14) needs no check: it creates `song_links` and adds the nullable `songs.last_played_at`, and its checks are on the new table only. It is additive, so the build before it keeps working: that build names its columns in every select, sends no `last_played_at`, and the new trigger on `songs` leaves its inserts and its title and artist edits as they were (checked in 14 Review).
+- [ ] Push that migration before the Unit 14 build goes live (by hand, before merging, with `npx supabase db push`; the `migrate` job then finds nothing to do). The other order is the one that breaks: the Unit 14 build's Songs list selects `last_played_at` and its song screens read `song_links`, so a Worker deployed before the migration has landed can't load the Songs list on a cold start (a list already on the device stays, with its refresh failing) until the `migrate` job finishes. Any migration whose build reads what it adds on a first screen is pushed first, the same way.
 
 - [ ] Before `20261123010000_session_sanity.sql` (a session longer than a day is refused):
 
@@ -62,7 +63,7 @@ CI does the first three on every push to `main` (the `migrate` job); by hand the
 - [ ] The types the app was built with match the hosted schema: `npx supabase gen types typescript --project-id <project-ref> --schema public | npx prettier --stdin-filepath x.ts | diff - src/lib/database.types.ts` prints nothing.
 - [ ] Storage: the private bucket `gp-files` exists with a 20 MB file size limit (made by `20261122000100_storage.sql`). The project-wide upload limit (Storage settings) is at least 20 MB.
 - [ ] Data API: the exposed schemas are `public` and `graphql_public`, and "Max rows" is at least 500 (`fetchAllPages` reads pages of 500; the local stack has 1000).
-- [ ] Spot check RLS: in the SQL editor, `select tablename, rowsecurity from pg_tables where schemaname = 'public';` shows `true` for `songs`, `loops`, `practice_sessions`, `user_settings`.
+- [ ] Spot check RLS: in the SQL editor, `select tablename, rowsecurity from pg_tables where schemaname = 'public';` shows `true` for `songs`, `loops`, `practice_sessions`, `user_settings`, `song_links`.
 
 ## 3. Hosted auth, against `supabase/config.toml`
 
