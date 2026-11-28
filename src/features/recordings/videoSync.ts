@@ -174,6 +174,37 @@ export function canNudge(barOneSeconds: number, direction: NudgeDirection): bool
   return nudgedBarOne(barOneSeconds, direction) !== toMilliseconds(barOneSeconds);
 }
 
+/**
+ * A time of the video as someone types it, in seconds to the millisecond, or
+ * null for anything that isn't one the column takes: "7.25", "0:07.25",
+ * "1:02:03.5" (minutes and seconds under 60 once there is a part before
+ * them), and YouTube's own "1m30s". A comma is a decimal point. Never
+ * clamped: a time past the limit is refused, not quietly moved.
+ */
+export function parseVideoClock(text: string): number | null {
+  const typed = text.trim().replace(',', '.');
+  let seconds: number | null = null;
+  const units = /^(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(typed);
+  if (typed !== '' && units && (units[1] !== undefined || units[2] !== undefined)) {
+    seconds = Number(units[1] ?? 0) * 60 + Number(units[2] ?? 0);
+  } else {
+    const parts = typed.split(':');
+    const last = parts[parts.length - 1] ?? '';
+    const leading = parts.slice(0, -1);
+    const wellFormed =
+      parts.length <= 3 &&
+      /^\d+(\.\d+)?$/.test(last) &&
+      leading.every((part) => /^\d+$/.test(part));
+    if (!wellFormed) return null;
+    const numbers = [...leading.map(Number), Number(last)];
+    // Everything after the first part counts in sixties.
+    if (numbers.slice(1).some((part) => part >= 60)) return null;
+    seconds = numbers.reduce((total, part) => total * 60 + part, 0);
+  }
+  if (!Number.isFinite(seconds) || seconds < 0 || seconds > BAR_ONE_SECONDS_MAX) return null;
+  return toMilliseconds(seconds);
+}
+
 /** "0:07.25", "1:02:03.50": a second of the video as its player's clock shows it, to the hundredth. */
 export function videoClockLabel(seconds: number): string {
   const hundredths = Math.round(Math.max(0, seconds) * 100);

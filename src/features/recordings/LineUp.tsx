@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import {
   buttonClass,
+  inputClass,
   pressedButtonClass,
   primaryButtonClass,
   quietButtonClass,
@@ -17,7 +18,14 @@ import { canLineUp, type RecordingPlayer } from './recordingPlayer';
 import type { SongLink } from './songLinks';
 import { useRecordingStatus } from './useRecordingPlayer';
 import { useBarOneAtPress, useSaveBarOne } from './useSaveBarOne';
-import { canNudge, lineUpSeconds, nudgedBarOne, type NudgeDirection } from './videoSync';
+import {
+  canNudge,
+  lineUpSeconds,
+  nudgedBarOne,
+  parseVideoClock,
+  videoClockLabel,
+  type NudgeDirection,
+} from './videoSync';
 
 /** The two rows' heights are fixed, so nothing on the page moves when their content changes. */
 const blockClass = 'flex w-full flex-col lg:w-[26rem] lg:max-w-full';
@@ -28,7 +36,7 @@ const messageRowClass = 'flex min-h-11 items-center gap-2';
 const rowButtonSize = 'min-w-0 px-2 text-sm whitespace-nowrap';
 
 /** The buttons that stand in for one another: focus goes from one to the other. */
-type HandOver = 'now' | 'again';
+type HandOver = 'now' | 'again' | 'typed';
 const handOverAttributes = (control: HandOver) => ({ 'data-line-up': control });
 const findHandOver = (control: HandOver) => () =>
   document.querySelector<HTMLElement>(`[data-line-up="${control}"]`);
@@ -84,6 +92,10 @@ export function LineUp({
   const focusWhenReady = useFocusWhenReady();
   // "Line up again" was pressed: the prompt is back, and the saved line-up stays until the next press.
   const [relining, setRelining] = useState(false);
+  // The time being typed for bar 1 ("Type a time"), or null while no field is open, and
+  // whether what was last submitted wasn't a time.
+  const [typed, setTyped] = useState<string | null>(null);
+  const [typedInvalid, setTypedInvalid] = useState(false);
   const [said, setSaid] = useState(NOTHING_SAID);
   const say = (text: string) => setSaid((last) => saying(last, text));
 
@@ -128,6 +140,43 @@ export function LineUp({
     focusWhenReady(findHandOver('again'));
   };
 
+  // Typing the time: for someone who knows where the song comes in, or reads it off the
+  // video's own clock. Needs no playing video, only a connection for the save.
+  const openTyping = () => {
+    if (!isOnline()) return;
+    setTyped(barOneSeconds === null ? '' : videoClockLabel(barOneSeconds));
+    setTypedInvalid(false);
+    focusWhenReady(findHandOver('typed'));
+  };
+
+  const closeTyping = () => {
+    setTyped(null);
+    setTypedInvalid(false);
+    focusWhenReady(findHandOver(lined ? 'again' : 'now'));
+  };
+
+  const saveTyped = (event: FormEvent) => {
+    event.preventDefault();
+    if (typed === null || !isOnline()) return;
+    const seconds = parseVideoClock(typed);
+    if (seconds === null) {
+      setTypedInvalid(true);
+      return;
+    }
+    // The time already saved, typed back unchanged, sends nothing.
+    if (seconds !== barOneSeconds) {
+      save.mutate(
+        { linkId: link.id, barOneSeconds: seconds },
+        { onError: () => focusWhenReady(findHandOver(barOneSeconds === null ? 'now' : 'again')) },
+      );
+    }
+    setTyped(null);
+    setTypedInvalid(false);
+    setRelining(false);
+    say(`Lined up. ${barOneLabel(seconds)}.`);
+    focusWhenReady(findHandOver('again'));
+  };
+
   let message: ReactNode;
   if (!online) message = <OfflineNote>{LINE_UP_COPY.offline}</OfflineNote>;
   else if (save.error) {
@@ -140,6 +189,59 @@ export function LineUp({
   else if (needsFirstTap && !status.started) message = LINE_UP_COPY.firstTap;
   else if (lined) message = `${barOneLabel(barOneSeconds)}. ${LINE_UP_COPY.drifting}`;
   else message = LINE_UP_COPY.prompt;
+
+  if (typed !== null) {
+    return (
+      <form data-testid="line-up" className={blockClass} noValidate onSubmit={saveTyped}>
+        <label className={`${messageRowClass} text-xs/4 text-ink-soft`}>
+          {/* The label gives way to what is wrong, in the same place and the same room. */}
+          {typedInvalid ? (
+            <span role="alert" className="w-24 shrink-0 text-danger">
+              {LINE_UP_COPY.typedInvalid}
+            </span>
+          ) : (
+            <span className="shrink-0">{LINE_UP_COPY.typedLabel}</span>
+          )}
+          <input
+            className={`${inputClass} h-11 min-w-0 flex-1`}
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            aria-label={LINE_UP_COPY.typedLabel}
+            aria-invalid={typedInvalid || undefined}
+            placeholder={LINE_UP_COPY.typedPlaceholder}
+            value={typed}
+            onChange={(event) => {
+              setTyped(event.target.value);
+              setTypedInvalid(false);
+            }}
+            // Escape leaves the field as Cancel does; cancelled so it reaches nothing else.
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return;
+              event.preventDefault();
+              closeTyping();
+            }}
+            {...handOverAttributes('typed')}
+          />
+        </label>
+        <div className={rowClass}>
+          <button
+            type="submit"
+            className={`${primaryButtonClass} flex-1 whitespace-nowrap`}
+            aria-disabled={!online || undefined}
+          >
+            {LINE_UP_COPY.typedSave}
+          </button>
+          <button type="button" className={quietButtonClass} onClick={closeTyping}>
+            {LINE_UP_COPY.cancel}
+          </button>
+        </div>
+        <p role="status" className="sr-only" data-testid="line-up-announcement">
+          {announcementText(said)}
+        </p>
+      </form>
+    );
+  }
 
   return (
     <div data-testid="line-up" className={blockClass}>
@@ -196,6 +298,14 @@ export function LineUp({
               {...handOverAttributes('now')}
             >
               {LINE_UP_COPY.now}
+            </button>
+            <button
+              type="button"
+              className={`${quietButtonClass} shrink-0 whitespace-nowrap`}
+              aria-disabled={!online || undefined}
+              onClick={openTyping}
+            >
+              {LINE_UP_COPY.type}
             </button>
             {relining && (
               <button type="button" className={quietButtonClass} onClick={keepLineUp}>

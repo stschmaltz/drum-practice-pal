@@ -7,6 +7,7 @@ import {
   lineUpSeconds,
   nudgedBarOne,
   NUDGE_SECONDS,
+  parseVideoClock,
   videoClockLabel,
   videoSecondsOfBar,
   type BarTime,
@@ -665,5 +666,51 @@ describe('lining up and nudging', () => {
     [3723.5, '1:02:03.50'],
   ])('shows %s s as %s', (seconds, label) => {
     expect(videoClockLabel(seconds)).toBe(label);
+  });
+});
+
+// Shane, after trying it: "let's allow users to enter a timestamp directly".
+describe('a typed time for bar 1', () => {
+  it.each([
+    ['7', 7],
+    ['7.25', 7.25],
+    ['7,25', 7.25],
+    ['0:07', 7],
+    ['0:07.25', 7.25],
+    ['1:15.5', 75.5],
+    ['01:15', 75],
+    ['1:02:03.5', 3723.5],
+    [' 0:07.25 ', 7.25],
+    ['90', 90],
+    ['90s', 90],
+    ['1m30s', 90],
+    ['1m30.5s', 90.5],
+    ['2m', 120],
+    ['0', 0],
+    ['7.4321', 7.432],
+    // What the line shows reads back as itself.
+    [videoClockLabel(3723.5), 3723.5],
+  ])('reads %j as %s seconds', (text, seconds) => {
+    expect(parseVideoClock(text)).toBe(seconds);
+  });
+
+  it.each([
+    [''],
+    ['   '],
+    ['abc'],
+    ['-5'],
+    ['1:75'],
+    ['1:60:00'],
+    ['1:2:3:4'],
+    ['1:'],
+    [':30'],
+    ['1..5'],
+    ['1e3'],
+    ['Infinity'],
+    ['0x10'],
+    [String(BAR_ONE_SECONDS_MAX + 1)],
+    ['99:59:59'],
+  ])('refuses %j', (text) => {
+    expect(parseVideoClock(text)).toBeNull();
   });
 });
