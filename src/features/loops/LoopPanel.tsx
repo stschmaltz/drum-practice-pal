@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { Icon } from '@/components/icons';
@@ -12,6 +12,7 @@ import {
   primaryButtonClass,
   sectionHeadingClass,
 } from '@/components/styles';
+import { scrollToShow } from '@/features/player/barScroll';
 import { canPickBars, canPlay } from '@/features/player/controlGates';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { LoopHistory } from '@/features/practice/LoopHistory';
@@ -51,7 +52,7 @@ import { speedLabel } from './loopLabels';
 import { editorOnPanel } from './loopPanelContent';
 import { LoopSpeedControl } from './LoopSpeedControl';
 import { LoopStatusButton } from './LoopStatusButton';
-import { playLoopClosesPanel } from './useLoopPanelOpen';
+import { countInClosesPanel, playLoopClosesPanel } from './useLoopPanelOpen';
 import type { useLoops } from './useLoops';
 import { hasPickedBars, type LoopPractice } from './useLoopPractice';
 import { useSpeedMovedSinceChosen } from './useSpeedMovedSinceChosen';
@@ -109,12 +110,45 @@ export function LoopPanel({
 }: LoopPanelProps) {
   const count = loops.data?.length ?? 0;
 
-  const playLoop = (loop: Loop) => {
-    // The sheet lies over the score and the count-in number; the press that starts
-    // a loop gives them back. Its header goes on naming the loop.
-    if (playLoopClosesPanel(snapshot.status)) onOpenChange(false);
-    practice.playLoop(loop);
+  const headerRef = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  // The sheet lies over the score and the count-in number; starting playback gives
+  // them back. Its header goes on naming the loop, and takes focus if it was on
+  // something the closed sheet now hides (it would fall to <body>): the header is
+  // always there, and is the way back in.
+  const closeForPlayback = () => {
+    const focusWasInside = bodyRef.current?.contains(document.activeElement) ?? false;
+    onOpenChange(false);
+    if (focusWasInside) headerRef.current?.focus();
   };
+
+  const playLoop = (loop: Loop) => {
+    const closes = playLoopClosesPanel(snapshot.status);
+    // First, with nothing before it: iOS only starts audio inside the tap.
+    practice.playLoop(loop);
+    if (closes) closeForPlayback();
+  };
+
+  // A count-in started from outside the sheet (Play in the page's bar, Space, a
+  // pedal) closes it too. Each status is looked at once, as it arrives, so a sheet
+  // opened during the count-in is left open.
+  const { status } = snapshot;
+  const statusBefore = useRef(status);
+  useEffect(() => {
+    const before = statusBefore.current;
+    statusBefore.current = status;
+    if (open && countInClosesPanel(before, status)) closeForPlayback();
+    // Only a change of status closes the sheet: opening it is never undone here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  // The list keeps the scroll position it was closed at; in a long one the playing
+  // loop, whose speed the sheet is opened for, may be out of sight. Once per opening:
+  // while the sheet is open the list is the user's to scroll.
+  useLayoutEffect(() => {
+    if (open && bodyRef.current) showPlayingLoop(bodyRef.current);
+  }, [open]);
 
   return (
     <aside
@@ -128,6 +162,7 @@ export function LoopPanel({
       className="fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 rounded-t-card border-t border-line bg-surface shadow-sheet md:right-gutter md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+var(--spacing-gutter))] md:border-x lg:left-auto lg:w-[26rem]"
     >
       <button
+        ref={headerRef}
         type="button"
         className={`flex min-h-touch w-full items-center justify-between gap-3 rounded-t-card px-4 text-left font-semibold ${focusRing} focus-visible:-outline-offset-2`}
         aria-expanded={open}
@@ -149,6 +184,7 @@ export function LoopPanel({
         </span>
       </button>
       <div
+        ref={bodyRef}
         id={bodyId}
         hidden={!open}
         // The sheet stops well short of the top so the score stays in reach above it;
@@ -167,6 +203,27 @@ export function LoopPanel({
       </div>
     </aside>
   );
+}
+
+/** Room left above an item the list was scrolled to, so it doesn't sit against the sheet's header. */
+const LIST_SCROLL_GAP_PX = 8;
+
+/**
+ * Scrolls the sheet's list so the playing loop's item is on show; an item
+ * already all on show stays where it is. It sets the list's own scroll
+ * position rather than calling `scrollIntoView`, which may scroll the window
+ * too: the score must not move under a sheet being opened.
+ */
+function showPlayingLoop(list: HTMLElement): void {
+  const item = list.querySelector('[data-testid="active-loop"]');
+  if (!item) return;
+  const listBox = list.getBoundingClientRect();
+  const itemBox = item.getBoundingClientRect();
+  const target = scrollToShow(
+    { x: 0, y: itemBox.top - listBox.top + list.scrollTop, w: 0, h: itemBox.height },
+    { left: 0, top: list.scrollTop, width: 0, height: list.clientHeight },
+  );
+  if (target) list.scrollTop = Math.max(0, target.top - LIST_SCROLL_GAP_PX);
 }
 
 type LoopPanelBodyProps = Pick<

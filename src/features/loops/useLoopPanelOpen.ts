@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import type { PlayerStatus } from '@/features/player/PlayerService';
+import { isRunning, type PlayerStatus } from '@/features/player/PlayerService';
 
 /**
  * Whether pressing "Play loop" should close the loop sheet. The sheet lies
@@ -9,6 +9,21 @@ import type { PlayerStatus } from '@/features/player/PlayerService';
  */
 export function playLoopClosesPanel(status: PlayerStatus): boolean {
   return status !== 'playing';
+}
+
+/**
+ * Whether a change of the player's status should close the open loop sheet:
+ * playback has just been started with a count-in, by something other than the
+ * sheet's own "Play loop" (Play in the page's bar, Space, a pedal), and the
+ * number is about to show under the sheet.
+ *
+ * Only the count-in that starts a run. A sheet open when a repeat's count-in
+ * comes was opened while the loop played, for its speed, and closing it at
+ * every pass would take that control from under the finger; one opened during
+ * a count-in stays for the same reason.
+ */
+export function countInClosesPanel(before: PlayerStatus, now: PlayerStatus): boolean {
+  return now === 'countingIn' && !isRunning(before);
 }
 
 /**

@@ -177,3 +177,86 @@ One comment on PR #36 (`useSongSources.ts`, the wait's key), confirmed and fixed
 - **Late answer.** Unchanged: it lands in B's links and offers the recording in the switch, as for a first visit.
 - **Also changed.** `docs/review-checklist.md`: an Interleavings row, "Kept per value, on a screen that outlives its item". `AGENTS.md`, Slow connections: name the wait by everything that makes it that thing.
 - **Checks.** `npm run check` green. No e2e: no spec goes from one song's recording to another's, and nothing an existing spec covers changed.
+
+## Batch 4: Tab page, the loop sheet
+
+### Build
+
+**Summary.** Items 13.32, 13.28a, 13.28b and 13.27a of the triage: D1's option A, built as the default. All four are on the Tab page's loop sheet and the loop form; nothing about how a loop is saved, played or logged changes.
+
+- **13.32** Playback started with a count-in from outside the sheet (Play in the page's bar, Space, a pedal) closes the open sheet, so the count-in number is not behind it. The rule is `countInClosesPanel(before, now)` beside `playLoopClosesPanel` in `useLoopPanelOpen.ts`; an effect in `LoopPanel` asks it at each change of the player's status.
+- **13.28a** Whenever starting playback closes the sheet ("Play loop", or 13.32's count-in), focus that was inside the sheet goes to the sheet's header, which is always on the page and is the way back in. Focus that was outside it (on the page's Play) is left alone.
+- **13.28b** Each time the sheet opens, its list is scrolled so the playing loop's item is on show. An item already all on show is not moved.
+- **13.27a** Bars typed into the loop form bring their first bar on screen (`player.showBar`) as soon as the two fields make a range in this song, which is when the score highlights them. Bars picked on the score by a tap or a drag never scroll it.
+
+**Walk-through** (as `docs/product.md` asks, before any code):
+
+- _Day one, one song, no loops:_ the sheet says "Loops (0)". Open it, read the empty note, press Play in the bar with a count-in on: the sheet closes and the number shows. With the count-in off nothing changes. No new control, no new step.
+- _Missing a piece:_ a song with no loops or no loop playing has no item to scroll to, and opening the sheet moves nothing. A song with no drum track is untouched. A new loop's form with only its first bar typed makes no range yet, so nothing scrolls until the last bar is typed (the score highlights nothing until then either).
+- _Offline:_ nothing here reads or writes the network. The form's Save is off offline as before; typed bars still scroll.
+- _The user this would have been wrong for, and what was changed for them:_ someone practising with "before every repeat" on, who opens the sheet mid-loop to nudge the speed. As the triage words 13.32 ("whenever the status becomes `countingIn`") the sheet would close under their finger at the start of every pass, which on a two-bar loop is every few seconds, and the tap meant for "Faster by 5%" would land on the score. So only the count-in that _starts_ a run closes the sheet (see Decisions). The batch's acceptance ("any way of starting playback with a count-in shows the number") is met as written.
+- No forced order and no chore.
+
+**Files touched**
+
+- `src/features/loops/useLoopPanelOpen.ts`: `countInClosesPanel`. Test: `useLoopPanelOpen.test.ts` (the table of status pairs).
+- `src/features/loops/LoopPanel.tsx`: `closeForPlayback` (close and hand focus on), the status effect, the layout effect on `open`, `showPlayingLoop`. "Play loop" now calls `practice.playLoop` first and closes after it. Tests: `LoopPanel.test.tsx`, three new describes named by item, and two older cases under "bringing a paused loop's first bar on screen" that said typed bars don't scroll.
+- `src/features/loops/LoopEditorForm.tsx`: `showTypedBars`, called from `editBars`. Test: `LoopEditorForm.test.tsx`, "bringing typed bars on screen".
+- `src/features/loops/useLoopPractice.test.tsx`: taps and a drag with the form open never scroll (a guard: it passed before the change). **`useLoopPractice.ts` itself is unchanged**, so there is nothing to merge with Unit 19's edit of it.
+- `src/features/song/SongPage.test.tsx`: one case, "Space after a mouse press of Play loop…", asserted that focus stayed on the button the closed sheet hides, which is 13.28a itself. It now asserts focus is on the header and that Space pauses without opening the sheet. `SongPage.tsx` is untouched.
+- `AGENTS.md`, Loops, the UI paragraph: the rules above.
+
+**Decisions**
+
+- **A repeat's count-in, and a count-in already running, never close the sheet** (a narrowing of the triage's "whenever"). `countInClosesPanel` is true only from a status that is not running to `countingIn`. A sheet open at a repeat's count-in was opened while the loop played, and one opened during a count-in was opened on purpose a moment ago; `playLoopClosesPanel` already says of a playing loop that "the sheet is open for its speed control". The number of a repeat's count-in is therefore still behind a sheet the user opened over it, and the clicks are still heard. If Shane wants every count-in to close it, the rule becomes `now === 'countingIn' && before !== 'countingIn'`: one line and one row of the table.
+- **It closes with the loop form open too.** The form stays mounted in the closed sheet, so the name and bars typed are there when it is reopened, and taps on the score go on picking bars (the highlight shows them). The header could already be closed over an open form by hand.
+- **With no count-in, Play from outside leaves the sheet open**, as before: there is no number to hide and the press was not on the sheet. Only "Play loop" closes it then.
+- **Focus is moved at once, not through `useFocusWhenReady`** (the triage named it). The header is always on the page, so there is nothing to wait for; and one of the two callers is an effect, from which AGENTS.md says never to schedule that hook. One function, `closeForPlayback`, does both paths, and moves focus only when it was inside the sheet's body.
+- **The list is scrolled by its own `scrollTop`, not `scrollIntoView`** (the triage named it). `scrollIntoView` scrolls every scrolling ancestor it thinks it must, and the Tab page goes to some length to keep the window, and the score, still while things open and close. The position comes from `scrollToShow` in `barScroll.ts`, the pure function the score box already uses: an item all on show stays put, otherwise its top goes to the top of the list (8 px under the header). So the alignment is "start", not "nearest".
+- **13.27a is in the form, not in `useLoopPractice.setEditorBars`** (the triage's test file suggests the hook). The form's `editBars` is the only typed path and has everything it needs; the hook is left alone for Unit 19's merge. It also covers the practice screen's "Save as loop" form, which uses the same component.
+- **Typed bars don't scroll while the song runs** (playing or counting in): alphaTab follows its cursor while playing, and during a count-in the score has just been put on the bar being counted in. `showBar` alone only refuses while playing.
+
+**Async windows and inputs**
+
+No request, timer or promise was added. The windows are between a change of the player's status and React drawing it.
+
+1. _Status becomes `countingIn` with the sheet open_ (the effect runs after the render that shows the new status).
+   - "Play loop" was the press: the handler has already closed the sheet in the same batch, so the effect finds it closed and does nothing (one close, one focus move).
+   - The header pressed in the same moment to close it: it is closed; the effect does nothing.
+   - The header pressed to open it during the count-in: no change of status follows, so it stays open through the count-in and the downbeat.
+   - A seek during the count-in (a tap on the score, a loop key): the service counts in again inside one call; React sees `countingIn` to `countingIn`, no close.
+   - Pause during the count-in, then Play again: `ready` to `countingIn` again, so an open sheet closes again. Intended: it is a new start.
+   - "Loop speed" in the controls bar during the count-in opens the sheet and focuses the speed group: it stays open (no status change).
+   - StrictMode's second run of the effect sees the same status as "before": nothing.
+   - The panel mounting while a count-in already runs: "before" starts as the current status: nothing.
+2. _A repeat's count-in._ alphaTab reports `finished`, then stopped: the service goes `playing` to `countingIn` and the sheet stays. The service also accepts the other order (stopped first), which would be `playing`, `ready`, `countingIn`; if alphaTab ever sent that, the `ready` between would read as a new start and close the sheet. See Known gaps.
+3. _The sheet opening_ (layout effect on `open`, before paint).
+   - No loop playing, or the form in the list's place: no item, nothing scrolls.
+   - The loop starts playing or changes while the sheet is open: nothing scrolls (once per opening; the open list is the user's).
+   - Opened by "Loop speed": the list is scrolled to the item, then the page's own hand-over focuses the speed group inside it, which the browser scrolls to if it must.
+   - Opened by the page because a form opened (a drag on the score): the form is showing, nothing scrolls.
+4. _Typing into a bar field._ Each keystroke is judged by itself against the other field's value.
+   - While the form's save is pending the fields are read-only and `editBars` returns first: no scroll.
+   - Before the score has rendered, `showBar` keeps the bar and shows it on `rendered` (the service's own rule).
+   - A range applied by the page meanwhile (`setRange`) drops a kept bar, as for any `showBar`.
+
+**Known gaps**
+
+- A bar number is scrolled to digit by digit: typing "12" over a first bar, with a last bar already there, shows bar 1 and then bar 12. Both moves are instant and the last one is right. Waiting for the typing to stop would need a timer.
+- The repeat order in window 2: the rule reads two statuses, and cannot tell a pass that ended "stopped, then finished" from a pause followed by Play. The service's test helper (`engineFinishesPass`) and its comment say alphaTab sends `finished` first.
+- "Play loop" still closes the sheet, and now moves focus, in the narrow case where `practice.playLoop` refuses a press on a button that was still enabled (the sounds failed between the render and the press). `playLoop` returns nothing to go by; having it return whether it acted is a change to `useLoopPractice.ts`, left for after Unit 19 merges.
+- Closing the sheet takes away the room it adds at the page's end (`SongPage`), at the same moment the controls fold for playback. That is what "Play loop" has always done; it now also happens for Play from the bar with the sheet open. Not measured in a browser here (13.31b is the accepted item about it).
+- `LoopPanel`'s doc comment and a helper comment in its test still describe a column from 1024 px; the panel has been a sheet at every size since the practice-feedback pass. Left for Readability.
+- Not seen by eye in a real browser: `showPlayingLoop` and the focus hand-over are tested in jsdom over a modelled layout; the e2e run below only shows the existing flows still pass.
+
+**How to verify**
+
+- `npm run check` (green at this commit: 145 test files, 5675 tests).
+- `npx vitest run src/features/loops src/features/song`.
+- e2e, run for this batch on phone and desktop only: `E2E_PORT=4383 npx playwright test tests/e2e/loops.spec.ts tests/e2e/loop-scroll.spec.ts tests/e2e/count-in.spec.ts tests/e2e/shortcuts.spec.ts --project=phone --project=desktop` (102 passed, 16 skipped by their own width conditions). No screenshots were rewritten. No spec was added or changed: the new behaviour has no e2e yet.
+- By hand, phone width, a song with several loops and a 2-bar count-in:
+  1. Open the sheet, save a new loop, press Play in the bar: the sheet closes and the number counts over the score.
+  2. Open the sheet, press "Play loop" by keyboard (Tab to it, Enter): the sheet closes, the focus ring is on its header; Enter opens it again and the playing loop is in view even if it is the last in a long list.
+  3. Scroll the open list away from the playing loop, close and reopen the sheet: the loop is back in view, and the score has not moved.
+  4. With "Every repeat" on, open the sheet while the loop plays: it stays open over the next count-in.
+  5. "New loop", type a first and last bar far from the bars on screen: the score moves to the first bar. Tap a bar instead: the score does not move.

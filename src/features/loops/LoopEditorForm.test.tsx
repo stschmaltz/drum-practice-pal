@@ -444,6 +444,55 @@ describe('LoopEditorForm for a new loop', () => {
   });
 });
 
+describe('LoopEditorForm bringing typed bars on screen (13.27a)', () => {
+  it('scrolls to the first bar once the typed bars make a range, and to nothing before', async () => {
+    const view = await renderForm();
+    await fill(view, { first: '13' });
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+
+    await fill(view, { last: '15' });
+
+    expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+  });
+
+  it('follows the first bar as it is typed over, and ignores bars the song lacks', async () => {
+    const view = await renderForm({ editing: chorus });
+    await replace(view, view.firstBar(), '2');
+    expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(1);
+    view.engine.scrollToBar.mockClear();
+
+    // No digit of it makes a range with the saved last bar, 8.
+    await replace(view, view.firstBar(), '90');
+
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('typing the name scrolls nowhere', async () => {
+    const view = await renderForm({ editing: chorus });
+    await fill(view, { name: ' again' });
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it.each(['playing', 'countingIn'] as const)(
+    'while %s the score is left where the music is',
+    async (status) => {
+      const view = await renderForm();
+      act(() => {
+        if (status === 'countingIn') view.player.setCountInBars(1);
+        view.player.play();
+        if (status === 'playing') view.engine.fire('stateChanged', { playing: true });
+      });
+      expect(view.player.getSnapshot().status).toBe(status);
+      view.engine.scrollToBar.mockClear();
+
+      await fill(view, { first: '13', last: '15' });
+
+      expect(screen.getByTestId('loop-bar-count')).toHaveTextContent('3 bars');
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe('LoopEditorForm editing a loop', () => {
   it('opens on the saved name and bars, and has no speed or target to set', async () => {
     const view = await renderForm({ editing: chorus });

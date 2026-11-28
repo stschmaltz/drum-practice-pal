@@ -2044,15 +2044,17 @@ describe('SongPage keyboard shortcuts', () => {
     expect(engine.stop).not.toHaveBeenCalled();
   });
 
-  it('Space after a mouse press of Play loop pauses, rather than pressing Restart loop', async () => {
+  it('Space after a mouse press of Play loop pauses, rather than pressing what the press left focused', async () => {
     const { user, engine, playLoop } = await openSong();
     await playLoop('Verse');
-    const restart = panel().getByRole('button', { name: 'Restart loop Verse' });
-    expect(restart).toHaveFocus();
+    // The press closed the sheet over its own button; focus is on the sheet's header (13.28a).
+    const header = panel().getByRole('button', { name: /Open$/ });
+    expect(header).toHaveFocus();
     const seeks = engine.seek.mock.calls.length;
 
     await user.keyboard(' ');
 
+    expect(header).toHaveAttribute('aria-expanded', 'false');
     expect(engine.pause).toHaveBeenCalledTimes(1);
     expect(engine.seek.mock.calls.length).toBe(seeks);
     expect(engine.play).toHaveBeenCalledTimes(1);

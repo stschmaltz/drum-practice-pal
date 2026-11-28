@@ -2,7 +2,11 @@ import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
-import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
+import {
+  isRunning,
+  type PlayerService,
+  type PlayerSnapshot,
+} from '@/features/player/PlayerService';
 import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { pointerIsFine } from '@/lib/pointer';
@@ -117,9 +121,20 @@ export function LoopEditorForm({
     touched();
   };
 
+  // Typed bars may be anywhere in the song, so their first bar is brought on screen
+  // once they make a range (what the score then highlights). Only here: bars picked
+  // on the score come through the page, and a tapped bar must not move under the
+  // finger. Not while the song runs: the score is then where the music is.
+  const showTypedBars = (bars: Partial<LoopBarFields>) => {
+    if (!player || isRunning(player.getSnapshot().status)) return;
+    const typed = formBarRange({ ...values, ...bars }, barCount);
+    if (typed) player.showBar(typed.startBar);
+  };
+
   const editBars = (bars: Partial<LoopBarFields>) => {
     if (saving) return;
     onBarsChange(bars);
+    showTypedBars(bars);
     touched();
   };
 
