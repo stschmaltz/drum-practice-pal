@@ -148,6 +148,18 @@ describe('the app’s code', () => {
     ).toHaveLength(2);
   });
 
+  // 19 Review: what the frame says reaches the app through YouTube's API object and no other
+  // way, so the app never has to judge a message's origin itself.
+  it('listens to no message from any window and reaches into no frame: the player is heard through its API object only', () => {
+    expect(
+      filesWith(/['"`]message['"`]|\bonmessage\b|postMessage|contentWindow|contentDocument/),
+    ).toEqual([]);
+    // The API's own events and readings, on the object it hands back.
+    const player = code('src/features/recordings/youTubePlayer.ts');
+    expect(player).toMatch(/new api\.Player\(frame, \{\s*events:/);
+    expect(player).not.toMatch(/\beval\(|new Function|innerHTML|document\.write/);
+  });
+
   it('lets the frame do no more than play: no autoplay, no camera, microphone, clipboard or location', () => {
     const box = code('src/features/recordings/RecordingBox.tsx');
     const allow = /FRAME_ALLOW\s*=\s*'([^']*)'/.exec(box)?.[1];

@@ -72,7 +72,7 @@ async function loadModule() {
 /** The module with YouTube's API already on the page, a player made for a frame, and its events heard. */
 async function setup() {
   window.YT = { Player: StubYtPlayer as never };
-  const { createYouTubePlayer, CLOCK_POLL_MS } = await loadModule();
+  const { createYouTubePlayer, CLOCK_POLL_MS, PAUSED_CLOCK_POLL_MS } = await loadModule();
   const frame = frameOnPage();
   const player = createYouTubePlayer(frame);
   const heard: RecordingState[] = [];
@@ -80,7 +80,7 @@ async function setup() {
   // The API's promise resolves in a microtask; then the widget exists.
   await vi.advanceTimersByTimeAsync(0);
   const yt = StubYtPlayer.made.at(-1)!;
-  return { createYouTubePlayer, CLOCK_POLL_MS, frame, player, heard, yt };
+  return { createYouTubePlayer, CLOCK_POLL_MS, PAUSED_CLOCK_POLL_MS, frame, player, heard, yt };
 }
 
 beforeEach(() => {
@@ -159,6 +159,40 @@ describe('loading YouTube’s API', () => {
     window.YT = { Player: StubYtPlayer as never };
     window.onYouTubeIframeAPIReady?.();
     expect(theirs).toHaveBeenCalledOnce();
+  });
+
+  // 19 Review: the page's global is the app's only while a load is on its way.
+  it('gives the page’s callback back once the API has arrived: theirs if there was one, none if not', async () => {
+    const theirs = vi.fn();
+    window.onYouTubeIframeAPIReady = theirs;
+    const first = await loadModule();
+    first.createYouTubePlayer(frameOnPage());
+    expect(window.onYouTubeIframeAPIReady).not.toBe(theirs);
+    window.YT = { Player: StubYtPlayer as never };
+    window.onYouTubeIframeAPIReady?.();
+    expect(window.onYouTubeIframeAPIReady).toBe(theirs);
+
+    delete window.YT;
+    delete window.onYouTubeIframeAPIReady;
+    const second = await loadModule();
+    second.createYouTubePlayer(frameOnPage());
+    // Read through a function: the compiler takes the `delete` above as the last word.
+    const callback = () => window.onYouTubeIframeAPIReady;
+    expect(callback()).toBeTypeOf('function');
+    window.YT = { Player: StubYtPlayer as never };
+    callback()?.();
+    expect(callback()).toBeUndefined();
+  });
+
+  it('gives it back when the script fails too, so a script that keeps failing leaves no chain of callbacks', async () => {
+    const { createYouTubePlayer } = await loadModule();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      createYouTubePlayer(frameOnPage());
+      expect(window.onYouTubeIframeAPIReady).toBeTypeOf('function');
+      document.head.querySelector('script')!.dispatchEvent(new Event('error'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(window.onYouTubeIframeAPIReady).toBeUndefined();
+    }
   });
 });
 
@@ -246,7 +280,7 @@ describe('the player’s state', () => {
 });
 
 describe('the poll', () => {
-  it('reads the clock a few times a second while the video plays, and stops when it pauses', async () => {
+  it('reads the clock a few times a second while the video plays, and says nothing more once it pauses and stands still', async () => {
     const { heard, yt, CLOCK_POLL_MS } = await setup();
     yt.ready();
     yt.state(PLAYING);
@@ -261,7 +295,8 @@ describe('the poll', () => {
     const paused = heard.length;
     vi.advanceTimersByTime(CLOCK_POLL_MS * 8);
     expect(heard).toHaveLength(paused);
-    expect(vi.getTimerCount()).toBe(0);
+    // The one timer left is the slow look at a paused video's clock (below).
+    expect(vi.getTimerCount()).toBe(1);
   });
 
   it('never polls before the video plays', async () => {
@@ -339,6 +374,23 @@ describe('driving the video', () => {
     player.seekTo(-3);
     expect(yt.seekTo).toHaveBeenCalledWith(0, true);
   });
+
+  // 19 Review: the one door to the player's `seekTo` takes a time and nothing else.
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'sends no seek for %s, and shows nothing of it',
+    async (seconds) => {
+      const { player, heard, yt } = await setup();
+      yt.ready();
+      yt.time = 4;
+      yt.state(PLAYING);
+      yt.state(PAUSED);
+      const count = heard.length;
+      player.seekTo(seconds);
+      expect(yt.seekTo).not.toHaveBeenCalled();
+      expect(heard).toHaveLength(count);
+      expect(player.getState().seconds).toBe(4);
+    },
+  );
 
   it('plays and pauses', async () => {
     const { player, yt } = await setup();
@@ -420,18 +472,19 @@ describe('the poll, through every way a video stops and goes on (19 Test)', () =
     ['buffering', BUFFERING],
     ['the end', ENDED],
   ])(
-    'stops for %s and starts again when the video plays on, one timer at a time',
+    'slows down for %s and speeds up again when the video plays on, one timer at a time',
     async (_name, stop) => {
-      const { heard, yt, CLOCK_POLL_MS } = await setup();
+      const { heard, yt, CLOCK_POLL_MS, PAUSED_CLOCK_POLL_MS } = await setup();
       yt.ready();
       yt.state(PLAYING);
       expect(vi.getTimerCount()).toBe(1);
 
       yt.state(stop);
-      expect(vi.getTimerCount()).toBe(0);
+      expect(vi.getTimerCount()).toBe(1);
       const stopped = heard.length;
       yt.time = 50;
-      vi.advanceTimersByTime(CLOCK_POLL_MS * 4);
+      // Not at the playing video's pace.
+      vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS - CLOCK_POLL_MS);
       expect(heard).toHaveLength(stopped);
 
       // Playing again, said twice as YouTube sometimes does: still one poll.
@@ -464,21 +517,24 @@ describe('the poll, through every way a video stops and goes on (19 Test)', () =
     expect(heard.at(-1)).toMatchObject({ seconds: 12.25 });
   });
 
-  it('a page that comes back to a paused video says where it is once, and polls nothing', async () => {
-    const { heard, yt, CLOCK_POLL_MS } = await setup();
+  it('a page that comes back to a paused video says where it is once, and nothing more while it stands still', async () => {
+    const { heard, yt, PAUSED_CLOCK_POLL_MS } = await setup();
     yt.ready();
     yt.state(PLAYING);
     yt.state(PAUSED);
     setVisibility('hidden');
+    expect(vi.getTimerCount()).toBe(0);
     // Scrubbed in another window's picture-in-picture, say.
     yt.time = 77;
     const hidden = heard.length;
+    vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS * 5);
+    expect(heard).toHaveLength(hidden);
     setVisibility('visible');
     expect(heard).toHaveLength(hidden + 1);
     expect(heard.at(-1)).toMatchObject({ seconds: 77, playing: false });
-    vi.advanceTimersByTime(CLOCK_POLL_MS * 4);
+    vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS * 4);
     expect(heard).toHaveLength(hidden + 1);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
   });
 
   it('a page hidden and shown before the player has answered says nothing: there is no clock to read', async () => {
@@ -789,7 +845,7 @@ describe('a video already going when its player first answers (19 QA issue 3)', 
     ['not started', -1, { started: false, playing: false }],
     ['cued', 5, { started: false, playing: false }],
   ])(
-    'a video that is %s when the player answers is read as that, and not polled',
+    'a video that is %s when the player answers is read as that, and nothing more is said while its clock stands still',
     async (_name, playerState, expected) => {
       const { player, heard, yt, CLOCK_POLL_MS } = await setup();
       yt.time = 31;
@@ -842,5 +898,150 @@ describe('a video already going when its player first answers (19 QA issue 3)', 
     (yt as { getPlayerState?: unknown }).getPlayerState = undefined;
     yt.ready();
     expect(player.getState()).toMatchObject({ status: 'ready', started: false, playing: false });
+  });
+});
+
+// 19 QA (after fix round 1), issue 2. YouTube fires no state change for a seek made on its own
+// bar while the video is paused, and there is no time event: the mark stayed on the old bar
+// until Play. So a started video that isn't playing is still looked at, about once a second.
+describe('a paused video scrubbed in YouTube’s own bar', () => {
+  it('is heard at the next slow look, once, with the video still paused', async () => {
+    const { heard, yt, PAUSED_CLOCK_POLL_MS } = await setup();
+    yt.ready();
+    yt.time = 3;
+    yt.state(PLAYING);
+    yt.state(PAUSED);
+    const paused = heard.length;
+
+    // A click on YouTube's progress bar: the clock moves, and no event says so.
+    yt.time = 24.86;
+    vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS);
+    expect(heard).toHaveLength(paused + 1);
+    expect(heard.at(-1)).toMatchObject({ seconds: 24.86, playing: false, started: true });
+
+    // Standing still again: looked at, nothing said.
+    vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS * 5);
+    expect(heard).toHaveLength(paused + 1);
+    expect(yt.playVideo).not.toHaveBeenCalled();
+    expect(yt.seekTo).not.toHaveBeenCalled();
+  });
+
+  it('a change of state reads the clock at once, without waiting for the look', async () => {
+    const { heard, yt } = await setup();
+    yt.ready();
+    yt.state(PLAYING);
+    yt.state(PAUSED);
+    // Some seeks do come with a buffering and a paused: the clock is read at each.
+    yt.time = 61;
+    yt.state(BUFFERING);
+    expect(heard.at(-1)).toMatchObject({ seconds: 61, playing: false });
+    yt.time = 61.2;
+    yt.state(PAUSED);
+    expect(heard.at(-1)).toMatchObject({ seconds: 61.2, playing: false });
+  });
+
+  it('is looked at slower than a playing one, and the pace follows play and pause with one timer', async () => {
+    const { heard, yt, CLOCK_POLL_MS, PAUSED_CLOCK_POLL_MS } = await setup();
+    expect(PAUSED_CLOCK_POLL_MS).toBeGreaterThanOrEqual(CLOCK_POLL_MS * 2);
+    yt.ready();
+    yt.state(PLAYING);
+    yt.state(PAUSED);
+    expect(vi.getTimerCount()).toBe(1);
+
+    yt.state(PLAYING);
+    expect(vi.getTimerCount()).toBe(1);
+    const playing = heard.length;
+    yt.time = 9;
+    vi.advanceTimersByTime(CLOCK_POLL_MS);
+    expect(heard).toHaveLength(playing + 1);
+
+    yt.state(PAUSED);
+    expect(vi.getTimerCount()).toBe(1);
+    const paused = heard.length;
+    yt.time = 40;
+    vi.advanceTimersByTime(CLOCK_POLL_MS * 2);
+    expect(heard).toHaveLength(paused);
+    vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS);
+    expect(heard.at(-1)).toMatchObject({ seconds: 40 });
+  });
+
+  it('is not looked at while the page is hidden, and is from the moment it is back', async () => {
+    const { heard, yt, PAUSED_CLOCK_POLL_MS } = await setup();
+    yt.ready();
+    yt.state(PLAYING);
+    yt.state(PAUSED);
+    setVisibility('hidden');
+    expect(vi.getTimerCount()).toBe(0);
+    const hidden = heard.length;
+    yt.time = 15;
+    vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS * 10);
+    expect(heard).toHaveLength(hidden);
+
+    setVisibility('visible');
+    expect(heard.at(-1)).toMatchObject({ seconds: 15 });
+    expect(vi.getTimerCount()).toBe(1);
+    yt.time = 16;
+    vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS);
+    expect(heard.at(-1)).toMatchObject({ seconds: 16 });
+  });
+
+  it.each([
+    ['not started', -1],
+    ['cued', 5],
+  ])(
+    'a video that is %s is never looked at: its clock isn’t the song’s yet',
+    async (_name, state) => {
+      const { heard, yt, PAUSED_CLOCK_POLL_MS } = await setup();
+      yt.ready();
+      yt.state(state);
+      expect(vi.getTimerCount()).toBe(0);
+      const count = heard.length;
+      yt.time = 5;
+      vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS * 3);
+      expect(heard).toHaveLength(count);
+    },
+  );
+
+  it('stops for good on dispose, and when the player gives up', async () => {
+    const { player, heard, yt, PAUSED_CLOCK_POLL_MS } = await setup();
+    yt.ready();
+    yt.state(PLAYING);
+    yt.state(PAUSED);
+    yt.options.events.onError({ data: 5 });
+    expect(vi.getTimerCount()).toBe(0);
+    const count = heard.length;
+    yt.time = 90;
+    vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS * 3);
+    expect(heard).toHaveLength(count);
+
+    const second = await setup();
+    second.yt.ready();
+    second.yt.state(PLAYING);
+    second.yt.state(PAUSED);
+    expect(vi.getTimerCount()).toBe(1);
+    second.player.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    second.yt.time = 90;
+    vi.advanceTimersByTime(second.PAUSED_CLOCK_POLL_MS * 3);
+    expect(second.heard.at(-1)).not.toMatchObject({ seconds: 90 });
+    player.dispose();
+  });
+
+  it('a wrapper made on a frame whose video is paused part-way looks at it too', async () => {
+    const { createYouTubePlayer, frame, player: first, yt, PAUSED_CLOCK_POLL_MS } = await setup();
+    yt.ready();
+    yt.state(PLAYING);
+    yt.playerState = PAUSED;
+    yt.state(PAUSED);
+    first.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+
+    const second = createYouTubePlayer(frame);
+    const heard: RecordingState[] = [];
+    second.subscribe((state) => heard.push(state));
+    expect(vi.getTimerCount()).toBe(1);
+    yt.time = 33;
+    vi.advanceTimersByTime(PAUSED_CLOCK_POLL_MS);
+    expect(heard.at(-1)).toMatchObject({ seconds: 33, started: true, playing: false });
   });
 });

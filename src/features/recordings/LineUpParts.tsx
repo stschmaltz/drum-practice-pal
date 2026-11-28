@@ -1,4 +1,4 @@
-import type { FormEvent, ReactNode } from 'react';
+import type { FocusEvent, FormEvent, ReactNode } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import {
@@ -58,16 +58,35 @@ export function LineUpSpace() {
   return <div className={blockClass} aria-hidden="true" data-testid="line-up-space" />;
 }
 
+/**
+ * Focus coming into and leaving the line-up, heard on its root in either
+ * state, for `LineUp` to keep focus when a control is replaced under it.
+ */
+export interface FocusWatch {
+  onFocus: (event: FocusEvent<HTMLElement>) => void;
+  onBlur: (event: FocusEvent<HTMLElement>) => void;
+}
+
 /** The line-up's grid with its message and controls: every state but the typed time's form. */
-export function LineUpRows({ children }: { children: ReactNode }) {
+export function LineUpRows({
+  children,
+  watchFocus,
+}: {
+  children: ReactNode;
+  watchFocus: FocusWatch;
+}) {
   return (
-    <div data-testid="line-up" className={blockClass}>
+    <div data-testid="line-up" className={blockClass} {...watchFocus}>
       {children}
     </div>
   );
 }
 
-/** On the page from the start, empty: a live region added with its text is often not read. */
+/**
+ * On the page from the start, empty: a live region added with its text is
+ * often not read. `LineUp` draws it after the rows or the form, as their
+ * sibling, so it is one element through every state.
+ */
 export function LineUpLiveRegion({ said }: { said: Announcement }) {
   return (
     <p role="status" className="sr-only" data-testid="line-up-announcement">
@@ -238,8 +257,7 @@ function linedUpButtons(
 
 /**
  * "Type a time": a field in the place of the line-up's rows, on the same
- * grid, so the score under the video doesn't move when it opens. `children`
- * is the live region, which stays mounted across every state.
+ * grid, so the score under the video doesn't move when it opens.
  */
 export function TypedTimeForm({
   text,
@@ -248,7 +266,7 @@ export function TypedTimeForm({
   onChange,
   onSubmit,
   onCancel,
-  children,
+  watchFocus,
 }: {
   text: string;
   /** What was last submitted wasn't a time. */
@@ -257,10 +275,16 @@ export function TypedTimeForm({
   onChange: (text: string) => void;
   onSubmit: (event: FormEvent) => void;
   onCancel: () => void;
-  children: ReactNode;
+  watchFocus: FocusWatch;
 }) {
   return (
-    <form data-testid="line-up" className={blockClass} noValidate onSubmit={onSubmit}>
+    <form
+      data-testid="line-up"
+      className={blockClass}
+      noValidate
+      onSubmit={onSubmit}
+      {...watchFocus}
+    >
       <label className={`${wholeRow} flex h-11 min-w-0 items-center gap-2 text-xs/4 text-ink-soft`}>
         {/* The label gives way to what is wrong, in the same place and the same room. */}
         {invalid ? (
@@ -307,7 +331,6 @@ export function TypedTimeForm({
       <button type="button" className={`${quietButtonClass} ${cellButton}`} onClick={onCancel}>
         {LINE_UP_COPY.cancel}
       </button>
-      {children}
     </form>
   );
 }

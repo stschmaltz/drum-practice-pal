@@ -175,6 +175,14 @@ export function createAlphaTabEngine({
       redraw();
     },
 
+    setCursorScroll(on) {
+      const mode = on ? alphaTab.ScrollMode.Continuous : alphaTab.ScrollMode.Off;
+      if (api.settings.player.scrollMode === mode) return;
+      api.settings.player.scrollMode = mode;
+      // Settings only: alphaTab drops (or makes) its scroll handler, and draws nothing.
+      api.updateSettings();
+    },
+
     setVisibleBars(range) {
       const display = api.settings.display;
       // alphaTab counts from bar 1, and -1 bars is all of them.

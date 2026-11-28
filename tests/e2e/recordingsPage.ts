@@ -74,7 +74,9 @@ document.getElementById('at').textContent = location.href;
   window.stub = {
     play: function () { setPlaying(true); },
     pause: function () { setPlaying(false); },
-    seek: function (seconds) { now(); time = seconds; post({ event: 'state', state: playing ? 1 : 2 }); },
+    // Like a real player (checked on one in 19 Review): a seek while it plays comes with a
+    // change of state; one while it is paused only moves the clock, and no event says so.
+    seek: function (seconds) { now(); time = seconds; post(playing ? { event: 'state', state: 1 } : undefined); },
     setRate: function (next) { now(); rate = next; post({ event: 'rate' }); },
     time: function () { return now(); },
     playing: function () { return playing; },

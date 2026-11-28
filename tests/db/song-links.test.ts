@@ -967,7 +967,8 @@ describe('song_links.bar_one_seconds (where bar 1 falls in the video)', () => {
 
     const planted = linkRow(b, songA, { bar_one_seconds: 3 });
     const insert = await b.client.from('song_links').insert(planted);
-    expect(insert.error).not.toBeNull();
+    // The link names its own user and another user's song: no such (song, user) pair.
+    expect(insert.error?.code).toBe(PG.FOREIGN_KEY_VIOLATION);
     expect(await linkAsAdmin(planted.id)).toBeNull();
 
     const cleared = await b.client

@@ -42,8 +42,9 @@ export const RECORDING_NOT_READY: RecordingState = {
 export interface RecordingPlayer {
   /**
    * Hears every change of the state: at once when the player is ready, plays,
-   * pauses, seeks or changes rate, and a few times a second while it plays
-   * with the page on show. Returns the unsubscribe.
+   * pauses, seeks or changes rate, a few times a second while it plays with
+   * the page on show, and within about a second when a started video that
+   * isn't playing was moved in its own controls. Returns the unsubscribe.
    */
   subscribe(listener: (state: RecordingState) => void): () => void;
   /** The state now, its clock read at this call: what a press uses. */

@@ -9,7 +9,10 @@
  * - `new YT.Player(iframe, { events })` takes over a frame the page already
  *   has, whose address carries `enablejsapi=1` and `origin` (built in
  *   songLinks.ts, the page's own origin).
- * - There is no time event: `getCurrentTime()` is polled. `onStateChange`
+ * - There is no time event: `getCurrentTime()` is polled, a few times a second
+ *   while the video plays and about once a second while a started one doesn't
+ *   (a seek on YouTube's own bar with the video paused fires no state change
+ *   at all: 19 QA after fix round 1). `onStateChange`
  *   gives -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued;
  *   `onPlaybackRateChange` the new rate; `onError` a code (100, 101, 150, 153…).
  *   `getPlayerState()` gives the same numbers on asking: a video the user
@@ -27,6 +30,13 @@ const API_URL = 'https://www.youtube.com/iframe_api';
 
 /** How often the clock is read while the video plays with the page on show: "a few times a second". */
 export const CLOCK_POLL_MS = 250;
+
+/**
+ * How often it is read while a started video isn't playing (paused, buffering,
+ * ended) with the page on show: the only way to hear that it was scrubbed in
+ * YouTube's own bar. Slow, since nothing is moving by itself.
+ */
+export const PAUSED_CLOCK_POLL_MS = 1000;
 
 /** `YT.PlayerState`, written out: the API's object isn't there until its script is. */
 const YT_PLAYING = 1;
@@ -72,18 +82,25 @@ function loadYouTubeApi(): Promise<YtApi> {
   const loaded = window.YT;
   if (loaded?.Player) return Promise.resolve(loaded as YtApi);
   apiLoading ??= new Promise<YtApi>((resolve, reject) => {
+    const earlier = window.onYouTubeIframeAPIReady;
+    /** The page's callback is the page's again once this load is over, either way. */
+    const letGo = () => {
+      if (window.onYouTubeIframeAPIReady === arrived) window.onYouTubeIframeAPIReady = earlier;
+    };
     const fail = () => {
       apiLoading = null;
+      letGo();
       script.remove();
       reject(new Error('The YouTube player API did not load'));
     };
-    const earlier = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
+    const arrived = () => {
+      letGo();
       earlier?.();
       const api = window.YT;
       if (api?.Player) resolve(api as YtApi);
       else fail();
     };
+    window.onYouTubeIframeAPIReady = arrived;
     const script = document.createElement('script');
     script.src = API_URL;
     script.async = true;
@@ -147,7 +164,7 @@ export function createYouTubePlayer(frame: HTMLIFrameElement): RecordingPlayer {
   const listeners = new Set<(state: RecordingState) => void>();
   let state: RecordingState = { ...RECORDING_NOT_READY };
   let disposed = false;
-  let poll: ReturnType<typeof setInterval> | null = null;
+  let poll: { timer: ReturnType<typeof setInterval>; everyMs: number } | null = null;
 
   /** The player's own clock and rate, read now. Left as they were when it can't say. */
   const readClock = () => {
@@ -192,19 +209,36 @@ export function createYouTubePlayer(frame: HTMLIFrameElement): RecordingPlayer {
     for (const listener of [...listeners]) listener({ ...state });
   };
 
-  /** Polls only while there is something to follow and someone to see it. */
+  /**
+   * How often the clock is to be read now, or null for not at all: only while
+   * there is something to follow (a video that answers and has been started:
+   * until then its clock isn't the song's) and someone to see it.
+   */
+  const pollEveryMs = (): number | null => {
+    if (disposed || document.visibilityState !== 'visible') return null;
+    if (state.status !== 'ready' || !state.started) return null;
+    return state.playing ? CLOCK_POLL_MS : PAUSED_CLOCK_POLL_MS;
+  };
+
+  /** One timer at most, at the pace the video's state asks for. */
   const keepPollInStep = () => {
-    const wanted = !disposed && state.playing && document.visibilityState === 'visible';
-    if (wanted && poll === null) {
-      poll = setInterval(() => {
-        if (disposed) return;
-        readClock();
-        emit();
-      }, CLOCK_POLL_MS);
-    } else if (!wanted && poll !== null) {
-      clearInterval(poll);
-      poll = null;
-    }
+    const everyMs = pollEveryMs();
+    if (poll?.everyMs === everyMs) return;
+    if (poll !== null) clearInterval(poll.timer);
+    poll =
+      everyMs === null
+        ? null
+        : {
+            everyMs,
+            timer: setInterval(() => {
+              if (disposed) return;
+              const before = state.seconds;
+              readClock();
+              // A playing video is said at every reading, as before; one standing still only
+              // when it has moved (scrubbed in YouTube's own bar).
+              if (state.playing || state.seconds !== before) emit();
+            }, everyMs),
+          };
   };
 
   const handle = (event: WidgetEvent) => {
@@ -277,6 +311,8 @@ export function createYouTubePlayer(frame: HTMLIFrameElement): RecordingPlayer {
       return { ...state };
     },
     seekTo(seconds) {
+      // The one way a value reaches the player's `seekTo`: a time, or nothing is sent.
+      if (!Number.isFinite(seconds)) return;
       ifReady((yt) => {
         const target = Math.max(0, seconds);
         yt.seekTo(target, true);
@@ -295,8 +331,7 @@ export function createYouTubePlayer(frame: HTMLIFrameElement): RecordingPlayer {
     dispose() {
       if (disposed) return;
       disposed = true;
-      if (poll !== null) clearInterval(poll);
-      poll = null;
+      keepPollInStep();
       document.removeEventListener('visibilitychange', onVisibility);
       // Only if a later wrapper of the same frame hasn't taken over.
       if (widget.sink === handle) widget.sink = null;

@@ -36,20 +36,32 @@ function confirmedOf(queryClient: QueryClient): Map<string, number | null> {
  * Two can be in flight (two nudges, a nudge after a line-up):
  * - They are sent one at a time, in the order pressed (`scope`), so the
  *   server ends on the later one.
- * - An answer is taken into the cache only when no later save is waiting;
- *   until then the cache holds the later save's value, which is what is on
- *   its way.
+ * - An answer is taken into the cache only when no later save of that link
+ *   is waiting; until then the cache holds the later save's value, which is
+ *   what is on its way.
  * - A save that failed puts back what the server is known to hold, and only
  *   while the cache still shows the value it sent: a later save's value stays.
- * The list is read again once the last one settles, whatever happened.
+ * "In flight" is counted per link: a song's two recordings share the key and
+ * the scope, and a save of the other one says nothing about this one (19
+ * Review: with the Original's save out, a failed save of the Drumless had no
+ * value to go back to and kept its guess on show).
+ * The list is read again once the last one of the song settles, whatever
+ * happened.
  */
 export function useSaveBarOne(songId: string) {
   const user = useSignedInUser();
   const queryClient = useQueryClient();
   const queryKey = songLinkKeys.forSong(user.id, songId);
   const mutationKey = songLinkKeys.lineUpsOf(user.id, songId);
-  /** Whether a save other than the one asking is still on its way. */
+  /** Whether any save of this song's links other than the one asking is still on its way. */
   const othersPending = () => queryClient.isMutating({ mutationKey }) > 1;
+  /** Whether a save of this link other than the one asking is still on its way. */
+  const othersPendingFor = (linkId: string) =>
+    queryClient
+      .getMutationCache()
+      .findAll({ mutationKey, status: 'pending' })
+      .filter((mutation) => (mutation.state.variables as BarOneSave | undefined)?.linkId === linkId)
+      .length > 1;
   const setBarOne = (linkId: string, barOneSeconds: number | null) =>
     queryClient.setQueryData<SongLinkRow[]>(queryKey, (rows) =>
       withBarOne(rows, linkId, barOneSeconds),
@@ -67,14 +79,16 @@ export function useSaveBarOne(songId: string) {
       // A read already on its way is from before this save: it must not land over it.
       void queryClient.cancelQueries({ queryKey });
       const before = shown(linkId);
-      // Nothing else in flight: what the cache shows is what the server holds.
-      if (!othersPending() && before !== undefined) confirmedOf(queryClient).set(linkId, before);
+      // Nothing else of this link in flight: what the cache shows is what the server holds.
+      if (!othersPendingFor(linkId) && before !== undefined) {
+        confirmedOf(queryClient).set(linkId, before);
+      }
       setBarOne(linkId, barOneSeconds);
     },
     onSuccess: (saved, { linkId }) => {
       confirmedOf(queryClient).set(linkId, saved);
-      // Saves answer in the order sent, so with none waiting this is the newest word.
-      if (!othersPending()) setBarOne(linkId, saved);
+      // Saves answer in the order sent, so with none of this link waiting this is the newest word.
+      if (!othersPendingFor(linkId)) setBarOne(linkId, saved);
     },
     onError: (_error, { linkId, barOneSeconds }) => {
       const confirmed = confirmedOf(queryClient);

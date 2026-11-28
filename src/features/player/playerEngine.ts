@@ -62,6 +62,16 @@ export interface PlayerEngine {
    */
   loadSoundFont(urls: readonly string[]): Promise<void>;
   setLayout(layout: LayoutChoice): void;
+  /**
+   * Whether alphaTab scrolls its box to its own cursor: while it plays, and a
+   * frame after every drawing (a new width, a change of layout). On by
+   * default. Off while the score is only read under something else that
+   * plays (a recording): the cursor is hidden there and says nothing about
+   * where the song is, and its scroll lands after, and over, the screen's own
+   * (19 QA after fix round 1, issue 1). Draws nothing again; playback is
+   * untouched. `scrollToBar` works either way.
+   */
+  setCursorScroll(on: boolean): void;
   /** Must start audio synchronously: on iOS this has to run inside the tap. */
   play(): void;
   /**

@@ -795,6 +795,37 @@ test.describe('the tab follows the video (Unit 19)', () => {
   /** Groove 120: sixteen 4/4 bars of two seconds. */
   const BAR_SECONDS = 2;
 
+  /** Whether the one marked bar is all in the part of the window the score is read in. */
+  const markedOnShow = async (page: Page) => {
+    const bar = await boxOf(recordingBar(page), 'recording bar');
+    const tabs = await page.locator('[data-bottom-tabs]').boundingBox();
+    const height = page.viewportSize()!.height;
+    const shown = { top: bar.y + bar.height, bottom: tabs && tabs.height > 0 ? tabs.y : height };
+    const boxes = await highlightBoxes(page);
+    const box = boxes[0];
+    return (
+      boxes.length === 1 &&
+      box !== undefined &&
+      onShowIn({ top: box.y, bottom: box.y + box.height }, shown)
+    );
+  };
+
+  /**
+   * Turns the phone: the marked bar is brought back on show, and is still there once the
+   * score has been drawn for the new width and anything that scrolls after a drawing has.
+   */
+  const turnTo = async (page: Page, size: { width: number; height: number }, bar: number) => {
+    await page.setViewportSize(size);
+    const at = `${size.width}x${size.height}`;
+    await expect
+      .poll(() => markedOnShow(page), { message: `bar ${bar} on show at ${at}` })
+      .toBe(true);
+    expect(await markedBars(page)).toEqual([bar, bar]);
+    await page.waitForTimeout(1_000);
+    expect(await markedOnShow(page), `bar ${bar} still on show at ${at}`).toBe(true);
+    expect(await markedBars(page)).toEqual([bar, bar]);
+  };
+
   test('lining up once marks the bar the video is on and keeps it on show, through pause, seek and speed', async ({
     user,
     page,
@@ -1155,36 +1186,63 @@ test.describe('the tab follows the video (Unit 19)', () => {
 
     // Paused in bar 6. Turned upright, and back: the bar is brought back on show each time,
     // with nothing playing to bring it (19 QA issue 7).
-    const view = async () => {
-      const bar = await boxOf(recordingBar(page), 'recording bar');
-      const tabs = await page.locator('[data-bottom-tabs]').boundingBox();
-      const height = page.viewportSize()!.height;
-      return { top: bar.y + bar.height, bottom: tabs && tabs.height > 0 ? tabs.y : height };
-    };
-    const markedOnShow = async () => {
-      const boxes = await highlightBoxes(page);
-      const box = boxes[0];
-      const shown = await view();
-      return (
-        boxes.length === 1 &&
-        box !== undefined &&
-        onShowIn({ top: box.y, bottom: box.y + box.height }, shown)
-      );
-    };
     for (const size of [
       { width: 390, height: 844 },
       { width: 844, height: 390 },
       { width: 390, height: 844 },
     ]) {
-      await page.setViewportSize(size);
-      await expect
-        .poll(markedOnShow, { message: `bar 6 on show at ${size.width}x${size.height}` })
-        .toBe(true);
-      expect(await markedBars(page)).toEqual([6, 6]);
-      // And it stays there once the score has been drawn for the new width.
-      await page.waitForTimeout(1_000);
-      expect(await markedOnShow(), `still on show at ${size.width}x${size.height}`).toBe(true);
+      await turnTo(page, size, 6);
     }
+  });
+
+  // 19 QA (after fix round 1), issue 1. A frame after every drawing alphaTab scrolls its box
+  // to its own cursor, whenever that cursor's line is somewhere new: the tab's own cursor,
+  // which is hidden under a recording and says nothing about where the song is. Here it was
+  // left on bar 9 (the tab played that far before the recording was opened), so every turn of
+  // the phone moves its line, and that scroll landed over the follow's.
+  test('a turn of the phone keeps the bar the video is on on show, wherever the tab’s own cursor was left, paused and playing', async ({
+    user,
+    page,
+    context,
+  }) => {
+    test.skip(test.info().project.name !== 'phone', 'about a phone turned sideways');
+    test.setTimeout(150_000);
+    await stubServices(context);
+    await openLinedVideo(page, user, 1);
+    const leaveTabCursorOnBar9 = () =>
+      expect
+        .poll(
+          () =>
+            page.evaluate(() =>
+              (
+                window as unknown as { __drumPalPlayer: { seekToBar(bar: number): boolean } }
+              ).__drumPalPlayer.seekToBar(9),
+            ),
+          { timeout: 20_000, message: 'the tab’s sounds are in, so its cursor can be moved' },
+        )
+        .toBe(true);
+    await leaveTabCursorOnBar9();
+    await followThrough(page, 4);
+
+    // Paused in bar 4: nothing plays on to put it right.
+    await turnTo(page, { width: 844, height: 390 }, 4);
+    await turnTo(page, { width: 390, height: 844 }, 4);
+    await turnTo(page, { width: 844, height: 390 }, 4);
+
+    // And playing, loaded upright again: slowly, so the bar outlasts the turn.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+    await scoreLaidOut(page);
+    await leaveTabCursorOnBar9();
+    const video = videoStub(page);
+    await video.tapPlay();
+    await video.setRate(0.25);
+    // Bar 3 is the video from 5 to 7 s: eight seconds of it at a quarter speed.
+    await video.seek(5.1);
+    await expect.poll(() => markedBars(page)).toEqual([3, 3]);
+    await turnTo(page, { width: 844, height: 390 }, 3);
+    expect(await video.playing()).toBe(true);
   });
 
   test('a video already playing when YouTube’s script arrives is followed, with no pause and play', async ({

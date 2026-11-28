@@ -291,6 +291,39 @@ describe('usePlayer layout', () => {
     expect(engine.loadScore).toHaveBeenCalledTimes(1);
   });
 
+  // 19 QA (after fix round 1), issue 1: after every drawing alphaTab scrolls its box to its own
+  // cursor, which under a recording is hidden and says nothing about where the song is.
+  it('turns alphaTab’s scroll to its own cursor off while the score is read along to, before the layout changes, and on again on the tab', async () => {
+    fakeMatchMedia(false);
+    const engine = new FakePlayerEngine();
+    const view = render(<Harness createEngine={fakeEngineFactory(engine)} />);
+    await screen.findByText('player yes');
+    await waitFor(() => expect(engine.setCursorScroll).toHaveBeenLastCalledWith(true));
+    act(() => engine.finishLoading());
+    const restartsBefore = engine.restartCalls();
+
+    view.rerender(<Harness createEngine={fakeEngineFactory(engine)} readAlong />);
+    await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('page'));
+    expect(engine.setCursorScroll).toHaveBeenLastCalledWith(false);
+    // Off before the redraw is asked for: the drawing that follows must not scroll to the cursor.
+    expect(engine.setCursorScroll.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      engine.setLayout.mock.invocationCallOrder.at(-1) ?? 0,
+    );
+
+    view.rerender(<Harness createEngine={fakeEngineFactory(engine)} />);
+    await waitFor(() => expect(engine.setCursorScroll).toHaveBeenLastCalledWith(true));
+    expect(engine.restartCalls()).toBe(restartsBefore);
+  });
+
+  it('opens with alphaTab’s scroll to its cursor off when the page opens on a recording', async () => {
+    fakeMatchMedia(true);
+    const engine = new FakePlayerEngine();
+    render(<Harness createEngine={fakeEngineFactory(engine)} readAlong />);
+    await screen.findByText('player yes');
+    await waitFor(() => expect(engine.setCursorScroll).toHaveBeenLastCalledWith(false));
+    expect(engine.setCursorScroll).not.toHaveBeenCalledWith(true);
+  });
+
   it('stays in page layout from 768 px whether or not the score is read along to', async () => {
     fakeMatchMedia(true);
     const engine = new FakePlayerEngine();

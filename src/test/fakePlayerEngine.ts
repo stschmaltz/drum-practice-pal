@@ -60,6 +60,7 @@ export class FakePlayerEngine implements PlayerEngine {
   loadScore = vi.fn<PlayerEngine['loadScore']>(() => this.loadScoreResult);
   loadSoundFont = vi.fn<PlayerEngine['loadSoundFont']>(() => this.soundFont);
   setLayout = vi.fn();
+  setCursorScroll = vi.fn<PlayerEngine['setCursorScroll']>();
   play = vi.fn();
   unlockAudio = vi.fn();
   pause = vi.fn();

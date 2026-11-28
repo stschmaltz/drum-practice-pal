@@ -104,4 +104,5 @@ export const fakeRecordingPlayerFactory: RecordingPlayerFactory = (frame) => {
 export const fakeYouTubePlayerModule = {
   createYouTubePlayer: fakeRecordingPlayerFactory,
   CLOCK_POLL_MS: 250,
+  PAUSED_CLOCK_POLL_MS: 1000,
 };

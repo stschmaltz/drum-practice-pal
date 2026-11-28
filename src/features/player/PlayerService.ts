@@ -655,6 +655,18 @@ export class PlayerService {
   }
 
   /**
+   * Whether the score box follows the tab's own cursor (alphaTab's scroll
+   * while playing and after every drawing). Off while the score is only read
+   * under a recording, where the screen keeps another bar on show and the
+   * tab's cursor is hidden. Live: nothing is drawn again, stopped or played.
+   * `showBar` works either way.
+   */
+  setCursorScroll(on: boolean): void {
+    if (this.disposed) return;
+    this.engine.setCursorScroll(on);
+  }
+
+  /**
    * Marks a range of bars on the score (1-based, inclusive), or clears the
    * mark for null. A drawing only: what plays is setRange's business, and the
    * two can differ, as while a new loop's bars are picked during another loop.

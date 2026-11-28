@@ -4,6 +4,7 @@
  * fake video player and an in-memory links table; the press-as-it-plays path
  * and the following are SongPage.test.tsx's.
  */
+import type { QueryClient } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { onlineManager } from '@tanstack/react-query';
@@ -339,6 +340,29 @@ describe('what the line-up says to a screen reader (19 QA issue 11)', () => {
   });
 });
 
+// 19 Review. A live region that is mounted already holding its text is often not read
+// (docs/review-checklist.md, section 6): the region must be the same element whichever of
+// the line-up's two roots, the rows or the typed time's form, is drawn.
+describe('the live region stays on the page across the typed time’s form (19 Review)', () => {
+  it('is the same element before the field opens, while it is open, and after a save says “Lined up”', async () => {
+    const { user, openField } = await renderLineUp();
+    const region = said();
+    expect(region).toBeEmptyDOMElement();
+
+    await openField();
+    expect(said()).toBe(region);
+    await user.type(field(), '0:07.25{Enter}');
+    await waitFor(() => expect(region).toHaveTextContent('Lined up. Bar 1 at 0:07.25.'));
+    expect(said()).toBe(region);
+    expect(region).toBeInTheDocument();
+
+    // And through Cancel: opened again and left.
+    await openField();
+    await user.click(button('Cancel'));
+    expect(said()).toBe(region);
+  });
+});
+
 describe('a line-up is saved for the video it was made on (19 QA issue 6)', () => {
   const OTHER_VIDEO = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
 
@@ -377,6 +401,9 @@ describe('a line-up is saved for the video it was made on (19 QA issue 6)', () =
     // And the read shows the new video, not lined up.
     await waitFor(() => expect(button('Bar 1 starts now')).toBeInTheDocument());
     expect(links.rows()[0]).toMatchObject({ url: OTHER_VIDEO, bar_one_seconds: null });
+    // The nudge that was pressed has left with the old line-up: focus is on the control that
+    // stands in its place, not on <body> (19 QA after fix round 1, issue 4).
+    expect(button('Bar 1 starts now')).toHaveFocus();
   });
 
   it('a link removed on another device is said to be gone, not changed', async () => {
@@ -428,6 +455,78 @@ describe('the buttons that stand in for one another (19 Readability)', () => {
     await user.click(again);
     await waitFor(() => expect(barOneSent()).toEqual([9]));
     expect(button('Line up again')).toBe(again);
+    expect(again).toHaveFocus();
+  });
+});
+
+// 19 QA (after fix round 1), issue 4, and its class: the line-up's controls can be replaced
+// under the focus by something other than a press here (a failed save's read, another device).
+describe('focus when the line-up changes under it (19 Review)', () => {
+  const lineUpOnAnotherDevice = async (queryClient: QueryClient, barOneSeconds: number | null) => {
+    links.setRows(links.rows().map((row) => ({ ...row, bar_one_seconds: barOneSeconds })));
+    await act(() => queryClient.invalidateQueries());
+  };
+
+  it.each(['Tab earlier', 'Follow'])(
+    'a line-up taken away elsewhere while focus is on “%s” hands it to “Bar 1 starts now”',
+    async (name) => {
+      const { queryClient } = await renderLineUp(5);
+      act(() => button(name).focus());
+      await lineUpOnAnotherDevice(queryClient, null);
+      await waitFor(() => expect(button('Bar 1 starts now')).toHaveFocus());
+    },
+  );
+
+  it('a link lined up elsewhere while focus is on “Type a time” hands it to “Line up again”', async () => {
+    const { queryClient } = await renderLineUp();
+    act(() => button('Type a time').focus());
+    await lineUpOnAnotherDevice(queryClient, 8);
+    await waitFor(() => expect(button('Line up again')).toHaveFocus());
+  });
+
+  it('“Line up again” half-way when the line-up is taken away elsewhere: Cancel has nothing to keep and goes, and focus with it to “Bar 1 starts now”', async () => {
+    const { user, queryClient } = await renderLineUp(5);
+    await user.click(button('Line up again'));
+    act(() => button('Cancel').focus());
+    await lineUpOnAnotherDevice(queryClient, null);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull());
+    expect(button('Bar 1 starts now')).toHaveFocus();
+  });
+
+  it('leaves focus alone when it is somewhere else on the page, or was never in the line-up', async () => {
+    const { queryClient } = await renderLineUp(5);
+    const elsewhere = document.createElement('button');
+    document.body.append(elsewhere);
+    // In the line-up, then moved on by the user: the change must not pull focus back.
+    act(() => button('Tab later').focus());
+    act(() => elsewhere.focus());
+    await lineUpOnAnotherDevice(queryClient, null);
+    await waitFor(() => expect(button('Bar 1 starts now')).toBeInTheDocument());
+    expect(elsewhere).toHaveFocus();
+
+    // Nothing focused at all (the page as it opens), and the line-up comes back: still nothing.
+    act(() => elsewhere.blur());
+    await lineUpOnAnotherDevice(queryClient, 6);
+    await waitFor(() => expect(button('Line up again')).toBeInTheDocument());
+    expect(document.body).toHaveFocus();
+
+    // In the line-up, on to something else, and then on nothing: the control last focused
+    // here is forgotten when focus goes to another element, so its leaving pulls nothing back.
+    act(() => button('Tab later').focus());
+    act(() => elsewhere.focus());
+    act(() => elsewhere.blur());
+    elsewhere.remove();
+    await lineUpOnAnotherDevice(queryClient, null);
+    await waitFor(() => expect(button('Bar 1 starts now')).toBeInTheDocument());
+    expect(document.body).toHaveFocus();
+  });
+
+  it('a control that only changes its name keeps the focus it has', async () => {
+    const { queryClient } = await renderLineUp(5);
+    const again = button('Line up again');
+    act(() => again.focus());
+    await lineUpOnAnotherDevice(queryClient, null);
+    await waitFor(() => expect(button('Bar 1 starts now')).toBe(again));
     expect(again).toHaveFocus();
   });
 });

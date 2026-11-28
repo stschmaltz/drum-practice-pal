@@ -1,15 +1,16 @@
-import { useState, type FormEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { NOTHING_SAID, saying, type Announcement } from '@/lib/announcement';
 import { isOnline, useOnline } from '@/lib/network';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import { LINE_UP_COPY, linedUpSaying, nudgedSaying } from './lineUpCopy';
-import { findHandOver } from './lineUpFocus';
+import { findHandOver, type LineUpHandOver } from './lineUpFocus';
 import {
   LineUpControls,
   LineUpLiveRegion,
   LineUpMessage,
   LineUpRows,
   TypedTimeForm,
+  type FocusWatch,
 } from './LineUpParts';
 import { canLineUp, type RecordingPlayer } from './recordingPlayer';
 import type { SongLink } from './songLinks';
@@ -89,6 +90,12 @@ export function LineUp({
   const unavailable = status.status === 'unavailable';
   const needsFirstTap = firstTapAsks > 0 && !status.started;
   const { said, say } = useSayings({ unavailable, needsFirstTap, firstTapAsks });
+  // "Line up again" has something to go back to only while a line-up is saved: one taken
+  // away meanwhile (another device, the link pointed at another video) leaves the plain prompt.
+  const canKeep = relining && barOneSeconds !== null;
+  const watchFocus = useFocusKeptInLineUp(
+    typed !== null ? 'typed' : lined ? 'lined' : canKeep ? 'relining' : 'prompt',
+  );
 
   const lineUpNow = () => {
     // The video's clock at the press, read before anything else is done.
@@ -175,62 +182,105 @@ export function LineUp({
     focusWhenReady(findHandOver('again'));
   };
 
-  const liveRegion = <LineUpLiveRegion said={said} />;
-
-  if (typed !== null) {
-    return (
-      <TypedTimeForm
-        text={typed.text}
-        invalid={typedInvalid}
-        online={online}
-        onChange={(text) => {
-          setTyped({ ...typed, text });
-          setTypedInvalid(false);
-        }}
-        onSubmit={saveTyped}
-        onCancel={closeTyping}
-      >
-        {liveRegion}
-      </TypedTimeForm>
-    );
-  }
-
   return (
-    <LineUpRows>
-      <LineUpMessage
-        notice={{
-          online,
-          saveError: save.error,
-          unavailable,
-          needsFirstTap,
-          pressedEarly: pressedEarly && !status.started,
-          barOneSeconds: lined ? barOneSeconds : null,
-        }}
-      />
-      <LineUpControls
-        online={online}
-        state={
-          lined
-            ? {
-                lined: true,
-                barOneSeconds,
-                follow,
-                onAgain: lineUpAgain,
-                onNudge: nudge,
-                onFollowChange,
-              }
-            : {
-                lined: false,
-                canPressNow: online && canLineUp(status),
-                onNow: lineUpNow,
-                onType: openTyping,
-                onKeep: relining ? keepLineUp : null,
-              }
-        }
-      />
-      {liveRegion}
-    </LineUpRows>
+    <>
+      {typed !== null ? (
+        <TypedTimeForm
+          text={typed.text}
+          invalid={typedInvalid}
+          online={online}
+          onChange={(text) => {
+            setTyped({ ...typed, text });
+            setTypedInvalid(false);
+          }}
+          onSubmit={saveTyped}
+          onCancel={closeTyping}
+          watchFocus={watchFocus}
+        />
+      ) : (
+        <LineUpRows watchFocus={watchFocus}>
+          <LineUpMessage
+            notice={{
+              online,
+              saveError: save.error,
+              unavailable,
+              needsFirstTap,
+              pressedEarly: pressedEarly && !status.started,
+              barOneSeconds: lined ? barOneSeconds : null,
+            }}
+          />
+          <LineUpControls
+            online={online}
+            state={
+              lined
+                ? {
+                    lined: true,
+                    barOneSeconds,
+                    follow,
+                    onAgain: lineUpAgain,
+                    onNudge: nudge,
+                    onFollowChange,
+                  }
+                : {
+                    lined: false,
+                    canPressNow: online && canLineUp(status),
+                    onNow: lineUpNow,
+                    onType: openTyping,
+                    onKeep: canKeep ? keepLineUp : null,
+                  }
+            }
+          />
+        </LineUpRows>
+      )}
+      {/* After the rows or the form, never inside either: the two are different elements, and
+          a region inside them would be mounted anew, already holding its text, at each change
+          between them, which a screen reader often doesn't read (19 Review). */}
+      <LineUpLiveRegion said={said} />
+    </>
   );
+}
+
+/** The sets of controls the line-up draws; each has one that stands in for the others'. */
+type LineUpShape = 'prompt' | 'relining' | 'lined' | 'typed';
+
+const STANDS_IN: Record<LineUpShape, LineUpHandOver> = {
+  prompt: 'now',
+  relining: 'now',
+  lined: 'again',
+  typed: 'typed',
+};
+
+/**
+ * Keeps focus in the line-up when the control that has it is replaced by
+ * something other than a press here: the read after a save that found the
+ * link pointed at another video, a line-up made or taken away on another
+ * device (19 QA after fix round 1, issue 4). A press hands focus on itself
+ * (`useFocusWhenReady`); this is for the changes no press scheduled. As
+ * `useFocusKeptInBar` does for the controls bar: the last control focused
+ * here is remembered, and when a change of shape has taken it off the page
+ * and left focus on `<body>`, the control that stands in for it gets it.
+ * Focus that the user moved elsewhere is forgotten, never pulled back.
+ */
+function useFocusKeptInLineUp(shape: LineUpShape): FocusWatch {
+  const lastFocused = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const last = lastFocused.current;
+    if (!last || last.isConnected) return;
+    lastFocused.current = null;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    findHandOver(STANDS_IN[shape])()?.focus();
+  }, [shape]);
+  return {
+    onFocus: (event) => {
+      if (event.target instanceof HTMLElement) lastFocused.current = event.target;
+    },
+    // Gone to another element: the user's own move. A blur to nothing (the control taken
+    // off the page, the window left) keeps what was focused.
+    onBlur: (event) => {
+      if (event.relatedTarget !== null) lastFocused.current = null;
+    },
+  };
 }
 
 /**
