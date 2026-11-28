@@ -75,11 +75,15 @@ function SongNotFound() {
 /** "← Song title": the way up a level, above a screen's own title. */
 export function BackLink({ to, children }: { to: string; children: ReactNode }) {
   return (
-    <Link to={to} className={`${linkClass} -mb-2 self-start text-sm no-underline hover:underline`}>
+    <Link
+      to={to}
+      className={`${linkClass} -mb-2 max-w-full self-start text-sm no-underline hover:underline`}
+    >
       <span aria-hidden="true" className="mr-1">
         ←
       </span>
-      {children}
+      {/* One line: a song's title can be one unbroken word, which would widen the page (14 QA). */}
+      <span className="min-w-0 truncate">{children}</span>
     </Link>
   );
 }

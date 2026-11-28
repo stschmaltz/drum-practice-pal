@@ -406,7 +406,7 @@ test('offline, the recording buttons are off and a press goes nowhere; on a reco
 
   await context.setOffline(false);
   await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
-  expect(services.requests).toEqual([EMBED_URL, EMBED_URL]);
+  await expect.poll(() => services.requests, { timeout: 10_000 }).toEqual([EMBED_URL, EMBED_URL]);
 });
 
 test('a second tab sees a link saved in the first at its next read, and its form edits that link', async ({

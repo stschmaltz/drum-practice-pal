@@ -146,7 +146,7 @@ export function PlayAlong({
               <li key={link.id} className="min-w-0">
                 <LinkOut
                   link={link}
-                  className={`${lockableLinkClass} max-w-full text-sm`}
+                  className={`${lockableLinkClass} max-w-full gap-1.5 text-sm`}
                   // One line each: a long address is cut short (clamped, so it can still shrink the row), and whole in its title.
                   textClassName="line-clamp-1 wrap-anywhere"
                   title={link.url}
