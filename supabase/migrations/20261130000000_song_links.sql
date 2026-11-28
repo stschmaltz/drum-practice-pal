@@ -88,14 +88,18 @@ language plpgsql
 set search_path = ''
 as $$
 begin
+  -- The incoming time is capped first, and only then compared with what is
+  -- stored. now() is this transaction's start: capping after the comparison
+  -- would let a transaction that started earlier pull back a later time that
+  -- a newer one had already saved, even on a title edit that sends none.
+  if new.last_played_at > now() then
+    new.last_played_at = now();
+  end if;
   if tg_op = 'UPDATE' then
     if new.last_played_at is null
       or (old.last_played_at is not null and new.last_played_at < old.last_played_at) then
       new.last_played_at = old.last_played_at;
     end if;
-  end if;
-  if new.last_played_at > now() then
-    new.last_played_at = now();
   end if;
   return new;
 end;

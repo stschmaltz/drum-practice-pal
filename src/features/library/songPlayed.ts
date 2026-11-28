@@ -86,6 +86,10 @@ function songPlayedOptions(queryClient: QueryClient, userId: string) {
         songId,
         playedAt,
       });
+      // A read of the list already on its way is from before this write: landing after it,
+      // it would put the old time back, and the old order would be persisted for offline
+      // (Copilot review on #34). Not awaited, as the loop edits don't: the list moves at once.
+      void queryClient.cancelQueries({ queryKey: songKeys.forUser(userId), exact: true });
       // Never back: a replayed, older time must not undo a newer one already shown.
       setCachedPlayedAt(queryClient, userId, songId, (current) => latest([current, playedAt]));
       await queued;
@@ -107,6 +111,12 @@ function songPlayedOptions(queryClient: QueryClient, userId: string) {
       context: { queueId: string } | undefined,
     ) => {
       if (context) void removeOutboxEntry(context.queueId);
+      // The list held its own refetches while this was pending (`useSongs`); once the last
+      // such write has settled it is read again, so what the server kept is what shows.
+      // 1 is this mutation, still counted as pending inside its own onSettled.
+      if (queryClient.isMutating({ mutationKey }) <= 1) {
+        void queryClient.invalidateQueries({ queryKey: songKeys.forUser(userId), exact: true });
+      }
     },
   };
 }

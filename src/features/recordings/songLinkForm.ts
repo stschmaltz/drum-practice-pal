@@ -204,7 +204,11 @@ export function applyLinkSave(
   savedAt: string,
 ): SongLinkRow[] {
   const removed = new Set(plan.removals);
-  const updates = new Map(plan.updates.map((update) => [update.id, update]));
+  // An added link the list already has (a read between a lost answer and its retry cached
+  // the row the first send made) takes the plan's address too: the server holds that one.
+  const updates = new Map(
+    [...plan.updates, ...plan.inserts].map(({ id, provider, url }) => [id, { provider, url }]),
+  );
   const kept = rows
     .filter((row) => !removed.has(row.id))
     .map((row) => {

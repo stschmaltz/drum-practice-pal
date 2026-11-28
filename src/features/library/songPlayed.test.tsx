@@ -152,6 +152,35 @@ describe('marking a song played', () => {
 });
 
 // 14 Test: two openings of one song close together (Original, then Drumless), each a write.
+// Copilot review on #34: a read of the Songs list that was already on its way finished after
+// the write and put the old time back, where it stayed (and was persisted) until the next read.
+describe('a Songs list read in flight when a recording is opened', () => {
+  it('is cancelled, so its older answer can’t put the old time back', async () => {
+    serveSong();
+    const { result, queryClient, cachedPlayedAt } = renderMark();
+    let answerRead: (songs: LibrarySong[]) => void = () => {};
+    const read = queryClient
+      .fetchQuery({
+        queryKey: songKeys.forUser(USER),
+        queryFn: () => new Promise<LibrarySong[]>((resolve) => (answerRead = resolve)),
+      })
+      .catch(() => {});
+    await waitFor(() =>
+      expect(queryClient.getQueryState(songKeys.forUser(USER))?.fetchStatus).toBe('fetching'),
+    );
+
+    act(() => result.current.mark('a'));
+    await waitFor(() =>
+      expect(queryClient.getQueryState(songKeys.forUser(USER))?.fetchStatus).toBe('idle'),
+    );
+    // The read answers anyway, with the row as it was before the write.
+    answerRead([librarySong('a'), librarySong('b')]);
+    await read;
+    await waitFor(() => expect(pendingPlays(queryClient)).toBe(0));
+    expect(cachedPlayedAt('a')).toBe(NOW);
+  });
+});
+
 describe('two played times for one song in flight', () => {
   const LATER = '2026-11-27T18:30:05.000Z';
 
@@ -191,6 +220,25 @@ describe('two played times for one song in flight', () => {
     expect(cachedPlayedAt('a')).toBe(LATER);
     await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
     expect(hasUnsentWrites(queryClient, USER)).toBe(false);
+  });
+
+  // Copilot review on #34: the list is read again once the last write has settled, and not
+  // while one is still on its way (its answer would be an older fact about the row).
+  it('reads the list again only when the last write has settled', async () => {
+    const { answer } = holdAnswers();
+    const { result, queryClient } = renderMark();
+    const invalidated = () => queryClient.getQueryState(songKeys.forUser(USER))?.isInvalidated;
+    act(() => result.current.mark('a'));
+    vi.setSystemTime(new Date(LATER));
+    act(() => result.current.mark('a'));
+    await waitFor(() => expect(sentTimes()).toEqual([NOW, LATER]));
+
+    await answer(0);
+    await waitFor(() => expect(pendingPlays(queryClient)).toBe(1));
+    await settle();
+    expect(invalidated()).toBe(false);
+    await answer(1);
+    await waitFor(() => expect(invalidated()).toBe(true));
   });
 
   // 14 Test, bug 4: the last answer to land was taken whole once nothing else was pending, so

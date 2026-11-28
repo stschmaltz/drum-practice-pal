@@ -50,9 +50,19 @@ function invalidateWhenIdle(queryClient: QueryClient, userId: string) {
 
 export function useSongs() {
   const user = useSignedInUser();
+  const queryClient = useQueryClient();
+  // Not by itself (focus, reconnect, a screen mounting the list) while a "recording opened"
+  // write is pending: between its retries the write is pending but not paused, and the read
+  // would put the old `last_played_at` back over the optimistic one. The write reads the
+  // list again once the last one settles (songPlayed.ts), as the loops' queued edits do.
+  const whenNoPlayPending = () =>
+    queryClient.isMutating({ mutationKey: songKeys.plays(user.id) }) === 0;
   return useQuery({
     queryKey: songKeys.forUser(user.id),
     queryFn: () => fetchSongs(user.id),
+    refetchOnWindowFocus: whenNoPlayPending,
+    refetchOnReconnect: whenNoPlayPending,
+    refetchOnMount: whenNoPlayPending,
   });
 }
 

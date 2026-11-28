@@ -204,6 +204,21 @@ describe('applyLinkSave', () => {
     };
     expect(applyLinkSave([linkRow('a')], SONG, plan, '2026-11-27T09:00:00Z')).toHaveLength(1);
   });
+
+  // Copilot review on #34: an insert whose answer was lost is sent again with a changed
+  // address, and a read in between cached the row the first send made. The server then holds
+  // the new address; skipping the listed row left the old one cached if the next read failed.
+  it('gives a row the list already has the address the plan added it with', () => {
+    const listed = linkRow('a', { kind: 'drumless', provider: 'youtube', url: WATCH });
+    const plan = {
+      removals: [],
+      updates: [],
+      inserts: [{ id: 'a', kind: 'drumless' as const, provider: 'spotify' as const, url: SPOTIFY }],
+    };
+    expect(applyLinkSave([listed], SONG, plan, '2026-11-27T09:00:00Z')).toEqual([
+      { ...listed, provider: 'spotify', url: SPOTIFY },
+    ]);
+  });
 });
 
 // 14 Review: a form opened again while a save is on its way shows what that save is sending.
