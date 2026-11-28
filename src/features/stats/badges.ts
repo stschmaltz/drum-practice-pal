@@ -115,3 +115,26 @@ export function newlyEarned(before: BadgeInput, after: BadgeInput): BadgeProgres
   );
   return badgeProgress(after).filter((badge) => badge.earned && !had.has(badge.id));
 }
+
+/** How many unearned badges "Next up" names. */
+export const NEXT_UP_BADGES = 3;
+
+/**
+ * The unearned badges closest to done, closest first: by the share of the
+ * target reached, and between equals in the list's own order (the smaller
+ * target of a kind comes first there). The rest, in list order, are what
+ * "Show all badges" opens.
+ */
+export function nextUpBadges(
+  badges: readonly BadgeProgress[],
+  count = NEXT_UP_BADGES,
+): { nextUp: BadgeProgress[]; rest: BadgeProgress[] } {
+  const share = (badge: BadgeProgress) => badge.current / badge.target;
+  const unearned = badges.filter((badge) => !badge.earned);
+  const nextUp = unearned
+    .map((badge, index) => ({ badge, index }))
+    .sort((a, b) => share(b.badge) - share(a.badge) || a.index - b.index)
+    .slice(0, count)
+    .map(({ badge }) => badge);
+  return { nextUp, rest: unearned.filter((badge) => !nextUp.includes(badge)) };
+}

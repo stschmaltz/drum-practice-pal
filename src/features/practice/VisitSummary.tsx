@@ -1,7 +1,7 @@
 import { Icon } from '@/components/icons';
 import { ghostButtonClass } from '@/components/styles';
 import { usePracticeLoops } from '@/features/loops/useLoops';
-import { daysLabel } from '@/features/stats/streak';
+import { daysLabel } from '@/features/stats/statLabels';
 import { visitSummaryExtras } from '@/features/stats/visitSummary';
 import { sittingFacts, sittingLines, type Sitting } from './sittings';
 import { useAllSessions } from './useSessions';

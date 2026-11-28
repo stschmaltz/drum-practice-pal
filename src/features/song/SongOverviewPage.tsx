@@ -7,7 +7,12 @@ import { OverflowMenu } from '@/components/OverflowMenu';
 import { PageHeader } from '@/components/PageHeader';
 import { ProgressBar, ProgressRing } from '@/components/ProgressMarks';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
-import { focusRing, ghostButtonClass, sectionHeadingClass } from '@/components/styles';
+import {
+  focusRing,
+  ghostButtonClass,
+  nameLinkClass,
+  sectionHeadingClass,
+} from '@/components/styles';
 import { songFactsLabel, type Song } from '@/features/library/songForm';
 import { NO_DRUM_TRACK_NOTE } from '@/features/library/songMetadata';
 import { ConfirmDeleteLoop } from '@/features/loops/ConfirmDeleteLoop';
@@ -276,7 +281,7 @@ function LoopRow({
             {/* The name opens the loop too, as a song's title does on the Songs list. */}
             <Link
               to={loopPracticePath(song.id, loop.id)}
-              className={`inline-flex min-h-touch min-w-touch max-w-full items-center rounded-sm wrap-anywhere text-ink hover:text-brand ${focusRing}`}
+              className={`${nameLinkClass} wrap-anywhere`}
             >
               {loop.name}
             </Link>

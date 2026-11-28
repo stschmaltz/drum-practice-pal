@@ -100,3 +100,42 @@ export function speedAxis(percents: readonly number[]): { min: number; max: numb
   const max = Math.ceil(Math.max(...all) / 25) * 25;
   return min === max ? { min: Math.max(min - 25, 0), max: max + 25 } : { min, max };
 }
+
+/**
+ * Which points of a line carry their number, when there isn't room for all:
+ * the `keep` ones always (the first, the last, the best), then each other
+ * point, left to right, that is at least `minGap` from every one already
+ * labelled. `xs` are the points' x positions.
+ */
+export function labelledIndexes(
+  xs: readonly number[],
+  { minGap, keep }: { minGap: number; keep: readonly number[] },
+): Set<number> {
+  const labelled = new Set(keep.filter((index) => index >= 0 && index < xs.length));
+  xs.forEach((x, index) => {
+    if (labelled.has(index)) return;
+    const clear = [...labelled].every((other) => Math.abs((xs[other] ?? 0) - x) >= minGap);
+    if (clear) labelled.add(index);
+  });
+  return labelled;
+}
+
+/**
+ * A sparkline's points: the values spread evenly across `width`, scaled
+ * between their own lowest and highest (a flat run sits in the middle), with
+ * `pad` kept clear all round for the line's width and its end dot.
+ */
+export function sparklinePoints(
+  values: readonly number[],
+  { width, height, pad }: { width: number; height: number; pad: number },
+): Point[] {
+  return linePoints(
+    values.map((value, index) => ({ time: index, value })),
+    {
+      width: width - pad * 2,
+      height: height - pad * 2,
+      yMin: Math.min(...values),
+      yMax: Math.max(...values),
+    },
+  ).map((point) => ({ x: point.x + pad, y: point.y + pad }));
+}
