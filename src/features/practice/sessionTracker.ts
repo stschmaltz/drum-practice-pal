@@ -41,6 +41,7 @@ export interface OpenSession {
   /**
    * The banked play time by speed: one entry per speed as the app shows it (a
    * whole percent), the speed played most recently last. Adds up to `playedMs`.
+   * Only speeds with play time are here: a stretch of no time adds none.
    */
   speedTimes: readonly SpeedTime[];
   /** When the stretch sounding now began; null while paused, counting in or hidden. */
@@ -107,10 +108,15 @@ export function playedMsAt(session: OpenSession, now: number): number {
  * The session with the stretch sounding now, if any, banked under the speed
  * it was played at. Every change of speed and every stop goes through here,
  * so a stretch is only ever at one speed.
+ *
+ * A stretch of no time (a speed set and changed or stopped in the same
+ * instant, or the clock set back under it) was not played: it ends, but it
+ * neither makes its speed the one played last nor replaces the ratio that was.
  */
 function withStretchBanked(session: OpenSession, now: number): OpenSession {
   if (session.playingSince === null) return session;
   const stretchMs = Math.max(0, now - session.playingSince);
+  if (stretchMs === 0) return { ...session, playingSince: null };
   const percent = ratioToPercent(session.speedRatio);
   const isSameSpeed = (time: SpeedTime) => ratioToPercent(time.speedRatio) === percent;
   const before = session.speedTimes.find(isSameSpeed)?.playedMs ?? 0;

@@ -384,6 +384,58 @@ describe('the speed of a session', () => {
 
     expect(t.at(30, { phase: 'stopped' })).toMatchObject({ durationSeconds: 50, speedRatio: 0.7 });
   });
+
+  // Unit 20, batch 5 Copilot review: a stretch of no time is no play at its speed.
+  it('a speed gone back to in the same instant as the stop was not played again, so a tie stays with the other', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    t.at(20, { speedRatio: 0.8 });
+    t.at(40, { speedRatio: 0.7 });
+
+    expect(t.at(40, { phase: 'stopped' })).toMatchObject({ durationSeconds: 40, speedRatio: 0.8 });
+  });
+
+  it('a ratio of the same percent set in the same instant as the stop does not replace the ratio played', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.708333 });
+    t.at(40, { speedRatio: 0.71 });
+
+    expect(t.at(40, { phase: 'stopped' })?.speedRatio).toBe(0.708333);
+  });
+
+  it('a stretch the clock was set back under is no play at its speed either', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    t.at(20, { speedRatio: 0.8 });
+    t.at(40, { speedRatio: 0.7 });
+
+    expect(t.at(30, { phase: 'stopped' })).toMatchObject({ durationSeconds: 40, speedRatio: 0.8 });
+  });
+
+  it('a first stretch of no time leaves the session open, with the time that follows at its own speed', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.9 });
+    t.at(0, { speedRatio: 0.7 });
+
+    expect(t.state()).toMatchObject({
+      id: 'session-1',
+      playedMs: 0,
+      speedTimes: [],
+      playingSince: T0,
+    });
+    expect(t.at(40, { phase: 'stopped' })).toMatchObject({
+      id: 'session-1',
+      durationSeconds: 40,
+      speedRatio: 0.7,
+    });
+  });
+
+  it('a session of no time at all, where the minimum allows one, is logged at the speed it was set to', () => {
+    const t = tracking({ minPlaySeconds: 0 });
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.85 });
+
+    expect(t.at(0, { phase: 'stopped' })).toMatchObject({ durationSeconds: 0, speedRatio: 0.85 });
+  });
 });
 
 // Unit 20, batch 5 Test: the windows a speed can change in, one row each.

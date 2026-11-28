@@ -979,3 +979,17 @@ Test's own table (the old end-speed rule, ties, banking, `historyDays`' rules) w
 **Open issues**
 
 None new beyond the Accepted lines above and D10.
+
+### Copilot review
+
+One comment on PR #40 (id 4726553546, `sessionTracker.ts`), confirmed and fixed.
+
+- **The comment:** a stretch of no time still moved its speed's entry to the end of `speedTimes` and replaced the entry's exact ratio, so a speed set but never played could decide a tie, or be the ratio logged.
+- **Confirmed:** `withStretchBanked` rewrote the entry for every stretch, whatever its length. 20 seconds at 70%, 20 at 80%, then 70% set in the same instant as the stop logged 70% ("a tie goes to the speed played later", and 70% had become the later). 40 seconds at 0.708333, then 0.71 and the stop in the same instant, logged 0.71. A stretch the clock was set back under is clamped to zero and did the same. A first stretch of no time left a zero-time entry in `speedTimes`, which could only win against other zero entries, so it logged right but broke "only speeds played are listed".
+- **Fix:** `withStretchBanked` ends a stretch of no time (`playingSince: null`) and changes nothing else. `playedMs` and `speedTimes` are untouched, so `speedTimes` holds only speeds with play time, and `mainSpeedRatio`'s fallback to the speed set still covers a session with nothing banked.
+- **Tests** (`sessionTracker.test.ts`, "the speed of a session"; the first four failed before the fix): Copilot's example; the exact-ratio half; the same with the stop's clock set back; a first stretch of no time (session stays open under its id, `speedTimes` empty, the 40 seconds that follow logged at their own speed); a session of no time at all with the minimum at 0 (logged at the speed set; passed before too, kept as the neighbour).
+- **Checklist:** new row in section 1, "A step that took no time, counted as the latest".
+
+**Async windows and inputs:** none added. The tracker is a pure reducer; the case is two inputs at one timestamp, which the new tests feed.
+
+**Checks:** `npm run check` green. No e2e (a pure tracker rule, nothing else changed).
