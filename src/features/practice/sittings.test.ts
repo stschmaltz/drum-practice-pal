@@ -31,6 +31,7 @@ function openSession(overrides: Partial<OpenSession> = {}): OpenSession {
     loopId: 'loop-a',
     startedAt: T0,
     playedMs: 0,
+    speedTimes: [],
     playingSince: null,
     repeats: 0,
     speedRatio: 0.8,

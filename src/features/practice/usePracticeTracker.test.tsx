@@ -314,6 +314,323 @@ describe('leaving the loop', () => {
   });
 });
 
+// Unit 20, batch 5 (17.1): the speed is the tracker's, whichever way the session is sent.
+describe('a session with a last try at full speed', () => {
+  /** Ten minutes at 80%, then a minute at 100%, still playing. */
+  const tenMinutesThenATry = (view: ReturnType<typeof renderTracker>) => {
+    act(() => view.player.setSpeed(0.8));
+    view.playOn(600);
+    act(() => view.player.setSpeed(1));
+    view.seconds(60);
+  };
+  const mostlyAt80 = { loop_id: 'loop-a', duration_seconds: 660, speed_ratio: 0.8 };
+
+  it('is logged at the speed most of it was played at when it is paused', async () => {
+    const view = renderTracker();
+    tenMinutesThenATry(view);
+    view.pause();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject(mostlyAt80);
+    expect(view.tracker().lastLogged).toMatchObject({ speedRatio: 0.8 });
+  });
+
+  it('is logged the same as the screen goes', async () => {
+    const view = renderTracker();
+    view.cacheEmptyHistory();
+    tenMinutesThenATry(view);
+
+    view.hook.unmount();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject(mostlyAt80);
+    expect(view.cachedHistory()).toEqual([expect.objectContaining({ speed_ratio: 0.8 })]);
+  });
+
+  it('is logged the same with keepalive from a hidden page, and on pagehide', () => {
+    const hidden = renderTracker();
+    tenMinutesThenATry(hidden);
+    setVisibility('hidden');
+    expect(keptAlive()).toEqual([expect.objectContaining(mostlyAt80)]);
+    hidden.hook.unmount();
+    Reflect.deleteProperty(document, 'visibilityState');
+    fetchMock.mockClear();
+
+    vi.setSystemTime(T0);
+    const left = renderTracker();
+    tenMinutesThenATry(left);
+    firePageEvent('pagehide');
+    expect(keptAlive()).toEqual([expect.objectContaining(mostlyAt80)]);
+  });
+
+  it('is logged at that speed when another loop is chosen, at a third speed, in the same render', async () => {
+    const view = renderTracker('loop-a');
+    tenMinutesThenATry(view);
+
+    act(() => {
+      view.player.setSpeed(0.5);
+      view.hook.rerender({ loopId: 'loop-b' });
+    });
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject(mostlyAt80);
+  });
+
+  it('the sitting still ends on the speed it was left at', () => {
+    const view = renderTracker();
+    tenMinutesThenATry(view);
+    view.pause();
+
+    expect(view.tracker().sitting()).toMatchObject({ playedSeconds: 660, endSpeedRatio: 1 });
+  });
+});
+
+// Unit 20, batch 5 Test: the row is built once, by the tracker, and every way
+// out and every later send carries that row, whatever the speed is by then.
+describe('the speed of a logged session, window by window', () => {
+  /** 40 s at 85 BPM typed at 120 (0.708333, "71%"), then 20 s at 100%, still playing. */
+  const mostlyAtATypedBpm = (view: ReturnType<typeof renderTracker>) => {
+    act(() => view.player.setSpeed(0.708333));
+    view.playOn(40);
+    act(() => view.player.setSpeed(1));
+    view.seconds(20);
+  };
+  const withoutId = (row: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(row).filter(([field]) => field !== 'id'));
+  const theRow = {
+    user_id: USER,
+    loop_id: 'loop-a',
+    started_at: '2026-11-23T18:00:00.000Z',
+    duration_seconds: 60,
+    speed_ratio: 0.708333,
+    repeats: 0,
+  };
+
+  it('the three ways out send the same row, the exact ratio of a typed BPM in it', async () => {
+    const paused = renderTracker();
+    mostlyAtATypedBpm(paused);
+    paused.pause();
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    const byMutation = withoutId(logged()[0]!);
+    paused.hook.unmount();
+    queryResult.mockClear();
+
+    vi.setSystemTime(T0);
+    const left = renderTracker();
+    mostlyAtATypedBpm(left);
+    left.hook.unmount();
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    const unobserved = withoutId(logged()[0]!);
+    queryResult.mockClear();
+
+    vi.setSystemTime(T0);
+    const hidden = renderTracker();
+    mostlyAtATypedBpm(hidden);
+    setVisibility('hidden');
+    const byKeepalive = withoutId(keptAlive()[0]!);
+
+    expect(byMutation).toEqual(theRow);
+    expect(unobserved).toEqual(theRow);
+    expect(byKeepalive).toEqual(theRow);
+    expect(logged()).toEqual([]);
+  });
+
+  it('a keepalive that failed is sent again as the same row, though the speed has changed on the hidden page', async () => {
+    let fail!: (error: Error) => void;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((_, reject) => (fail = reject)));
+    const view = renderTracker();
+    mostlyAtATypedBpm(view);
+    setVisibility('hidden');
+    expect(keptAlive()).toHaveLength(1);
+
+    // A key pressed with the page hidden, the keepalive still unanswered.
+    act(() => view.player.setSpeed(0.5));
+    await act(async () => fail(new TypeError('Failed to fetch')));
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toEqual(keptAlive()[0]);
+    expect(logged()[0]).toMatchObject(theRow);
+  });
+
+  it('a log on its way is not touched by a change of speed, which belongs to the next session', async () => {
+    const first = heldAnswer();
+    queryResult.mockReturnValueOnce(first.promise);
+    const view = renderTracker();
+    mostlyAtATypedBpm(view);
+    view.pause();
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    const sent = structuredClone(logged()[0]!);
+
+    act(() => view.player.setSpeed(0.9));
+    view.playFor(31);
+    await waitFor(() => expect(logged()).toHaveLength(2));
+    await act(async () => first.answer(ok));
+
+    await waitFor(() => expect(view.tracker().lastLogged).not.toBeNull());
+    expect(logged()[0]).toEqual(sent);
+    expect(logged()[0]).toMatchObject(theRow);
+    // The next one has none of the first's 40 seconds at 71%: it is 31 seconds at 90%.
+    expect(logged()[1]).toMatchObject({ duration_seconds: 31, speed_ratio: 0.9 });
+  });
+
+  it('"Try again" sends the row that failed, not one at the speed set since', async () => {
+    queryResult.mockResolvedValueOnce(offline);
+    const view = renderTracker();
+    mostlyAtATypedBpm(view);
+    view.pause();
+    await waitFor(() => expect(view.tracker().unsaved).toHaveLength(1));
+    expect(view.tracker().unsaved[0]).toMatchObject({ speedRatio: 0.708333 });
+
+    act(() => view.player.setSpeed(0.5));
+    act(() => view.tracker().retryUnsaved());
+
+    await waitFor(() => expect(view.tracker().unsaved).toEqual([]));
+    expect(logged()).toHaveLength(2);
+    expect(logged()[1]).toEqual(logged()[0]);
+    expect(logged()[1]).toMatchObject(theRow);
+  });
+
+  it('waits offline in the outbox with that speed, and is logged with it when the connection is back', async () => {
+    const view = renderTracker();
+    act(() => onlineManager.setOnline(false));
+    mostlyAtATypedBpm(view);
+    view.pause();
+
+    await waitFor(async () =>
+      expect(await outboxEntries(USER)).toEqual([
+        expect.objectContaining({
+          kind: 'session',
+          record: expect.objectContaining({ durationSeconds: 60, speedRatio: 0.708333 }) as unknown,
+        }),
+      ]),
+    );
+    await settle();
+    expect(logged()).toEqual([]);
+    act(() => view.player.setSpeed(0.5));
+
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject(theRow);
+  });
+
+  it('a speed set during the count-in is the speed of what is then played', async () => {
+    const view = renderTracker();
+    act(() => {
+      view.player.setSpeed(0.7);
+      view.player.setCountInBars(1);
+    });
+    act(() => view.player.play());
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    view.seconds(1);
+    act(() => view.player.setSpeed(0.9));
+    view.seconds(1);
+    act(() => view.engine.fire('stateChanged', { playing: true }));
+    view.seconds(35);
+    view.pause();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject({
+      started_at: '2026-11-23T18:00:02.000Z',
+      duration_seconds: 35,
+      speed_ratio: 0.9,
+    });
+  });
+
+  it('a speed set in the count-in before a repeat takes nothing from the pass before it', async () => {
+    const view = renderTracker();
+    act(() => {
+      view.player.setSpeed(0.7);
+      view.player.setCountInBars(1);
+      view.player.setCountInMode('every_repeat');
+    });
+    view.loopBars5To8();
+    act(() => view.player.play());
+    view.seconds(2);
+    act(() => view.engine.fire('stateChanged', { playing: true }));
+    view.seconds(20);
+    act(() => {
+      view.engine.fire('finished', undefined);
+      view.engine.fire('stateChanged', { playing: false });
+    });
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    act(() => view.player.setSpeed(1));
+    view.seconds(2);
+    act(() => view.engine.fire('stateChanged', { playing: true }));
+    view.seconds(15);
+    view.pause();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    // 20 s at 70%, 15 at 100%; the count-ins are nobody's.
+    expect(logged()[0]).toMatchObject({ duration_seconds: 35, speed_ratio: 0.7, repeats: 1 });
+  });
+
+  it('a session still under the minimum keeps each go at its own speed across the pauses', async () => {
+    const view = renderTracker();
+    act(() => view.player.setSpeed(0.6));
+    view.playFor(12);
+    act(() => view.player.setSpeed(0.75));
+    view.seconds(30);
+    view.playFor(12);
+    act(() => view.player.setSpeed(0.6));
+    await settle();
+    expect(logged()).toEqual([]);
+
+    view.playFor(12);
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject({
+      started_at: '2026-11-23T18:00:00.000Z',
+      duration_seconds: 36,
+      speed_ratio: 0.6,
+    });
+  });
+
+  it('a session still under the minimum, taken past it on a try at full speed, leaves a hidden page at the speed it mostly had', () => {
+    const view = renderTracker();
+    act(() => view.player.setSpeed(0.6));
+    view.playFor(25);
+    act(() => view.player.setSpeed(1));
+    view.playOn(6);
+
+    setVisibility('hidden');
+
+    expect(keptAlive()).toEqual([
+      expect.objectContaining({ duration_seconds: 31, speed_ratio: 0.6 }),
+    ]);
+  });
+
+  it('a speed set while the page is hidden has no play time until the page is back', async () => {
+    const view = renderTracker();
+    act(() => view.player.setSpeed(0.8));
+    view.playOn(20);
+    // Too short to end: the hidden page keeps it. The player goes on "playing" in the pocket.
+    setVisibility('hidden');
+    expect(fetchMock).not.toHaveBeenCalled();
+    view.seconds(600);
+    act(() => view.player.setSpeed(1));
+    view.seconds(3000);
+
+    setVisibility('visible');
+    view.seconds(15);
+    view.pause();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    // 20 s at 80% before, 15 at 100% after: none of the hour is anybody's.
+    expect(logged()[0]).toMatchObject({ duration_seconds: 35, speed_ratio: 0.8 });
+  });
+
+  it('with effects run twice it is still one row at the speed most of it was played at', async () => {
+    const view = renderTracker('loop-a', { strict: true });
+    mostlyAtATypedBpm(view);
+    view.pause();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    await settle();
+    expect(logged()).toHaveLength(1);
+    expect(logged()[0]).toMatchObject(theRow);
+  });
+});
+
 describe('a page that is hidden or going away', () => {
   it('logs with keepalive when the page is hidden mid-practice, and starts again when it is back', async () => {
     const view = renderTracker();

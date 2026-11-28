@@ -17,12 +17,16 @@ import type { SessionRecord } from './sessionTracker';
  */
 export type LogSessionResult = 'logged' | 'loopGone';
 
-/** Every session of one loop, newest first. */
+/**
+ * Every session of one loop, newest first. One copy of each (uniqueById): the
+ * History adds a day's sessions up, so a row two pages both returned would
+ * double its time and passes in that day's row.
+ */
 export async function fetchLoopSessions(
   userId: string,
   loopId: string,
 ): Promise<PracticeSession[]> {
-  return fetchAllPages(async (from, to) =>
+  const rows = await fetchAllPages(async (from, to) =>
     unwrap(
       await supabase
         .from('practice_sessions')
@@ -36,6 +40,7 @@ export async function fetchLoopSessions(
       'practice sessions',
     ),
   );
+  return uniqueById(rows);
 }
 
 /** Every session of the user, oldest first: the Stats page works everything out from these. */

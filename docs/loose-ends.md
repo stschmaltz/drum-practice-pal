@@ -94,7 +94,7 @@ Every stop of 30 seconds or more is a row, so one sitting with pauses is several
 - **A. Leave the rows.**
 - **B. One row per day**: the day, total time, passes, and the speed (the speed with the most play time that day, the rule Unit 17's chart uses). Sessions stay stored as they are.
 
-Recommendation: **B**, built as the default. The Stats page already treats a practice day as the unit, and the question History answers is "is this loop getting faster over days" (job 3), which a list of pauses hides. Build: a pure `historyDays(sessions, now)` in `src/features/practice/sessions.ts` and `LoopHistory.tsx` drawing it. S to M, in batch 5.
+Recommendation: **B**, built as the default. **Built: B** (2026-11-28, `docs/units/20-loose-ends.md`, Batch 5; what a day's row says about a try at full speed is D10). The Stats page already treats a practice day as the unit, and the question History answers is "is this loop getting faster over days" (job 3), which a list of pauses hides. Build: a pure `historyDays(sessions, now)` in `src/features/practice/sessions.ts` and `LoopHistory.tsx` drawing it. S to M, in batch 5.
 
 ### D5. Should short stretches on several loops add up? (13.20)
 
@@ -141,6 +141,16 @@ Below 1024 px the open sheet lies over the count-in number. Batch 4 closes it wh
 - **C. A, plus a beat count in the sheet's header while it is open over a count-in** ("Loop: Verse · 3"). Nothing closes and the count is seen. QA's idea; S, a few lines in `LoopPanel.tsx` reading `snapshot.countIn`, with one thing to settle: the header is a button, and a name that changes every beat must not be read out every beat.
 
 Recommendation: **A**, and C if the Human check says hearing the count-in isn't enough. "No chores": a control the user opened shouldn't be taken away at every pass. **Built: A** (2026-11-28, batch 4; evidence in `docs/units/20-loose-ends.md`, Batch 4, QA issue 4, with `b4-phone-repeat-count-in-sheet-open.png` and `b4-tablet-repeat-count-in-sheet-open.png` in `docs/units/20-shots/`).
+
+### D10. What does History say about a day that had a try at full speed? (from batch 5; 17.1, D4)
+
+One sitting, three speeds on one screen: ten minutes at 80%, a nudge to 100% for the last seconds, Pause, back to the song. The overview's summary says "Fill: 15 s, 80% → 100%", the loop's line says 100% (the speed it was left at), and its History says "Today · 15 s · 80% · 3 passes". Each is right by its own rule, but nothing on the History said the rule, and on the day a drummer first reaches 100% the row reads as "the 100% wasn't recorded" (20 batch 5 QA issue 1; `b5-390x844-summary-beside-history.png` in `docs/units/20-shots/`).
+
+- **A. Say the rule in the History**: one line under its total, the sentence the Stats page already has under Loop progress ("Each day counts at the speed you spent the most time at, so a quick try at full speed isn't a day at full speed."). One string for both places (`DAY_SPEED_NOTE` in `src/features/practice/sessions.ts`).
+- **B. "mostly" in each row**: "Today · 15 s · mostly 80% · 3 passes". No extra line, but the word is on every row, also on days played at one speed.
+- **C. The day's top speed too**: "80%, up to 100%". The only option that shows the 100% happened. A session stores one speed, so the tracker would have to keep the fastest speed played as well (a new column, so a migration, and Shane is asked first), or History would show it only for days whose sessions happen to differ.
+
+Recommendation: **A**, and C if a week of real rows says the try at full speed is what he looks for. "The app records what it can see happen": the row's 80% is the true answer to job 3's question, and it only needed saying. **Built: A** (2026-11-28, batch 5 Review).
 
 ## Batches
 
@@ -205,6 +215,10 @@ Files: `src/features/loops/LoopPanel.tsx`, `useLoopPanelOpen.ts`, `useLoopPracti
 Acceptance: on a phone and a tablet in portrait, any way of starting playback with a count-in shows the number (but with the loop form open, when the sheet stays: 20.4e); after "Play loop" a keyboard user's next Tab starts from the sheet's header; reopening the sheet shows the playing loop; typing bars 40 to 44 into the form brings bar 40 on screen.
 
 ### Batch 5. Practice history says what happened (M)
+
+**Done** (branch `le-5-practice-history`; `docs/units/20-loose-ends.md`, Batch 5). What it chose to live with is in the plan's Accepted section as 20.5a to 20.5c; what History says about a day with a try at full speed is D10.
+
+As built, where it differs from the lines below: `usePracticeTracker.ts` needed no change (all three ways out already send the tracker's record); a day's tie goes to the slower speed, as the Stats chart's does, while a session's goes to the later; History has one line under its total saying the rule (D10), "Show all N days" hands focus to the first day it adds, and `fetchLoopSessions` keeps one copy of a session two pages both returned (Review).
 
 - **17.1** A session stores the speed it ended at, so ten minutes at 80% ending on a nudge to 100% is logged at 100%. Fix: the tracker keeps play time per speed within a session and logs the speed with the most (ties: the later). Test: `sessionTracker.test.ts`, with the Unit 17 acceptance case (ten minutes at 80%, one at 100%).
 - **D4 (13.18b)**, option B, built as the default: History as one row per day.
