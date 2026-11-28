@@ -1,11 +1,14 @@
 /**
- * The Stats page's numbers and chart data, worked out from the user's
- * sessions and loops. Pure: nothing here is stored (docs/plan.md, Unit 16),
- * and every function takes `now` so tests pick the day.
+ * The Stats page's periods, totals and day-by-day play time, worked out from
+ * the user's sessions and loops. Pure: nothing here is stored (docs/plan.md,
+ * Units 16 and 17), and every function takes `now` so tests pick the day.
+ * The practice-day map is heatmap.ts; how a time or a count is written,
+ * statLabels.ts.
  */
 import type { PracticeSession } from '@/features/practice/sessions';
 import type { Loop } from '@/features/loops/loopForm';
-import { addDays, dayKeyOf, dayKeyOfIso, startOfDay, type DayKey } from './days';
+import { addDays, dayKeyOf, dayKeyOfIso, type DayKey } from './days';
+import { countLabel, minutesLabel, wholeMinutes } from './statLabels';
 
 export type StatsSession = Pick<
   PracticeSession,
@@ -15,10 +18,23 @@ export type StatsLoop = Pick<Loop, 'id' | 'song_id' | 'status' | 'finished_at'>;
 
 export const STATS_RANGES = ['week', 'month', 'all'] as const;
 export type StatsRange = (typeof STATS_RANGES)[number];
+/** A range that has a period before it to compare with. */
+export type ComparedRange = Exclude<StatsRange, 'all'>;
 
 export const STATS_RANGE_LABELS: Record<StatsRange, string> = {
   week: 'Week',
   month: 'Month',
+  all: 'All time',
+};
+
+/**
+ * A period in words: the totals' heading, and the aside beside the heading of
+ * a section, which says the time the section covers whether or not the
+ * Period choice sets it.
+ */
+export const STATS_RANGE_HEADINGS: Record<StatsRange, string> = {
+  week: 'Last 7 days',
+  month: 'Last 30 days',
   all: 'All time',
 };
 
@@ -36,8 +52,21 @@ export function rangeStart(range: StatsRange, now: Date): Date | null {
   return days === null ? null : addDays(now, -(days - 1));
 }
 
-function inRange(iso: string, start: Date | null): boolean {
-  return start === null || Date.parse(iso) >= start.getTime();
+/**
+ * The period of the same length just before a range: the seven days before
+ * this week's seven, the thirty before this month's. Null for all time, which
+ * has nothing before it. `end` is the first instant not counted.
+ */
+export function previousRange(range: StatsRange, now: Date): { start: Date; end: Date } | null {
+  const days = RANGE_DAYS[range];
+  const end = rangeStart(range, now);
+  return days === null || end === null ? null : { start: addDays(end, -days), end };
+}
+
+/** From `start` (null: the beginning) up to, not including, `end` (null: no end). */
+export function inRange(iso: string, start: Date | null, end: Date | null = null): boolean {
+  const time = Date.parse(iso);
+  return (start === null || time >= start.getTime()) && (end === null || time < end.getTime());
 }
 
 export interface StatsTotals {
@@ -45,10 +74,28 @@ export interface StatsTotals {
   seconds: number;
   /** Local days with at least one session. */
   days: number;
-  /** Loop passes. */
-  passes: number;
   /** Loops finished in the range (all of them, for all time). */
   mastered: number;
+}
+
+function totalsBetween(
+  sessions: readonly StatsSession[],
+  loops: readonly StatsLoop[],
+  start: Date | null,
+  end: Date | null,
+  now: Date,
+): StatsTotals {
+  const counted = sessions.filter((session) => inRange(session.started_at, start, end));
+  return {
+    seconds: counted.reduce((total, session) => total + session.duration_seconds, 0),
+    days: new Set(counted.map((session) => dayKeyOfIso(session.started_at))).size,
+    mastered: loops.filter(
+      (loop) =>
+        loop.status === 'finished' &&
+        // Finished a moment ago, the server's time not back yet: it was now.
+        inRange(loop.finished_at ?? now.toISOString(), start, end),
+    ).length,
+  };
 }
 
 export function statsTotals(
@@ -57,19 +104,78 @@ export function statsTotals(
   range: StatsRange,
   now: Date,
 ): StatsTotals {
-  const start = rangeStart(range, now);
-  const counted = sessions.filter((session) => inRange(session.started_at, start));
-  return {
-    seconds: counted.reduce((total, session) => total + session.duration_seconds, 0),
-    days: new Set(counted.map((session) => dayKeyOfIso(session.started_at))).size,
-    passes: counted.reduce((total, session) => total + session.repeats, 0),
-    mastered: loops.filter(
-      (loop) =>
-        loop.status === 'finished' &&
-        // Finished a moment ago, the server's time not back yet: it was now.
-        inRange(loop.finished_at ?? now.toISOString(), start),
-    ).length,
+  return totalsBetween(sessions, loops, rangeStart(range, now), null, now);
+}
+
+/** The same totals for the period before (`previousRange`); null for all time. */
+export function previousTotals(
+  sessions: readonly StatsSession[],
+  loops: readonly StatsLoop[],
+  range: StatsRange,
+  now: Date,
+): StatsTotals | null {
+  const previous = previousRange(range, now);
+  return previous === null
+    ? null
+    : totalsBetween(sessions, loops, previous.start, previous.end, now);
+}
+
+/** What a period is compared with, as the line under a total ends. */
+const PERIOD_BEFORE: Record<ComparedRange, string> = {
+  week: 'the week before',
+  month: 'the month before',
+};
+
+export interface TotalChange {
+  direction: 'up' | 'down' | 'same';
+  /** "12 min more than the week before", "1 h 5 min less than the month before", "3 fewer than the month before", "Same as the week before". */
+  label: string;
+}
+
+/**
+ * Whether the period before has anything to compare with: a session. Against
+ * a period with no practice at all every line is "n more than the week
+ * before", which only repeats the total (17 QA issue 7), so the page draws no
+ * line then, under any total.
+ */
+export function periodBeforeHasPractice(previous: StatsTotals | null): boolean {
+  return previous !== null && previous.days > 0;
+}
+
+/**
+ * How one total compares with the period before. Play time is compared as
+ * what both totals show (checklist 4): whole minutes, so 59 s against 61 s is
+ * "<1 min" against "1 min" and 1 min more; and under a minute against nothing
+ * is "<1 min more", since those two don't read the same. Counts are compared
+ * as they are. Null when both show nothing: "0, same as the week before" says
+ * nothing worth a line.
+ */
+export function totalChange(
+  kind: keyof StatsTotals,
+  current: StatsTotals,
+  previous: StatsTotals,
+  range: ComparedRange,
+  locale?: string,
+): TotalChange | null {
+  const before = PERIOD_BEFORE[range];
+  const change = (difference: number, words: (amount: number) => string): TotalChange => {
+    if (difference === 0) return { direction: 'same', label: `Same as ${before}` };
+    const up = difference > 0;
+    return {
+      direction: up ? 'up' : 'down',
+      label: `${words(Math.abs(difference))} ${up ? 'more' : kind === 'seconds' ? 'less' : 'fewer'} than ${before}`,
+    };
   };
+  if (kind !== 'seconds') {
+    if (current[kind] === 0 && previous[kind] === 0) return null;
+    return change(current[kind] - previous[kind], (amount) => countLabel(amount, locale));
+  }
+  if (current.seconds <= 0 && previous.seconds <= 0) return null;
+  const minutes = wholeMinutes(current.seconds) - wholeMinutes(previous.seconds);
+  if (minutes !== 0) return change(minutes, (amount) => minutesLabel(amount * 60));
+  // The same whole minutes. Only "<1 min" against "0 min" still reads differently.
+  const some = (seconds: number) => Number(seconds > 0);
+  return change(some(current.seconds) - some(previous.seconds), () => minutesLabel(1));
 }
 
 /**
@@ -84,8 +190,22 @@ export function hasPracticeHistory(
   return sessions.length > 0 || loops.some((loop) => loop.status === 'finished');
 }
 
+/** When each loop's latest session began, in epoch ms, by loop id. */
+export function latestSessionTimes(
+  sessions: readonly Pick<StatsSession, 'loop_id' | 'started_at'>[],
+): Map<string, number> {
+  const latest = new Map<string, number>();
+  for (const session of sessions) {
+    const time = Date.parse(session.started_at);
+    latest.set(session.loop_id, Math.max(latest.get(session.loop_id) ?? -Infinity, time));
+  }
+  return latest;
+}
+
 /** Play time per local day. */
-function secondsByDay(sessions: readonly StatsSession[]): Map<DayKey, number> {
+export function secondsByDay(
+  sessions: readonly Pick<StatsSession, 'started_at' | 'duration_seconds'>[],
+): Map<DayKey, number> {
   const byDay = new Map<DayKey, number>();
   for (const session of sessions) {
     const key = dayKeyOfIso(session.started_at);
@@ -117,85 +237,10 @@ export function dailyPractice(
   });
 }
 
-export interface HeatmapDay extends PracticeDay {
-  /** 0 for none, then 1 to 4 by play time (`heatLevel`). */
-  level: HeatLevel;
-  /** After today: drawn empty, so the last column ends on the right weekday. */
-  future: boolean;
-}
-
-export type HeatLevel = 0 | 1 | 2 | 3 | 4;
-
-/** Minutes at which a day reaches each shade, past none. */
-const HEAT_STEPS_MINUTES = [10, 20, 40] as const;
-
-export function heatLevel(seconds: number): HeatLevel {
-  if (seconds <= 0) return 0;
-  const minutes = seconds / 60;
-  const step = HEAT_STEPS_MINUTES.findIndex((limit) => minutes < limit);
-  return (step === -1 ? 4 : step + 1) as HeatLevel;
-}
-
-/**
- * The last `weeks` weeks as columns of seven days, Monday first, oldest week
- * first. The last column is this week, with the days after today marked
- * `future`.
- */
-export function practiceHeatmap(
-  sessions: readonly StatsSession[],
-  now: Date,
-  weeks = 26,
-): HeatmapDay[][] {
-  const byDay = secondsByDay(sessions);
-  const today = startOfDay(now);
-  const todayKey = dayKeyOf(now);
-  // getDay(): 0 is Sunday. Days since this week's Monday.
-  const sinceMonday = (today.getDay() + 6) % 7;
-  const firstMonday = addDays(today, -sinceMonday - (weeks - 1) * 7);
-  return Array.from({ length: weeks }, (_, week) =>
-    Array.from({ length: 7 }, (_, weekday) => {
-      const date = addDays(firstMonday, week * 7 + weekday);
-      const key = dayKeyOf(date);
-      const future = date.getTime() > today.getTime();
-      const seconds = future ? 0 : (byDay.get(key) ?? 0);
-      return { key, date, seconds, today: key === todayKey, future, level: heatLevel(seconds) };
-    }),
-  );
-}
-
-export interface SpeedPoint {
-  sessionId: string;
-  /** Epoch ms. */
-  time: number;
-  speedRatio: number;
-}
-
-/** One loop's session speeds, oldest first: the speed-over-time chart. */
-export function speedHistory(sessions: readonly StatsSession[], loopId: string): SpeedPoint[] {
-  return sessions
-    .filter((session) => session.loop_id === loopId)
-    .map((session) => ({
-      sessionId: session.id,
-      time: Date.parse(session.started_at),
-      speedRatio: session.speed_ratio,
-    }))
-    .sort((a, b) => a.time - b.time || a.sessionId.localeCompare(b.sessionId));
-}
-
-/** "4:12" for minutes and seconds, "1:04:12" from an hour up: the practice screen's live time. */
-export function clockLabel(totalSeconds: number): string {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const rest = String(seconds % 60).padStart(2, '0');
-  return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
-}
-
-/** "45 min", "2 h 5 min", "0 min": a total of play time, to the minute. */
-export function minutesLabel(totalSeconds: number): string {
-  const minutes = Math.floor(Math.max(0, totalSeconds) / 60);
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  if (hours === 0) return `${minutes} min`;
-  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+/** The daily chart's caption: all the play time on show, and on how many of its days. */
+export function dailySummary(days: readonly PracticeDay[]): { seconds: number; practised: number } {
+  return {
+    seconds: days.reduce((total, day) => total + day.seconds, 0),
+    practised: days.filter((day) => day.seconds > 0).length,
+  };
 }

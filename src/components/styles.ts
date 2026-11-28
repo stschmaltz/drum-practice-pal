@@ -118,6 +118,20 @@ export const dangerCardClass = `rounded-card ${dangerSurface}`;
 /** A section's heading inside a page: an h2, or a fieldset's legend. */
 export const sectionHeadingClass = 'text-lg font-bold tracking-tight';
 
+/** A small heading inside a section (an h3), or the label over a figure: quiet capitals. */
+export const smallHeadingClass = 'text-xs font-semibold tracking-wider text-ink-muted uppercase';
+
+/** A figure worth its own line: a total, a record. */
+export const statValueClass = 'text-2xl font-bold tabular-nums';
+
+/**
+ * An item's own name as the way to it (a loop's name to its practice screen,
+ * a song's title to the song): plain ink, the brand on hover, and a 44 px
+ * target however short the name. A name that may be one long word adds
+ * `wrap-anywhere`; one that must stay on a line truncates inside it.
+ */
+export const nameLinkClass = `inline-flex min-h-touch max-w-full min-w-touch items-center rounded-sm text-ink hover:text-brand ${focusRing}`;
+
 /** A link to another page, on a line of its own (every use so far): a 44 px target like a button. */
 export const linkClass = `inline-flex min-h-touch items-center rounded-sm font-medium text-brand underline underline-offset-4 hover:text-brand-hover ${focusRing}`;
 

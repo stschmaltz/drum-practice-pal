@@ -20,6 +20,7 @@ import {
   viewport,
 } from './playerPage';
 import {
+  addLoopLeftAlone,
   backTo,
   navLink,
   openLoopHistory,
@@ -133,10 +134,29 @@ test('the library, the song page with its loops, and the home page with a loop',
   await expectWellDrawn(page, 'song overview, practice summary');
   await expectFocusRings(page, 'song overview, practice summary');
 
+  // A second loop practised once, nine days ago: with it the page has every
+  // block it can draw (17 QA fix round 1): the lines against the week before,
+  // "Not practised lately" and, from a second practice day, Records.
+  await addLoopLeftAlone(user, 'Fill', 9);
   await navLink(page, 'Stats').click();
   await expect(page.getByRole('heading', { name: 'Badges' })).toBeVisible();
+  // The loop came from outside the page, as from another device: a reload reads it.
+  await page.reload();
+  await expect(
+    page.getByTestId('neglected-loop').getByRole('link', { name: 'Fill' }),
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: /^Records/ })).toBeVisible();
+  await expect(page.getByTestId('total-time-change')).toBeVisible();
   await expectWellDrawn(page, 'stats');
   await expectFocusRings(page, 'stats');
+
+  // Unit 17: a loop's chart open under its row, and every badge on show.
+  await page.getByRole('button', { name: 'Chart of Verse' }).click();
+  await expect(page.getByRole('img', { name: /^Speed of Verse/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Show all badges' }).click();
+  await expect(page.getByRole('list', { name: 'More badges' })).toBeVisible();
+  await expectWellDrawn(page, 'stats, chart and all badges');
+  await expectFocusRings(page, 'stats, chart and all badges');
 
   await navLink(page, 'Songs').click();
   await expect(page.getByRole('main').getByRole('link', { name: 'Groove 120' })).toBeVisible();
