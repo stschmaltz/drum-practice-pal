@@ -354,6 +354,18 @@ describe('PlayerService live changes', () => {
     expect(engine.restartCalls()).toBe(0);
   });
 
+  it('turns the scroll to its own cursor off and on without restarting, and not once disposed', () => {
+    const { engine, service } = playing();
+    service.setCursorScroll(false);
+    expect(engine.setCursorScroll).toHaveBeenLastCalledWith(false);
+    service.setCursorScroll(true);
+    expect(engine.setCursorScroll).toHaveBeenLastCalledWith(true);
+    expect(engine.restartCalls()).toBe(0);
+    service.dispose();
+    service.setCursorScroll(false);
+    expect(engine.setCursorScroll).toHaveBeenCalledTimes(2);
+  });
+
   it('only notifies subscribers when something changed', () => {
     const { service, listener } = playing();
     listener.mockClear();

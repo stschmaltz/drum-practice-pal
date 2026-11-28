@@ -16,7 +16,10 @@ interface StubApi {
   boundsLookup: { staffSystems: SystemBoundsLike[] } | null;
   postRenderFinished: StubEvent;
   renderer: { partialRenderFinished: StubEvent };
-  settings: { display: { startBar: number; barCount: number; layoutMode: number } };
+  settings: {
+    display: { startBar: number; barCount: number; layoutMode: number };
+    player: { scrollMode: number };
+  };
   /** Set once a score is loaded; null before. */
   score: object | null;
   updateSettings: ReturnType<typeof vi.fn>;
@@ -40,7 +43,10 @@ vi.mock('@coderline/alphatab', () => {
     boundsLookup: StubApi['boundsLookup'] = null;
     postRenderFinished = new Event();
     renderer = { partialRenderFinished: new Event() };
-    settings = { display: { startBar: 1, barCount: -1, layoutMode: 0 } };
+    settings = {
+      display: { startBar: 1, barCount: -1, layoutMode: 0 },
+      player: { scrollMode: 1 },
+    };
     score: object | null = { tracks: [] };
     updateSettings = vi.fn();
     render = vi.fn();
@@ -56,7 +62,7 @@ vi.mock('@coderline/alphatab', () => {
   return {
     AlphaTabApi,
     PlayerMode: { EnabledSynthesizer: 1 },
-    ScrollMode: { Continuous: 1 },
+    ScrollMode: { Off: 0, Continuous: 1 },
     LayoutMode: { Page: 0, Horizontal: 1 },
     synth: { PlayerState: { Playing: 1 } },
   };
@@ -817,5 +823,29 @@ describe('scrolling a bar into view', () => {
     api.postRenderFinished.fire();
     api.postRenderFinished.fire();
     expect(rendered).toHaveBeenCalledTimes(2);
+  });
+});
+
+// 19 QA (after fix round 1), issue 1. After every drawing alphaTab scrolls its box to its own
+// cursor a frame later (`_onPostRenderFinished`, then its scroll handler), over anything the
+// screen scrolled to at `rendered`. With its scroll mode off it has no scroll handler at all.
+describe('alphaTab’s own scroll to its cursor', () => {
+  it('is on until told otherwise, goes off without drawing anything again, and comes back', () => {
+    const { engine, api } = setup();
+    expect(api.settings.player.scrollMode).toBe(1);
+
+    engine.setCursorScroll(false);
+    expect(api.settings.player.scrollMode).toBe(0);
+    expect(api.updateSettings).toHaveBeenCalledTimes(1);
+    expect(api.render).not.toHaveBeenCalled();
+
+    // Told again what it already is: nothing to apply.
+    engine.setCursorScroll(false);
+    expect(api.updateSettings).toHaveBeenCalledTimes(1);
+
+    engine.setCursorScroll(true);
+    expect(api.settings.player.scrollMode).toBe(1);
+    expect(api.updateSettings).toHaveBeenCalledTimes(2);
+    expect(api.render).not.toHaveBeenCalled();
   });
 });

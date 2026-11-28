@@ -62,6 +62,7 @@ export function ScoreBox({
   hidden,
   fitsScore = false,
   readOnly = false,
+  tappable = false,
 }: {
   scrollRef: Ref<HTMLDivElement>;
   scoreRef: Ref<HTMLDivElement>;
@@ -80,6 +81,12 @@ export function ScoreBox({
    * player keeps its bar, and the cursor is back where it was without it.
    */
   readOnly?: boolean;
+  /**
+   * Under `readOnly`, a tap on a bar still does something (it moves a
+   * lined-up video there, Unit 19), so bars keep the pointer cursor. The
+   * player's own cursor stays hidden.
+   */
+  tappable?: boolean;
 }) {
   return (
     // The counter covers the score box without scrolling with what's inside it.
@@ -98,7 +105,7 @@ export function ScoreBox({
         // Below 768 px the score is one line of music scrolling sideways, so the box is as tall
         // as that line (alphaTab sizes it) rather than a fixed height of blank paper under it.
         // At least as tall as the count-in number drawn over it.
-        className={`jam-score ${readOnly ? 'score-read-only ' : ''}relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card ${fitsScore ? 'md:max-h-[60dvh]' : 'md:h-[60dvh]'} md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))]`}
+        className={`jam-score ${readOnly ? 'score-read-only ' : ''}${tappable ? 'score-tappable ' : ''}relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card ${fitsScore ? 'md:max-h-[60dvh]' : 'md:h-[60dvh]'} md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))]`}
       >
         <div ref={scoreRef} />
       </div>

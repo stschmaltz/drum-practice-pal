@@ -10,6 +10,7 @@ import {
   METRONOME_VOLUME_MIN,
   LOOP_NAME_MAX_LENGTH,
   SESSION_MAX_DURATION_SECONDS,
+  BAR_ONE_SECONDS_MAX,
   SONG_LINK_KINDS,
   SONG_LINK_URL_MAX_LENGTH,
   SONG_TEMPO_MAX,
@@ -147,6 +148,12 @@ describe('matches the migrations', () => {
     const kinds = SONG_LINK_KINDS.map((kind) => `'${kind}'`).join(', ');
     expect(links).toContain(`create type public.song_link_kind as enum (${kinds})`);
     expect(links).toContain(`check (char_length(url) <= ${SONG_LINK_URL_MAX_LENGTH})`);
+  });
+
+  it('where bar 1 may fall in a video', () => {
+    expect(readMigration('20261201000000_song_link_bar_one.sql')).toContain(
+      `check (bar_one_seconds is null or (bar_one_seconds >= 0 and bar_one_seconds <= ${BAR_ONE_SECONDS_MAX}))`,
+    );
   });
 
   it('song tempo bound', () => {

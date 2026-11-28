@@ -57,6 +57,8 @@ export function AppShell() {
       {/* h-14 plus the 1px border: the loop sheet and the score's scroll margin sit above exactly this. */}
       <nav
         aria-label="Main"
+        // What lies under it can't be read: a screen that scrolls a bar on show measures this.
+        data-bottom-tabs
         className="fixed inset-x-0 bottom-0 z-10 flex border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         <NavLinks

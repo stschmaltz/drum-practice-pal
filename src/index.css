@@ -204,8 +204,8 @@
 .jam-score.score-read-only .at-cursor-beat {
   visibility: hidden;
 }
-.jam-score.score-read-only .at-surface,
-.jam-score.score-read-only .at-surface * {
+.jam-score.score-read-only:not(.score-tappable) .at-surface,
+.jam-score.score-read-only:not(.score-tappable) .at-surface * {
   cursor: default;
 }
 

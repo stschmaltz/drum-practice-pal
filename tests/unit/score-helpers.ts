@@ -38,5 +38,6 @@ export function playedBars(score: alphaTab.model.Score): BarTicks[] {
     barIndex: lookup.masterBar.index,
     start: lookup.start,
     end: lookup.end,
+    tempoChanges: lookup.tempoChanges.map(({ tick, tempo }) => ({ tick, tempo })),
   }));
 }

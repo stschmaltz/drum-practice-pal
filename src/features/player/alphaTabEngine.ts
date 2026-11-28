@@ -13,7 +13,7 @@ import { barMeters } from './countIn';
 import type { BarTicks } from './barTicks';
 import { createEmitter, type Emitter } from './emitter';
 import type { LayoutChoice } from './layout';
-import type { EngineEvents, EngineMount, PlayerEngine } from './playerEngine';
+import type { EngineEvents, EngineMount, PlayerEngine, WindowRect } from './playerEngine';
 import { movedBeyondTap, type PointerPoint } from './tapGesture';
 import { NOTATION_SCALE, SCORE_RESOURCES } from './scoreTheme';
 import { barStartTempos } from './tempo';
@@ -175,6 +175,14 @@ export function createAlphaTabEngine({
       redraw();
     },
 
+    setCursorScroll(on) {
+      const mode = on ? alphaTab.ScrollMode.Continuous : alphaTab.ScrollMode.Off;
+      if (api.settings.player.scrollMode === mode) return;
+      api.settings.player.scrollMode = mode;
+      // Settings only: alphaTab drops (or makes) its scroll handler, and draws nothing.
+      api.updateSettings();
+    },
+
     setVisibleBars(range) {
       const display = api.settings.display;
       // alphaTab counts from bar 1, and -1 bars is all of them.
@@ -240,9 +248,13 @@ export function createAlphaTabEngine({
     setHighlight(range) {
       highlight.show(range);
     },
-    scrollToBar(barIndex) {
+    scrollToBar(barIndex, nextBarIndex) {
       if (redrawing) return false;
-      return scrollBoxToBar(element, scrollElement, staffSystems(), barIndex);
+      return scrollBoxToBar(element, scrollElement, staffSystems(), barIndex, nextBarIndex);
+    },
+    barRectInWindow(barIndex) {
+      if (redrawing) return null;
+      return barRectInWindow(element, staffSystems(), barIndex);
     },
     destroy() {
       stopWatchingPointer();
@@ -403,7 +415,8 @@ function createHighlightLayer(element: HTMLElement, staffSystems: StaffSystems) 
 }
 
 /**
- * Scrolls the box so the bar can be read, unless all of it is on show. False
+ * Scrolls the box so the bar can be read, unless all of it is on show (and,
+ * given the bar played after it, that one too: see `scrollToShow`). False
  * when the score has no bounds yet (not rendered), so the caller can ask again;
  * true once it could decide, scrolled or not.
  */
@@ -412,6 +425,7 @@ function scrollBoxToBar(
   scrollElement: HTMLElement,
   systems: readonly SystemBoundsLike[],
   barIndex: number,
+  nextBarIndex?: number,
 ): boolean {
   const surface = element.querySelector('.at-surface');
   if (!surface || systems.length === 0) return false;
@@ -427,15 +441,14 @@ function scrollBoxToBar(
   // Bounds are relative to the surface; the box scrolls in its own content's coordinates.
   const surfaceRect = surface.getBoundingClientRect();
   const boxRect = scrollElement.getBoundingClientRect();
-  const target = scrollToShow(
-    {
-      x: bar.x + surfaceRect.left - boxRect.left - scrollElement.clientLeft + view.left,
-      y: bar.y + surfaceRect.top - boxRect.top - scrollElement.clientTop + view.top,
-      w: bar.w,
-      h: bar.h,
-    },
-    view,
-  );
+  const inContent = (rect: { x: number; y: number; w: number; h: number }) => ({
+    x: rect.x + surfaceRect.left - boxRect.left - scrollElement.clientLeft + view.left,
+    y: rect.y + surfaceRect.top - boxRect.top - scrollElement.clientTop + view.top,
+    w: rect.w,
+    h: rect.h,
+  });
+  const next = nextBarIndex === undefined ? null : barBounds(systems, nextBarIndex);
+  const target = scrollToShow(inContent(bar), view, next && inContent(next));
   if (!target) return true;
   // At once, not animated: a count-in may be a second long, and the bar is to be read during it.
   if (typeof scrollElement.scrollTo === 'function') {
@@ -446,6 +459,24 @@ function scrollBoxToBar(
     scrollElement.scrollTop = target.top;
   }
   return true;
+}
+
+/** Where a bar is drawn in the window now, from alphaTab's bounds; null while it has none. */
+function barRectInWindow(
+  element: HTMLElement,
+  systems: readonly SystemBoundsLike[],
+  barIndex: number,
+): WindowRect | null {
+  const surface = element.querySelector('.at-surface');
+  const bar = surface && barBounds(systems, barIndex);
+  if (!surface || !bar) return null;
+  const origin = surface.getBoundingClientRect();
+  return {
+    top: origin.top + bar.y,
+    bottom: origin.top + bar.y + bar.h,
+    left: origin.left + bar.x,
+    right: origin.left + bar.x + bar.w,
+  };
 }
 
 function subscribe<K extends keyof EngineEvents>(
@@ -512,6 +543,7 @@ function playedBars(api: alphaTab.AlphaTabApi): BarTicks[] {
     barIndex: lookup.masterBar.index,
     start: lookup.start,
     end: lookup.end,
+    tempoChanges: lookup.tempoChanges.map(({ tick, tempo }) => ({ tick, tempo })),
   }));
 }
 

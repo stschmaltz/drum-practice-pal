@@ -239,3 +239,40 @@ describe('scrollToShow, whatever the bar and the box', () => {
     expect(leftAlone).toBeGreaterThan(5);
   });
 });
+
+describe('scrollToShow with the bar played next (19 QA fix round 1: the page turns a line early)', () => {
+  it.each([
+    ['on the same line', line(100), { x: 440, y: 100, w: 440, h: 100 }],
+    ['on the next line, all on show', line(100), line(200)],
+    ['on a line that ends at the box’s foot', line(300), line(400)],
+    ['above it (a repeat going back)', line(400), line(100)],
+    ['above the box (a repeat going back)', line(300, 100), { x: 0, y: -400, w: 880, h: 100 }],
+  ])('leaves the box alone when the next bar is %s', (_name, bar, next) => {
+    expect(scrollToShow(bar, page(0), next)).toBeNull();
+  });
+
+  it.each([
+    ['cut off by the box’s foot', line(350), line(450)],
+    ['below the box', line(400), line(500)],
+    ['two pixels short of fitting', line(302), line(402)],
+  ])('puts the bar’s line at the top when the next line is %s', (_name, bar, next) => {
+    expect(scrollToShow(bar, page(0), next)).toEqual({ left: 0, top: bar.y });
+  });
+
+  it('moves nothing more once the line is at the top, though the next still doesn’t fit', () => {
+    // A box that holds one line.
+    const short: ScrollView = { left: 0, top: 350, width: 900, height: 150 };
+    expect(scrollToShow(line(350), short, line(450))).toBeNull();
+  });
+
+  it('a bar that has left is shown as before, whatever follows it', () => {
+    expect(scrollToShow(line(900), page(0), line(1000))).toEqual({ left: 0, top: 900 });
+    expect(scrollToShow(line(900), page(0), null)).toEqual({ left: 0, top: 900 });
+  });
+
+  it('never turns sideways: in one long line the next bar is beside this one', () => {
+    const bar = { x: 100, y: 20, w: 200, h: 150 };
+    const beside = { x: 300, y: 20, w: 200, h: 150 };
+    expect(scrollToShow(bar, phone(0), beside)).toBeNull();
+  });
+});
