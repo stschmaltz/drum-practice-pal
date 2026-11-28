@@ -331,6 +331,198 @@ describe('LoopPracticePage', () => {
     expect(screen.queryByTestId('finish-prompt')).not.toBeInTheDocument();
   });
 
+  // 20 batch 8, Test (13.21, 13.35c): the practice screen's own "Mark finished?" prompt. Its
+  // write is held first, so the prompt is seen to go (the loop is finished, optimistically)
+  // before the refusal brings it back.
+  describe('a refused "Mark finished" from the prompt', () => {
+    const prompt = () => within(screen.getByTestId('finish-prompt'));
+    /** What any screen says of a refused status change (the recordings' own alert aside). */
+    const STATUS_REFUSAL = /Couldn't (mark the loop finished|reopen the loop)/;
+    const statusWrites = () =>
+      loops.sent('update').filter((sent) => (sent as Partial<Loop>).status !== undefined);
+
+    /** Chorus fill worked up to 100%, its "Mark finished" pressed by keyboard and held. */
+    async function heldFinish(songRoute?: ReactNode) {
+      serve([loopRow(CHORUS_ID, { ...chorus, speed_ratio: 0.95 }), verse]);
+      const { user, queryClient } = renderPracticeWithClient(
+        CHORUS_ID,
+        undefined,
+        undefined,
+        songRoute,
+      );
+      await loadPlayer();
+      await waitFor(() => expect(speed()).toHaveTextContent('95%'));
+      await user.click(screen.getByRole('button', { name: 'Faster by 5%' }));
+      await screen.findByTestId('finish-prompt');
+      // The speed saves itself, a write of the same loop: through before the next is held.
+      await waitFor(() => expect(loops.sent('update')).toContainEqual({ speed_ratio: 1 }));
+      await settle();
+      const refuse = loops.holdNext('update');
+      loops.failNext('update', 'nope');
+      prompt().getByRole('button', { name: 'Mark finished' }).focus();
+      await user.keyboard('{Enter}');
+      await waitFor(() => expect(screen.queryByTestId('finish-prompt')).not.toBeInTheDocument());
+      // The prompt went with the press: focus goes on to Play.
+      await waitFor(() => expect(playButton()).toHaveFocus());
+      const refused = async () => {
+        refuse();
+        await waitFor(() =>
+          expect(screen.getByTestId('finish-prompt')).toHaveTextContent(
+            "Couldn't mark the loop finished. Something went wrong. Try again.",
+          ),
+        );
+      };
+      return { user, queryClient, refused };
+    }
+
+    it('brings the prompt back with the reason and Dismiss, and focus stays on Play, not on <body>', async () => {
+      const { refused } = await heldFinish();
+      await refused();
+      await settle();
+      expect(document.body).not.toHaveFocus();
+      expect(playButton()).toHaveFocus();
+      expect(prompt().getByRole('button', { name: /^Dismiss/ })).toBeInTheDocument();
+      expect(screen.getAllByRole('alert')).toHaveLength(1);
+      expect(statusWrites()).toEqual([{ status: 'finished' }]);
+    });
+
+    it('with focus fallen to <body> meanwhile, the prompt coming back takes no focus', async () => {
+      const { refused } = await heldFinish();
+      (document.activeElement as HTMLElement).blur();
+      await refused();
+      await settle();
+      // Pinned: nothing here hands focus on (see Bugs found); the user is where they were.
+      expect(document.body).toHaveFocus();
+    });
+
+    it('Dismiss puts the message away, sends nothing, and leaves focus on the prompt’s Mark finished', async () => {
+      const { user, refused } = await heldFinish();
+      await refused();
+      const sent = loops.sent('update').length;
+
+      await user.click(prompt().getByRole('button', { name: /^Dismiss/ }));
+
+      await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+      expect(prompt().queryByRole('button', { name: /^Dismiss/ })).not.toBeInTheDocument();
+      expect(prompt().getByRole('button', { name: 'Mark finished' })).toHaveFocus();
+      await settle();
+      expect(loops.sent('update')).toHaveLength(sent);
+      // The prompt still asks, and its button still works.
+      await user.keyboard('{Enter}');
+      await waitFor(() => expect(statusWrites()).toHaveLength(2));
+    });
+
+    it('Dismiss by keyboard leaves focus on a control of the prompt, never on <body>', async () => {
+      const { user, refused } = await heldFinish();
+      await refused();
+      prompt()
+        .getByRole('button', { name: /^Dismiss/ })
+        .focus();
+      await user.keyboard('{Enter}');
+      await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+      expect(prompt().getByRole('button', { name: 'Mark finished' })).toHaveFocus();
+    });
+
+    it('is not said again under the loop on the song’s page: leaving the screen puts it away', async () => {
+      const { user, queryClient, refused } = await heldFinish(
+        <Route path="/songs/:id" element={<SongOverviewPage />} />,
+      );
+      await refused();
+      expect(queryClient.getMutationCache().findAll({ status: 'error' })).toHaveLength(1);
+
+      await user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+
+      const onTheGo = await screen.findByRole('list', { name: 'Loops on the go' });
+      expect(within(onTheGo).getByRole('link', { name: 'Chorus fill' })).toBeInTheDocument();
+      await waitFor(() =>
+        expect(queryClient.getMutationCache().findAll({ status: 'error' })).toHaveLength(0),
+      );
+      await settle();
+      expect(screen.queryByText(STATUS_REFUSAL)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Dismiss/ })).not.toBeInTheDocument();
+    });
+
+    // 20 batch 8, Review (Test's bug 1): a change made on the song's page and refused while
+    // another loop's practice screen is up is not that screen's to say or to put away. The
+    // song's page says it on coming back, or the loop would be back where it was, unsaid.
+    it('a refusal of the song page’s change that lands on another loop’s practice screen is said on the song’s page on coming back', async () => {
+      serve();
+      const { user, queryClient } = renderPracticeWithClient(
+        CHORUS_ID,
+        undefined,
+        undefined,
+        <Route path="/songs/:id" element={<SongOverviewPage />} />,
+      );
+      await loadPlayer();
+      await user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+      const refuse = loops.holdNext('update');
+      loops.failNext('update', 'nope');
+      await user.click(await screen.findByRole('button', { name: 'More actions for Verse' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Mark finished' }));
+      await within(await screen.findByRole('list', { name: 'Mastered loops' })).findByRole('link', {
+        name: 'Verse',
+      });
+
+      await user.click(screen.getByRole('link', { name: 'Practise Chorus fill' }));
+      await screen.findByRole('heading', { level: 1, name: 'Chorus fill' });
+      await settle();
+      refuse();
+      await waitFor(() =>
+        expect(queryClient.getMutationCache().findAll({ status: 'error' })).toHaveLength(1),
+      );
+      // Nothing on the practice screen says it.
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+
+      const onTheGo = await screen.findByRole('list', { name: 'Loops on the go' });
+      expect(within(onTheGo).getByRole('link', { name: 'Verse' })).toBeInTheDocument();
+      await settle();
+      expect(within(onTheGo).getByRole('alert')).toHaveTextContent(
+        "Couldn't mark the loop finished. Something went wrong. Try again.",
+      );
+      expect(
+        within(onTheGo).getByRole('button', { name: 'Dismiss the message about Verse' }),
+      ).toBeInTheDocument();
+      expect(statusWrites()).toEqual([{ status: 'finished' }]);
+    });
+
+    // The practice loop's own change, refused with no prompt up to say it (the loop is below
+    // full speed): the same. It was made from the song's page on the way here.
+    it('a refusal of this loop’s change with no prompt up is kept for the song’s page', async () => {
+      serve();
+      const { user, queryClient } = renderPracticeWithClient(
+        CHORUS_ID,
+        undefined,
+        undefined,
+        <Route path="/songs/:id" element={<SongOverviewPage />} />,
+      );
+      await loadPlayer();
+      await user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+      const refuse = loops.holdNext('update');
+      loops.failNext('update', 'nope');
+      await user.click(await screen.findByRole('button', { name: 'More actions for Verse' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Mark finished' }));
+      const mastered = await screen.findByRole('list', { name: 'Mastered loops' });
+      await user.click(within(mastered).getByRole('link', { name: 'Practise Verse' }));
+      await screen.findByRole('heading', { level: 1, name: 'Verse' });
+      await settle();
+      refuse();
+      await waitFor(() =>
+        expect(queryClient.getMutationCache().findAll({ status: 'error' })).toHaveLength(1),
+      );
+      await settle();
+      expect(screen.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+
+      const onTheGo = await screen.findByRole('list', { name: 'Loops on the go' });
+      expect(await within(onTheGo).findByRole('alert')).toHaveTextContent(
+        "Couldn't mark the loop finished.",
+      );
+    });
+  });
+
   it('moves to the next loop with a loop key, and the URL follows, replaced', async () => {
     serve();
     const user = renderPractice(CHORUS_ID);

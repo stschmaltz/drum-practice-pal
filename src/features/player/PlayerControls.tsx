@@ -131,12 +131,13 @@ export function PlayerControls({
   const drumTogglesDisabled = !canUseDrumToggles(player, snapshot);
   const noDrumsReason = snapshot.hasDrumTrack ? undefined : 'This song has no drum track';
   const folded = fold?.folded ?? false;
-  const keepFocus = useFocusKeptInBar(folded, fold?.canFold ?? false);
+  const keepFocus = useFocusKeptInBar(folded, fold?.canFold ?? false, snapshot.countInBars);
 
   return (
     <section
       ref={keepFocus.ref}
       onFocus={keepFocus.onFocus}
+      onBlur={keepFocus.onBlur}
       aria-label="Player controls"
       data-folded={folded || undefined}
       className={
@@ -265,8 +266,12 @@ export function PlayerControls({
  * keyboard user start again from the top; it goes to the fold toggle instead,
  * or, once playback has stopped and the toggle has gone with it, to the
  * metronome, which is always there (checklist 5, a control that replaces itself).
+ *
+ * The count-in turned off (the C key acts with focus anywhere) takes "When to
+ * count in" away the same way: focus on one of its options goes to the checked
+ * option of the count-in's bars, the group beside it, which stays.
  */
-function useFocusKeptInBar(folded: boolean, canFold: boolean) {
+function useFocusKeptInBar(folded: boolean, canFold: boolean, countInBars: CountInBars) {
   const ref = useRef<HTMLElement>(null);
   const lastFocused = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
@@ -276,15 +281,27 @@ function useFocusKeptInBar(folded: boolean, canFold: boolean) {
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
     const bar = ref.current;
+    // A radio that went was a count-in choice. Folded, the bars' group has gone too, and
+    // the fold toggle takes focus as for any other control folded away.
+    const countInChoice = last.matches('input[type="radio"]')
+      ? bar?.querySelector<HTMLElement>('input[type="radio"]:checked:not(:disabled)')
+      : null;
     const target =
+      countInChoice ??
       bar?.querySelector<HTMLElement>('[data-fold-toggle]') ??
       bar?.querySelector<HTMLElement>('[aria-pressed]');
     target?.focus();
-  }, [folded, canFold]);
+  }, [folded, canFold, countInBars]);
   return {
     ref,
     onFocus: (event: { target: EventTarget }) => {
       if (event.target instanceof HTMLElement) lastFocused.current = event.target;
+    },
+    // Focus given up while the control was still there (a tap on the score) was not lost
+    // to a fold: nothing is handed on, or a radio would take the arrow keys from the page.
+    onBlur: (event: { target: EventTarget }) => {
+      const last = lastFocused.current;
+      if (event.target === last && last.isConnected) lastFocused.current = null;
     },
   };
 }

@@ -21,6 +21,7 @@ import {
   useDeleteLoop,
   useLoops,
   usePracticeLoops,
+  useLoopStatusRefusals,
   useSetLoopStatus,
   useUpdateLoop,
 } from './useLoops';
@@ -845,5 +846,338 @@ describe('useSetLoopStatus', () => {
 
     expect(later.result.current.error?.message).toBe('nope');
     expect(later.result.current.isPending).toBe(false);
+  });
+});
+
+// 20 batch 8 (13.21, 13.35c): a refused status change is a failed mutation the cache keeps.
+// The screen hears it as it happens, a control can put it away, and so does leaving.
+describe('refused status changes: dismissed, and heard by the screen', () => {
+  /** What the screen has on show: the loops it draws, and whether it is itself drawn. */
+  interface ScreenShows {
+    loopIds: string[];
+    isOnShow?: () => boolean;
+  }
+  function renderScreen({
+    queryClient = testQueryClient(),
+    strict = false,
+    shows = { loopIds: ['a', 'b'] } as ScreenShows,
+  } = {}) {
+    queryClient.setQueryData<Loop[]>(loopKeys.forSong('user-1', SONG), [
+      loopRow('a'),
+      loopRow('b'),
+    ]);
+    const heard: [string, string][] = [];
+    const hooks = renderHook(
+      (shown: ScreenShows) => {
+        useLoopStatusRefusals({
+          ...shown,
+          onRefused: (loopId, refused) => heard.push([loopId, refused]),
+        });
+        return {
+          a: useSetLoopStatus(SONG, 'a'),
+          b: useSetLoopStatus(SONG, 'b'),
+          update: useUpdateLoop(SONG),
+        };
+      },
+      {
+        initialProps: shows,
+        wrapper: wrapperFor(queryClient, signedInAs('user-1')),
+        reactStrictMode: strict,
+      },
+    );
+    /** The loop writes the cache holds as failed, by what they sent. */
+    const failed = () =>
+      queryClient
+        .getMutationCache()
+        .findAll({ status: 'error' })
+        .map((mutation) => (mutation.state.variables as { changes: Partial<Loop> }).changes);
+    return { ...hooks, queryClient, heard, failed };
+  }
+  /** Each write refused in turn, each list read answered. */
+  const refuseWrites = () =>
+    queryResult.mockImplementation(async (call) =>
+      opArgs(call, 'update') ? fail('nope') : ok([loopRow('a'), loopRow('b')]),
+    );
+
+  it('dismissError puts the loop’s refusal away for each of its controls, and sends nothing', async () => {
+    const view = renderScreen();
+    refuseWrites();
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.error?.message).toBe('nope'));
+    const sent = queryResult.mock.calls.length;
+
+    act(() => view.result.current.a.dismissError());
+
+    await waitFor(() => expect(view.result.current.a.error).toBeNull());
+    expect(view.failed()).toEqual([]);
+    await settle();
+    expect(queryResult.mock.calls).toHaveLength(sent);
+    // Nothing of the loop changed with it.
+    expect(view.queryClient.getQueryData<Loop[]>(loopKeys.forSong('user-1', SONG))).toEqual([
+      loopRow('a'),
+      loopRow('b'),
+    ]);
+  });
+
+  it('dismissError leaves another loop’s refusal, and a failed write of another kind', async () => {
+    const view = renderScreen();
+    refuseWrites();
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.error).not.toBeNull());
+    act(() => void view.result.current.b.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.b.error).not.toBeNull());
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    await waitFor(() => expect(view.failed()).toHaveLength(3));
+
+    act(() => view.result.current.a.dismissError());
+
+    await waitFor(() => expect(view.result.current.a.error).toBeNull());
+    expect(view.result.current.b.error?.message).toBe('nope');
+    expect(view.failed()).toEqual([{ status: 'finished' }, { speed_ratio: 0.9 }]);
+  });
+
+  it('dismissError never takes a status write that is still on its way', async () => {
+    const view = renderScreen();
+    const pending = deferred();
+    queryResult.mockReturnValueOnce(pending.promise);
+    queryResult.mockResolvedValue(ok([loopRow('a', { status: 'finished' }), loopRow('b')]));
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.isPending).toBe(true));
+
+    act(() => view.result.current.a.dismissError());
+
+    expect(view.result.current.a.isPending).toBe(true);
+    await act(async () => pending.resolve(ok(loopRow('a', { status: 'finished' }))));
+    await waitFor(() => expect(view.result.current.a.isPending).toBe(false));
+    expect(
+      view.queryClient.getQueryData<Loop[]>(loopKeys.forSong('user-1', SONG))?.[0]?.status,
+    ).toBe('finished');
+  });
+
+  it.each([
+    ['', false],
+    [' (StrictMode: once, not twice)', true],
+  ])('the screen hears a refusal, with the loop and what was asked%s', async (_, strict) => {
+    const view = renderScreen({ strict });
+    refuseWrites();
+    act(() => void view.result.current.b.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.b.error).not.toBeNull());
+    expect(view.heard).toEqual([['b', 'finished']]);
+  });
+
+  it('hears nothing for a status change that went through, or a refused write of another kind', async () => {
+    const view = renderScreen();
+    queryResult.mockResolvedValueOnce(ok(loopRow('a', { status: 'finished' })));
+    queryResult.mockResolvedValue(ok([loopRow('a', { status: 'finished' }), loopRow('b')]));
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.isPending).toBe(false));
+
+    refuseWrites();
+    act(() => view.result.current.update.mutate({ loopId: 'b', changes: { speed_ratio: 0.9 } }));
+    // The refused speed did fail, so the silence isn't a write that never settled.
+    await waitFor(() => expect(view.failed()).toEqual([{ speed_ratio: 0.9 }]));
+    expect(view.heard).toEqual([]);
+  });
+
+  it('leaving the screen puts every loop’s refusal away, and nothing else', async () => {
+    const view = renderScreen();
+    refuseWrites();
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.error).not.toBeNull());
+    act(() => void view.result.current.b.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.b.error).not.toBeNull());
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    await waitFor(() => expect(view.failed()).toHaveLength(3));
+
+    view.unmount();
+
+    await waitFor(() => expect(view.failed()).toEqual([{ speed_ratio: 0.9 }]));
+  });
+
+  // What the message says goes by what was asked, not by the list the loop is in: the
+  // refusal can be drawn before the loop has moved back (20 batch 8, Build's known gap).
+  it('reports what the refused change asked for, and nothing once it is dismissed', async () => {
+    const view = renderScreen();
+    expect(view.result.current.a.refused).toBeNull();
+    refuseWrites();
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.refused).toBe('finished'));
+    expect(view.result.current.b.refused).toBeNull();
+
+    act(() => void view.result.current.a.setStatus('active'));
+    await waitFor(() => expect(view.result.current.a.refused).toBe('active'));
+
+    act(() => view.result.current.a.dismissError());
+    await waitFor(() => expect(view.result.current.a.refused).toBeNull());
+    expect(view.result.current.a.error).toBeNull();
+  });
+
+  /** Both loops' "Mark finished" refused, one after the other. */
+  async function bothRefused(view: ReturnType<typeof renderScreen>) {
+    refuseWrites();
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.error).not.toBeNull());
+    act(() => void view.result.current.b.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.b.error).not.toBeNull());
+  }
+
+  // 20 batch 8, Review (Test's bug 1): a screen puts away what it showed, nothing more.
+  it('leaving a screen that shows one loop’s status keeps another loop’s refusal for the screen that shows it', async () => {
+    const view = renderScreen({ shows: { loopIds: ['a'] } });
+    await bothRefused(view);
+    // Heard for both, as before: only the putting away is the one loop's.
+    expect(view.heard).toEqual([
+      ['a', 'finished'],
+      ['b', 'finished'],
+    ]);
+
+    view.unmount();
+
+    await waitFor(() => expect(view.failed()).toEqual([{ status: 'finished' }]));
+    await settle();
+    expect(
+      view.queryClient
+        .getMutationCache()
+        .findAll({ status: 'error' })
+        .map((mutation) => (mutation.state.variables as { loopId: string }).loopId),
+    ).toEqual(['b']);
+  });
+
+  it('leaving a screen that never had its refusals on show keeps them all', async () => {
+    const view = renderScreen({ shows: { loopIds: [] } });
+    await bothRefused(view);
+
+    view.unmount();
+    await settle();
+
+    expect(view.failed()).toEqual([{ status: 'finished' }, { status: 'finished' }]);
+  });
+
+  it('a refusal that came while hidden and was then shown is put away on leaving', async () => {
+    const view = renderScreen({ shows: { loopIds: [] } });
+    await bothRefused(view);
+    view.rerender({ loopIds: ['a', 'b'] });
+    // Hidden again before leaving: it was seen, which is what counts.
+    view.rerender({ loopIds: [] });
+
+    view.unmount();
+
+    await waitFor(() => expect(view.failed()).toEqual([]));
+  });
+
+  // Copilot on #41: "every loop's" is too many. A screen draws one song's loops, and the
+  // cache holds the refusals of every song's.
+  it('leaving a screen keeps the refusal of a loop it never drew (another song’s), which it could not have said', async () => {
+    const queryClient = testQueryClient();
+    // Song A's page: its loop's change is refused with no screen of song A up.
+    const songA = renderHook(() => useSetLoopStatus('song-a', 'elsewhere'), {
+      wrapper: wrapperFor(queryClient, signedInAs('user-1')),
+    });
+    queryClient.setQueryData<Loop[]>(loopKeys.forSong('user-1', 'song-a'), [loopRow('elsewhere')]);
+    refuseWrites();
+    act(() => void songA.result.current.setStatus('finished'));
+    await waitFor(() => expect(songA.result.current.error).not.toBeNull());
+    songA.unmount();
+
+    // Song B's page, up and left again, with a refusal of its own that it did show.
+    const view = renderScreen({ queryClient });
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.error).not.toBeNull());
+    const refusedLoops = () =>
+      queryClient
+        .getMutationCache()
+        .findAll({ status: 'error' })
+        .map((mutation) => (mutation.state.variables as { loopId: string }).loopId);
+    expect(refusedLoops()).toEqual(['elsewhere', 'a']);
+
+    view.unmount();
+
+    await waitFor(() => expect(refusedLoops()).toEqual(['elsewhere']));
+    await settle();
+    expect(refusedLoops()).toEqual(['elsewhere']);
+  });
+
+  it('a screen whose list has not loaded (no loops drawn) puts nothing away; once one is drawn, only that one’s', async () => {
+    const view = renderScreen({ shows: { loopIds: [] } });
+    await bothRefused(view);
+    // Only loop a is drawn in the end: b's is still not this screen's to put away.
+    view.rerender({ loopIds: ['a'] });
+
+    view.unmount();
+
+    await waitFor(() => expect(view.failed()).toHaveLength(1));
+    expect(
+      view.queryClient
+        .getMutationCache()
+        .findAll({ status: 'error' })
+        .map((mutation) => (mutation.state.variables as { loopId: string }).loopId),
+    ).toEqual(['b']);
+  });
+
+  // Copilot on #41: mounted is not drawn. The page can hide the screen that lists the loops
+  // (the loop sheet under a recording) without the screen's own state saying so.
+  it('a screen that lists the loops but is itself hidden when the refusal lands keeps it on leaving', async () => {
+    const view = renderScreen({ shows: { loopIds: ['a', 'b'], isOnShow: () => false } });
+    await bothRefused(view);
+
+    view.unmount();
+    await settle();
+
+    expect(view.failed()).toEqual([{ status: 'finished' }, { status: 'finished' }]);
+  });
+
+  it('a refusal that landed with the screen hidden is put away once the screen has been drawn with it', async () => {
+    let drawn = false;
+    const shows = { loopIds: ['a', 'b'], isOnShow: () => drawn };
+    const view = renderScreen({ shows });
+    await bothRefused(view);
+    // The page draws the screen again, which renders it; nothing of the screen's own changed.
+    drawn = true;
+    view.rerender({ ...shows });
+    drawn = false;
+    view.rerender({ ...shows });
+
+    view.unmount();
+
+    await waitFor(() => expect(view.failed()).toEqual([]));
+  });
+
+  it('a refusal from before the screen opened, on show as it opens, is put away on leaving (StrictMode too)', async () => {
+    const queryClient = testQueryClient();
+    const before = renderHook(() => useSetLoopStatus(SONG, 'a'), {
+      wrapper: wrapperFor(queryClient, signedInAs('user-1')),
+    });
+    queryClient.setQueryData<Loop[]>(loopKeys.forSong('user-1', SONG), [loopRow('a')]);
+    refuseWrites();
+    act(() => void before.result.current.setStatus('finished'));
+    await waitFor(() => expect(before.result.current.error).not.toBeNull());
+    before.unmount();
+
+    const view = renderScreen({ queryClient, strict: true });
+    await settle();
+    expect(view.failed()).toEqual([{ status: 'finished' }]);
+    view.unmount();
+
+    await waitFor(() => expect(view.failed()).toEqual([]));
+  });
+
+  it('a refusal from before the screen opened is still there under StrictMode, whose first clean-up is no leaving', async () => {
+    const queryClient = testQueryClient();
+    // Refused with no screen up to hear it or to put it away.
+    const before = renderHook(() => useSetLoopStatus(SONG, 'a'), {
+      wrapper: wrapperFor(queryClient, signedInAs('user-1')),
+    });
+    queryClient.setQueryData<Loop[]>(loopKeys.forSong('user-1', SONG), [loopRow('a')]);
+    refuseWrites();
+    act(() => void before.result.current.setStatus('finished'));
+    await waitFor(() => expect(before.result.current.error).not.toBeNull());
+    before.unmount();
+
+    const view = renderScreen({ queryClient, strict: true });
+    await settle();
+
+    expect(view.result.current.a.error?.message).toBe('nope');
+    // It was refused before the screen opened: not heard, so nothing takes focus for it.
+    expect(view.heard).toEqual([]);
   });
 });

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   useMutation,
   useMutationState,
@@ -289,6 +290,45 @@ export function isStatusWriteOf(variables: unknown, loopId: string): boolean {
   return writtenId === loopId && changes?.status !== undefined;
 }
 
+/** The loop and the status a status write asked for, or null for any other write. */
+function statusWriteIn(variables: unknown): { loopId: string; status: LoopStatus } | null {
+  if (typeof variables !== 'object' || variables === null) return null;
+  const { loopId, changes } = variables as Partial<LoopUpdate>;
+  return loopId !== undefined && changes?.status !== undefined
+    ? { loopId, status: changes.status }
+    : null;
+}
+
+/** The status writes the server refused: of one loop, or of every loop. */
+function refusedStatusWrites(userId: string, loopId?: string) {
+  return {
+    mutationKey: loopKeys.writes(userId),
+    status: 'error' as const,
+    predicate: (mutation: { state: { variables?: unknown } }) => {
+      const write = statusWriteIn(mutation.state.variables);
+      return write !== null && (loopId === undefined || write.loopId === loopId);
+    },
+  };
+}
+
+/**
+ * Puts away what refused status changes left to say (13.35c). The refusals are
+ * failed mutations kept in the mutation cache, which is all the message under
+ * the loop is read from: removing them changes nothing saved, here or on the
+ * server. Only writes that have failed go; one still on its way is never touched.
+ * With `among`, only those of them it holds.
+ */
+function dismissStatusRefusals(
+  queryClient: QueryClient,
+  userId: string,
+  { loopId, among }: { loopId?: string; among?: WeakSet<object> } = {},
+): void {
+  const cache = queryClient.getMutationCache();
+  for (const mutation of cache.findAll(refusedStatusWrites(userId, loopId))) {
+    if (among === undefined || among.has(mutation)) cache.remove(mutation);
+  }
+}
+
 /** Whether a mutation's variables are a write of this loop's speed. */
 export function isSpeedWriteOf(variables: unknown, loopId: string): boolean {
   if (typeof variables !== 'object' || variables === null) return false;
@@ -346,9 +386,14 @@ export function useSetLoopStatus(songId: string, loopId: string) {
   // In the order they were sent.
   const writes = useMutationState({
     filters,
-    select: (mutation) => ({ status: mutation.state.status, error: mutation.state.error }),
+    select: (mutation) => ({
+      status: mutation.state.status,
+      error: mutation.state.error,
+      asked: statusWriteIn(mutation.state.variables)?.status ?? null,
+    }),
   });
   const latest = writes.at(-1);
+  const refused = latest?.status === 'error' ? latest : null;
 
   /** False, sending nothing, while another status write to the loop is on its way. */
   const setStatus = (status: LoopStatus): boolean => {
@@ -360,8 +405,103 @@ export function useSetLoopStatus(songId: string, loopId: string) {
   return {
     setStatus,
     isPending: writes.some((write) => write.status === 'pending'),
-    error: latest?.status === 'error' ? (latest.error as { message: string }) : null,
+    error: refused ? (refused.error as { message: string }) : null,
+    /** The status the refused change asked for, which is what the message says; null with no `error`. */
+    refused: refused?.asked ?? null,
+    /** Puts `error` away, for every control of the loop. Sends nothing and changes no loop. */
+    dismissError: () => dismissStatusRefusals(queryClient, user.id, { loopId }),
   };
+}
+
+/** What a screen tells `useLoopStatusRefusals` about itself. */
+interface LoopStatusRefusalsScreen {
+  /** Hears each status change the server refuses while the screen is up. */
+  onRefused?: (loopId: string, refused: LoopStatus) => void;
+  /**
+   * The loops whose refusals' messages the screen has on show now: the loops
+   * it draws a status control for, and none while what draws them is not there
+   * (its list loading or failed, the loop form over the list, no "Mark
+   * finished?" prompt). Never "every loop": the cache holds the refusals of
+   * other songs' loops too, which this screen can't say.
+   */
+  loopIds: readonly string[];
+  /**
+   * Whether the screen itself is drawn, asked after each render, for a screen
+   * that can be mounted and hidden by something outside it (the loop sheet,
+   * closed or under a recording: `isOnShow` in `src/lib/onShow.ts`). Without
+   * it the screen is taken as drawn.
+   */
+  isOnShow?: () => boolean;
+}
+
+/**
+ * For a screen that shows loops' status controls, called once by the part of
+ * it that outlives its loops' items (the list, the page):
+ *
+ * - `onRefused` hears each status change the server refuses while the screen
+ *   is up, as it is refused, and the caller re-renders. The refusal moves the
+ *   loop back to the list it came from, so the item focus followed it to is
+ *   taken away: the list hands focus on (`findStatusButtonAfterRefusal`). A
+ *   refusal from before the screen opened is not heard, so nothing takes focus
+ *   as a page opens.
+ * - Leaving the screen puts away the message of every refusal it had on show
+ *   (`loopIds`, `isOnShow`), so it isn't there again on coming back (until
+ *   then it stays, up to the five minutes the mutation cache keeps a failed
+ *   write). A refusal the screen never showed is kept (another song's loop,
+ *   one that came while the screen was hidden or its list not yet read): until
+ *   a screen that says it has been opened, the message is the only sign that
+ *   the change did not hold.
+ */
+export function useLoopStatusRefusals({
+  onRefused,
+  loopIds,
+  isOnShow,
+}: LoopStatusRefusalsScreen): void {
+  const user = useSignedInUser();
+  const queryClient = useQueryClient();
+  const latestOnRefused = useRef(onRefused);
+  useEffect(() => {
+    latestOnRefused.current = onRefused;
+  });
+  // The hand-over waits for a render of the caller (`useFocusWhenReady`), and the loop may
+  // have been drawn back in its place before the refusal is heard: this makes one.
+  const [, setHeard] = useState(0);
+  // The refusals this screen has had on show, for as long as it is up.
+  const [shown] = useState(() => new WeakSet<object>());
+  const leaving = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    // Mounted again straight after a clean-up (StrictMode): the screen never left.
+    clearTimeout(leaving.current);
+    const cache = queryClient.getMutationCache();
+    const unsubscribe = cache.subscribe((event) => {
+      if (event.type !== 'updated' || event.action.type !== 'error') return;
+      if (!cache.findAll(refusedStatusWrites(user.id)).includes(event.mutation)) return;
+      const write = statusWriteIn(event.mutation.state.variables);
+      if (!write) return;
+      latestOnRefused.current?.(write.loopId, write.status);
+      setHeard((count) => count + 1);
+    });
+    return () => {
+      unsubscribe();
+      // After this commit, not in it: a clean-up that a mount follows at once is no leaving.
+      leaving.current = setTimeout(() =>
+        dismissStatusRefusals(queryClient, user.id, { among: shown }),
+      );
+    };
+  }, [queryClient, user.id, shown]);
+
+  // After the one above, so it has heard. After every render, with no list of what it
+  // depends on: whether the screen is drawn is read from the page (`isOnShow`), and what
+  // hides it (a parent's `hidden`) changes nothing this hook is given. Each such change
+  // renders the caller, as do a refusal landing (`heard`) and its loops being drawn.
+  useEffect(() => {
+    if (loopIds.length === 0 || (isOnShow && !isOnShow())) return;
+    for (const refusal of queryClient.getMutationCache().findAll(refusedStatusWrites(user.id))) {
+      const loopId = statusWriteIn(refusal.state.variables)?.loopId;
+      if (loopId !== undefined && loopIds.includes(loopId)) shown.add(refusal);
+    }
+  });
 }
 
 /**

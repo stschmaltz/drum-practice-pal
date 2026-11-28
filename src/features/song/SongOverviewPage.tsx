@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
-import { ErrorAlert } from '@/components/ErrorAlert';
 import { Icon } from '@/components/icons';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { OverflowMenu } from '@/components/OverflowMenu';
@@ -16,7 +15,12 @@ import {
 import { songFactsLabel, type Song } from '@/features/library/songForm';
 import { NO_DRUM_TRACK_NOTE } from '@/features/library/songMetadata';
 import { ConfirmDeleteLoop } from '@/features/loops/ConfirmDeleteLoop';
-import { findFormOpener, NEW_LOOP_BUTTON_ATTRIBUTES } from '@/features/loops/loopFocus';
+import {
+  findFormOpener,
+  findStatusButtonAfterRefusal,
+  NEW_LOOP_BUTTON_ATTRIBUTES,
+  statusButtonAttributes,
+} from '@/features/loops/loopFocus';
 import { barsLabel, type Loop } from '@/features/loops/loopForm';
 import {
   fullSpeedFraction,
@@ -26,7 +30,9 @@ import {
   masterySummary,
 } from '@/features/loops/mastery';
 import { practiceLoopsFor } from '@/features/loops/practiceList';
-import { useLoops, useSetLoopStatus } from '@/features/loops/useLoops';
+import { statusRefusalCopy } from '@/features/loops/loopLabels';
+import { StatusRefusal } from '@/features/loops/LoopStatusButton';
+import { useLoops, useLoopStatusRefusals, useSetLoopStatus } from '@/features/loops/useLoops';
 import { ratioToPercent } from '@/features/player/speed';
 import { LoopHistory } from '@/features/practice/LoopHistory';
 import { lastPracticedLabel } from '@/features/practice/sessions';
@@ -70,7 +76,17 @@ export function SongOverviewPage() {
   const [params] = useSearchParams();
   const redirect = legacyLoopRedirect(id, params);
   if (redirect) return <Navigate to={redirect} replace />;
-  return <SongGate songId={id}>{(song) => <SongOverview song={song} />}</SongGate>;
+  return (
+    <SongGate songId={id}>
+      {(song) => (
+        // Back or Forward between two songs whose rows are cached unmounts nothing by
+        // itself: the key makes each song's overview its own, so what was open on one (the
+        // recordings form, a delete question) isn't open on the next, and leaving one for
+        // another puts its refusals away as leaving for any other screen does.
+        <SongOverview key={song.id} song={song} />
+      )}
+    </SongGate>
+  );
 }
 
 function SongOverview({ song }: { song: Song }) {
@@ -149,6 +165,17 @@ function SongOverview({ song }: { song: Song }) {
 
 function SongLoops({ song, loops }: { song: Song; loops: ReturnType<typeof useLoops> }) {
   const focusWhenReady = useFocusWhenReady();
+  // A refused "Mark finished" or "Reopen" moves the loop back to its list, away from the
+  // focus that followed it: on to its "More" button there. Leaving the page puts away the
+  // refusals' messages of the loops it lists (none while the list is loading or failed:
+  // `data` is only there once rows are drawn), never another song's.
+  useLoopStatusRefusals({
+    loopIds: (loops.data ?? []).map((loop) => loop.id),
+    onRefused: (loopId, refused) => {
+      const find = findStatusButtonAfterRefusal(loopId, refused);
+      if (find) focusWhenReady(find);
+    },
+  });
 
   if (waitsForNetwork(loops)) {
     return (
@@ -283,7 +310,8 @@ function LoopRow({
         </div>
         <OverflowMenu
           name={loop.name}
-          buttonAttributes={itemMenuAttributes(loop.id)}
+          // The button stands for the status change its menu holds, in the list the loop is in.
+          buttonAttributes={{ ...itemMenuAttributes(loop.id), ...statusButtonAttributes(loop) }}
           items={[
             {
               id: 'edit',
@@ -334,11 +362,17 @@ function LoopRow({
           onDeletePressed={onDeletePressed}
         />
       )}
-      {status.error && (
-        <ErrorAlert>
-          {finished ? "Couldn't reopen the loop." : "Couldn't mark the loop finished."}{' '}
-          {failureCopy(status.error)}
-        </ErrorAlert>
+      {status.error && status.refused && (
+        <StatusRefusal
+          loopName={loop.name}
+          onDismiss={() => {
+            // "Dismiss" goes with the message: the menu that holds the change takes focus.
+            findItemControl(loop.id, 'delete')?.focus();
+            status.dismissError();
+          }}
+        >
+          {statusRefusalCopy(status.refused)} {failureCopy(status.error)}
+        </StatusRefusal>
       )}
       {showingHistory && <LoopHistory loopId={loop.id} loopName={loop.name} tempo={null} />}
     </li>
