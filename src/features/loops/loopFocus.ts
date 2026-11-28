@@ -4,9 +4,13 @@
  * loop form, which the form replaces. The buttons carry data attributes so a
  * later render can find the one that stands in for the control pressed.
  */
+import { isInItem } from '@/lib/itemFocus';
 import type { LoopStatus } from '@/lib/schema';
 
-/** On a loop's "Mark finished" / "Reopen", wherever it is listed. */
+/**
+ * On a loop's "Mark finished" / "Reopen", wherever it is listed, or on the
+ * "More" button whose menu holds it (the song's overview).
+ */
 export function statusButtonAttributes(loop: { id: string; status: LoopStatus }) {
   return { 'data-loop-status-of': loop.id, 'data-loop-status': loop.status };
 }
@@ -15,6 +19,29 @@ export function statusButtonAttributes(loop: { id: string; status: LoopStatus })
 export function findStatusButton(loopId: string, status?: LoopStatus): HTMLElement | null {
   const statusPart = status === undefined ? '' : `[data-loop-status="${status}"]`;
   return document.querySelector<HTMLElement>(`[data-loop-status-of="${loopId}"]${statusPart}`);
+}
+
+/**
+ * A status change the server refused moves its loop back to the list it came
+ * from, after focus followed it to the other one: the item it was on is taken
+ * away and focus falls to `<body>` (13.21). This is the finder for
+ * `useFocusWhenReady`, called when the refusal arrives: the loop's status
+ * button once it is listed with its old status again.
+ *
+ * Null when focus is somewhere else on the page: a user who has moved on
+ * keeps their place. Focus inside the loop's item moves only once what had it
+ * has left the page, so an item that is already back, with the user in it, is
+ * left alone too.
+ */
+export function findStatusButtonAfterRefusal(
+  loopId: string,
+  refused: LoopStatus,
+): (() => HTMLElement | null) | null {
+  const active = document.activeElement;
+  const nowhere = active === null || active === document.body;
+  if (!nowhere && !isInItem(loopId, active)) return null;
+  const kept: LoopStatus = refused === 'finished' ? 'active' : 'finished';
+  return () => (nowhere || !active.isConnected ? findStatusButton(loopId, kept) : null);
 }
 
 /** What opened the loop form, for focus to go back to: "New loop", or a loop's "Edit". */

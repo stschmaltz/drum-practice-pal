@@ -36,8 +36,11 @@ export function LibraryPage() {
   // Every loop, for each song's mastery ring.
   const loops = usePracticeLoops();
   const mastery = loops.data ? songMastery(loops.data) : null;
-  // Once there are songs the upload is a button, and the list takes a dropped file.
-  const hasSongs = songs.data !== undefined && songs.data.length > 0;
+  // The upload is a button, and the list takes a dropped file, unless the library is known
+  // to be empty: only then the big drop box. While the songs load it is the button too, so
+  // a library with songs in it draws the same before and after the read, and nothing moves
+  // under a pointer on its way to the upload.
+  const knownEmpty = songs.data?.length === 0;
   // Here, not in the list: deleting the last song takes the list away, and its
   // focus hand-over with it. The page re-renders when a song leaves the cache.
   const focusAfterDelete = useFocusWhenReady();
@@ -48,7 +51,7 @@ export function LibraryPage() {
         <PageHeader title="Songs" />
         <StreakBadge />
       </div>
-      <UploadPanel compact={hasSongs}>
+      <UploadPanel compact={!knownEmpty}>
         {waitsForNetwork(songs) ? (
           <EmptyState icon="offline">
             You're offline, and your library hasn't been opened on this device yet. It shows once

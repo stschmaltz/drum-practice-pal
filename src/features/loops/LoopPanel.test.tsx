@@ -33,17 +33,27 @@ function Panel({ player, startsOpen }: { player: PlayerService; startsOpen: bool
   const practice = useLoopPractice(player, snapshot, loops.data);
   useSaveLoopSpeed(LOOP_SONG_ID, practice.activeLoop, snapshot.speedRatio);
   const [open, setOpen] = useState(startsOpen);
+  // The song page's source switch: on a recording the panel is hidden, not unmounted, and
+  // keeps its `open`.
+  const [recording, setRecording] = useState(false);
   return (
-    <LoopPanel
-      songId={LOOP_SONG_ID}
-      player={player}
-      snapshot={snapshot}
-      practice={practice}
-      loops={loops}
-      open={open}
-      onOpenChange={setOpen}
-      bodyId={BODY_ID}
-    />
+    <>
+      <button type="button" onClick={() => setRecording((on) => !on)}>
+        {recording ? 'Tab' : 'Original'}
+      </button>
+      <div hidden={recording} className="contents">
+        <LoopPanel
+          songId={LOOP_SONG_ID}
+          player={player}
+          snapshot={snapshot}
+          practice={practice}
+          loops={loops}
+          open={open}
+          onOpenChange={setOpen}
+          bodyId={BODY_ID}
+        />
+      </div>
+    </>
   );
 }
 
@@ -76,7 +86,7 @@ function renderPanel({
   prepare?.(table);
   const { engine, player, finishLoading } = loopPlayer({ loaded });
   const queryClient = testQueryClient();
-  render(<Panel player={player} startsOpen={startsOpen} />, {
+  const { unmount } = render(<Panel player={player} startsOpen={startsOpen} />, {
     wrapper: wrapperFor(queryClient),
     reactStrictMode: strict,
   });
@@ -89,6 +99,23 @@ function renderPanel({
     player,
     finishLoading,
     panel,
+    /** Leaves the page: the panel goes, the query client stays, as the app's does. */
+    leave: unmount,
+    /** The page again, on the same client, as on coming back to the song. */
+    comeBack: () => {
+      render(<Panel player={player} startsOpen={startsOpen} />, {
+        wrapper: wrapperFor(queryClient),
+      });
+      return within(screen.getByTestId('loop-panel'));
+    },
+    /** The status writes the mutation cache still holds as failed. */
+    refusedStatusWrites: () =>
+      queryClient.getMutationCache().findAll({
+        status: 'error',
+        predicate: (mutation) =>
+          (mutation.state.variables as { changes?: { status?: string } } | undefined)?.changes
+            ?.status !== undefined,
+      }),
     /**
      * Presses the panel's button of this name, once it is there. "Edit X",
      * "History X" and "Delete X" are in loop X's "More" menu: it opens that and
@@ -1393,7 +1420,7 @@ describe('LoopPanel finishing a loop', () => {
 
     await waitFor(() => expect(finishedNames(view)).toEqual(['Intro']));
     expect(await view.item('Intro').findByRole('alert')).toHaveTextContent(
-      "Couldn't change the loop. Something went wrong. Try again.",
+      "Couldn't reopen the loop. Something went wrong. Try again.",
     );
   });
 
@@ -1421,7 +1448,9 @@ describe('LoopPanel finishing a loop', () => {
     await view.user.click(prompt(view).getByRole('button', { name: 'Not yet' }));
     await waitFor(() => expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument());
     expect(view.panel.getAllByRole('alert')).toHaveLength(1);
-    expect(view.item('Late').getByRole('alert')).toHaveTextContent("Couldn't change the loop.");
+    expect(view.item('Late').getByRole('alert')).toHaveTextContent(
+      "Couldn't mark the loop finished.",
+    );
   });
 
   it('asks when the speed shows as 100%, though its ratio is a hair under', async () => {
@@ -1851,7 +1880,7 @@ describe('LoopPanel keeping focus', () => {
       expect(view.panel.queryByRole('region', { name: 'Finished loops' })).not.toBeInTheDocument(),
     );
     expect(await view.item('Intro').findByRole('alert')).toHaveTextContent(
-      "Couldn't change the loop. Something went wrong. Try again.",
+      "Couldn't mark the loop finished. Something went wrong. Try again.",
     );
     const finish = view.panel.getByRole('button', { name: 'Mark finished Intro' });
     expectUnlocked(finish);
@@ -1862,6 +1891,478 @@ describe('LoopPanel keeping focus', () => {
     await waitFor(() =>
       expect(view.panel.getByRole('button', { name: 'Reopen Intro' })).toHaveFocus(),
     );
+  });
+
+  // 20 batch 8 (13.21, 13.35c): a refused status change moves the loop back, after focus
+  // followed it to the other section. Held first, so the loop is seen to move before the
+  // refusal lands; otherwise React never moves anything and the test proves nothing.
+  describe('a refused status change', () => {
+    /** "Mark finished Intro" by keyboard, held: refused when the returned function is called. */
+    async function refusedFinish(options: PanelOptions = {}) {
+      const view = renderPanel(options);
+      const refuse = view.table.holdNext('update');
+      view.table.failNext('update', 'nope');
+      (await view.panel.findByRole('button', { name: 'Mark finished Intro' })).focus();
+      await view.user.keyboard('{Enter}');
+      const reopen = await view.panel.findByRole('button', { name: 'Reopen Intro' });
+      await waitFor(() => expect(reopen).toHaveFocus());
+      return { view, refuse };
+    }
+    const finishIntro = (view: View) =>
+      view.panel.getByRole('button', { name: 'Mark finished Intro' });
+    /** The loop's item is drawn anew where it lands back: looked up afresh until it says why. */
+    const alertUnder = (view: View, name: string) =>
+      waitFor(() => view.item(name).getByRole('alert'));
+    const prompt = (view: View) =>
+      within(view.panel.getByRole('group', { name: 'Mark finished?' }));
+    const finishedNames = (view: View) =>
+      within(view.panel.getByRole('region', { name: 'Finished loops' }))
+        .getAllByRole('listitem')
+        .map((li) => li.querySelector('p')?.textContent ?? '');
+    const dismiss = (view: View) => view.item('Intro').getByRole('button', { name: /^Dismiss/ });
+
+    it.each([
+      ['', false],
+      [' (StrictMode)', true],
+    ])(
+      'hands focus to the loop’s button where it lands back, not to <body>%s',
+      async (_, strict) => {
+        const { view, refuse } = await refusedFinish({ strict });
+        refuse();
+        await alertUnder(view, 'Intro');
+        await waitFor(() => expect(finishIntro(view)).toHaveFocus());
+      },
+    );
+
+    it('a refused Reopen hands focus back to the loop’s Reopen', async () => {
+      const view = renderPanel({
+        loops: [loopRow('intro', { ...intro, status: 'finished' }), late],
+      });
+      const refuse = view.table.holdNext('update');
+      view.table.failNext('update', 'nope');
+      (await view.panel.findByRole('button', { name: 'Reopen Intro' })).focus();
+      await view.user.keyboard('{Enter}');
+      await waitFor(() => expect(finishIntro(view)).toHaveFocus());
+      refuse();
+      await alertUnder(view, 'Intro');
+      await waitFor(() =>
+        expect(view.panel.getByRole('button', { name: 'Reopen Intro' })).toHaveFocus(),
+      );
+    });
+
+    it('leaves focus where the user has since put it', async () => {
+      const { view, refuse } = await refusedFinish();
+      const elsewhere = view.play('Late');
+      elsewhere.focus();
+      refuse();
+      await alertUnder(view, 'Intro');
+      await settle();
+      expect(elsewhere).toHaveFocus();
+    });
+
+    it('Dismiss puts the message away, sends nothing, and leaves focus on the loop’s button', async () => {
+      const { view, refuse } = await refusedFinish();
+      refuse();
+      await alertUnder(view, 'Intro');
+      expect(view.refusedStatusWrites()).toHaveLength(1);
+
+      await view.user.click(dismiss(view));
+
+      await waitFor(() => expect(view.panel.queryByRole('alert')).not.toBeInTheDocument());
+      expect(view.panel.queryByRole('button', { name: /^Dismiss/ })).not.toBeInTheDocument();
+      expect(finishIntro(view)).toHaveFocus();
+      expect(view.refusedStatusWrites()).toHaveLength(0);
+      // Only the message went: the loop is as it was, and nothing more was sent.
+      expect(view.names()).toEqual(['Intro', 'Late']);
+      expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+      // And the button still works.
+      await view.user.click(finishIntro(view));
+      await waitFor(() => expect(finishedNames(view)).toEqual(['Intro']));
+    });
+
+    it('Dismiss leaves another loop’s refusal where it is', async () => {
+      const { view, refuse } = await refusedFinish();
+      refuse();
+      await alertUnder(view, 'Intro');
+      const refuseLate = view.table.holdNext('update');
+      view.table.failNext('update', 'nope');
+      await view.press('Mark finished Late');
+      await view.panel.findByRole('button', { name: 'Reopen Late' });
+      refuseLate();
+      await alertUnder(view, 'Late');
+
+      await view.user.click(dismiss(view));
+
+      await waitFor(() => expect(view.item('Intro').queryByRole('alert')).not.toBeInTheDocument());
+      expect(view.item('Late').getByRole('alert')).toBeInTheDocument();
+    });
+
+    it('is gone on coming back to the page', async () => {
+      const { view, refuse } = await refusedFinish();
+      refuse();
+      await alertUnder(view, 'Intro');
+
+      view.leave();
+      await waitFor(() => expect(view.refusedStatusWrites()).toHaveLength(0));
+
+      const panel = view.comeBack();
+      await panel.findByRole('button', { name: 'Mark finished Intro' });
+      await settle();
+      expect(panel.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('a write still on its way when the page is left is not thrown away with the messages', async () => {
+      const view = renderPanel();
+      const release = view.table.holdNext('update');
+      await view.press('Mark finished Intro');
+      await view.panel.findByRole('button', { name: 'Reopen Intro' });
+
+      view.leave();
+      await settle();
+      release();
+
+      await waitFor(() => expect(view.table.sent('update')).toEqual([{ status: 'finished' }]));
+      const panel = view.comeBack();
+      expect(await panel.findByRole('button', { name: 'Reopen Intro' })).toBeInTheDocument();
+    });
+
+    it('the prompt’s refusal can be dismissed there, and is then said nowhere', async () => {
+      const view = renderPanel({ loops: [intro, atTarget] });
+      await view.playLoop('Late');
+      view.enginePlays();
+      const refuse = view.table.holdNext('update');
+      view.table.failNext('update', 'nope');
+      await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
+      await waitFor(() => expect(finishedNames(view)).toEqual(['Late']));
+      refuse();
+      expect(await view.panel.findByTestId('finish-prompt')).toHaveTextContent(
+        "Couldn't mark the loop finished.",
+      );
+
+      await view.user.click(prompt(view).getByRole('button', { name: /^Dismiss/ }));
+
+      await waitFor(() => expect(view.panel.queryByRole('alert')).not.toBeInTheDocument());
+      expect(prompt(view).getByRole('button', { name: 'Mark finished' })).toHaveFocus();
+    });
+
+    // 20 batch 8, Test. What else can be on the page when the refusal lands: each of these
+    // has taken the loop's status button away, or put the user somewhere else.
+    /** The refusal is in: said by the cache, whatever the page shows of it. */
+    const refusalLanded = (view: View) =>
+      waitFor(() => expect(view.refusedStatusWrites()).toHaveLength(1));
+
+    it('with focus fallen to <body> meanwhile (a click on the page’s text), goes to the loop’s button', async () => {
+      const { view, refuse } = await refusedFinish();
+      (document.activeElement as HTMLElement).blur();
+      expect(document.body).toHaveFocus();
+      refuse();
+      await alertUnder(view, 'Intro');
+      await waitFor(() => expect(finishIntro(view)).toHaveFocus());
+    });
+
+    it('landing while the loop form has replaced the list, leaves focus in the form; the message is there when the list is back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.press('Edit Late');
+      const name = await view.panel.findByLabelText('Name');
+      name.focus();
+      refuse();
+      await refusalLanded(view);
+      await settle();
+      expect(name).toHaveFocus();
+      // The form is still the form: nothing of the list was drawn over it.
+      expect(view.panel.queryByRole('alert')).not.toBeInTheDocument();
+
+      await view.press('Cancel');
+
+      await alertUnder(view, 'Intro');
+      expect(dismiss(view)).toBeInTheDocument();
+      // The form's own hand-over, to the button that opened it, is not taken by the refusal.
+      await waitFor(() => expect(view.more('Late')).toHaveFocus());
+      expect(view.names()).toEqual(['Intro', 'Late']);
+    });
+
+    it('landing while the form the loop’s own Edit opened is up, leaves focus in the form', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.press('Edit Intro');
+      const name = await view.panel.findByLabelText('Name');
+      name.focus();
+      refuse();
+      await refusalLanded(view);
+      await settle();
+      expect(name).toHaveFocus();
+      expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+    });
+
+    it('landing while the loop’s "Delete …?" question is up, takes the question away with the move and leaves focus on a control of the loop', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.press('Delete Intro');
+      const question = await view.panel.findByRole('group', { name: 'Delete Intro' });
+      await waitFor(() => expect(question).toHaveFocus());
+      refuse();
+      await alertUnder(view, 'Intro');
+      // The item is drawn anew among the active loops, without its question: nothing is
+      // deleted, and focus is on the loop's button there, not on <body>.
+      await waitFor(() => expect(finishIntro(view)).toHaveFocus());
+      expect(view.panel.queryByRole('group', { name: 'Delete Intro' })).not.toBeInTheDocument();
+      expect(view.table.sent('delete')).toEqual([]);
+      expect(view.names()).toEqual(['Intro', 'Late']);
+    });
+
+    it('landing while another loop’s "Delete …?" question has focus, leaves it there', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.press('Delete Late');
+      const question = await view.panel.findByRole('group', { name: 'Delete Late' });
+      await waitFor(() => expect(question).toHaveFocus());
+      refuse();
+      await alertUnder(view, 'Intro');
+      await settle();
+      expect(question).toHaveFocus();
+    });
+
+    it('landing while the sheet is closed, leaves focus on the header that closed it; the message is there when it opens', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.user.click(view.header());
+      expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+      expect(view.header()).toHaveFocus();
+      refuse();
+      await refusalLanded(view);
+      await settle();
+      expect(view.header()).toHaveFocus();
+
+      await view.user.click(view.header());
+      await alertUnder(view, 'Intro');
+      await settle();
+      // Opening the sheet is the user's press: focus stays on it.
+      expect(view.header()).toHaveFocus();
+      expect(dismiss(view)).toBeInTheDocument();
+    });
+
+    it('Dismiss by keyboard: Enter on it leaves focus on the loop’s button, never on <body>', async () => {
+      const { view, refuse } = await refusedFinish();
+      refuse();
+      await alertUnder(view, 'Intro');
+      dismiss(view).focus();
+      await view.user.keyboard('{Enter}');
+      await waitFor(() => expect(view.panel.queryByRole('alert')).not.toBeInTheDocument());
+      expect(document.body).not.toHaveFocus();
+      expect(finishIntro(view)).toHaveFocus();
+    });
+
+    // The screen that asked has gone when the answer comes: nothing heard it, so nothing can
+    // take focus for it, and the message is the only sign the change did not hold.
+    it('refused after the page was left: said on coming back, with Dismiss, and without taking focus', async () => {
+      const view = renderPanel();
+      const refuse = view.table.holdNext('update');
+      view.table.failNext('update', 'nope');
+      await view.press('Mark finished Intro');
+      await view.panel.findByRole('button', { name: 'Reopen Intro' });
+
+      view.leave();
+      // Past the tick in which leaving puts refusals away: this one comes after it.
+      await settle();
+      refuse();
+      await refusalLanded(view);
+
+      const panel = view.comeBack();
+      const item = () =>
+        within(
+          panel
+            .getAllByRole('listitem')
+            .find((li) => within(li).queryByText('Intro', { selector: 'p' })) ?? document.body,
+        );
+      await waitFor(() =>
+        expect(item().getByRole('alert')).toHaveTextContent("Couldn't mark the loop finished."),
+      );
+      expect(panel.getByRole('button', { name: 'Mark finished Intro' })).toBeInTheDocument();
+      await settle();
+      expect(document.body).toHaveFocus();
+
+      await view.user.click(item().getByRole('button', { name: /^Dismiss/ }));
+      await waitFor(() => expect(panel.queryByRole('alert')).not.toBeInTheDocument());
+      expect(panel.getByRole('button', { name: 'Mark finished Intro' })).toHaveFocus();
+      expect(view.refusedStatusWrites()).toHaveLength(0);
+    });
+
+    // 20 batch 8, Review: it was never on show, so leaving doesn't put it away (Test's bug 1).
+    it('refused in the tick between leaving and the messages being put away: kept, and said on coming back', async () => {
+      const view = renderPanel();
+      const refuse = view.table.holdNext('update');
+      view.table.failNext('update', 'nope');
+      await view.press('Mark finished Intro');
+      await view.panel.findByRole('button', { name: 'Reopen Intro' });
+
+      // Left and refused with no task between: the refusal is in before the timer runs.
+      view.leave();
+      refuse();
+      await waitFor(() => expect(view.table.sent('update')).toEqual([{ status: 'finished' }]));
+      await refusalLanded(view);
+      await settle();
+      expect(view.refusedStatusWrites()).toHaveLength(1);
+
+      const panel = view.comeBack();
+      // The loop is active, as the server has it, and the page says the change didn't hold.
+      expect(await panel.findByRole('button', { name: 'Mark finished Intro' })).toBeInTheDocument();
+      expect(await panel.findByRole('alert')).toHaveTextContent("Couldn't mark the loop finished.");
+      expect(panel.queryByRole('region', { name: 'Finished loops' })).not.toBeInTheDocument();
+    });
+
+    // 20 batch 8, Review (Test's bug 1, the Tab page's half): the sheet's list is the only
+    // place the Tab page says a refusal, so one that came with the sheet closed, or with the
+    // loop form over the list, has not been said when the page is left.
+    it('refused with the sheet closed and the page left before it is opened: said on coming back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.user.click(view.header());
+      expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+      refuse();
+      await refusalLanded(view);
+      await settle();
+
+      view.leave();
+      await settle();
+      expect(view.refusedStatusWrites()).toHaveLength(1);
+
+      const panel = view.comeBack();
+      expect(await panel.findByRole('alert')).toHaveTextContent("Couldn't mark the loop finished.");
+      expect(panel.getByRole('button', { name: /^Dismiss/ })).toBeInTheDocument();
+    });
+
+    it('refused with the sheet closed, then seen with the sheet open: gone on coming back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.user.click(view.header());
+      refuse();
+      await refusalLanded(view);
+      await view.user.click(view.header());
+      await alertUnder(view, 'Intro');
+      // Closed again over it: it was seen, which is what counts.
+      await view.user.click(view.header());
+
+      view.leave();
+
+      await waitFor(() => expect(view.refusedStatusWrites()).toHaveLength(0));
+    });
+
+    it('refused with the loop form over the list and the page left with the form still up: said on coming back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.press('New loop');
+      await view.panel.findByRole('form', { name: 'New loop' });
+      refuse();
+      await refusalLanded(view);
+      await settle();
+
+      view.leave();
+      await settle();
+
+      expect(view.refusedStatusWrites()).toHaveLength(1);
+    });
+
+    // Copilot on #41: the song page hides the whole panel under a recording and keeps its
+    // `open`, so an open sheet can be one nobody sees.
+    it('refused with the page on a recording (the sheet open, but hidden) and the page left there: said on coming back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.user.click(screen.getByRole('button', { name: 'Original' }));
+      expect(screen.getByTestId('loop-panel')).not.toBeVisible();
+      refuse();
+      await refusalLanded(view);
+      await settle();
+
+      view.leave();
+      await settle();
+      expect(view.refusedStatusWrites()).toHaveLength(1);
+
+      const panel = view.comeBack();
+      expect(await panel.findByRole('alert')).toHaveTextContent("Couldn't mark the loop finished.");
+    });
+
+    it('refused with the page on a recording, then seen back on the tab: gone on coming back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.user.click(screen.getByRole('button', { name: 'Original' }));
+      refuse();
+      await refusalLanded(view);
+      await view.user.click(screen.getByRole('button', { name: 'Tab' }));
+      await alertUnder(view, 'Intro');
+      // On a recording again when the page is left: it was seen, which is what counts.
+      await view.user.click(screen.getByRole('button', { name: 'Original' }));
+
+      view.leave();
+
+      await waitFor(() => expect(view.refusedStatusWrites()).toHaveLength(0));
+    });
+
+    it('the page opened again in the same tick it was left: the message is put away all the same', async () => {
+      const { view, refuse } = await refusedFinish();
+      refuse();
+      await alertUnder(view, 'Intro');
+
+      view.leave();
+      const panel = view.comeBack();
+
+      await waitFor(() => expect(view.refusedStatusWrites()).toHaveLength(0));
+      await panel.findByRole('button', { name: 'Mark finished Intro' });
+      await waitFor(() => expect(panel.queryByRole('alert')).not.toBeInTheDocument());
+    });
+
+    // Two controls for one loop's status: the prompt's "Mark finished" and the list's button.
+    it('the prompt and the list’s button racing: one write, one message, focus on a control, and one Dismiss for both', async () => {
+      const view = renderPanel({ loops: [intro, atTarget] });
+      await view.playLoop('Late');
+      view.enginePlays();
+      const refuse = view.table.holdNext('update');
+      view.table.failNext('update', 'nope');
+      await view.user.click(prompt(view).getByRole('button', { name: 'Mark finished' }));
+      const reopen = await view.panel.findByRole('button', { name: 'Reopen Late' });
+      await waitFor(() => expect(reopen).toHaveFocus());
+      // The second control, pressed under the first one's write: locked, nothing sent.
+      expectLocked(reopen);
+      await view.user.click(reopen);
+      await view.user.keyboard('{Enter}');
+      refuse();
+
+      expect(await view.panel.findByTestId('finish-prompt')).toHaveTextContent(
+        "Couldn't mark the loop finished.",
+      );
+      expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+      expect(view.refusedStatusWrites()).toHaveLength(1);
+      expect(view.panel.getAllByRole('alert')).toHaveLength(1);
+      expect(view.panel.getAllByRole('button', { name: /^Dismiss/ })).toHaveLength(1);
+      // Focus followed the loop to "Reopen", which went with the move back.
+      await waitFor(() =>
+        expect(view.panel.getByRole('button', { name: 'Mark finished Late' })).toHaveFocus(),
+      );
+
+      // "Not yet": the prompt goes and the loop's own button says it, still once.
+      await view.user.click(prompt(view).getByRole('button', { name: 'Not yet' }));
+      await waitFor(() =>
+        expect(view.item('Late').getByRole('alert')).toHaveTextContent(
+          "Couldn't mark the loop finished.",
+        ),
+      );
+      expect(view.panel.getAllByRole('alert')).toHaveLength(1);
+
+      await view.user.click(view.item('Late').getByRole('button', { name: /^Dismiss/ }));
+      await waitFor(() => expect(view.panel.queryByRole('alert')).not.toBeInTheDocument());
+      expect(view.refusedStatusWrites()).toHaveLength(0);
+      expect(view.panel.getByRole('button', { name: 'Mark finished Late' })).toHaveFocus();
+      expect(view.table.sent('update')).toEqual([{ status: 'finished' }]);
+    });
+
+    it('the prompt’s refused Mark finished leaves focus on the loop’s own button, back among the active loops', async () => {
+      const view = renderPanel({ loops: [intro, atTarget] });
+      await view.playLoop('Late');
+      view.enginePlays();
+      const refuse = view.table.holdNext('update');
+      view.table.failNext('update', 'nope');
+      const finish = prompt(view).getByRole('button', { name: 'Mark finished' });
+      finish.focus();
+      await view.user.keyboard('{Enter}');
+      await waitFor(() =>
+        expect(view.panel.getByRole('button', { name: 'Reopen Late' })).toHaveFocus(),
+      );
+      refuse();
+      await view.panel.findByTestId('finish-prompt');
+      await waitFor(() =>
+        expect(view.panel.getByRole('button', { name: 'Mark finished Late' })).toHaveFocus(),
+      );
+    });
   });
 
   it('with the prompt’s write on its way, focus is on the loop’s Reopen at once', async () => {

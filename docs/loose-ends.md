@@ -251,6 +251,10 @@ Acceptance: going offline with a video on screen leaves its frame in place; open
 
 ### Batch 8. Focus and small jumps (S)
 
+**Done** (branch `le-8-focus`; `docs/units/20-loose-ends.md`, Batch 8). What it chose to live with is in the plan's Accepted section as 20.8a to 20.8d.
+
+As built, where it differs from the lines below: the list hands focus on after a refusal, not the remounted button (`useLoopStatusRefusals`' `onRefused`, with `findStatusButtonAfterRefusal`), and on the song's page the loop's "More" takes it, since the change is in that menu; leaving a screen puts away only the refusals it had on show, so one that landed behind a closed sheet, under the loop form or on another loop's practice screen is still said where its loop is listed (Review); all three places say which change was refused, from `statusRefusalCopy`; focus given up by a tap outside the bar is not pulled back onto the count-in (Review); `SongOverviewPage.tsx`, `LoopPanel.tsx`, `LoopPracticePage.tsx`, `FinishPrompt.tsx` and `itemFocus.ts` changed too. Review also made the practice screen fit a 320 px phone (the band's speed and Play, older than this batch).
+
 - **13.21** A refused "Mark finished" or "Reopen" moves the loop back after focus followed it, and focus falls to `<body>`. Fix: when the loop's latest status write turns to `error`, `LoopStatusButton` (remounted in its old place) takes focus if focus is on `<body>`. Test: `LoopPanel.test.tsx` and `SongOverviewPage.test.tsx` with `holdNext` then `failNext`.
 - **13.35c** That refusal's error stays under the loop for up to five minutes. Fix: `useSetLoopStatus` returns a `dismiss` that removes the errored mutation from the cache; a "Dismiss" button on the alert, and the same on unmount of the page. Test: same files.
 - **13.37a** With focus on "When to count in", C cycling the count-in to Off removes that group and focus falls to `<body>`. Fix: `useFocusKeptInBar` also runs when the count-in bars change, and prefers the bars' checked option. Test: `PlayerControls.test.tsx`.

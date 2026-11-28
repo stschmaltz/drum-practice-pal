@@ -1,3 +1,4 @@
+import { useRef, type ReactNode } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { Icon } from '@/components/icons';
 import { quietButtonClass } from '@/components/styles';
@@ -5,6 +6,7 @@ import { failureCopy } from '@/lib/errorCopy';
 import type { LoopStatus } from '@/lib/schema';
 import { statusButtonAttributes } from './loopFocus';
 import type { Loop } from './loopForm';
+import { statusRefusalCopy } from './loopLabels';
 import { useSetLoopStatus } from './useLoops';
 
 /**
@@ -29,10 +31,12 @@ export function LoopStatusButton({
 }) {
   const status = useSetLoopStatus(loop.song_id, loop.id);
   const finished = loop.status === 'finished';
+  const button = useRef<HTMLButtonElement>(null);
 
   return (
     <>
       <button
+        ref={button}
         type="button"
         className={quietButtonClass}
         // Locked while any control is changing this loop's status, not only this one. Locked,
@@ -51,12 +55,46 @@ export function LoopStatusButton({
         {finished ? 'Reopen' : 'Mark finished'}
         <span className="sr-only"> {loop.name}</span>
       </button>
-      {showError && status.error && (
+      {showError && status.error && status.refused && (
         // After the row's other buttons, whatever the button's own place in it.
         <div className="order-last basis-full">
-          <ErrorAlert>Couldn't change the loop. {failureCopy(status.error)}</ErrorAlert>
+          <StatusRefusal
+            loopName={loop.name}
+            onDismiss={() => {
+              // "Dismiss" goes with the message: the button it was about takes focus first.
+              button.current?.focus();
+              status.dismissError();
+            }}
+          >
+            {statusRefusalCopy(status.refused)} {failureCopy(status.error)}
+          </StatusRefusal>
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Why a loop's status change was refused, with "Dismiss" to put the message
+ * away (13.35c): it is read from the failed write, which the mutation cache
+ * keeps for minutes. `onDismiss` also says where focus goes, since the button
+ * leaves with the message.
+ */
+export function StatusRefusal({
+  loopName,
+  onDismiss,
+  children,
+}: {
+  loopName: string;
+  onDismiss: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <ErrorAlert>{children}</ErrorAlert>
+      <button type="button" className={quietButtonClass} onClick={onDismiss}>
+        Dismiss<span className="sr-only"> the message about {loopName}</span>
+      </button>
+    </div>
   );
 }

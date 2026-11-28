@@ -1,4 +1,4 @@
-import { speedLabel } from './loopLabels';
+import { speedLabel, statusRefusalCopy } from './loopLabels';
 
 describe('speedLabel', () => {
   it.each([
@@ -13,5 +13,12 @@ describe('speedLabel', () => {
 
   it('gives only the percent until the tempo is known', () => {
     expect(speedLabel(0.85, null)).toBe('85%');
+  });
+});
+
+describe('statusRefusalCopy', () => {
+  it('says which change the server refused', () => {
+    expect(statusRefusalCopy('finished')).toBe("Couldn't mark the loop finished.");
+    expect(statusRefusalCopy('active')).toBe("Couldn't reopen the loop.");
   });
 });

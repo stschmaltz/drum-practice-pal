@@ -43,6 +43,11 @@ export function isItemListed(itemId: string): boolean {
   return document.querySelector(`[data-item="${itemId}"]`) !== null;
 }
 
+/** Whether the element is part of this item, wherever the item is listed now. */
+export function isInItem(itemId: string, element: Element): boolean {
+  return element.closest(`[data-item="${itemId}"]`) !== null;
+}
+
 /**
  * The item focus moves to when `leavingId` leaves `ids` (a list on show): the
  * one after it, or the one before when it was last; null when it was alone.
