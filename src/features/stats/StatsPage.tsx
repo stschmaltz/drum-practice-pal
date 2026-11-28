@@ -6,6 +6,7 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
 import { linkClass, sectionHeadingClass } from '@/components/styles';
 import { usePracticeLoops } from '@/features/loops/useLoops';
+import { DAY_SPEED_NOTE } from '@/features/practice/sessions';
 import { useAllSessions } from '@/features/practice/useSessions';
 import { failureCopy } from '@/lib/errorCopy';
 import { waitsForNetwork } from '@/lib/network';
@@ -156,10 +157,7 @@ function Stats({ sessions, loops }: StatsData) {
       </div>
 
       <StatsSection id="progress-heading" title="Loop progress" aside={ALL_TIME}>
-        <p className="max-w-prose text-sm text-ink-muted">
-          Each day counts at the speed you spent the most time at, so a quick try at full speed
-          isn&apos;t a day at full speed.
-        </p>
+        <p className="max-w-prose text-sm text-ink-muted">{DAY_SPEED_NOTE}</p>
         <LoopProgressList sessions={sessions} loops={loops} now={now} />
         <NeglectedLoops sessions={sessions} loops={loops} now={now} />
       </StatsSection>

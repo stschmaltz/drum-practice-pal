@@ -7,7 +7,9 @@ One section per batch of `docs/loose-ends.md`.
 The running list for Shane (`docs/loose-ends.md`, Decisions for Shane, has each decision's options and reasoning). Each was built without waiting for an answer; he can overrule any of them.
 
 - **D1, does the Tab page still play loops?** Built: **A**, keep the loop sheet and fix its three cheap faults (batch 4, built here: the count-in that starts a run closes the sheet, focus goes to its header, the reopened sheet shows the playing loop; typed bars come on screen under either answer). Not built: B, make the sheet a list of links to the practice screen (a unit of its own, never started without his say).
+- **D4, should a loop's History group sessions by day?** Built: **B**, one row per day practised (batch 5): the day, its play time, the speed most of it was played at (the slower on a tie, the Stats chart's rule) and its passes. Sessions are stored one per stop, as before. Not built: A, leave a row per session.
 - **D9, which count-ins close the Tab page's loop sheet?** (new with batch 4) Built: **A**, only the count-in that starts a run, and never while the loop form is open. With "before every repeat", a sheet opened mid-loop stays open and each repeat's count-in is heard but not seen behind it on a phone and a tablet. Not built: B, every count-in closes it (one line, but the sheet then closes under the finger at every pass); C, A plus a beat count in the sheet's header (QA's idea, small).
+- **D10, what does History say about a day that had a try at full speed?** (new with batch 5) Built: **A**, one line under the History's total, in the Stats page's own sentence: "Each day counts at the speed you spent the most time at, so a quick try at full speed isn't a day at full speed." Not built: B, "mostly 80%" in each row; C, the day's top speed beside it ("80%, up to 100%"), which needs the tracker to keep that speed and a column to store it.
 
 ## Batch 1: A slow connection never holds up Play
 
@@ -911,3 +913,69 @@ Walked with Playwright (Chromium) on a development build at `E2E_PORT=4383` agai
 **Cleanup**
 
 Seventeen users recorded, plus a handful the fixture made for skipped cases and for the re-runs of `practice.spec.ts` and `stats.spec.ts`; every one was deleted by the `user` fixture (files first), and a listing by the service role afterwards finds no `e2e-qa-b5-` user. The preview server was Playwright's own and stopped with each run; nothing listens on 4383 or 5383. The temporary spec `tests/e2e/qa-b5.spec.ts` was removed. `npm run check` green after the cosmetic fix (146 files, 5767 tests).
+
+### Review
+
+Merged `origin/main` first (batches 1, 2 and 4): two conflicts, both "keep both" (`tests/e2e/practicePage.ts` has `addSessions` and `addLoops`; this note has the batches in order 1, 2, 4, 5). Then every line of `git diff origin/main...HEAD`, tests and the e2e helper included, against `docs/review-checklist.md`.
+
+**Inventory** (the stateful pieces the diff adds or changes)
+
+- `sessionTracker.ts`: the reducer `observe`, with `speedTimes`, `withStretchBanked`, `mainSpeedRatio`, `recordOf` / `recordIfLongEnough`. No hook changed; `usePracticeTracker.ts` and its three ways out are as they were.
+- `sessions.ts`: `historyDays` (pure), `HistoryDay`; `practiceTimeLabel` removed.
+- `LoopHistory.tsx`: one piece of state (`showAll`) and one handler ("Show all N days"); its query (`useLoopSessions`) and the cache write that feeds it while open (`sessionLogged`) are unchanged.
+- `sessionsApi.ts` `fetchLoopSessions`: unchanged by Build, but what it returns is now added up (finding 1).
+- Tests and helpers: `sessionTracker.test.ts`, `sessions.test.ts`, `LoopHistory.test.tsx`, `usePracticeTracker.test.tsx`, `LoopPanel.test.tsx`, `practice.spec.ts`, `practicePage.ts` (`addSessions`, by the service role).
+- No mutation, migration, engine listener, timer or script.
+
+**Behaviour pass**
+
+- _Interleavings._ The tracker has no async window of its own; the record is built once, before any send, and Test's "window by window" describes (tracker and hook) cover a speed change during a pending log, a failed keepalive, "Try again", the outbox, both count-ins, a hidden page, a loop switch in the same render and StrictMode. History open while a session is logged: the cache write is deduped by id and the list regroups (tests for before and after the refetch, the same session heard twice). A read in pages while a session is logged: finding 1. "Done once on cached data", "a wait that comes back", "kept per value": nothing in the diff latches or waits. History left open past midnight keeps its "Today" until the next render (batch 9's class, 17.4b; not made worse).
+- _Gates._ No control gained or lost a gate. "Show all" has no precondition beyond being drawn (`days.length > shown.length`).
+- _Gestures._ None added. "Show all" is a control that leaves the page with its own press: finding 2.
+- _Round trips._ The exact ratio survives both steps: the tracker keeps the ratio last played of each percent shown and logs it (0.708333, not 0.71), and `historyDays` keeps the ratio last played of the day's percent, so a typed BPM reads back as typed (93 BPM for 0.775, where 78% would say 94). Speeds are compared as the percent shown in both.
+- _Validated paths._ No input crosses a boundary: History reads rows the database already checked, `<time datetime>` is a day key built from numbers, and no text from a URL or an error is drawn.
+- _What is drawn._ A row's passes are one unbreakable piece (QA's fix); the new line under the total is `text-ink-muted` on `surface`, as the rows are. e2e measures the History for text outside its box, the new line in it.
+
+**Findings**
+
+1. **Fixed. `fetchLoopSessions` could return a session twice, and a day's row now adds them up** (`src/features/practice/sessionsApi.ts`; checklist 5, "Pages read by offset while rows are being added"). The read is newest first in pages of 500; a session logged between two page requests sorts before the offset, so the next page starts with the last row of the page before. `fetchAllSessions` has had `uniqueById` for this since PR 30; the loop's own read did not. Until this batch the copy would have shown as a second row (and a duplicate React key); with one row per day it would silently double that session's time and passes in its day and in "in all". It needs more than 500 sessions on one loop and a session logged during the read, so it is rare, but nothing would ever show it. Test first: `sessionsApi.test.ts`, "keeps one copy of a session that two pages both returned" (502 rows before the fix). The row missed by such a read is the one just logged, which `sessionLogged` adds to the cache and then invalidates, as for the Stats read.
+2. **Fixed (QA issue 3). "Show all N days" dropped focus to `<body>`** (`src/features/practice/LoopHistory.tsx`; checklist 5, "Focus when a control replaces itself"). The press now hands focus to the first day it brought on show (the eleventh row, `tabIndex={-1}`, with the focus ring), through `useFocusWhenReady` from the press handler, so a keyboard or screen reader carries on reading where the list grew. Only that one row can take focus, and only once "Show all" is pressed. Tests first: `LoopHistory.test.tsx`, "“Show all” hands focus to the first day it brought on show" (failed with focus on `<body>`); e2e, `practice.spec.ts`, the History case presses "Show all 13 days" with Enter and expects the eleventh row focused.
+3. **Fixed (QA issue 1, now D10). Nothing on the History said the rule a day's speed follows** (`LoopHistory.tsx`, `sessions.ts`, `src/features/stats/StatsPage.tsx`). One line under the total: "Each day counts at the speed you spent the most time at, so a quick try at full speed isn't a day at full speed." The sentence is `DAY_SPEED_NOTE` in `sessions.ts` (pure), imported by the History and by the Stats page, whose own copy of it is gone, so the two can't drift. Nothing else in `src/features/stats/` changed. Not shown over an empty history. Tests first: `LoopHistory.test.tsx`, "the rule a day's speed follows" (2); the e2e History case reads it. Written up as D10 in `docs/loose-ends.md` with the two other options, and in the list at the top of this note.
+
+**Checked and left**
+
+- _A session's tie goes to the later speed, a day's to the slower._ Different questions, as Build says; both pinned by tests. No change.
+- _The day rule is written twice_ (`historyDays`, `dailySpeeds`). Left: sharing is not trivially safe. `historyDays` keeps the exact ratio and folds a day after today into today; `dailySpeeds` does neither and is read by the chart, the progress list and the records. The equality test over a table and a made-up season holds them together. Accepted as 20.5c.
+- _A session dated ahead of the device's clock_ (History "1 day", Stats "2 days" until tomorrow). Not a one-line fold: `dailySpeeds` has no `now`, so folding there means a new argument through `loopProgress` and its callers. Accepted as 20.5b.
+- _QA issue 2_ (a row is a run of text; speeds don't line up; some rows wrap in the phone sheet). A redesign of the row, which wants real rows to judge. Accepted as 20.5a, with a row in Open human checks.
+- _`mainSpeedRatio` over entries with no time._ A speed set and changed again in the same instant banks an entry of 0 ms; it can only win a tie against other 0 ms entries, in a session too short to log.
+- _A stretch across a clock set back_ counts as nothing, as before; one before a speed change is now kept (Build's note). Neither can make `speedTimes` and `playedMs` disagree: both are added to in the one function.
+- _`addSessions` (e2e helper)._ Both results checked and thrown; rows go by the service role for the fixture's own user, which the `user` fixture deletes. Days are built from local calendar days (`dayAt`), older ones at noon; today's at the day's first seconds, so they are ahead of the clock only in a run that starts within two seconds of midnight, where the app folds them into today anyway.
+- _`LoopPanel.test.tsx`'s UTC timestamps._ Its three sessions of 20 November (19:42 to 19:53 UTC) fall on one local day in every zone (a zone would need an offset between 4:07 and 4:18 hours to split them).
+- _Sessions stored before this change_ keep the end speed they were logged with. Nothing rewrites them, and nothing should without Shane (no migration in this unit).
+
+**Vacuous-test checks** (each restored)
+
+| Break                                                         | Failed                                                                         |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `fetchLoopSessions` without `uniqueById` (the code as it was) | "keeps one copy of a session that two pages both returned" (502 rows, not 501) |
+| "Show all" without the hand-over                              | "“Show all” hands focus to the first day it brought on show"                   |
+| History without the line                                      | "is said under the summary, in the sentence the Stats page uses"               |
+
+Test's own table (the old end-speed rule, ties, banking, `historyDays`' rules) was read against the tests it names and not run again.
+
+**Plan upkeep**
+
+- `docs/plan.md`: deleted the Carried forward lines 17.1 (Unit 17) and D4 / 13.18b (Unit 13). Unit 20: batch 5 marked done, D4 marked built, D10 added to Decisions for Shane. Data model: `practice_sessions.speed_ratio` is "The speed most of the session was played at (the later on a tie)". Rules: a session is logged at that speed, not the speed it ended on. Unit 09: "Loop history" is one row per day. Accepted: **20.4f** (the gap batch 4's Copilot round left: "Play loop" for a loop running past the loaded score's end is drawn enabled and a press does nothing), a new group "A loop's History" with **20.5a**, **20.5b**, **20.5c**, and 13.34c reworded now that the row per day is built. Open human checks: a row "History by day" with QA's two checks.
+- `docs/loose-ends.md`: D4 marked built; **D10** added (A the explaining line, built; B "mostly 80%" in each row; C the day's top speed too); Batch 5 marked done with what differs from its lines.
+- This note, "Decisions built as defaults": D4 (B, batch 5) and D10 (A).
+- `docs/review-checklist.md`: no new row; two rows gained a sentence. "Pages read by offset": when one read gets the fix, look for its siblings, most of all a list about to be added up. "Focus when a control replaces itself": a "Show all" that goes with its own press is one of these.
+- `AGENTS.md` (Practice sessions): `DAY_SPEED_NOTE` as the one string for a rule two features state; both session reads pass through `uniqueById`; "Show all" hands focus to the first row it added.
+
+**Checks**
+
+`npm run check` green: 147 test files (146 passed, 1 skipped), 5,831 tests (5,829 passed, 2 skipped). e2e at `E2E_PORT=4383` (free before, no listener after), phone and desktop, `practice.spec.ts`, `stats.spec.ts` and `design.spec.ts`: 64 passed, 4 skipped (the phone-only cases on desktop), no screenshot rewritten. Not run: tablet, the full e2e suite, `npm run test:db` (no migration, grant or policy changed; the one database-facing change is a dedupe of rows already read).
+
+**Open issues**
+
+None new beyond the Accepted lines above and D10.

@@ -128,6 +128,24 @@ describe('fetchLoopSessions', () => {
     expect(opArgs(calls()[1]!, 'range')).toEqual([PAGE_SIZE, PAGE_SIZE * 2 - 1]);
   });
 
+  // 20 batch 5 Review: the same miss as fetchAllSessions. A session logged between two page
+  // requests (newest first, so it sorts before the offset) makes the next page begin with the
+  // last row of the page before. History adds a day's sessions up, so the copy would double
+  // that session's time and passes in its day's row with nothing to show for it.
+  it('keeps one copy of a session that two pages both returned', async () => {
+    const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) => session(`p1-${i}`));
+    const repeated = firstPage[PAGE_SIZE - 1]!;
+    queryResult
+      .mockResolvedValueOnce(ok(firstPage))
+      .mockResolvedValueOnce(ok([repeated, session('last')]));
+
+    const sessions = await fetchLoopSessions(USER, LOOP);
+
+    expect(sessions).toHaveLength(PAGE_SIZE + 1);
+    expect(sessions.filter((each) => each.id === repeated.id)).toHaveLength(1);
+    expect(sessions.at(-1)?.id).toBe('last');
+  });
+
   it('throws when a page fails, the second included', async () => {
     const fullPage = Array.from({ length: PAGE_SIZE }, (_, i) => session(`p1-${i}`));
     queryResult.mockResolvedValueOnce(ok(fullPage)).mockResolvedValueOnce(fail('boom'));

@@ -133,6 +133,14 @@ export function totalPracticeSeconds(
   return sessions.reduce((total, session) => total + session.duration_seconds, 0);
 }
 
+/**
+ * The rule a day's speed follows, as the user is told it: under Loop progress
+ * on the Stats page and in a loop's History, which draw the same days. One
+ * string, so the two can't come to say different things.
+ */
+export const DAY_SPEED_NOTE =
+  "Each day counts at the speed you spent the most time at, so a quick try at full speed isn't a day at full speed.";
+
 /** One day of a loop's history: every session begun that day, added up. */
 export interface HistoryDay {
   /** The device's calendar day, "2026-11-23". */

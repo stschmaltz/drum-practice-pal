@@ -4,7 +4,7 @@ import { queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupa
 import { settle, signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import { HISTORY_PREVIEW_COUNT, LoopHistory } from './LoopHistory';
 import { sessionKeys } from './sessionKeys';
-import type { PracticeSession } from './sessions';
+import { DAY_SPEED_NOTE, type PracticeSession } from './sessions';
 import type { SessionRecord } from './sessionTracker';
 import { sessionLogged } from './useSessions';
 
@@ -190,6 +190,30 @@ describe('a row per day', () => {
   });
 });
 
+// 20 batch 5 QA, issue 1 (D10): a day with a try at full speed reads 80%, and nothing on
+// the History said why. It says the rule in the Stats page's own words.
+describe("the rule a day's speed follows", () => {
+  it('is said under the summary, in the sentence the Stats page uses', async () => {
+    const view = renderHistory([
+      session(at(0, 19, 0), { duration_seconds: 600 }),
+      session(at(0, 19, 12), { duration_seconds: 60, speed_ratio: 1 }),
+    ]);
+
+    expect(await view.rows()).toEqual(['Today · 11 min · 80% (96 BPM) · 10 passes']);
+    expect(view.region().getByText(DAY_SPEED_NOTE)).toBeInTheDocument();
+    expect(DAY_SPEED_NOTE).toBe(
+      "Each day counts at the speed you spent the most time at, so a quick try at full speed isn't a day at full speed.",
+    );
+  });
+
+  it('is not said over an empty history', async () => {
+    renderHistory([]);
+
+    expect(await screen.findByText(/No practice logged yet/)).toBeInTheDocument();
+    expect(screen.queryByText(DAY_SPEED_NOTE)).not.toBeInTheDocument();
+  });
+});
+
 describe('the days on show', () => {
   /** `sessionsPerDay` sessions on each of the last `days` days. */
   const daysOfPractice = (days: number, sessionsPerDay = 1) =>
@@ -217,6 +241,26 @@ describe('the days on show', () => {
     expect(await view.rows()).toHaveLength(10);
     expect(view.summary()).toBe('10 days · 40 min in all');
     expect(view.region().queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  // 20 batch 5 QA, issue 3: the button leaves the page with the press, and focus fell to
+  // <body>. It goes to the first day the press brought on, so reading carries on from there.
+  it('"Show all" hands focus to the first day it brought on show', async () => {
+    const view = renderHistory(daysOfPractice(13));
+    await view.rows();
+    const showAll = view.region().getByRole('button', { name: 'Show all 13 days' });
+    showAll.focus();
+
+    await view.user.keyboard('{Enter}');
+
+    const rows = view.region().getAllByRole('listitem');
+    expect(rows).toHaveLength(13);
+    await waitFor(() => expect(rows[HISTORY_PREVIEW_COUNT]).toHaveFocus());
+    // Ten days back: the eleventh row.
+    expect(within(rows[HISTORY_PREVIEW_COUNT]!).getByRole('time')).toHaveAttribute(
+      'datetime',
+      '2026-11-13',
+    );
   });
 
   it('offers the eleventh day', async () => {

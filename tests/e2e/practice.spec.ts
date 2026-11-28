@@ -574,8 +574,14 @@ test('a loop’s History is a row per day: today’s sessions together, ten days
   expect((await rows.allTextContents()).filter((row) => /\d:\d\d/.test(row))).toEqual([]);
   expect(await textSpillingOutOf(history)).toEqual([]);
 
-  await history.getByRole('button', { name: 'Show all 13 days' }).click();
+  // The rule a day's speed follows is said where the 80% is read (D10).
+  await expect(history).toContainText('Each day counts at the speed you spent the most time at');
+
+  // "Show all" by the keyboard: the button goes, and focus goes on to the first day it added.
+  await history.getByRole('button', { name: 'Show all 13 days' }).focus();
+  await page.keyboard.press('Enter');
   await expect(rows).toHaveCount(13);
+  await expect(rows.nth(10)).toBeFocused();
   await expect(history.getByRole('button')).toHaveCount(0);
   expect(await textSpillingOutOf(history)).toEqual([]);
 

@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { LoadingLine } from '@/components/StatusMessages';
-import { buttonClass } from '@/components/styles';
+import { buttonClass, focusRing } from '@/components/styles';
 import { speedLabel } from '@/features/loops/loopLabels';
 import { waitsForNetwork } from '@/lib/network';
+import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
+  DAY_SPEED_NOTE,
   durationLabel,
   historyDays,
   repeatsLabel,
@@ -35,6 +37,10 @@ export function LoopHistory({
 }) {
   const sessions = useLoopSessions(loopId);
   const [showAll, setShowAll] = useState(false);
+  // "Show all" leaves the page with its own press: focus goes on to the first day it
+  // brought on show, so a keyboard or screen reader carries on from there, not from <body>.
+  const firstNewDay = useRef<HTMLLIElement>(null);
+  const focusWhenReady = useFocusWhenReady();
 
   if (waitsForNetwork(sessions)) {
     return (
@@ -73,13 +79,26 @@ export function LoopHistory({
         {days.length === 1 ? '1 day' : `${days.length} days`} ·{' '}
         {durationLabel(totalPracticeSeconds(sessions.data))} in all
       </p>
+      <p className="text-sm text-ink-muted">{DAY_SPEED_NOTE}</p>
       <ol className="flex flex-col divide-y divide-line">
-        {shown.map((day) => (
-          <HistoryItem key={day.key} day={day} tempo={tempo} />
+        {shown.map((day, index) => (
+          <HistoryItem
+            key={day.key}
+            day={day}
+            tempo={tempo}
+            focusRef={showAll && index === HISTORY_PREVIEW_COUNT ? firstNewDay : undefined}
+          />
         ))}
       </ol>
       {days.length > shown.length && (
-        <button type="button" className={buttonClass} onClick={() => setShowAll(true)}>
+        <button
+          type="button"
+          className={buttonClass}
+          onClick={() => {
+            setShowAll(true);
+            focusWhenReady(() => firstNewDay.current);
+          }}
+        >
           Show all {days.length} days
         </button>
       )}
@@ -87,9 +106,22 @@ export function LoopHistory({
   );
 }
 
-function HistoryItem({ day, tempo }: { day: HistoryDay; tempo: number | null }) {
+function HistoryItem({
+  day,
+  tempo,
+  focusRef,
+}: {
+  day: HistoryDay;
+  tempo: number | null;
+  /** Given to the one row that takes focus when "Show all" goes. */
+  focusRef?: RefObject<HTMLLIElement | null>;
+}) {
   return (
-    <li className="py-1.5 text-sm text-ink-muted tabular-nums">
+    <li
+      ref={focusRef}
+      tabIndex={focusRef ? -1 : undefined}
+      className={`py-1.5 text-sm text-ink-muted tabular-nums ${focusRing}`}
+    >
       <time dateTime={day.key}>{day.label}</time> · {durationLabel(day.seconds)} ·{' '}
       {speedLabel(day.speedRatio, tempo)} ·{' '}
       {/* One piece, so a narrow row never leaves "passes" alone on a line (20 batch 5 QA). */}
