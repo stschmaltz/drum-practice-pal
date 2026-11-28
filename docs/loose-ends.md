@@ -152,6 +152,8 @@ Acceptance: with the song's file on the device and a loops list cached, a loop's
 
 ### Batch 2. Queued practice is never dropped (M)
 
+**Done** (branch `le-2-queued-writes`; `docs/units/20-loose-ends.md`, Batch 2). What it chose to live with is in the plan's Accepted section as 20.2a to 20.2d.
+
 - **13.23** A queued write sent while supabase-js has no session in memory (its refresh failed for the network, a session still stored) goes out as `anon`, is refused with 42501 and is dropped as a real refusal: a session log or a saved speed lost. Fix: in `sendRefreshingToken`, ask `supabase.auth.getSession()` before sending; null while `readStoredSession()` still has one is thrown as a network failure, so the write's retries wait. Give the fake client `auth.getSession`. Test: `tokenRefresh.test.ts` (no session, stored session: retried, nothing sent as anon) and one case in `queuedWrites.test.tsx`.
 - **14.6** `removeOutboxEntry` forgets the id before the row is deleted, so a replay reading in between sends the write once more. Fix: delete the row, then `queuedHere.delete(id)`. Test: `offlineStore.test.ts`, a `takeLeftoverOutboxEntries` raced against a removal returns nothing.
 

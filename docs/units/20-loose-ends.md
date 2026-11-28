@@ -177,3 +177,207 @@ One comment on PR #36 (`useSongSources.ts`, the wait's key), confirmed and fixed
 - **Late answer.** Unchanged: it lands in B's links and offers the recording in the switch, as for a first visit.
 - **Also changed.** `docs/review-checklist.md`: an Interleavings row, "Kept per value, on a screen that outlives its item". `AGENTS.md`, Slow connections: name the wait by everything that makes it that thing.
 - **Checks.** `npm run check` green. No e2e: no spec goes from one song's recording to another's, and nothing an existing spec covers changed.
+
+## Batch 2: Queued practice is never dropped
+
+### Build
+
+Items 13.23 and 14.6 of `docs/loose-ends.md`: "Queued practice is never dropped".
+
+**Summary**
+
+- **13.23.** `sendRefreshingToken` (every queued write goes through it: session logs, loop edits, a song's played time) now asks `supabase.auth.getSession()` before it sends. With no session in memory while one is still in storage (supabase-js's refresh of an expired token failed for the connection) it sends nothing and throws `SessionNotLoadedError`, which `isNetworkFailure` counts as the connection's failure. So the write's retries wait, the optimistic value stays, the outbox entry stays, and nothing goes out signed as `anon`. Each retry asks `getSession()` again, which is also what makes supabase-js try its refresh again, so a retry changes what was wrong. With no session stored either (signed out) the write goes to the server as before and its refusal is final. A real refusal (a missing grant, a check) is untouched: it still fails and rolls back.
+- **14.6.** `removeOutboxEntry` deletes the row first and forgets the id after, so a replay whose read found the row before the delete landed still sees the id as this page's and leaves it. Two cases the plain reorder would have got wrong are handled: a row that could not be deleted keeps its id claimed (this page never replays an answered write; the next page sends it once more, harmless as before), and an id queued again while its last removal is still deleting is not forgotten by that removal (each claim has a number; the removal forgets only the claim it saw).
+
+**Walk-through** (`docs/product.md`)
+
+- Day one with a song: signed in with a session in memory, the only change is one awaited `getSession()` (answered from memory) before a write. Nothing new on screen, no new step.
+- Missing a piece (no tab, no loops): the only queued write such a song has is its played time (`songPlayed.ts`), which takes the same path and is held back the same way.
+- Offline at the jam space: the write is paused by TanStack Query as before and `sendRefreshingToken` isn't reached. On reconnect with an expired token, `getSession()` refreshes it before the send; if that refresh fails for the connection (a captive portal, one bar of signal) the write waits for its next retry rather than being dropped, which is the bug.
+
+No forced order, no chore, nothing a user does differently.
+
+**Files touched**
+
+- `src/lib/network.ts`: `SessionNotLoadedError`; `isNetworkFailure` takes it
+- `src/lib/tokenRefresh.ts`: the session check before the first send
+- `src/features/offline/outbox.ts`: claims by number; removal forgets after the delete
+- `src/test/fakeSupabase.ts`: `auth.getSession` (a signed-in session unless scripted), reset in `resetFakeSupabase`
+- Tests: `src/lib/tokenRefresh.test.ts`, `src/features/offline/queuedWrites.test.tsx`, `src/features/offline/offlineStore.test.ts`
+- `AGENTS.md`: two sentences in the "Queued" bullet of PWA and offline
+
+**Decisions**
+
+- The held-back write is a class of its own in `network.ts`, recognised by `isNetworkFailure`, not a `TypeError` in disguise: `failureCopy` then says "connection" for it with no extra case, and `retryNetworkFailures` needs no change.
+- Storage is read after `getSession()` answers, not before. A refresh the server refused removes the stored session while `getSession()` is answering; read first, that would hold back for ever a write that should be refused.
+- `getSession()` throwing is treated like "no session": held back while one is stored, sent otherwise. A throw must not turn into a dropped write.
+- Only the first send is checked. The second send follows a `refreshSession()` that succeeded, so a session is in memory.
+- The keepalive session log (`keepaliveInsert`) is not changed: it carries the token it was handed from `useAuth().session` and never goes through supabase-js, so it can't go out as `anon`.
+
+**Async windows and inputs**
+
+- _`getSession()` pending before a send_ (new; instant with a session in memory, up to supabase-js's own refresh retries with an expired token and a bad connection).
+  - Another queued write of the same loop: waits behind this one (loop edits share a `scope`); session logs each ask for themselves.
+  - Sign-out pressed: off, as the mutation is pending (`useHasUnsentWrites`), unchanged.
+  - A sign-out forced by the server (refresh refused): storage is emptied, so the check finds no stored session, the write is sent and refused, and the device is being emptied anyway.
+  - Going offline: `getSession()` fails for the connection, the write is held back and its retry pauses until online.
+  - The page hidden or closed: the outbox entry was put in `onMutate` before any of this, so the next start replays it.
+  - The screen unmounting: nothing here is tied to a component.
+- _Between `getSession()` answering "session" and the request leaving_: supabase-js asks for the session again itself when it builds the request. A refresh failing for the connection inside that gap needs the token to expire in the same instant; the request then goes as `anon` as before. Not closed (see Known gaps).
+- _The outbox row's delete pending in `removeOutboxEntry`_ (was there, now the id is held across it).
+  - A replay's read that started before the removal, or after it: gets nothing (two tests).
+  - The same id queued again: stays claimed, the row is there after both settle (test).
+  - The delete failing: the id stays claimed (test).
+  - Sign-out's `clearOfflineData`: removes the row either way; the id left in the map is of no consequence, as ids are never reused across users.
+
+**Known gaps**
+
+- The gap between the check and supabase-js's own read of the session, above. Closing it means signing the request with the token in hand instead of letting supabase-js fetch it, which is a change to every queued write's API function and not in this batch.
+- Queries sent with no session in memory still go as `anon` and come back empty under RLS (the second half of bug hunt D4). Not in 13.23's fix.
+- A held-back write retries at 1, 2, 4, … 30 s for as long as the session can't be refreshed. That is the same as a dropped request today, and sign-out stays off meanwhile (the open "Sign out anyway" question in the plan).
+- Not run: any real device, Safari or Firefox. The e2e run was `offline.spec.ts` on phone and desktop only (12 passed); no e2e case makes supabase-js lose its session mid-run.
+
+**How to verify**
+
+- `npm run check` (green: 5618 tests).
+- `npx vitest run src/lib/tokenRefresh.test.ts src/features/offline/offlineStore.test.ts src/features/offline/queuedWrites.test.tsx`. Each new test was seen failing before its fix, except "queued again while its last removal is on its way", which passes on the old code and guards the reorder.
+- `E2E_PORT=4383 npx playwright test tests/e2e/offline.spec.ts --project=phone --project=desktop`.
+- By hand (not run by Build), on the dev server: sign in, open a loop, set the stored session's `expires_at` in localStorage to the past and reload with the auth endpoint blocked (DevTools request blocking on `/auth/v1/token`) but REST allowed; change the loop's speed. Before: a 401/42501 on the PATCH and the speed snaps back. Now: no PATCH leaves, the speed stays, and it lands once the block is lifted.
+
+### Test
+
+Tests for 13.23 and 14.6 through the real hooks, the replay and one e2e case. No app code changed. No bugs found.
+
+**Per acceptance line**
+
+- _A session log or loop edit queued while the token could not be refreshed is still in the outbox and lands once after the connection is back, with nothing sent as `anon`._
+  - `usePracticeTracker.test.tsx`, "with no session in memory, one still stored": a stop (nothing sent, not in `unsaved`, in `waiting`, in the outbox, then logged once); a hidden page (the keepalive with the stale token gets a 401, its fallback is held back, logged once when the page is back); a session that ends as the screen unmounts (`logSessionUnobserved`).
+  - `LoopSpeedControl.test.tsx` (the control over `useSaveLoopSpeed`): a nudge sends nothing, shows no "Couldn't save the speed" alert, keeps 85% on show and in the cache, and is saved once; two nudges while the first is held back go in order, the last kept.
+  - `songPlayed.test.tsx`: the played time stays on show and in the outbox, and is sent once.
+  - `queuedWrites.test.tsx`, "window by window": a second edit waits behind a held-back one (it asks for no session of its own); going offline while held back pauses the retries, and it lands once; "replayed from an earlier page": a session, a loop edit and a played time written straight to `offlineDb.outbox`, replayed under StrictMode with the session missing, all stay in the outbox with nothing sent and land once each.
+  - `tokenRefresh.test.ts`: a token refusal whose refresh found no connection, then no session at the next try, sends nothing more until the session is back; a stored value that isn't a session holds nothing back.
+  - e2e, `offline.spec.ts`, "with the access token expired and its refresh failing" (phone and desktop): the real supabase-js with the stored token expired and `/auth/v1/token` aborted. A loop speed typed meanwhile sends no PATCH for the 25 s supabase-js spends retrying and after it gives up; no alert, 80% on show, one outbox entry, the database still at 100%. With the refresh let through there is exactly one PATCH, signed as `authenticated`, and the outbox empties. Without the session check this test fails on a PATCH whose bearer is the publishable key, which is the bug.
+- _A write the server truly refuses (a missing grant) still fails and rolls back._ A 42501 with a session in memory (and one stored): the tracker keeps it for "Try again", sent once, out of the outbox; the speed control shows its alert and the cached speed goes back while the playing speed stays; `useUpdateLoop` and `useLogSession` fail after one send; a replayed edit rolls back and leaves the outbox.
+- _A server-forced sign-out during the `getSession()` wait._ `tokenRefresh.test.ts` and `queuedWrites.test.tsx` hold `getSession`, empty storage, then answer "no session": the write is sent, refused and rolled back, not held.
+- _Sign-out stays off while a write is held back._ `SignOutButton.test.tsx` with a real `useLogSession` write held back: disabled with its note between tries, a press refused, enabled and working once the write has landed. `useHasUnsentWrites` / `hasUnsentWrites` are also asserted in the tracker, loop edit, played and replay tests.
+- _An outbox removal can't be replayed._ `queuedWrites.test.tsx`, "while an answered write is being taken out": a replay mounted under StrictMode while the answered row's delete is held sends nothing again; a row whose delete failed is not sent again by a replay on this page. `usePracticeTracker.test.tsx`, "queued again while its last outbox removal is on its way": a keepalive refused, its fallback refused, "Try again" refused with its removal held after the delete, "Try again" once more; the entry stays this page's, a replay mounted then sends nothing, and the last retry logs it.
+
+**Checked by breaking the code** (each restored)
+
+| Break                                                    | Tests that failed                                                   |
+| -------------------------------------------------------- | ------------------------------------------------------------------- |
+| No session check in `sendRefreshingToken`                | 22 across the six unit files, and the e2e case (an anon PATCH)      |
+| Storage read before `getSession()`                       | the two forced sign-out tests                                       |
+| `isNetworkFailure` without `SessionNotLoadedError`       | 16: every "held back" test                                          |
+| "No session" whenever one is stored (holds everything)   | 15, the 42501 tests among them                                      |
+| `removeOutboxEntry` forgets the id first (the old order) | the StrictMode replay test, the failed-delete test, and Build's two |
+| Forgets after the delete whatever the claim              | the tracker's "queued again" test and Build's                       |
+| A failed delete forgets the id                           | the failed-delete test and Build's                                  |
+
+A test of a loop edit answered while a replay reads passed with the old order too (the replay drops an entry this page has edited since, `editsMadeSince`), so it was removed.
+
+**Seen while testing** (none is a regression)
+
+- A held-back write on a hidden page is not retried until the page is shown: TanStack Query waits for focus between retries. The same holds for a dropped request. The outbox still has it for the next start.
+- With the real client a held-back write's try takes about 25 s (auth-js retries its refresh inside `getSession()`), then the 1, 2, 4 s back-off. After the connection returned the e2e write landed within about 15 s.
+- A row whose delete failed keeps `useHasUnsentWrites` true on that page, so Sign out stays off until the next start, which replays it. It was the same before this batch (the row was left then too).
+
+**Not covered**
+
+- The gap Build names between the check and supabase-js's own read of the session.
+- Safari, Firefox, a real device. The e2e ran on Chromium, phone and desktop projects.
+
+**How to verify**
+
+- `npm run check`.
+- `E2E_PORT=4383 npx playwright test tests/e2e/offline.spec.ts --project=phone --project=desktop` (14 passed; the new case takes about 100 s).
+
+### Review
+
+Reviewed `git diff origin/main...HEAD` after merging main (batch 1; the one conflict was this note, Batch 1 kept first).
+
+**Inventory**
+
+- `sendRefreshingToken` and `hasSessionInMemory` (`src/lib/tokenRefresh.ts`): the session check before a queued write's first send. Reached only from three `mutationFn`s: `loopEditOptions`, `logSessionOptions`, the played time in `songPlayed.ts`.
+- `SessionNotLoadedError` and `isNetworkFailure` (`src/lib/network.ts`).
+- `removeOutboxEntry`, `putOutboxEntry`, `takeLeftoverOutboxEntries` and the claim numbers in `queuedHere` (`src/features/offline/outbox.ts`).
+- `fakeSupabase.auth.getSession` (`src/test/fakeSupabase.ts`), and the tests of six unit files and one e2e case.
+
+**Behaviour pass**
+
+- _Interleavings, the outbox._ Walked put, remove, a failed delete and the replay's take in every order, with one id and with the id queued again. A take's read before or after a removal's delete finds the id claimed either way; a removal never drops a claim made after it began (the number); a failed delete keeps the claim; two removals of one id (the keepalive's answer and the mutation's `onSettled`) both see the same number and the second finds nothing to do; StrictMode's two takes claim in the step after their reads, so the second gets none. The one order that can still hand a replay an answered entry is a removal of an id this page never claimed, and every removal on a page follows that page's own put or take. Each has a test (`offlineStore.test.ts`, `queuedWrites.test.tsx`, the tracker's "queued again"). Put back the old order: the 14.6 test and the failed-delete test fail.
+- _Interleavings, the session check._ `getSession()` pending: another edit of the loop waits behind it (scope), going offline pauses the retry, a forced sign-out empties storage before the answer and the write is sent for its refusal. All tested by Test. Read auth-js 2.119.2 for what `getSession()` does with an expired token: eight tries over about 25 s, then `{ session: null, error }` with the session left in storage for a retryable failure, removed for a refused one; inside the 90 s before expiry a failed refresh still returns the stored, still-valid session.
+- _A tap that starts audio._ No handler awaits a queued write: `useSaveLoopSpeed`, the tracker and the played time fire from effects, `useSetLoopStatus` calls `mutate`, and the tracker's `mutateAsync` is only chained. supabase-js already awaited `getSession()` inside every request before this batch, so the check adds no wait of a new kind.
+- _The keepalive from a hidden page._ `keepaliveInsert` carries the token from `useAuth().session` and never reaches `sendRefreshingToken`. With an expired stored token it gets a 401 and falls back to the mutation, which is held back; the row is in the outbox throughout.
+- _Gates._ Sign out stays off for a held-back write between tries (pending in the mutation cache, and its outbox entry). Tested through the real button.
+- _Validated paths._ The check is on the first send only; the second follows a refresh that succeeded. The check-to-send gap is below.
+- _Hygiene._ No list reads, no multi-step clean-up. `removeOutboxEntry`'s catch is deliberate and now says what it leaves. Test spies are restored (`afterEach`, or in the test); `localStorage` is cleared by `src/test/setup.ts`.
+
+**Findings**
+
+1. `tests/e2e/offline.spec.ts` (the new case), hygiene: about 100 s in each of three projects. It can't be made shorter and still prove what it does. The 25 s is auth-js's own retry loop, bounded by a constant; after it auth-js answers every `getSession()` from that failure for 60 s (`REFRESH_FAILURE_COOLDOWN_MS`), so the write cannot land sooner than about 85 s whatever the spec does. A reload after the outage would cut it to about 35 s, but would then prove the replay, which the unit tests already do, and no longer that the real client recovers its session in the page, which only this case does. Nothing in it depends on the window's size, so it now runs in the desktop project only (`test.skip`, as `loop-scroll.spec.ts` does for its breakpoint case): 100 s once, not three times.
+2. `src/lib/tokenRefresh.ts`, `hasSessionInMemory`'s comment said every retry is a new attempt at a refresh. It isn't for a minute after a failed one (the cooldown above). Comment corrected; it also says why the answer's `error` is not read (AGENTS.md: check every `error`): storage, not the error, tells "no connection" from "signed out". No behaviour change.
+3. The plan's 13.23 line said queries sent with no session "come back empty under RLS". Checked against the local API with the publishable key: `anon` has no grants, so a read is refused (401, 42501), not answered empty. Written correctly in Accepted 20.2b.
+
+**Looked at and left**
+
+- The gap between the check and supabase-js's own read (Build's known gap). From auth-js's code it is narrower than Build wrote: inside the 90 s margin a failed refresh still hands out the stored token, so a write goes out as `anon` only when the token's real expiry falls between two reads a few milliseconds apart, with the refresh failing. A check after a 42501 ("no session now, one stored: hold it back") would close the drop, at the cost of a second `getSession()` on every real refusal, for a window that size. Accepted as 20.2a.
+- A stored session with `getSession()` throwing for ever would hold a write for ever, and Sign out with it. It needs auth itself broken; the entry is in the outbox for the next start.
+- A server-forced sign-out during the wait sends the write as `anon` for its refusal and drops it. The device is being emptied then anyway; keeping unsent practice across a forced sign-out is batch 6 (D2).
+
+**Changed**
+
+- `tests/e2e/offline.spec.ts`: the new case is desktop only, with why it takes 100 s.
+- `src/lib/tokenRefresh.ts`: comment only.
+- `docs/review-checklist.md`: "What counts as a refusal" gains the code that is about who the request was sent as; a new Interleavings row, "A claim let go before the work it covers is done".
+- `AGENTS.md`, PWA and offline: where the session check may sit (a queued write's `mutationFn` only), the cooldown, and a long e2e case in one project.
+- `docs/plan.md`: the 13.23 and 14.6 Carried forward lines deleted (Unit 13 and Unit 14 both still have lines), batch 2 marked done, Accepted 20.2a to 20.2d. `docs/loose-ends.md`: batch 2 marked done.
+
+**Open issues**
+
+None for a later batch. For batch 6 (13.01): a read sent with no session is a 401 carrying 42501, not PGRST301 or PGRST303, so `isTokenRefusal` won't see it (20.2b).
+
+**Checks**
+
+- `npm run check`: green (5682 tests passed, 2 skipped).
+- `E2E_PORT=4383 npx playwright test tests/e2e/offline.spec.ts --project=phone --project=desktop`: 13 passed, 1 skipped (the new case on phone); the new case took 1.6 min on desktop. No screenshots rewritten.
+- `npm run test:db` not run: nothing in the batch touches the database.
+
+### Copilot review
+
+One comment on #37 (`src/features/offline/outbox.ts`, high): two sends of one session id at once, and the first answered removes the other's outbox row and claim. Confirmed and fixed.
+
+**Is it real**
+
+- _Sessions: yes._ `retryUnsaved` sends every record in `unsaved` through the mutation, and a record stays in `unsaved` until its retry is answered, so "Try again" pressed twice has two mutations of one id pending at once (`usePracticeTracker.test.tsx` already had "Try again pressed twice sends the same session twice"). Both `onSettled`s called `removeOutboxEntry(record.id)`: whichever was answered first deleted the row and forgot the id while the other was still waiting (held back for the session, between network retries, or paused offline). A page closed then left nothing to replay. It fails in both orders: the comment's (the earlier send answered first) and its mirror (the later one answered first while the earlier still waits), so "remove only when my claim is still the latest", the comment's first suggestion, would have fixed one and left the other.
+- _Loop edits and played times: no._ Each mutation's entry id is its own `randomUuid()`; a replayed one keeps the entry's id, and an entry is taken by one replay only. No two sends share an id. They moved to the same API all the same, so no caller can remove by id.
+- How bad: the send answered first was refused or logged. Logged, the row is no loss. Refused, the other send carries the same record and will mostly be refused too; the loss is real where the refusal was about the moment and not the record (a refused token refresh, the check-to-send gap of 20.2a), and the invariant "a send still waiting has its copy on the device" was broken either way.
+
+**Fix**
+
+- `outbox.ts`: a put returns its send's `OutboxHold` (`{ stored, release }`), at once; `takeLeftoverOutboxEntries` returns `{ entry, release }` per entry. `removeOutboxEntry(id)` is gone: clean-up takes the hold, never the id. Each id counts its holds; a release that is not the last does nothing else, and the last one deletes the row and forgets the id only after that delete (14.6 unchanged: a failed delete keeps the id, an id queued again during a delete stays claimed, and a delete still on its way keeps the id from being forgotten by a later one).
+- Every hold has one owner that releases it once: the three mutations keep theirs as the mutation's context and release in `onSettled`; the tracker's `send` keeps the hold of its early put and releases it when the send it started has settled (the mutation, or the keepalive; a failed keepalive passes the hold to its fallback); the replay releases what it took when the entry's mutation has settled.
+- `songPlayed.ts`: `sendSongPlayedUnobserved` (resolves when settled) beside `markSongPlayedUnobserved`, for the replay's release.
+
+Not done: preventing overlapping sends in the tracker. The Test stage's 14.6 case presses "Try again" while the last retry's removal is still on its way and expects that press to send; blocking it would take that away, and the outbox would still let the next caller make the same mistake.
+
+**Async windows and inputs**
+
+- _A send's hold, from its put to its release._ Another send of the same id starting or settling: the row stays until the last release (tests, both orders). A replay's read: the id is claimed while any hold or delete is out. The page closing: the row is there for the next page (test). A release called twice: the second does nothing, so it can't let go of another send's hold (test).
+- _Between a mutation's `onSettled` and the release of the hold its caller kept_ (new, a promise callback later): the row is still there with every send answered. A replay can't take it (still held). A page closed there leaves a row the next page sends once more, which is harmless (the session insert ignores a duplicate; a refused one is refused again and dropped). `useHasUnsentWrites` reads true for that moment longer.
+- _The row's delete on its way_: as in Build, plus a second send queued and answered inside it, whose own delete takes the row and after which the id is forgotten only when both deletes are done (test).
+
+**Tests** (each seen failing first: the tracker's on the old code, the outbox's with the "another send still holds it" line taken out)
+
+- `usePracticeTracker.test.tsx`, "two sends of one session at once": a refused session, "Try again" twice with both answers held; the first (and, as a second case, the second) is refused; the row is still in the outbox, a replay mounted under StrictMode sends nothing, the other send lands, the row goes and the session counts as logged.
+- `offlineStore.test.ts`, "queued by two sends at once": both orders; the page closing with one unanswered (`vi.resetModules()` is the next page, which takes the entry); a hold released twice; a second send queued and answered while the first's delete is held. Also "holds what the replay took until the replay lets go". The file's earlier outbox tests are rewritten on holds with the same assertions.
+
+**Docs**
+
+- `docs/review-checklist.md`: new row, "Clean-up by id, when two pieces of work share the id"; the row above it no longer says "number the claims".
+- `AGENTS.md`: the outbox sentences of the "Queued" bullet and of the test patterns.
+
+**Checks**
+
+- `npm run check`: green (5690 tests passed, 2 skipped).
+- `E2E_PORT=4383 npx playwright test tests/e2e/offline.spec.ts --project=phone --project=desktop`: 13 passed, 1 skipped (the token case on phone, as before). Not run: any other spec, a real device, Safari or Firefox.
