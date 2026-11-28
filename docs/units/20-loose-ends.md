@@ -291,3 +291,54 @@ A test of a loop edit answered while a replay reads passed with the old order to
 
 - `npm run check`.
 - `E2E_PORT=4383 npx playwright test tests/e2e/offline.spec.ts --project=phone --project=desktop` (14 passed; the new case takes about 100 s).
+
+### Review
+
+Reviewed `git diff origin/main...HEAD` after merging main (batch 1; the one conflict was this note, Batch 1 kept first).
+
+**Inventory**
+
+- `sendRefreshingToken` and `hasSessionInMemory` (`src/lib/tokenRefresh.ts`): the session check before a queued write's first send. Reached only from three `mutationFn`s: `loopEditOptions`, `logSessionOptions`, the played time in `songPlayed.ts`.
+- `SessionNotLoadedError` and `isNetworkFailure` (`src/lib/network.ts`).
+- `removeOutboxEntry`, `putOutboxEntry`, `takeLeftoverOutboxEntries` and the claim numbers in `queuedHere` (`src/features/offline/outbox.ts`).
+- `fakeSupabase.auth.getSession` (`src/test/fakeSupabase.ts`), and the tests of six unit files and one e2e case.
+
+**Behaviour pass**
+
+- _Interleavings, the outbox._ Walked put, remove, a failed delete and the replay's take in every order, with one id and with the id queued again. A take's read before or after a removal's delete finds the id claimed either way; a removal never drops a claim made after it began (the number); a failed delete keeps the claim; two removals of one id (the keepalive's answer and the mutation's `onSettled`) both see the same number and the second finds nothing to do; StrictMode's two takes claim in the step after their reads, so the second gets none. The one order that can still hand a replay an answered entry is a removal of an id this page never claimed, and every removal on a page follows that page's own put or take. Each has a test (`offlineStore.test.ts`, `queuedWrites.test.tsx`, the tracker's "queued again"). Put back the old order: the 14.6 test and the failed-delete test fail.
+- _Interleavings, the session check._ `getSession()` pending: another edit of the loop waits behind it (scope), going offline pauses the retry, a forced sign-out empties storage before the answer and the write is sent for its refusal. All tested by Test. Read auth-js 2.119.2 for what `getSession()` does with an expired token: eight tries over about 25 s, then `{ session: null, error }` with the session left in storage for a retryable failure, removed for a refused one; inside the 90 s before expiry a failed refresh still returns the stored, still-valid session.
+- _A tap that starts audio._ No handler awaits a queued write: `useSaveLoopSpeed`, the tracker and the played time fire from effects, `useSetLoopStatus` calls `mutate`, and the tracker's `mutateAsync` is only chained. supabase-js already awaited `getSession()` inside every request before this batch, so the check adds no wait of a new kind.
+- _The keepalive from a hidden page._ `keepaliveInsert` carries the token from `useAuth().session` and never reaches `sendRefreshingToken`. With an expired stored token it gets a 401 and falls back to the mutation, which is held back; the row is in the outbox throughout.
+- _Gates._ Sign out stays off for a held-back write between tries (pending in the mutation cache, and its outbox entry). Tested through the real button.
+- _Validated paths._ The check is on the first send only; the second follows a refresh that succeeded. The check-to-send gap is below.
+- _Hygiene._ No list reads, no multi-step clean-up. `removeOutboxEntry`'s catch is deliberate and now says what it leaves. Test spies are restored (`afterEach`, or in the test); `localStorage` is cleared by `src/test/setup.ts`.
+
+**Findings**
+
+1. `tests/e2e/offline.spec.ts` (the new case), hygiene: about 100 s in each of three projects. It can't be made shorter and still prove what it does. The 25 s is auth-js's own retry loop, bounded by a constant; after it auth-js answers every `getSession()` from that failure for 60 s (`REFRESH_FAILURE_COOLDOWN_MS`), so the write cannot land sooner than about 85 s whatever the spec does. A reload after the outage would cut it to about 35 s, but would then prove the replay, which the unit tests already do, and no longer that the real client recovers its session in the page, which only this case does. Nothing in it depends on the window's size, so it now runs in the desktop project only (`test.skip`, as `loop-scroll.spec.ts` does for its breakpoint case): 100 s once, not three times.
+2. `src/lib/tokenRefresh.ts`, `hasSessionInMemory`'s comment said every retry is a new attempt at a refresh. It isn't for a minute after a failed one (the cooldown above). Comment corrected; it also says why the answer's `error` is not read (AGENTS.md: check every `error`): storage, not the error, tells "no connection" from "signed out". No behaviour change.
+3. The plan's 13.23 line said queries sent with no session "come back empty under RLS". Checked against the local API with the publishable key: `anon` has no grants, so a read is refused (401, 42501), not answered empty. Written correctly in Accepted 20.2b.
+
+**Looked at and left**
+
+- The gap between the check and supabase-js's own read (Build's known gap). From auth-js's code it is narrower than Build wrote: inside the 90 s margin a failed refresh still hands out the stored token, so a write goes out as `anon` only when the token's real expiry falls between two reads a few milliseconds apart, with the refresh failing. A check after a 42501 ("no session now, one stored: hold it back") would close the drop, at the cost of a second `getSession()` on every real refusal, for a window that size. Accepted as 20.2a.
+- A stored session with `getSession()` throwing for ever would hold a write for ever, and Sign out with it. It needs auth itself broken; the entry is in the outbox for the next start.
+- A server-forced sign-out during the wait sends the write as `anon` for its refusal and drops it. The device is being emptied then anyway; keeping unsent practice across a forced sign-out is batch 6 (D2).
+
+**Changed**
+
+- `tests/e2e/offline.spec.ts`: the new case is desktop only, with why it takes 100 s.
+- `src/lib/tokenRefresh.ts`: comment only.
+- `docs/review-checklist.md`: "What counts as a refusal" gains the code that is about who the request was sent as; a new Interleavings row, "A claim let go before the work it covers is done".
+- `AGENTS.md`, PWA and offline: where the session check may sit (a queued write's `mutationFn` only), the cooldown, and a long e2e case in one project.
+- `docs/plan.md`: the 13.23 and 14.6 Carried forward lines deleted (Unit 13 and Unit 14 both still have lines), batch 2 marked done, Accepted 20.2a to 20.2d. `docs/loose-ends.md`: batch 2 marked done.
+
+**Open issues**
+
+None for a later batch. For batch 6 (13.01): a read sent with no session is a 401 carrying 42501, not PGRST301 or PGRST303, so `isTokenRefusal` won't see it (20.2b).
+
+**Checks**
+
+- `npm run check`: green (5682 tests passed, 2 skipped).
+- `E2E_PORT=4383 npx playwright test tests/e2e/offline.spec.ts --project=phone --project=desktop`: 13 passed, 1 skipped (the new case on phone); the new case took 1.6 min on desktop. No screenshots rewritten.
+- `npm run test:db` not run: nothing in the batch touches the database.

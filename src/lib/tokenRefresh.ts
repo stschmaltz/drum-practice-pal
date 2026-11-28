@@ -31,7 +31,13 @@ export class TokenRefusedError extends Error {
 /**
  * Whether supabase-js has a session to sign a request with. Asking is also
  * what makes it try the refresh again (`getSession` refreshes an expired
- * token), so each retry of a held-back write is a new attempt at one.
+ * token), though not at every ask: auth-js answers with the last failure
+ * for a minute after one (`REFRESH_FAILURE_COOLDOWN_MS`), so a held-back write
+ * can land up to a minute, plus its own back-off, after the connection is back.
+ *
+ * The answer's `error` is not read on purpose: whatever it says, the question
+ * here is only whether there is a session, and storage is what tells "the
+ * refresh found no connection" from "signed out" (see `sendRefreshingToken`).
  */
 async function hasSessionInMemory(): Promise<boolean> {
   try {

@@ -415,7 +415,12 @@ test.describe('with the access token expired and its refresh failing', () => {
     page,
     context,
     user,
-  }) => {
+  }, testInfo) => {
+    // About 100 s, none of it the spec's to shorten: auth-js retries the refresh for 25 s
+    // before it reports no session, then answers from that failure for a minute more, and
+    // the in-page recovery after that minute is what this proves on the real client.
+    // Nothing in it depends on the window's size.
+    test.skip(testInfo.project.name !== 'desktop', 'one browser is enough');
     test.setTimeout(240_000);
     await openFixture(page, user, 'groove-120', 'Groove 120');
     await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 6 });
