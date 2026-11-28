@@ -785,4 +785,149 @@ describe('song_links.bar_one_seconds (where bar 1 falls in the video)', () => {
     expect(error).toBeNull();
     expect(data?.bar_one_seconds).toBe(4.5);
   });
+
+  // 19 Test: the check's edges, what the trigger leaves alone, and who can read the column.
+  it.each([
+    ['a millisecond in', 0.001],
+    ['a millisecond short of twelve hours', 43199.999],
+    ['a nudge’s quarter second', 0.25],
+  ])('keeps %s exactly as sent', async (_name, seconds) => {
+    const id = await insertLink(a, songA);
+    const { data, error } = await saveBarOne(a, id, seconds);
+    expect(error).toBeNull();
+    expect(data).toEqual({ id, bar_one_seconds: seconds });
+    expect((await linkAsAdmin(id))?.bar_one_seconds).toBe(seconds);
+  });
+
+  it.each([
+    // PostgREST reads these words into the numeric column; the range check is what stops them.
+    ['not a number', 'NaN'],
+    ['without end', 'Infinity'],
+    ['without end the other way', '-Infinity'],
+  ])('refuses a time that is %s, and keeps the one it had', async (_name, word) => {
+    const id = await insertLink(a, songA);
+    expect((await saveBarOne(a, id, 30)).error).toBeNull();
+    const { error } = await saveBarOne(a, id, word as never);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
+    expect((await linkAsAdmin(id))?.bar_one_seconds).toBe(30);
+  });
+
+  it('refuses words that aren’t a number at all, and keeps the one it had', async () => {
+    const id = await insertLink(a, songA);
+    expect((await saveBarOne(a, id, 30)).error).toBeNull();
+    const { error } = await saveBarOne(a, id, 'soon' as never);
+    expect(error?.code).toBe(PG.INVALID_TEXT_REPRESENTATION);
+    expect((await linkAsAdmin(id))?.bar_one_seconds).toBe(30);
+  });
+
+  it('a nudge moves nothing but the line-up and updated_at: the address, the kind and created_at stay', async () => {
+    const id = await insertLink(a, songA, { provider: 'youtube', url: `${WATCH}&t=30s` });
+    expect((await saveBarOne(a, id, 7)).error).toBeNull();
+    const before = await linkAsAdmin(id);
+    await waitForClockTick();
+    expect((await saveBarOne(a, id, 7.25)).error).toBeNull();
+    const after = await linkAsAdmin(id);
+    expect(after).toEqual({
+      ...before,
+      bar_one_seconds: 7.25,
+      updated_at: after?.updated_at,
+    });
+    expect(Date.parse(after!.updated_at)).toBeGreaterThan(Date.parse(before!.updated_at));
+  });
+
+  it('the trigger clears a line-up only for a new address: other edits of the row leave it', async () => {
+    const song = await insertSong(a);
+    const id = await insertLink(a, song, { provider: 'youtube', url: WATCH });
+    expect((await saveBarOne(a, id, 7.25)).error).toBeNull();
+
+    // An edit only the service role can make (the kind), and the client's own provider-and-address
+    // write with the address unchanged: neither is a new video.
+    const kind = await admin.from('song_links').update({ kind: 'original' }).eq('id', id);
+    expect(kind.error).toBeNull();
+    expect(await linkAsAdmin(id)).toMatchObject({ kind: 'original', bar_one_seconds: 7.25 });
+    const same = await a.client
+      .from('song_links')
+      .update({ url: WATCH })
+      .eq('id', id)
+      .eq('user_id', a.id);
+    expect(same.error).toBeNull();
+    expect((await linkAsAdmin(id))?.bar_one_seconds).toBe(7.25);
+
+    // Pointed at Spotify, then back at the video: the line-up doesn't come back with the address.
+    const away = await a.client
+      .from('song_links')
+      .update({ provider: 'spotify', url: SPOTIFY })
+      .eq('id', id)
+      .eq('user_id', a.id);
+    expect(away.error).toBeNull();
+    expect((await linkAsAdmin(id))?.bar_one_seconds).toBeNull();
+    const back = await a.client
+      .from('song_links')
+      .update({ provider: 'youtube', url: WATCH })
+      .eq('id', id)
+      .eq('user_id', a.id);
+    expect(back.error).toBeNull();
+    expect(await linkAsAdmin(id)).toMatchObject({ url: WATCH, bar_one_seconds: null });
+  });
+
+  it('a new address on a link that was never lined up changes only the address', async () => {
+    const id = await insertLink(a, songA, { provider: 'youtube', url: WATCH });
+    const { error } = await a.client
+      .from('song_links')
+      .update({ url: `${WATCH}&t=10s` })
+      .eq('id', id)
+      .eq('user_id', a.id);
+    expect(error).toBeNull();
+    expect(await linkAsAdmin(id)).toMatchObject({ url: `${WATCH}&t=10s`, bar_one_seconds: null });
+  });
+
+  it('a write that points the link elsewhere and clears the line-up in one leaves it cleared', async () => {
+    const id = await insertLink(a, songA, { provider: 'youtube', url: WATCH });
+    expect((await saveBarOne(a, id, 7.25)).error).toBeNull();
+    const { error } = await a.client
+      .from('song_links')
+      .update({ url: `${WATCH}&t=45s`, bar_one_seconds: null })
+      .eq('id', id)
+      .eq('user_id', a.id);
+    expect(error).toBeNull();
+    expect((await linkAsAdmin(id))?.bar_one_seconds).toBeNull();
+  });
+
+  it('only its owner reads it: B and a signed-out client get no row', async () => {
+    const id = await insertLink(a, songA, { provider: 'youtube', url: WATCH });
+    expect((await saveBarOne(a, id, 12)).error).toBeNull();
+    // The owner's read finds it, so the empty answers below are RLS and not a wrong id.
+    const own = await a.client.from('song_links').select('id, bar_one_seconds').eq('id', id);
+    expect(own.error).toBeNull();
+    expect(own.data).toEqual([{ id, bar_one_seconds: 12 }]);
+
+    const others = await b.client.from('song_links').select('id, bar_one_seconds').eq('id', id);
+    expect(others.error).toBeNull();
+    expect(others.data).toEqual([]);
+    const signedOut = await anonClient().from('song_links').select('bar_one_seconds').eq('id', id);
+    expect(signedOut.error?.code).toBe(PG.INSUFFICIENT_PRIVILEGE);
+  });
+
+  it("B can't put a lined-up link on A's song, and can't take A's line-up away by deleting or clearing it", async () => {
+    const id = await insertLink(a, songA, { provider: 'youtube', url: WATCH });
+    expect((await saveBarOne(a, id, 12)).error).toBeNull();
+
+    const planted = linkRow(b, songA, { bar_one_seconds: 3 });
+    const insert = await b.client.from('song_links').insert(planted);
+    expect(insert.error).not.toBeNull();
+    expect(await linkAsAdmin(planted.id)).toBeNull();
+
+    const cleared = await b.client
+      .from('song_links')
+      .update({ bar_one_seconds: null })
+      .eq('id', id)
+      .select('id')
+      .maybeSingle();
+    expect(cleared.error).toBeNull();
+    expect(cleared.data).toBeNull();
+    const removed = await b.client.from('song_links').delete().eq('id', id).select('id');
+    expect(removed.error).toBeNull();
+    expect(removed.data).toEqual([]);
+    expect((await linkAsAdmin(id))?.bar_one_seconds).toBe(12);
+  });
 });

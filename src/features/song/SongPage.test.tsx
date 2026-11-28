@@ -4201,6 +4201,502 @@ describe('SongPage recordings (Unit 14)', () => {
       });
     });
 
+    // 19 Test: the inputs Build's "Async windows and inputs" names with no test of their own,
+    // and the ones it missed.
+    describe('lining up, pressed again (19 Test)', () => {
+      const noAlert = () => expect(within(lineUp()).queryByRole('alert')).not.toBeInTheDocument();
+
+      it('twice before the page has drawn the first press: one moment, saved, and no second line-up of a later one', async () => {
+        const { engine, video } = await openVideo({ links: [original] });
+        act(() => video.playAt(5));
+        const button = lineUpButton('Bar 1 starts now');
+        act(() => {
+          fireEvent.click(button);
+          fireEvent.click(button);
+        });
+        await waitFor(() => expect(links.rows()[0]).toMatchObject({ bar_one_seconds: 5 }));
+        await settle();
+        // Whether one write or two went, each carried the press's moment and nothing else.
+        expect(barOneSent().length).toBeGreaterThan(0);
+        expect(new Set(barOneSent())).toEqual(new Set([5]));
+        expect(message()).toHaveTextContent('Bar 1 at 0:05.00');
+        expect(marked(engine)).toEqual([1, 1]);
+        noAlert();
+      });
+
+      it('twice with the video moving on between: the later press is where bar 1 is, here and on the server', async () => {
+        const { video } = await openVideo({ links: [original] });
+        act(() => video.playAt(5));
+        const button = lineUpButton('Bar 1 starts now');
+        const release = links.holdNext('update');
+        act(() => {
+          fireEvent.click(button);
+          video.tick(5.3);
+          fireEvent.click(button);
+        });
+        // Shown with the first still on its way.
+        await waitFor(() => expect(message()).toHaveTextContent('Bar 1 at 0:05.30'));
+        expect(barOneSent()).toEqual([5]);
+        release();
+        await waitFor(() => expect(links.rows()[0]).toMatchObject({ bar_one_seconds: 5.3 }));
+        await settle();
+        expect(barOneSent()).toEqual([5, 5.3]);
+        expect(message()).toHaveTextContent('Bar 1 at 0:05.30');
+        noAlert();
+      });
+
+      it('“Line up again” and a press the server refuses: the line-up it had is back, and the tab follows on it', async () => {
+        const { user, engine, video } = await openVideo();
+        // 10.5 s is bar 4 with bar 1 at 4 s.
+        act(() => video.playAt(10.5));
+        expect(marked(engine)).toEqual([4, 4]);
+        await user.click(lineUpButton('Line up again'));
+        const release = links.holdNext('update');
+        links.failNext('update');
+        await user.click(lineUpButton('Bar 1 starts now'));
+        // Held: bar 1 is where the video is.
+        expect(marked(engine)).toEqual([1, 1]);
+        expect(message()).toHaveTextContent('Bar 1 at 0:10.50');
+
+        // The read that follows a save is held, so what shows next is the page's own going back.
+        const releaseRead = links.holdNext('select');
+        release();
+        expect(await within(lineUp()).findByRole('alert')).toHaveTextContent(
+          'Couldn’t save where bar 1 starts. The server refused it. Try again, or reload the page.',
+        );
+        expect(links.rows()[0]).toMatchObject({ bar_one_seconds: BAR_ONE });
+        await waitFor(() => expect(marked(engine)).toEqual([4, 4]));
+        // The nudges are there, on the value that is saved: focus hasn't fallen off the page.
+        expect(lineUpButton('Tab earlier')).toBeInTheDocument();
+        expect(document.body).not.toHaveFocus();
+        releaseRead();
+        await settle();
+        expect(marked(engine)).toEqual([4, 4]);
+        await user.click(lineUpButton('Tab later'));
+        await waitFor(() => expect(barOneSent()).toEqual([10.5, 4.25]));
+        expect(message()).toHaveTextContent('Bar 1 at 0:04.25');
+      });
+
+      it('a new line-up pressed while a nudge is on its way ends on the line-up', async () => {
+        const { user, engine, video } = await openVideo();
+        const release = links.holdNext('update');
+        await user.click(lineUpButton('Tab later'));
+        await waitFor(() => expect(barOneSent()).toEqual([4.25]));
+        act(() => video.playAt(9));
+        await user.click(lineUpButton('Line up again'));
+        await user.click(lineUpButton('Bar 1 starts now'));
+        expect(message()).toHaveTextContent('Bar 1 at 0:09.00');
+        // The nudge answers with 4.25 while the line-up waits: it isn't drawn over it.
+        const releaseSecond = links.holdNext('update');
+        release();
+        await waitFor(() => expect(barOneSent()).toEqual([4.25, 9]));
+        await settle();
+        expect(message()).toHaveTextContent('Bar 1 at 0:09.00');
+        expect(marked(engine)).toEqual([1, 1]);
+        releaseSecond();
+        await waitFor(() => expect(links.rows()[0]).toMatchObject({ bar_one_seconds: 9 }));
+        await settle();
+        expect(message()).toHaveTextContent('Bar 1 at 0:09.00');
+        noAlert();
+      });
+
+      it('a nudge straight after a line-up still on its way moves the line-up, not the value before it', async () => {
+        const { user, video } = await openVideo({ links: [original] });
+        act(() => video.playAt(7));
+        const release = links.holdNext('update');
+        await user.click(lineUpButton('Bar 1 starts now'));
+        await user.click(await within(lineUp()).findByRole('button', { name: 'Tab later' }));
+        expect(message()).toHaveTextContent('Bar 1 at 0:07.25');
+        release();
+        await waitFor(() => expect(links.rows()[0]).toMatchObject({ bar_one_seconds: 7.25 }));
+        expect(barOneSent()).toEqual([7, 7.25]);
+      });
+
+      it('two nudges pressed before the page has drawn the first are half a second, not a quarter twice over', async () => {
+        const { video } = await openVideo();
+        act(() => video.playAt(4.5));
+        const later = lineUpButton('Tab later');
+        act(() => {
+          fireEvent.click(later);
+          fireEvent.click(later);
+        });
+        await waitFor(() => expect(links.rows()[0]).toMatchObject({ bar_one_seconds: 4.5 }));
+        expect(barOneSent()).toEqual([4.25, 4.5]);
+        await settle();
+        expect(message()).toHaveTextContent('Bar 1 at 0:04.50');
+        expect(said()).toHaveTextContent('Bar 1 at 0:04.50.');
+      });
+
+      it('lined up before the tab’s bars are in: saved all the same, and followed from the moment they are', async () => {
+        const { user, engine, video } = await openVideo({ links: [original], ready: false });
+        act(() => video.playAt(7));
+        await user.click(lineUpButton('Bar 1 starts now'));
+        await waitFor(() => expect(barOneSent()).toEqual([7]));
+        expect(marked(engine)).toBeNull();
+        act(() => video.tick(9.5));
+        act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+        await waitFor(() => expect(marked(engine)).toEqual([2, 2]));
+      });
+    });
+
+    describe('another device, while following here (19 Test)', () => {
+      it('moves the line-up: the same frame goes on playing, and the mark is where the new one puts it', async () => {
+        const client = testQueryClient();
+        const { engine, video } = await openVideo({ queryClient: client });
+        act(() => video.playAt(6.5));
+        expect(marked(engine)).toEqual([2, 2]);
+
+        links.setRows([{ ...lined, bar_one_seconds: 6 }]);
+        await act(() => client.invalidateQueries({ queryKey: linksKey }));
+        await waitFor(() => expect(marked(engine)).toEqual([1, 1]));
+        expect(message()).toHaveTextContent('Bar 1 at 0:06.00');
+        expect(currentRecordingPlayer()).toBe(video);
+        expect(video.dispose).not.toHaveBeenCalled();
+        // And a nudge here moves that value, not the one this page opened with.
+        await userEvent.setup().click(lineUpButton('Tab later'));
+        await waitFor(() => expect(barOneSent()).toEqual([6.25]));
+      });
+
+      it('takes the line-up away: the mark goes, the prompt is back, and the video plays on in the same frame', async () => {
+        const client = testQueryClient();
+        const { engine, video } = await openVideo({ queryClient: client });
+        act(() => video.playAt(6.5));
+        expect(marked(engine)).toEqual([2, 2]);
+        const scrolls = engine.scrollToBar.mock.calls.length;
+
+        links.setRows([{ ...lined, bar_one_seconds: null }]);
+        await act(() => client.invalidateQueries({ queryKey: linksKey }));
+        await waitFor(() => expect(marked(engine)).toBeNull());
+        expect(message()).toHaveTextContent('Line the tab up: when bar 1 starts, press');
+        expectUnlocked(lineUpButton('Bar 1 starts now'));
+        noLineUpButton('Tab later');
+        expect(currentRecordingPlayer()).toBe(video);
+        // The clock goes on, and moves nothing.
+        act(() => video.tick(12.5));
+        expect(marked(engine)).toBeNull();
+        expect(engine.scrollToBar).toHaveBeenCalledTimes(scrolls);
+        expect(screen.getByTestId('score-viewport')).not.toHaveClass('score-tappable');
+      });
+
+      it('a read of the links that fails keeps what is followed: the frame, the line-up and the mark', async () => {
+        const client = testQueryClient();
+        const { engine, video } = await openVideo({ queryClient: client });
+        act(() => video.playAt(6.5));
+        links.failNext('select', { message: 'TypeError: Failed to fetch', code: '' });
+        await act(() => client.invalidateQueries({ queryKey: linksKey }));
+        await waitFor(() => expect(client.getQueryState(linksKey)?.status).toBe('error'));
+        expect(client.getQueryData(linksKey)).toHaveLength(1);
+        expect(frame()).toBeInTheDocument();
+        expect(currentRecordingPlayer()).toBe(video);
+        expect(message()).toHaveTextContent('Bar 1 at 0:04.00');
+        act(() => video.tick(8.5));
+        expect(marked(engine)).toEqual([3, 3]);
+      });
+    });
+
+    describe('one video after another (19 Test)', () => {
+      it('back on the first source it is a new video: nothing marked until it has been played, then followed again', async () => {
+        const { user, engine, video } = await openVideo({ links: [lined, drumlessVideo] });
+        act(() => video.playAt(6.5));
+        expect(marked(engine)).toEqual([2, 2]);
+        await choose(user, 'Drumless');
+        await waitFor(() => expect(frame()).toHaveAttribute('src', DRUMLESS_EMBED));
+        const second = currentRecordingPlayer();
+        act(() => second.playAt(20));
+
+        await choose(user, 'Original');
+        await waitFor(() => expect(frame()).toHaveAttribute('src', EMBED_URL));
+        const third = currentRecordingPlayer();
+        expect(third).not.toBe(video);
+        expect(third).not.toBe(second);
+        expect(second.dispose).toHaveBeenCalled();
+        expect(second.listenerCount()).toBe(0);
+        // The line-up is the link's, so the nudges are there; the frame is new, so nothing is marked.
+        expect(message()).toHaveTextContent('Bar 1 at 0:04.00');
+        expect(marked(engine)).toBeNull();
+        // Space can't start it either: it says to tap the video.
+        // Its clock already reads a second of the song (a link with a start time): still nothing.
+        act(() => third.set({ status: 'ready', seconds: 8.5 }));
+        expect(marked(engine)).toBeNull();
+        await user.keyboard(' ');
+        expect(third.play).not.toHaveBeenCalled();
+        expect(message()).toHaveTextContent('Press Play on the video once.');
+
+        // Both earlier players' clocks, late: neither marks a bar.
+        act(() => video.tick(12.5));
+        act(() => second.tick(8.5));
+        expect(marked(engine)).toBeNull();
+        act(() => third.playAt(8.5));
+        expect(marked(engine)).toEqual([3, 3]);
+        expect(message()).toHaveTextContent('Bar 1 at 0:04.00');
+      });
+    });
+
+    describe('the reader’s own scrolling (19 Test)', () => {
+      const scrollBy = vi.fn();
+      const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 200 });
+      beforeEach(() => {
+        scrollBy.mockReset();
+        vi.stubGlobal('scrollBy', scrollBy);
+      });
+      afterEach(() => {
+        vi.unstubAllGlobals();
+        document.querySelector('[data-bottom-tabs]')?.remove();
+      });
+
+      it('isn’t undone inside the bar being played; the page follows again when the next bar is out of sight', async () => {
+        const { engine, video } = await openVideo();
+        engine.barRects.set(0, rect(300, 420));
+        act(() => video.playAt(4.5));
+        expect(scrollBy).not.toHaveBeenCalled();
+        expect(shown(engine)).toEqual([1]);
+
+        // The reader flicks ahead: bar 1 is now far above the window.
+        engine.barRects.set(0, rect(-900, -780));
+        fireEvent.scroll(window);
+        act(() => video.tick(5));
+        act(() => video.tick(5.9));
+        expect(scrollBy).not.toHaveBeenCalled();
+        expect(shown(engine)).toEqual([1]);
+
+        // Bar 2 is on show where they scrolled to: still nothing moves.
+        engine.barRects.set(1, rect(200, 320));
+        act(() => video.tick(6.5));
+        expect(scrollBy).not.toHaveBeenCalled();
+        // Bar 3 isn't: the page goes to it.
+        engine.barRects.set(2, rect(1500, 1620));
+        act(() => video.tick(8.5));
+        expect(scrollBy).toHaveBeenCalledTimes(1);
+        expect(scrollBy).toHaveBeenLastCalledWith({ top: 1488, behavior: 'instant' });
+      });
+
+      it('a bar under the sticky video or behind a phone’s tab bar isn’t on show; one between them is', async () => {
+        const { engine, video } = await openVideo();
+        // The video's bar ends 300 px down; a phone's tab bar starts at 712 px.
+        const sticky = screen.getByTestId('recording-bar');
+        sticky.getBoundingClientRect = () => ({ top: 0, bottom: 300, height: 300 }) as DOMRect;
+        const tabs = document.createElement('nav');
+        tabs.setAttribute('data-bottom-tabs', '');
+        tabs.getBoundingClientRect = () => ({ top: 712, bottom: 768, height: 56 }) as DOMRect;
+        document.body.append(tabs);
+
+        engine.barRects.set(0, rect(320, 440));
+        engine.barRects.set(1, rect(250, 370));
+        engine.barRects.set(2, rect(620, 740));
+        engine.barRects.set(3, rect(592, 712));
+
+        act(() => video.playAt(4.5));
+        expect(scrollBy).not.toHaveBeenCalled();
+        // Its top is behind the video: brought to just under it.
+        act(() => video.tick(6.5));
+        expect(scrollBy).toHaveBeenLastCalledWith({ top: -62, behavior: 'instant' });
+        // Its foot is behind the tab bar, though inside the window.
+        act(() => video.tick(8.5));
+        expect(scrollBy).toHaveBeenLastCalledWith({ top: 308, behavior: 'instant' });
+        expect(scrollBy).toHaveBeenCalledTimes(2);
+        // It ends exactly where the tab bar begins: on show.
+        act(() => video.tick(10.5));
+        expect(scrollBy).toHaveBeenCalledTimes(2);
+      });
+
+      it('a tab bar that isn’t drawn (a tablet, a laptop) hides nothing: the window’s own foot is the edge', async () => {
+        const { engine, video } = await openVideo();
+        const tabs = document.createElement('nav');
+        tabs.setAttribute('data-bottom-tabs', '');
+        // `display: none` from 768 px: no box.
+        tabs.getBoundingClientRect = () => ({ top: 0, bottom: 0, height: 0 }) as DOMRect;
+        document.body.append(tabs);
+        engine.barRects.set(0, rect(window.innerHeight - 120, window.innerHeight));
+        engine.barRects.set(1, rect(window.innerHeight - 100, window.innerHeight + 20));
+        act(() => video.playAt(4.5));
+        expect(scrollBy).not.toHaveBeenCalled();
+        act(() => video.tick(6.5));
+        expect(scrollBy).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('a tap and Space, at the edges (19 Test)', () => {
+      it('a tap after a nudge still on its way goes by the nudged line-up', async () => {
+        const { user, engine, video } = await openVideo();
+        act(() => video.playAt(4.5));
+        act(() => video.pauseAt(4.5));
+        links.holdNext('update');
+        await user.click(lineUpButton('Tab later'));
+        act(() => engine.fire('barTapped', { barIndex: 8 }));
+        // Bar 9 is 16 s into the tab: 20.25 s of the video with bar 1 at 4.25 s.
+        expect(video.seekTo).toHaveBeenLastCalledWith(20.25);
+        expect(marked(engine)).toEqual([9, 9]);
+      });
+
+      it('a tap once the video has run past the tab’s end brings it back into the tab', async () => {
+        const { engine, video } = await openVideo();
+        act(() => video.playAt(120));
+        expect(marked(engine)).toBeNull();
+        act(() => engine.fire('barTapped', { barIndex: 15 }));
+        expect(video.seekTo).toHaveBeenLastCalledWith(34);
+        expect(marked(engine)).toEqual([16, 16]);
+      });
+
+      it('a tap while the video’s player hasn’t answered does nothing and says nothing', async () => {
+        const { engine, video } = await openVideo();
+        act(() => engine.fire('barTapped', { barIndex: 8 }));
+        expect(video.seekTo).not.toHaveBeenCalled();
+        expect(message()).toHaveTextContent('Bar 1 at 0:04.00');
+        expect(engine.seek).not.toHaveBeenCalled();
+      });
+
+      it('Space held down is one press: it pauses once, and the page doesn’t scroll under it', async () => {
+        const { video } = await openVideo();
+        act(() => video.playAt(5));
+        const down = (repeat: boolean) => {
+          const press = new KeyboardEvent('keydown', {
+            key: ' ',
+            bubbles: true,
+            cancelable: true,
+            repeat,
+          });
+          act(() => void document.body.dispatchEvent(press));
+          return press;
+        };
+        expect(down(false).defaultPrevented).toBe(true);
+        for (let held = 0; held < 5; held += 1) expect(down(true).defaultPrevented).toBe(true);
+        expect(video.pause).toHaveBeenCalledTimes(1);
+        expect(video.play).not.toHaveBeenCalled();
+      });
+
+      it('Space is the browser’s again once the video’s player has given up', async () => {
+        const { engine, video } = await openVideo();
+        act(() => video.playAt(5));
+        act(() => video.set({ status: 'unavailable', playing: false }));
+        const press = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+        act(() => void document.body.dispatchEvent(press));
+        expect(press.defaultPrevented).toBe(false);
+        expect(video.pause).not.toHaveBeenCalled();
+        expect(video.play).not.toHaveBeenCalled();
+        expect(engine.play).not.toHaveBeenCalled();
+        // And nothing is marked for a video that can't be followed.
+        expect(marked(engine)).toBeNull();
+      });
+
+      it('Space pauses by the video’s state at the press, a pause made in its own controls included', async () => {
+        const { user, video } = await openVideo();
+        act(() => video.playAt(5));
+        // Paused in YouTube's controls, not by the key: the next Space plays.
+        act(() => video.pauseAt(6));
+        await user.keyboard(' ');
+        expect(video.play).toHaveBeenCalledTimes(1);
+        expect(video.pause).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('songs with nothing to follow (19 Test)', () => {
+      it.each([
+        ['no links', [] as SongLinkRow[]],
+        [
+          'only a Spotify link and a web link',
+          [spotifyLink('s', { kind: 'original' }), linkRow('lesson')],
+        ],
+      ])(
+        'with %s: no line-up, no video player made, and Space plays the tab as before',
+        async (_name, saved) => {
+          const { user, engine } = await openSong({ links: saved });
+          await waitFor(() => expect(playButton()).toBeEnabled());
+          await settle();
+          expect(screen.queryByTestId('line-up')).not.toBeInTheDocument();
+          expect(recordingPlayers()).toEqual([]);
+          expect(marked(engine)).toBeNull();
+          await user.keyboard(' ');
+          expect(engine.play).toHaveBeenCalledTimes(1);
+          expect(links.sent('update')).toEqual([]);
+        },
+      );
+
+      it('on Tab, a song with a lined-up video has no video player, and its taps and Space are the tab’s', async () => {
+        const { user, engine } = await openSong({ links: [lined] });
+        await waitFor(() => expect(playButton()).toBeEnabled());
+        await screen.findByRole('radio', { name: 'Original' });
+        await settle();
+        expect(screen.queryByTestId('line-up')).not.toBeInTheDocument();
+        expect(recordingPlayers()).toEqual([]);
+        expect(screen.getByTestId('score-viewport')).not.toHaveClass('score-tappable');
+        act(() => engine.fire('barTapped', { barIndex: 4 }));
+        expect(engine.seek).toHaveBeenCalled();
+        await user.keyboard(' ');
+        expect(engine.play).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('the connection going (19 Test)', () => {
+      it('while following: the video leaves, the mark with it, and its clock is heard by nothing', async () => {
+        const { engine, video } = await openVideo();
+        act(() => video.playAt(6.5));
+        expect(marked(engine)).toEqual([2, 2]);
+        act(() => onlineManager.setOnline(false));
+        await waitFor(() => noFrame());
+        expect(video.dispose).toHaveBeenCalled();
+        expect(video.listenerCount()).toBe(0);
+        await waitFor(() => expect(marked(engine)).toBeNull());
+        act(() => video.tick(12.5));
+        expect(marked(engine)).toBeNull();
+
+        // Back: a new frame, which has to be tapped before anything is marked.
+        act(() => onlineManager.setOnline(true));
+        await frameShown();
+        const again = currentRecordingPlayer();
+        expect(again).not.toBe(video);
+        expect(marked(engine)).toBeNull();
+        act(() => again.playAt(8.5));
+        expect(marked(engine)).toEqual([3, 3]);
+      });
+
+      it('on a link that isn’t lined up: the prompt gives way to the note, and a press made as it went saves nothing', async () => {
+        const { video } = await openVideo({ links: [original] });
+        act(() => video.playAt(5));
+        expectUnlocked(lineUpButton('Bar 1 starts now'));
+        act(() => {
+          onlineManager.setOnline(false);
+          fireEvent.click(lineUpButton('Bar 1 starts now'));
+        });
+        expect(within(lineUp()).getByTestId('offline-note')).toHaveTextContent(
+          'You’re offline. Lining the tab up needs a connection.',
+        );
+        expectLocked(lineUpButton('Bar 1 starts now'));
+        fireEvent.click(lineUpButton('Bar 1 starts now'));
+        await settle();
+        expect(links.sent('update')).toEqual([]);
+        noLineUpButton('Tab later');
+
+        act(() => onlineManager.setOnline(true));
+        await frameShown();
+        const again = currentRecordingPlayer();
+        act(() => again.playAt(8));
+        await userEvent.setup().click(lineUpButton('Bar 1 starts now'));
+        await waitFor(() => expect(barOneSent()).toEqual([8]));
+      });
+
+      it('a nudge whose answer is lost says so, puts the saved value back on show, and the next read shows what the server kept', async () => {
+        const client = testQueryClient();
+        const cached = () =>
+          client.getQueryData<SongLinkRow[]>(linksKey)?.map((row) => row.bar_one_seconds);
+        const { user } = await openVideo({ queryClient: client });
+        links.loseNext('update');
+        const releaseRead = links.holdNext('select');
+        await user.click(lineUpButton('Tab later'));
+        expect(await within(lineUp()).findByRole('alert')).toHaveTextContent(
+          "Couldn’t save where bar 1 starts. The server couldn't be reached. Check the connection and try again.",
+        );
+        // The page is back on what it knew the server held; the server did take the nudge.
+        expect(cached()).toEqual([BAR_ONE]);
+        expect(links.rows()[0]).toMatchObject({ bar_one_seconds: 4.25 });
+        // The read that follows every save says so.
+        releaseRead();
+        await waitFor(() => expect(cached()).toEqual([4.25]));
+        // A nudge now moves what the server holds, so the lost answer costs no quarter second.
+        await user.click(lineUpButton('Tab later'));
+        await waitFor(() => expect(barOneSent()).toEqual([4.25, 4.5]));
+      });
+    });
+
     describe('under StrictMode', () => {
       beforeEach(() => configure({ reactStrictMode: true }));
       afterEach(() => configure({ reactStrictMode: false }));

@@ -10,6 +10,7 @@ import {
   EMBED_URL,
   gotoSource,
   lastPlayedOf,
+  lineUp,
   lineUpButton,
   lineUpMessage,
   markedBars,
@@ -1014,5 +1015,144 @@ test.describe('the tab follows the video (Unit 19)', () => {
         .locator('.at-surface')
         .evaluate((surface) => getComputedStyle(surface).cursor),
     ).toBe('default');
+  });
+
+  // 19 Test. The repeats fixture plays bars 3 and 4 twice: ten playthroughs of two seconds.
+  test('a tab with a repeat is followed in the order its bars are played; a tap goes to the pass the video is in; the reader’s own scroll and Follow off are left alone', async ({
+    user,
+    page,
+    context,
+  }) => {
+    test.setTimeout(180_000);
+    await stubServices(context);
+    await signIn(page, user, '/');
+    await uploadFixture(page, 'repeats', 'Repeats');
+    await openSongOverview(page, 'Repeats');
+    await saveRecordings(page, 'Repeats', { Original: WATCH_URL });
+    await recordingLink(page, 'Original').click();
+    await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+    await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
+
+    const video = videoStub(page);
+    await video.tapPlay();
+    await video.seek(3);
+    await lineUpButton(page, 'Bar 1 starts now').click();
+    await expect.poll(async () => (await barOneOf(user)).original).not.toBeNull();
+    const barOne = (await barOneOf(user)).original!;
+    await video.pause();
+
+    const PLAY_ORDER = [1, 2, 3, 4, 3, 4, 5, 6, 7, 8];
+    /** Half a second into the playthrough at `position` of the play order. */
+    const at = (position: number) => barOne + position * BAR_SECONDS + 0.5;
+    const onShow = async () => {
+      const view = await readableView(page);
+      const box = await markedBox(page);
+      return box.y >= view.top - 1 && box.y + box.height <= view.bottom + 1;
+    };
+    const scrolledTo = () =>
+      page.evaluate(() => {
+        const box = document.querySelector('[data-testid="score-viewport"]')!;
+        return { window: window.scrollY, boxTop: box.scrollTop, boxLeft: box.scrollLeft };
+      });
+
+    // Through the repeat: bar 3 comes again after bar 4, and is brought back on show.
+    for (const [position, bar] of PLAY_ORDER.entries()) {
+      await video.seek(at(position));
+      await expect
+        .poll(() => markedBars(page), { message: `position ${position}` })
+        .toEqual([bar, bar]);
+      await expect.poll(onShow, { message: `bar ${bar} on show` }).toBe(true);
+    }
+
+    // A tap on bar 3 from its second pass goes to the second pass; from the song's start, to the first.
+    await video.seek(at(4));
+    await expect.poll(() => markedBars(page)).toEqual([3, 3]);
+    await expect.poll(onShow).toBe(true);
+    // Follow off, so the page stays put between measuring the bar and tapping it.
+    await lineUpButton(page, 'Follow').click();
+    await expect(lineUpButton(page, 'Follow')).toHaveAttribute('aria-pressed', 'false');
+    const third = await markedBox(page);
+    const tapThird = () => page.mouse.click(third.x + third.width / 2, third.y + third.height / 2);
+    await video.seek(at(5));
+    await expect.poll(() => markedBars(page)).toEqual([4, 4]);
+    await tapThird();
+    await expect.poll(() => video.time()).toBeCloseTo(barOne + 4 * BAR_SECONDS, 1);
+    await expect.poll(() => markedBars(page)).toEqual([3, 3]);
+    await video.seek(at(0));
+    await expect.poll(() => markedBars(page)).toEqual([1, 1]);
+    await tapThird();
+    await expect.poll(() => video.time()).toBeCloseTo(barOne + 2 * BAR_SECONDS, 1);
+    expect(await video.playing()).toBe(false);
+
+    // Follow on again: the last bar is brought on show.
+    await lineUpButton(page, 'Follow').click();
+    await video.seek(at(9));
+    await expect.poll(() => markedBars(page)).toEqual([8, 8]);
+    await expect.poll(onShow).toBe(true);
+    const followed = await scrolledTo();
+    // A phone's page has scrolled to get there (one bar a line under the video).
+    if (page.viewportSize()!.width < 768) expect(followed.window).toBeGreaterThan(0);
+
+    // The reader scrolls back to the top by hand: inside the bar being played, nothing pulls it back.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await video.seek(at(9) + 0.7);
+    await page.waitForTimeout(800);
+    expect(await markedBars(page)).toEqual([8, 8]);
+    expect((await scrolledTo()).window).toBe(0);
+    // The next bar the video goes to is followed again.
+    await video.seek(at(8));
+    await expect.poll(() => markedBars(page)).toEqual([7, 7]);
+    await expect.poll(onShow).toBe(true);
+
+    // Follow off: the mark goes to bar 1 and neither the page nor the score box moves.
+    await lineUpButton(page, 'Follow').click();
+    await expect(lineUpButton(page, 'Follow')).toHaveAttribute('aria-pressed', 'false');
+    const still = await scrolledTo();
+    await video.seek(at(0));
+    await expect.poll(() => markedBars(page)).toEqual([1, 1]);
+    await page.waitForTimeout(500);
+    expect(await scrolledTo()).toEqual(still);
+    // On a phone bar 1 is far above the window by now: the check above had something to refuse.
+    if (page.viewportSize()!.width < 768) expect(await onShow()).toBe(false);
+    await lineUpButton(page, 'Follow').click();
+    await expect.poll(onShow).toBe(true);
+  });
+
+  test('a song with only a Spotify link asks YouTube for nothing on its play screen and has no line-up; Space plays its tab', async ({
+    user,
+    page,
+    context,
+  }) => {
+    test.setTimeout(120_000);
+    const services = await stubServices(context);
+    await openNewSongOverview(page, user);
+    await addRecordingButton(page).click();
+    await linkField(page, 'Drumless').fill(SPOTIFY_URL);
+    await saveRecordingsButton(page).click();
+    await expect(recordingsForm(page)).toHaveCount(0);
+
+    await tabLink(page).click();
+    await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+    await expect(sourceSwitch(page)).toHaveCount(0);
+    await expect(lineUp(page)).toHaveCount(0);
+    expect(await page.locator('iframe').count()).toBe(0);
+    expect(await markedBars(page)).toBeNull();
+    // Space is the tab's own key here, as it always was.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press('Space');
+    await expect(playButton(page)).toHaveText(/Pause/);
+    await page.keyboard.press('Space');
+    await expect(playButton(page)).toHaveText(/Play/);
+    // Not the player's script, not a frame, nothing: neither YouTube's hosts nor Spotify's.
+    expect(services.requests).toEqual([]);
+
+    // The recorder hears a request when there is one: a YouTube Original, opened.
+    await page.goBack();
+    await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
+    await recordingLink(page, 'Original').click();
+    await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+    await expect.poll(() => services.scripts()).toEqual([PLAYER_API_URL]);
+    expect(services.frames()).toEqual([EMBED_URL]);
+    await expect(lineUp(page)).toBeVisible();
   });
 });

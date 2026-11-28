@@ -407,3 +407,341 @@ describe('a frame wrapped twice (StrictMode mounts, cleans up and mounts again)'
     expect(heard.at(-1)).toMatchObject({ status: 'ready' });
   });
 });
+
+// 19 Test: the windows Build's list names, each with the input that arrives in it.
+describe('the poll, through every way a video stops and goes on (19 Test)', () => {
+  const ENDED = 0;
+
+  it.each([
+    ['a pause', PAUSED],
+    ['buffering', BUFFERING],
+    ['the end', ENDED],
+  ])(
+    'stops for %s and starts again when the video plays on, one timer at a time',
+    async (_name, stop) => {
+      const { heard, yt, CLOCK_POLL_MS } = await setup();
+      yt.ready();
+      yt.state(PLAYING);
+      expect(vi.getTimerCount()).toBe(1);
+
+      yt.state(stop);
+      expect(vi.getTimerCount()).toBe(0);
+      const stopped = heard.length;
+      yt.time = 50;
+      vi.advanceTimersByTime(CLOCK_POLL_MS * 4);
+      expect(heard).toHaveLength(stopped);
+
+      // Playing again, said twice as YouTube sometimes does: still one poll.
+      yt.state(PLAYING);
+      yt.state(PLAYING);
+      expect(vi.getTimerCount()).toBe(1);
+      const resumed = heard.length;
+      yt.time = 51;
+      vi.advanceTimersByTime(CLOCK_POLL_MS);
+      expect(heard).toHaveLength(resumed + 1);
+      expect(heard.at(-1)).toMatchObject({ seconds: 51, playing: true });
+    },
+  );
+
+  it('a video that starts playing while the page is hidden isn’t polled until the page is back', async () => {
+    const { heard, yt, CLOCK_POLL_MS } = await setup();
+    yt.ready();
+    setVisibility('hidden');
+    yt.state(PLAYING);
+    // The change of state itself is heard; the clock isn't read on a timer.
+    expect(heard.at(-1)).toMatchObject({ playing: true, started: true });
+    expect(vi.getTimerCount()).toBe(0);
+
+    yt.time = 12;
+    setVisibility('visible');
+    expect(heard.at(-1)).toMatchObject({ seconds: 12 });
+    expect(vi.getTimerCount()).toBe(1);
+    yt.time = 12.25;
+    vi.advanceTimersByTime(CLOCK_POLL_MS);
+    expect(heard.at(-1)).toMatchObject({ seconds: 12.25 });
+  });
+
+  it('a page that comes back to a paused video says where it is once, and polls nothing', async () => {
+    const { heard, yt, CLOCK_POLL_MS } = await setup();
+    yt.ready();
+    yt.state(PLAYING);
+    yt.state(PAUSED);
+    setVisibility('hidden');
+    // Scrubbed in another window's picture-in-picture, say.
+    yt.time = 77;
+    const hidden = heard.length;
+    setVisibility('visible');
+    expect(heard).toHaveLength(hidden + 1);
+    expect(heard.at(-1)).toMatchObject({ seconds: 77, playing: false });
+    vi.advanceTimersByTime(CLOCK_POLL_MS * 4);
+    expect(heard).toHaveLength(hidden + 1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a page hidden and shown before the player has answered says nothing: there is no clock to read', async () => {
+    const { heard } = await setup();
+    setVisibility('hidden');
+    setVisibility('visible');
+    expect(heard).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stops when the player gives up while playing (an error mid-video)', async () => {
+    const { heard, yt, CLOCK_POLL_MS } = await setup();
+    yt.ready();
+    yt.state(PLAYING);
+    yt.options.events.onError({ data: 5 });
+    expect(heard.at(-1)).toMatchObject({ status: 'unavailable', playing: false });
+    expect(vi.getTimerCount()).toBe(0);
+    const count = heard.length;
+    vi.advanceTimersByTime(CLOCK_POLL_MS * 4);
+    expect(heard).toHaveLength(count);
+    // A "playing" still on its way from the frame doesn't set the clock going again: the
+    // screen has been told this video can't be followed.
+    yt.state(PLAYING);
+    expect(heard.at(-1)).toMatchObject({ status: 'unavailable', playing: false });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('tells each listener, and one that stops listening hears no more while the others do', async () => {
+    const { player, heard, yt, CLOCK_POLL_MS } = await setup();
+    const others: number[] = [];
+    const stop = player.subscribe((state) => {
+      others.push(state.seconds);
+      // Taking itself off while being told must not skip the listener after it.
+      if (state.seconds === 2) stop();
+    });
+    const last: number[] = [];
+    player.subscribe((state) => last.push(state.seconds));
+    yt.ready();
+    yt.state(PLAYING);
+    yt.time = 2;
+    vi.advanceTimersByTime(CLOCK_POLL_MS);
+    yt.time = 3;
+    vi.advanceTimersByTime(CLOCK_POLL_MS);
+    expect(others.at(-1)).toBe(2);
+    expect(last.at(-1)).toBe(3);
+    expect(heard.at(-1)).toMatchObject({ seconds: 3 });
+  });
+});
+
+describe('events that arrive late (19 Test)', () => {
+  it('a player let go of before it answered stays as it was when the answer comes', async () => {
+    const { player, heard, yt, CLOCK_POLL_MS } = await setup();
+    player.dispose();
+    yt.time = 9;
+    yt.ready();
+    yt.state(PLAYING);
+    vi.advanceTimersByTime(CLOCK_POLL_MS * 4);
+    expect(heard).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+    // What it knew when it was let go of: nothing is read from the player for it any more.
+    expect(player.getState()).toMatchObject({ status: 'loading', started: false, seconds: 0 });
+  });
+
+  it('a listener added after dispose hears nothing, and its unsubscribe is safe to call', async () => {
+    const { player, yt } = await setup();
+    yt.ready();
+    player.dispose();
+    const late = vi.fn();
+    const stop = player.subscribe(late);
+    yt.state(PLAYING);
+    expect(late).not.toHaveBeenCalled();
+    expect(() => stop()).not.toThrow();
+    // Disposing twice is one dispose.
+    expect(() => player.dispose()).not.toThrow();
+  });
+
+  it('a seek sent while the video buffers shows at once, and a clock reading from before it is put right by the next', async () => {
+    const { player, heard, yt, CLOCK_POLL_MS } = await setup();
+    yt.ready();
+    yt.time = 5;
+    yt.state(PLAYING);
+    yt.state(BUFFERING);
+    player.seekTo(40);
+    expect(heard.at(-1)).toMatchObject({ seconds: 40, playing: false });
+    // No poll while it buffers: nothing moves the time shown off the target.
+    vi.advanceTimersByTime(CLOCK_POLL_MS * 4);
+    expect(heard.at(-1)).toMatchObject({ seconds: 40 });
+    // It plays on from where YouTube really landed.
+    yt.time = 39.7;
+    yt.state(PLAYING);
+    expect(heard.at(-1)).toMatchObject({ seconds: 39.7, playing: true });
+  });
+
+  it('two seeks, one straight after the other, end on the second', async () => {
+    const { player, heard, yt } = await setup();
+    yt.ready();
+    yt.state(PLAYING);
+    yt.state(PAUSED);
+    player.seekTo(10);
+    player.seekTo(30);
+    expect(yt.seekTo.mock.calls.map(([seconds]) => seconds)).toEqual([10, 30]);
+    expect(heard.at(-1)).toMatchObject({ seconds: 30 });
+    expect(player.getState().seconds).toBe(30);
+  });
+});
+
+describe('one video after another (19 Test)', () => {
+  it('a second frame is a second player: the script isn’t asked for again, and neither hears the other', async () => {
+    const { createYouTubePlayer } = await loadModule();
+    const firstFrame = frameOnPage();
+    const first = createYouTubePlayer(firstFrame);
+    const firstHeard: RecordingState[] = [];
+    first.subscribe((state) => firstHeard.push(state));
+    window.YT = { Player: StubYtPlayer as never };
+    window.onYouTubeIframeAPIReady?.();
+    await vi.advanceTimersByTimeAsync(0);
+    const firstYt = StubYtPlayer.made[0]!;
+    firstYt.ready();
+    firstYt.time = 100;
+    firstYt.state(PLAYING);
+    expect(firstHeard.at(-1)).toMatchObject({ started: true, playing: true, seconds: 100 });
+
+    // The source is switched while the first is being polled: its frame goes, another comes.
+    first.dispose();
+    firstFrame.remove();
+    expect(vi.getTimerCount()).toBe(0);
+    const secondFrame = frameOnPage();
+    const second = createYouTubePlayer(secondFrame);
+    const secondHeard: RecordingState[] = [];
+    second.subscribe((state) => secondHeard.push(state));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(document.head.querySelectorAll('script')).toHaveLength(1);
+    expect(StubYtPlayer.made.map((yt) => yt.frame)).toEqual([firstFrame, secondFrame]);
+    // The new video hasn't been tapped: nothing of the first's is carried over.
+    expect(second.getState()).toMatchObject({ status: 'loading', started: false, seconds: 0 });
+
+    // The first video's events, still on their way, reach neither.
+    const before = firstHeard.length;
+    firstYt.time = 101;
+    firstYt.state(PAUSED);
+    firstYt.state(PLAYING);
+    expect(firstHeard).toHaveLength(before);
+    expect(secondHeard).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+
+    const secondYt = StubYtPlayer.made[1]!;
+    secondYt.time = 3;
+    secondYt.ready();
+    expect(secondHeard.at(-1)).toMatchObject({ status: 'ready', started: false, seconds: 3 });
+    // And orders go to the video on the page, never to the one that left.
+    second.seekTo(8);
+    first.seekTo(8);
+    expect(secondYt.seekTo).toHaveBeenCalledTimes(1);
+    expect(firstYt.seekTo).not.toHaveBeenCalled();
+  });
+
+  it('the frame replaced while the script loads: only the one on the page is wrapped, and it works', async () => {
+    const { createYouTubePlayer } = await loadModule();
+    const gone = frameOnPage();
+    const first = createYouTubePlayer(gone);
+    const firstHeard = vi.fn();
+    first.subscribe(firstHeard);
+    first.dispose();
+    gone.remove();
+    const here = frameOnPage();
+    const second = createYouTubePlayer(here);
+    const heard: RecordingState[] = [];
+    second.subscribe((state) => heard.push(state));
+    expect(document.head.querySelectorAll('script')).toHaveLength(1);
+
+    window.YT = { Player: StubYtPlayer as never };
+    window.onYouTubeIframeAPIReady?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(StubYtPlayer.made.map((yt) => yt.frame)).toEqual([here]);
+    StubYtPlayer.made[0]!.ready();
+    StubYtPlayer.made[0]!.state(PLAYING);
+    expect(heard.at(-1)).toMatchObject({ status: 'ready', playing: true });
+    expect(firstHeard).not.toHaveBeenCalled();
+  });
+});
+
+describe('the script failing (19 Test)', () => {
+  it('every frame that was waiting is told, and none is polled or driven', async () => {
+    const { createYouTubePlayer } = await loadModule();
+    const players = [createYouTubePlayer(frameOnPage()), createYouTubePlayer(frameOnPage())];
+    const heard = players.map((player) => {
+      const states: RecordingState[] = [];
+      player.subscribe((state) => states.push(state));
+      return states;
+    });
+    document.head.querySelector('script')!.dispatchEvent(new Event('error'));
+    await vi.advanceTimersByTimeAsync(0);
+    for (const states of heard) {
+      expect(states.at(-1)).toMatchObject({ status: 'unavailable', playing: false });
+    }
+    for (const player of players) {
+      expect(() => {
+        player.play();
+        player.pause();
+        player.seekTo(4);
+      }).not.toThrow();
+    }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a frame made after the failure asks again, and works when the script then loads', async () => {
+    const { createYouTubePlayer } = await loadModule();
+    createYouTubePlayer(frameOnPage());
+    document.head.querySelector('script')!.dispatchEvent(new Event('error'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const frame = frameOnPage();
+    const player = createYouTubePlayer(frame);
+    const heard: RecordingState[] = [];
+    player.subscribe((state) => heard.push(state));
+    expect(player.getState().status).toBe('loading');
+    window.YT = { Player: StubYtPlayer as never };
+    window.onYouTubeIframeAPIReady?.();
+    await vi.advanceTimersByTimeAsync(0);
+    // Only the frame that asked the second time: the first was told it would never answer.
+    expect(StubYtPlayer.made.map((yt) => yt.frame)).toEqual([frame]);
+    StubYtPlayer.made[0]!.ready();
+    expect(heard.at(-1)).toMatchObject({ status: 'ready' });
+  });
+
+  it('a script that arrives without a player in it is the same as none', async () => {
+    const { createYouTubePlayer } = await loadModule();
+    const player = createYouTubePlayer(frameOnPage());
+    const heard: RecordingState[] = [];
+    player.subscribe((state) => heard.push(state));
+    window.YT = {};
+    window.onYouTubeIframeAPIReady?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(heard.at(-1)).toMatchObject({ status: 'unavailable' });
+  });
+
+  it('a player that can’t be made for the frame is unavailable, and the page carries on', async () => {
+    class Throws {
+      constructor() {
+        throw new Error('not this frame');
+      }
+    }
+    window.YT = { Player: Throws as never };
+    const { createYouTubePlayer } = await loadModule();
+    const player = createYouTubePlayer(frameOnPage());
+    const heard: RecordingState[] = [];
+    player.subscribe((state) => heard.push(state));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(heard.at(-1)).toMatchObject({ status: 'unavailable' });
+    // A wrapper made for the same frame afterwards (StrictMode's second mount) knows already.
+    expect(createYouTubePlayer(document.querySelector('iframe')!).getState().status).toBe(
+      'unavailable',
+    );
+  });
+
+  it('a script that fails after its frame has gone tells nobody, and nothing throws', async () => {
+    const { createYouTubePlayer } = await loadModule();
+    const frame = frameOnPage();
+    const player = createYouTubePlayer(frame);
+    const heard = vi.fn();
+    player.subscribe(heard);
+    player.dispose();
+    frame.remove();
+    document.head.querySelector('script')!.dispatchEvent(new Event('error'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(heard).not.toHaveBeenCalled();
+  });
+});

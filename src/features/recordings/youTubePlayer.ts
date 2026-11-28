@@ -182,6 +182,10 @@ export function createYouTubePlayer(frame: HTMLIFrameElement): RecordingPlayer {
     if (disposed) return;
     if (event.type === 'unavailable') {
       state = { ...state, status: 'unavailable', playing: false };
+    } else if (state.status === 'unavailable') {
+      // Said to be out of reach for good: a "playing" that follows an error must not set
+      // the clock's poll going under a video the screen has stopped following (19 Test).
+      return;
     } else if (event.type === 'ready') {
       state = { ...state, status: 'ready' };
       readClock();

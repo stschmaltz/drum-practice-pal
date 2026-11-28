@@ -177,3 +177,64 @@ Local stack and `npm run dev`, a song with a tab and a YouTube Original:
 - e2e, `recordings.spec.ts` (3 new, at phone, tablet and desktop): the frame's parameters and the one script; one following pass with pause, seek and 2x speed, the bar on show; Space; nothing moving at the line-up; a tap; the nudges saved; a second device; an unlined link. `design.spec.ts` measures the line-up as a prompt, as nudges and while lining up again.
 
 `npm run check` and `npm run test:db` are green; `recordings.spec.ts`, the recordings design test and `journey.spec.ts` pass at the three sizes.
+
+## Test
+
+### Summary
+
+Build's tests already covered each acceptance criterion once. This stage went through the plan's Test focus and Build's "Async windows and inputs" list row by row and added what had no test of its own: 114 unit and component tests, 13 database tests and 2 e2e tests (each at the three sizes). One bug found and fixed (three lines). One test file could not be written (see Not covered).
+
+### Tests added
+
+- **`videoSync.test.ts` (+69, 134 in all), the maths as tables:**
+  - _Shapes of a tab:_ a bar played three times; a tempo change inside a repeated bar, timed at each playthrough from that playthrough's own ticks; several changes in one bar listed out of order; a pickup bar; a tempo and a meter changing together (4/4 to 6/8); 3000 bars at 137 BPM with each bar starting exactly where the last ended.
+  - _On a bar line:_ one mixed tab (bars 2 and 3 three times, a 3/4 bar, 90 and 137 BPM, a last bar that slows half-way) with bar 1 at 0, 0.25, 7.432, 3600.001 and 43200 s. Exactly on each line is that playthrough, a millisecond before it the one before, a millisecond before its end still it, the tab's end "ended". A tap on any playthrough goes to its own line, which is that playthrough again. A sum with float noise in it (0.1 + 0.2) is still bar 1's first instant.
+  - _A bar played three times:_ followed pass by pass; a tap goes to the nearest pass from nine places of the video, half-way between two passes going back to the one already heard.
+  - _After nudges:_ where a fixed moment of the video falls after 0 to 100 presses each way, the time since bar 1 going negative ("not started") after "Tab later".
+  - _Quarter-second steps:_ there and back is the stored value exactly; a thousand presses are a thousand quarters; the thousandths of a press survive 200 nudges; a nudge an end cuts short lands on the end, and the way back is a whole quarter (the tenth isn't remembered); a press is saved to the millisecond; nothing a press or a nudge gives is outside what the column takes; the label after a nudge.
+- **`youTubePlayer.test.ts` (+19, 45):** the poll stopping for a pause, buffering and the end and starting again with one timer; a video that starts while the page is hidden; a page that comes back to a paused video; hidden and shown before the player answered; an error mid-video; a listener that takes itself off mid-telling; a player let go of before it answered; a listener added after dispose; a seek while buffering with nothing moving the time shown until it plays on; two seeks one after the other; two videos one after the other (one script, nothing carried over, neither hears the other, orders go to the one on the page); the frame replaced while the script loads; the script failing with two frames waiting, a later frame working once it loads, a script with no player in it, a constructor that throws, a failure after the frame has gone.
+- **`SongPage.test.tsx` (+26, describes marked "19 Test"):**
+  - _Lining up, pressed again:_ twice before the page has drawn the first press; twice with the video moving between (ends on the later, here and on the server); "Line up again" with a refused save (the old line-up back, the read held so the page's own rollback is what is asserted); a new line-up while a nudge is on its way; a nudge straight after a line-up still on its way; two nudges pressed inside one render; lined up before the tab's bars are in.
+  - _Another device while following:_ it moves the line-up (same frame, the mark moves, a nudge here moves the new value); it takes the line-up away (prompt back, the video plays on, the score no longer tappable); a read that fails over the cached links keeps the frame, the line-up and the mark.
+  - _One video after another:_ Original, Drumless, Original again is a third player: the nudges are there, nothing is marked until it has been played (its clock already inside the tab), Space says to tap it, and the two earlier players' late clocks mark nothing.
+  - _The reader's own scrolling:_ a hand scroll isn't undone inside the bar being played, nor for a next bar that is on show; the page follows again for one that isn't. A bar under the sticky video or behind a phone's tab bar isn't on show; a tab bar with no box (768 px and up) hides nothing.
+  - _A tap and Space at the edges:_ a tap after a nudge on its way; after the video has run past the tab; before the player has answered; Space held down (one pause, every repeat still taken); Space after the player has given up (the browser's); Space after a pause made in the video's own controls.
+  - _Nothing to follow:_ a song with no links, with only a Spotify and a web link, and a lined-up song on Tab: no line-up, no video player made, taps and Space are the tab's.
+  - _The connection going:_ while following (the frame leaves, the mark with it, a new frame on return has to be tapped); on an unlined link with a press made as it went; a nudge whose answer is lost (said, rolled back, and the read after it shows what the server kept, so the next nudge isn't a quarter short).
+- **`tests/db/song-links.test.ts` (+13, 95):** a millisecond, 43199.999 and a quarter second kept exactly; `NaN`, `Infinity` and `-Infinity` refused by the range check (PostgREST reads the words into `numeric`; Postgres sorts NaN above every number), "soon" as 22P02; a nudge moves only the line-up and `updated_at`; the trigger leaves a change of kind and a same-address write alone, clears on Spotify and doesn't give the line-up back with the old address; a new address on an unlined link; a new address with an explicit null; only the owner reads the column (B gets no row, signed out is 42501); B can't plant a lined-up link on A's song, clear A's line-up or delete the link.
+- **e2e, `recordings.spec.ts` (+2 at each size):** the repeats fixture followed through all ten playthroughs with each bar brought on show (bar 3 again after bar 4), a tap on bar 3 going to the second pass from the second pass and the first from the song's start, a hand scroll to the top not pulled back inside the bar and followed again at the next, and Follow off moving neither the window nor the score box (on a phone bar 1 is proved out of sight first). A song with only a Spotify link: no request to any YouTube or Spotify host on its play screen (the script included), no line-up, Space plays the tab; then a YouTube Original proves the recorder hears the script.
+
+"Nothing is requested from YouTube or Google before a recording is opened" was confirmed again three ways, the API script included: the page (`services.requests` is every request, script and frame, and is empty through the Songs list, Stats, Settings, the overview and the Tab player, with and without the service worker in charge, and now for a Spotify-only song), the build (`index.html` and `sw.js`), and the source (`thirdPartyRequests.test.ts`: one script, one module, only when a frame is handed over).
+
+### Break checks
+
+Each of these was made in app code, the tests run, and the file put back (a script that copies the file, edits it, runs, restores):
+
+- `videoSync.ts`: the float margin removed (8 fail), the tie going the other way (2), the tempo changes unsorted (1), no rounding to the millisecond (10), no stop at the video's start (2), changes inside a bar ignored (4), always the first pass (12), the nudge's direction swapped (12).
+- `youTubePlayer.ts`: a second interval per "playing" (3), polling while hidden (1), wrapping a frame that left (1), a failed load remembered (1), a throwing constructor not caught (1), a reading said before the player answered (1), orders sent after dispose (1), and the fix below reverted (1).
+- `useSaveBarOne.ts`: an answer drawn over a later save (1), a failure clearing instead of going back (2), no `scope` (2). `LineUp.tsx`: no `isOnline()` in the press (1), the clock from the last render (1), a nudge from the rendered value (1).
+- `useVideoFollow.ts`: the tab bar ignored (1), an undrawn tab bar counted (1), the sticky bar ignored (1), the scroll run at every render (3), a tap before the player answered (1), a stale line-up (5), Space on an unavailable player (1), a mark before the first play (1). `shortcuts.ts`: a held Space repeating (1).
+- e2e: the repeat test's play order written without the repeat fails at position 4 ("received [3, 3]").
+
+Three tests pass with their line removed, because a second guard holds the behaviour: a listener added after dispose (the widget's `sink` is already null), a listener taking itself off mid-telling (a `Set` survives deletion while iterated), and events after a dispose before "ready". They are kept as statements of behaviour. Two first drafts passed vacuously and were changed: the refused re-line-up passed on the refetch until the read was held, and the tab-bar bar was below jsdom's 768 px window anyway until it was moved inside it. The database tests can't be broken without changing the migration; they run against the real schema on the 54421 stack.
+
+### Bugs found
+
+1. **A "playing" after a player error set the clock's poll going under an unavailable video (fixed).** `youTubePlayer.ts` took any state event after `onError`: the state became `unavailable` with `playing: true`, and the 250 ms poll ran (reading the clock and telling every listener) for the rest of the frame's life. Nothing on screen acted on it, since every gate asks for `ready`. Repro: `yt.ready(); yt.state(1); yt.options.events.onError({ data: 5 }); yt.state(1)`. Fix: once unavailable, later events from the frame are dropped (three lines in `handle`). Test: "stops when the player gives up while playing".
+
+Nothing bigger found.
+
+### Not covered
+
+- **Real scores with a tempo change inside a bar, a change of meter part-way and a bar played three times.** No committed fixture has one. Four tests were written for `tests/unit/video-sync-fixtures.test.ts` that build such scores from alphaTex in the test and run them through alphaTab's MIDI generator; the edit that added them was not let through by this session's permission check, so they are not in the repo. The maths for all three is covered on hand-made tick data in `videoSync.test.ts`; what is unproved is that alphaTab's `tempoChanges` carries a mid-bar change at the tick this code expects. Carried forward in `docs/plan.md`.
+- A real YouTube player: adverts, a clock that reports in steps, `onAutoplayBlocked`, a seek that lands early. The stub and the fake stand in; Build's one real video is the only evidence.
+- Safari and Firefox (Chromium only), and whether the marked bar is the bar heard.
+- Focus after a refused re-line-up is only asserted not to be on `<body>`.
+- A save in flight when the source is switched or the screen left (Build's known gap: the cache is corrected, the message is lost).
+- The window follow at 320 px and on a phone on its side (QA's).
+
+### Verify
+
+- `npm run check`: 5908 passed, 2 skipped (5794 before).
+- `npm run test:db`: 290 passed.
+- `E2E_PORT=4283 npx playwright test tests/e2e/recordings.spec.ts tests/e2e/journey.spec.ts tests/e2e/shortcuts.spec.ts`: 96 passed at phone, tablet and desktop. `tests/e2e/design.spec.ts -g "a song’s recordings"`: 3 passed.
