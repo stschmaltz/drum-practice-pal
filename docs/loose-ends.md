@@ -7,8 +7,8 @@ How to read the classes:
 - **GONE**: no longer true, or no longer reachable. Deleted from the plan.
 - **DONE**: already fixed or already decided. Deleted from the plan.
 - **FIX**: a defect or gap code can close. It is in a batch below.
-- **DECIDE**: turns on how Shane practises, or on a product choice. It has a D number below.
-- **ACCEPT**: real, not worth fixing now. It stays listed so nobody raises it again.
+- **DECIDE**: turns on how Shane practises, or on a product choice. It has a D number below, and its recommendation is built as the default (see Decisions for Shane).
+- **ACCEPT**: real, not worth fixing now. It is in the Accepted section of `docs/plan.md`, with why and what would change that, so nobody raises it again.
 - **HUMAN**: only checkable by ear or on a real device. Moved to the Open human checks table.
 
 Names used here: the **Tab page** is `/songs/:id/play` (what the plan used to call jam mode or the song page); the **practice screen** is `/songs/:id/loops/:loopId`; the **overview** is `/songs/:id`.
@@ -29,34 +29,44 @@ What was not run: the e2e suite, any browser, any real device. Rows that rest on
 
 Batches, in order of value to someone practising at a kit. No two batches touch the same files.
 
-| #   | Batch                                            | Items                                             | Size |
-| --- | ------------------------------------------------ | ------------------------------------------------- | ---- |
-| 1   | A slow connection never holds up Play            | 13.06, 13.14, 13.16a, 14.4b                       | M    |
-| 2   | Queued practice is never dropped                 | 13.23, 14.6                                       | M    |
-| 3   | Tab page: the score stays put                    | 13.26, 13.29, 13.30, 13.31a                       | M    |
-| 4   | Tab page: the loop sheet                         | 13.27a, 13.28a, 13.28b, 13.32 (D1's cheap option) | S    |
-| 5   | Practice history says what happened              | 17.1, D4 (13.18b)                                 | M    |
-| 6   | Sign-in and sign-out                             | 13.01, D2 (13.05a, 13.05b)                        | M    |
-| 7   | Recordings                                       | D8 (14.3); 14.2 once the Human check has tried it | S    |
-| 8   | Focus and small jumps                            | 13.21, 13.35c, 13.37a, 13.37b                     | S    |
-| 9   | Stats copy and locale                            | 17.3a, 17.3b, 17.4a, 17.4b, 17.5a, 17.5b, 17.5e   | M    |
-| 10  | Scripts and seed                                 | 13.10, 14.5                                       | S    |
-| 11  | Docs only (this unit's commit, then the wrap-up) | every GONE, DONE, HUMAN and ACCEPT row            | S    |
+| #   | Batch                                                    | Items                                                                       | Size |
+| --- | -------------------------------------------------------- | --------------------------------------------------------------------------- | ---- |
+| 1   | A slow connection never holds up Play                    | 13.06, 13.14, 13.16a, 14.4b                                                 | M    |
+| 2   | Queued practice is never dropped                         | 13.23, 14.6                                                                 | M    |
+| 3   | Tab page: the score stays put                            | 13.26, 13.29, 13.30, 13.31a                                                 | M    |
+| 4   | Tab page: the loop sheet                                 | 13.27a whatever D1's answer; 13.28a, 13.28b, 13.32 (D1's default, option A) | S    |
+| 5   | Practice history says what happened                      | 17.1; D4's default (13.18b)                                                 | M    |
+| 6   | Sign-in and sign-out                                     | 13.01; D2's default (13.05a, 13.05b), "Sign out anyway" asked first         | M    |
+| 7   | Recordings                                               | D8's default (14.3); 14.2 once the Human check has tried it                 | S    |
+| 8   | Focus and small jumps                                    | 13.21, 13.35c, 13.37a, 13.37b                                               | S    |
+| 9   | Stats copy and locale                                    | 17.3a, 17.3b, 17.4a, 17.4b, 17.5a, 17.5b, 17.5e                             | M    |
+| 10  | Scripts and seed                                         | 13.10, 14.5                                                                 | S    |
+| 11  | Docs only (this unit's first commits, then a last check) | every GONE, DONE, HUMAN and ACCEPT row                                      | S    |
 
-Sizes: S is under an hour of building (tests on top), M an afternoon, L a unit of its own. D6 (bigger notation) and D7 (the video beside the score) are not in a batch: both wait for Shane to look at a real device, and D6 would be an L.
+Sizes: S is under an hour of building (tests on top), M an afternoon, L a unit of its own. D6 (bigger notation) and D7 (the video beside the score) are not in a batch: both wait for Shane to look at a real device, and D6 would be an L. D3 and D5 are not in one either: their recommendation is to build nothing.
 
 ## Decisions for Shane
 
-Each has the options, what I would pick and why (from `docs/product.md`), and what would then be built.
+Each has the options, what I would pick and why (from `docs/product.md`), and what is then built. Asked on 2026-11-28.
+
+**Nothing here waits for an answer.** Each recommendation is built as the default (AGENTS.md, Stage workflow: a question is asked, not parked). The unit keeps a running list of what was built for each decision, with the options beside it, in its handoff note (`docs/units/20-loose-ends.md`), and its report puts that list to Shane so he can overrule any of them. Where the recommendation is to build nothing (D3, D5, D6 and D7 as recommended), nothing is built and the decision lives here and in Unit 20 of `docs/plan.md`, not in a Carried forward list.
+
+The waits that stay are for a real device, which no default can stand in for: `sandbox` on the YouTube frame (14.2), D6 and D7.
+
+**Shane's standing exceptions for this unit** (2026-11-28). He is asked first, and nothing is built or run until he answers, before:
+
+- any database migration (no batch needs one as written);
+- anything that deletes user data: batch 6's "Sign out anyway", which discards unsent practice, and batch 10's sweep run with `--delete`;
+- anything sized L: D1's option B, D6's option B, Web Locks for 13.22.
 
 ### D1. Does the Tab page still need to play loops?
 
-Since Unit 16 a loop is practised on its own screen: the loop's bars alone, the speed stepper, Play beside it, "Mark finished?" under the score. The Tab page still has the whole loop sheet with "Play loop", the loop's speed and the finish prompt, and eight of the open items live only there (13.27a, 13.28a, 13.28b, 13.32, 13.34a, 13.35b, 13.38a, 13.38b).
+Since Unit 16 a loop is practised on its own screen: the loop's bars alone, the speed stepper, Play beside it, "Mark finished?" under the score. The Tab page still has the whole loop sheet with "Play loop", the loop's speed and the finish prompt, and seven of the open items live only in that sheet as a place to play loops (13.28a, 13.28b, 13.32, 13.34a, 13.35b, 13.38a, 13.38b). An eighth, 13.27a (typed bars not scrolled to), is on the Tab page too, but in the loop form, which both options keep.
 
-- **A. Keep the sheet as it is and fix its three cheap faults** (batch 4): the count-in number behind an open sheet, focus left on a hidden button, the playing loop scrolled out of the reopened sheet. Accept the rest (about 112 px of score beside an open sheet on a phone, the prompt behind a closed sheet).
-- **B. Make the sheet a list**: each loop's row links to its practice screen, and the Tab page only plays the whole song and makes new loops. All eight items go, with `LoopSpeedControl`, the sheet's finish prompt and a few hundred lines of tests. A unit of its own (L).
+- **A. Keep the sheet as it is and fix its three cheap faults** (batch 4, with 13.27a): the count-in number behind an open sheet, focus left on a hidden button, the playing loop scrolled out of the reopened sheet. Accept the rest (about 112 px of score beside an open sheet on a phone, the prompt behind a closed sheet).
+- **B. Make the sheet a list**: each loop's row links to its practice screen, and the Tab page only plays the whole song and makes new loops. Those seven items go, with `LoopSpeedControl`, the sheet's finish prompt and a few hundred lines of tests. 13.27a does not go: "New loop" and its form stay, so typed bars still need scrolling to. A unit of its own (L).
 
-Recommendation: **A**. Taking away a way to practise needs evidence that nobody uses it ("no forced order": some people will loop a part with the whole song on screen), and A costs an hour. If Shane says he has not pressed "Play loop" on the Tab page since the practice screen arrived, B is the better end state and should be designed with `/design`.
+Recommendation: **A**, built as the default (batch 4). Taking away a way to practise needs evidence that nobody uses it ("no forced order": some people will loop a part with the whole song on screen), and A costs an hour. If Shane says he has not pressed "Play loop" on the Tab page since the practice screen arrived, B is the better end state and should be designed with `/design`; it is an L, so it is never started without his say.
 
 ### D2. What happens to unsent practice when sign-out is forced, or can't happen? (13.05a, 13.05b)
 
@@ -66,7 +76,7 @@ Today a sign-out the server forces (a refresh it refuses) empties the device, ou
 - **B. Keep the outbox across a forced sign-out** (entries are keyed by user id; replay them when the same user signs in again, drop them when another does), and under the "still on their way" note offer "Sign out anyway" that says what will be lost.
 - **C. Only "Sign out anyway".**
 
-Recommendation: **B**. Job 3 and job 6 both rest on the record of practice being kept; losing a session silently is the one failure a drummer can't see or redo. What is kept on the device is small rows (loop ids, speeds, times), not content. Build: batch 6, M.
+Recommendation: **B**. Job 3 and job 6 both rest on the record of practice being kept; losing a session silently is the one failure a drummer can't see or redo. What is kept on the device is small rows (loop ids, speeds, times), not content. Build: batch 6, M. Keeping the outbox is built as the default; "Sign out anyway" discards unsent practice, so Shane is asked before that half is built.
 
 ### D3. Is time with the page hidden practice time on a laptop? (13.18a)
 
@@ -75,7 +85,7 @@ Hiding the page (another tab, minimising) ends the session there and a new one s
 - **A. Keep it.**
 - **B. On a wide screen, keep counting while the loop sounds.**
 
-Recommendation: **A**, nothing to build. "The app records what it can see happen": with the page hidden the score can't be read, and the app can't tell drumming from a tab left playing. The sitting's time on the practice screen and the overview's summary already add the pieces up. Change it only if a week of laptop practice shows split sessions that matter.
+Recommendation: **A**, the default, nothing to build. "The app records what it can see happen": with the page hidden the score can't be read, and the app can't tell drumming from a tab left playing. The sitting's time on the practice screen and the overview's summary already add the pieces up. Change it only if a week of laptop practice shows split sessions that matter.
 
 ### D4. Should a loop's History group sessions by day? (13.18b)
 
@@ -84,7 +94,7 @@ Every stop of 30 seconds or more is a row, so one sitting with pauses is several
 - **A. Leave the rows.**
 - **B. One row per day**: the day, total time, passes, and the speed (the speed with the most play time that day, the rule Unit 17's chart uses). Sessions stay stored as they are.
 
-Recommendation: **B**. The Stats page already treats a practice day as the unit, and the question History answers is "is this loop getting faster over days" (job 3), which a list of pauses hides. Build: a pure `historyDays(sessions, now)` in `src/features/practice/sessions.ts` and `LoopHistory.tsx` drawing it. S to M, in batch 5.
+Recommendation: **B**, built as the default. The Stats page already treats a practice day as the unit, and the question History answers is "is this loop getting faster over days" (job 3), which a list of pauses hides. Build: a pure `historyDays(sessions, now)` in `src/features/practice/sessions.ts` and `LoopHistory.tsx` drawing it. S to M, in batch 5.
 
 ### D5. Should short stretches on several loops add up? (13.20)
 
@@ -93,7 +103,7 @@ Leaving a loop ends its session: logged with 30 seconds of play, dropped with le
 - **A. Keep the 30 seconds per stretch.**
 - **B. Carry a loop's unlogged seconds over while the screen stays, and log them when the screen is left.**
 
-Recommendation: **A** for now, nothing to build. Nobody has practised with a pedal yet (the Unit 10 human check is still open); decide after that check. If B is wanted it is a rule in `sessionTracker.ts` (M).
+Recommendation: **A** for now, the default, nothing to build. Nobody has practised with a pedal yet (the Unit 10 human check is still open); decide after that check. If B is wanted it is a rule in `sessionTracker.ts` (M).
 
 ### D6. Is the notation big enough at the kit? (13.36)
 
@@ -102,7 +112,7 @@ Notation is at alphaTab's default size. Raising it broke taps in one layout or t
 - **A. Leave it at 1.**
 - **B. Investigate alphaTab's bounds, make hit-test, highlight and scroll scale-aware, then raise `NOTATION_SCALE`.** A unit of its own (L), every tap and highlight test re-proved at three sizes.
 
-Recommendation: **A** until Shane has read a loop on the practice screen from the throne. That screen now draws the loop's bars alone, which is the case the size mattered for. If it is too small, B.
+Recommendation: **A**, the default, nothing to build, until Shane has read a loop on the practice screen from the throne. That screen now draws the loop's bars alone, which is the case the size mattered for. If it is too small, B.
 
 ### D7. On a phone on its side, should the video sit beside the score? (14.1)
 
@@ -111,7 +121,7 @@ The video bar is the 200 px frame with its note beside it, a little over half of
 - **A. Leave it.**
 - **B. In a `short` window put the video in a column beside the score.** M.
 
-Recommendation: look first (it is in the Unit 14 human check), then **B** only if one line of score is not enough to read along. Job 4 is reading along, and on a phone on its side that is the whole point of the screen.
+Recommendation: look first (it is in the "Recordings" row of Open human checks), then **B** only if one line of score is not enough to read along. Nothing is built before that look. Job 4 is reading along, and on a phone on its side that is the whole point of the screen.
 
 ### D8. Should a playing video survive a short drop in the connection? (14.3)
 
@@ -120,7 +130,7 @@ Recommendation: look first (it is in the Unit 14 human check), then **B** only i
 - **A. Leave it.**
 - **B. Never take away a frame that has loaded; only refuse to make a new one offline.**
 
-Recommendation: **B**. "Design around a platform's limits in the open": YouTube's player plays on from its buffer, and the app is what stops it. At a jam space with bad Wi-Fi this restarts the song mid-play-along. Build: `RecordingBox.tsx` latches "loaded" on the frame's `load` event per `embedUrl`. S, batch 7.
+Recommendation: **B**, built as the default. "Design around a platform's limits in the open": YouTube's player plays on from its buffer, and the app is what stops it. At a jam space with bad Wi-Fi this restarts the song mid-play-along. Build: `RecordingBox.tsx` latches "loaded" on the frame's `load` event per `embedUrl`. S, batch 7.
 
 ## Batches
 
@@ -152,7 +162,7 @@ Acceptance: a session log or loop edit queued while the token could not be refre
 ### Batch 3. Tab page: the score stays put (M)
 
 - **13.26** On a phone the tab opens scrolled about 47 px sideways with the clef clipped (alphaTab scrolls the box to its cursor at about the moment Play is enabled). Fix: in the engine, after `readyForPlayback` with the cursor on bar 1, put the box's scroll back to its start (or set alphaTab's horizontal scroll offset so bar 1's start stays on show). Test: `jam.spec.ts`, phone: after `openFixture` the score box's `scrollLeft` is 0.
-- **13.29** A phone turned to landscape during a count-in, or turned twice while playing, leaves the score and the count-in number below the window: the score is brought on screen once per start. Fix: `useScoreOnScreen` also runs after a width change while running (keyed on the layout from `useLayout`), instant, not smooth. Test: `player.spec.ts` at 390 x 844 then 844 x 390 during a count-in: the counter is inside the window.
+- **13.29** A phone turned to landscape during a count-in, or turned twice while playing, leaves the score and the count-in number below the window: the score is brought on screen once per start. Fix: `useScoreOnScreen` also runs after the window's width changes while running, instant, not smooth. It watches the real viewport width (a `resize` listener reading `window.innerWidth`, or a `ResizeObserver`), not the layout from `useLayout`: `useLayout.ts` only notifies when the 768 px media query flips, so a 320 x 640 phone turned to 640 x 320 stays `horizontal` and an effect keyed on the layout would never rerun, which is the second case recorded for this item. It scrolls once the score has been laid out again for the new width (alphaTab re-renders on a resize), not on the resize event itself, or it measures the old layout. Test: `player.spec.ts`, two rotations: 390 x 844 to 844 x 390 during a count-in, which crosses the breakpoint (the counter is inside the window), and 320 x 640 to 640 x 320, back, and to 640 x 320 again while playing, which never crosses it (the beat cursor is inside the window).
 - **13.30** "Practice logged" appears above the score about 100 ms after the Pause that logs a session and pushes the score down 32 px, so a bar tapped then is the one below the finger. Tab page only now (the practice screen shows no such note). Fix: render `SessionNotice` under `ScoreBox` in `SongPage.tsx`, as the practice screen does with its finish prompt. Test: `practice.spec.ts`: the score box's top is the same before and after the notice appears.
 - **13.31a** A Pause pressed while Play's smooth scroll is still running moves the score once more (64 px on a laptop). Fix: `useStaysOnScreen` ends the smooth scroll at every fold change with an instant `scrollTo` of the current position before its `scrollBy`. Test: drop the `test.fixme` in `tests/e2e/player.spec.ts` (line 767).
 
@@ -160,16 +170,16 @@ Files: `src/features/song/SongPage.tsx`, `useJamMode.ts`, `useStaysOnScreen.ts`,
 
 Risk: `useStaysOnScreen` has had four rounds of fixes; change it only with its model tests (`useStaysOnScreen.test.tsx`) extended first. 13.26 is unverified on this branch (see the end).
 
-Acceptance: at phone, tablet and desktop sizes the Tab page's score does not move at Play, Pause, a logged session or a Pause during Play's scroll; a rotation while counting in or playing leaves the beat cursor and the count-in number in the window; the tab opens on a phone with the clef on show; the fixme test runs and passes.
+Acceptance: at phone, tablet and desktop sizes the Tab page's score does not move at Play, Pause, a logged session or a Pause during Play's scroll; a rotation while counting in or playing leaves the beat cursor and the count-in number in the window, whether it crosses 768 px (390 x 844 to 844 x 390) or stays below it (320 x 640 to 640 x 320); the tab opens on a phone with the clef on show; the fixme test runs and passes.
 
 ### Batch 4. Tab page: the loop sheet (S)
 
-D1's option A. Skip this batch if Shane picks B.
+D1's option A, built as the default. 13.27a is in the loop form, which both of D1's options keep, so it is built whatever Shane answers. If he answers B before this batch is built, only the three fixes to the sheet's playback are skipped: 13.32, 13.28a and 13.28b.
 
 - **13.32** Below 1024 px the count-in number is behind the loop sheet when playback starts with the sheet open by any press other than "Play loop". Fix: close the sheet whenever the status becomes `countingIn` while it is a sheet (an effect in `LoopPanel.tsx`, the rule beside `playLoopClosesPanel` in `useLoopPanelOpen.ts`). Test: `useLoopPanelOpen.test.ts` for the rule, `LoopPanel.test.tsx` for Play from the sticky bar after a save.
 - **13.28a** "Play loop" closes the sheet and leaves focus on the hidden button. Fix: hand focus to the sheet's header toggle (`focusWhenReady`). Test: `LoopPanel.test.tsx`.
 - **13.28b** The reopened sheet keeps its old scroll position, so in a long list the playing loop may be out of sight. Fix: on open, `scrollIntoView({ block: 'nearest' })` on `[data-testid="active-loop"]`. Test: component test with a stubbed `scrollIntoView`.
-- **13.27a** Bars typed into the loop form are highlighted but not scrolled to. Fix: the form's typed path calls `player.showBar(startBar)` (never the tap path: a tapped bar must not move). Test: `useLoopPractice.test.tsx`: a typed range scrolls, a tapped one doesn't.
+- **13.27a** (whatever D1's answer) Bars typed into the loop form are highlighted but not scrolled to. Fix: the form's typed path calls `player.showBar(startBar)` (never the tap path: a tapped bar must not move). Test: `useLoopPractice.test.tsx`: a typed range scrolls, a tapped one doesn't.
 
 Files: `src/features/loops/LoopPanel.tsx`, `useLoopPanelOpen.ts`, `useLoopPractice.ts`, `LoopEditorForm.tsx`.
 
@@ -178,7 +188,7 @@ Acceptance: on a phone and a tablet in portrait, any way of starting playback wi
 ### Batch 5. Practice history says what happened (M)
 
 - **17.1** A session stores the speed it ended at, so ten minutes at 80% ending on a nudge to 100% is logged at 100%. Fix: the tracker keeps play time per speed within a session and logs the speed with the most (ties: the later). Test: `sessionTracker.test.ts`, with the Unit 17 acceptance case (ten minutes at 80%, one at 100%).
-- **D4 (13.18b)**, if Shane agrees: History as one row per day.
+- **D4 (13.18b)**, option B, built as the default: History as one row per day.
 
 Files: `src/features/practice/sessionTracker.ts`, `usePracticeTracker.ts`, `sessions.ts`, `LoopHistory.tsx`.
 
@@ -189,17 +199,17 @@ Acceptance: a session's logged speed is the speed most of it was played at; a lo
 ### Batch 6. Sign-in and sign-out (M)
 
 - **13.01** A 401 on a query is shown as "Your sign-in has run out" with no way on: nothing refreshes the token or sends the user to `/login`. Fix: a `QueryCache` `onError` in `queryClient.ts` that, on `isTokenRefusal`, refreshes the session once and invalidates; a refresh the server refuses signs out locally so the guard redirects. Test: `AuthProvider.test.tsx` or a new `queryClient` test with the fake client.
-- **D2 (13.05a, 13.05b)**, if Shane agrees: keep the outbox across a forced sign-out; "Sign out anyway" with a warning.
+- **D2 (13.05a, 13.05b)**, option B. Built as the default: keep the outbox across a forced sign-out. Asked first, since it discards unsent practice (Shane's standing exception): "Sign out anyway" with a warning.
 
 Files: `src/lib/queryClient.ts`, `src/lib/AuthProvider.tsx`, `src/main.tsx`, `src/features/offline/offlineData.ts`, `src/features/auth/SignOutButton.tsx`, `useAuthActions.ts`.
 
 Risk: 13.01 makes forced sign-outs more likely to be reached, so do D2's "keep the outbox" in the same batch or not at all. Do not touch `outbox.ts` or `tokenRefresh.ts` (batch 2).
 
-Acceptance: a query refused for its token either recovers by itself or lands the user on `/login?next=…`; practice queued before a forced sign-out reaches the server after the same user signs in again and never reaches another user's account; behind a connection that never answers the user can still sign out, after being told what won't be saved.
+Acceptance: a query refused for its token either recovers by itself or lands the user on `/login?next=…`; practice queued before a forced sign-out reaches the server after the same user signs in again and never reaches another user's account; and, once Shane has said yes to "Sign out anyway", behind a connection that never answers the user can still sign out, after being told what won't be saved.
 
 ### Batch 7. Recordings (S)
 
-- **D8 (14.3)**, if Shane agrees: a loaded video is left alone when the connection drops.
+- **D8 (14.3)**, option B, built as the default: a loaded video is left alone when the connection drops.
 - **14.2**, only after the Human check has tried it on a real video: `sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"` on the frame.
 
 Files: `src/features/recordings/RecordingBox.tsx`, `tests/e2e/recordings.spec.ts`.
@@ -239,13 +249,13 @@ Acceptance: with the browser set to German, every sentence on the Stats page is 
 
 Files: `scripts/`, `package.json`, `tests/db/seed.test.ts`, a new `tests/db` file, `AGENTS.md` (the Commands table), `docs/release.md` if the sweep becomes a release step.
 
-Risk: the sweep runs with the secret key; dry run by default, and it must loop every page of `storage.list` (AGENTS.md, Conventions).
+Risk: the sweep runs with the secret key; dry run by default, and it must loop every page of `storage.list` (AGENTS.md, Conventions). `--delete` removes users' files: the test runs it on the local stack only, and Shane is asked before it is ever run that way on the hosted project (his standing exception).
 
 Acceptance: `npm run db:seed` gives the demo user a song with both recordings; the sweep lists exactly the orphan in the test and removes it only when asked.
 
 ### Batch 11. Docs only (S)
 
-This unit's commit: the plan's lists cut down and labelled, the human checks rewritten. At the end of Unit 20: gather every ACCEPT row into one "Accepted" list in `docs/plan.md`, delete the per-unit copies, and delete each FIX and DECIDE line as its batch lands.
+Done with the triage: the plan's lists cut down to the lines a batch closes (each FIX line, and each DECIDE line whose default builds something, with its id and batch), the human checks rewritten, and every ACCEPT row written into the one **Accepted** section of `docs/plan.md` with its reason and what would change it. No ACCEPT line and no decision with nothing to build is left in a Carried forward list. Each batch deletes its own lines as it lands. At the end of Unit 20 this batch only confirms that every Carried forward list is empty, and that the Accepted section has no item a batch fixed.
 
 ## Every item
 
@@ -359,7 +369,7 @@ This unit's commit: the plan's lists cut down and labelled, the human checks rew
 
 ### Accepted, in one list
 
-So nobody raises them again: 13.02, 13.04, 13.07a, 13.07b, 13.07c, 13.09a, 13.09b, 13.11, 13.12, 13.13, 13.15, 13.22, 13.24, 13.25, 13.27b, 13.31b, 13.33a, 13.33b, 13.34a, 13.34c, 13.35b, 13.38a, 13.38b, 14.4a, 14.4c, 14.7, 14.8a, 14.8b, 14.8d, 17.3c, 17.5c, 17.5d. (13.31b, 13.34a, 13.38a and 13.38b go away entirely if D1 is answered B.) Each row above says what would change the answer.
+These 32 are the Accepted section of `docs/plan.md`, each there with its reason and what would make it worth another look: 13.02, 13.04, 13.07a, 13.07b, 13.07c, 13.09a, 13.09b, 13.11, 13.12, 13.13, 13.15, 13.22, 13.24, 13.25, 13.27b, 13.31b, 13.33a, 13.33b, 13.34a, 13.34c, 13.35b, 13.38a, 13.38b, 14.4a, 14.4c, 14.7, 14.8a, 14.8b, 14.8d, 17.3c, 17.5c, 17.5d. (13.31b, 13.34a, 13.35b, 13.38a and 13.38b go away entirely if D1 is answered B.)
 
 ## Open human checks, proposed
 
