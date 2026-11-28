@@ -759,3 +759,14 @@ Every line under Unit 19 in `docs/plan.md` is gone from the list:
 - e2e on a fresh build, `E2E_PORT=4283`, at phone, tablet and desktop: `tests/e2e/recordings.spec.ts` 67 passed, 8 skipped (the phone-only tests on the other two sizes); `tests/e2e/journey.spec.ts` and `tests/e2e/shortcuts.spec.ts` 42 passed; `tests/e2e/design.spec.ts -g "a song’s recordings"` 3 passed.
 - Break checks through e2e, each on a build with one line put back: without `setCursorScroll(!readAlong)` the turn test fails; without the slow poll the following test fails at the paused seek. Both files were restored from copies and touched, and the dev server on port 5283 was checked with `curl` to be serving the fixed modules. It was left running.
 - The real player check asked YouTube for one video from a scratch page on `127.0.0.1` (four runs, two of which gave up before the video played; no account, nothing of the app's or the user's sent); no user was created and nothing was reset or seeded.
+
+## Copilot review (PR #39)
+
+Four inline comments, each confirmed with a failing test first and fixed.
+
+1. **A failed save was said only by the line-up that sent it.** `LineUp` read `save.error` from its own `useMutation`; after a source switch the line-up that came back showed the rolled-back value and no message. Now `useLineUpFailure(songId, linkId)` reads the link's latest save from the mutation cache. Until the link's next save, or five minutes after the mutation is last watched.
+2. **An answer for a video the link no longer points at** wrote its offset onto the link in the cache (the request was filtered on the address, its handlers were not). Every handler now acts only while the cached link has the save's address, and the confirmed values are kept per link and address.
+3. **Later, Later, Earlier, the first failing:** the cache held the third's value, the same number the first sent, so the failure rolled it back over a save still out. A failure now puts nothing back while another save of that video waits.
+4. **Follow turned off stayed off for the next recording opened.** Kept per player now, like the first-tap asks.
+
+Tests: `useSaveBarOne.test.tsx`, "one link, several saves" (three), and `SongPage.test.tsx`, Follow, "turned off on one recording…". Checklist: two new rows in section 1 ("An answer for what the row used to be", "A failure only the sender can say") and an example added to "Two writes to one item" and to "Kept per value, on a screen that outlives its item". AGENTS.md: the Unit 19 section says all four.

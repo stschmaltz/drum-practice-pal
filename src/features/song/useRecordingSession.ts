@@ -50,7 +50,13 @@ export function useRecordingSession(
 ): RecordingPageState {
   const barRef = useRef<HTMLDivElement>(null);
   const { frameRef, player } = useRecordingPlayer();
-  const [follow, setFollow] = useState(true);
+  // Kept per player: Follow turned off on one video is on again for the next one opened.
+  const [followOff, setFollowOff] = useState<{ of: RecordingPlayer | null } | null>(null);
+  const follow = !(followOff !== null && followOff.of === player);
+  const setFollow = useCallback(
+    (on: boolean) => setFollowOff(on ? null : { of: player }),
+    [player],
+  );
   // Kept per player, so another video doesn't open with the note about the last one.
   const [asked, setAsked] = useState<{ of: RecordingPlayer | null; times: number }>({
     of: null,

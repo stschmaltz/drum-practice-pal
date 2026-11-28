@@ -4174,6 +4174,17 @@ describe('SongPage recordings (Unit 14)', () => {
     });
 
     describe('Follow', () => {
+      it('turned off on one recording, it is on again for the next one opened (Copilot review on #39)', async () => {
+        const linedDrumless = { ...drumlessVideo, bar_one_seconds: BAR_ONE };
+        const { user } = await openVideo({ links: [lined, linedDrumless] });
+        await user.click(lineUpButton('Follow'));
+        expect(lineUpButton('Follow')).toHaveAttribute('aria-pressed', 'false');
+
+        await choose(user, 'Drumless');
+        await waitFor(() => expect(frame()).toHaveAttribute('src', DRUMLESS_EMBED));
+        expect(lineUpButton('Follow')).toHaveAttribute('aria-pressed', 'true');
+      });
+
       it('off: the mark still moves, and nothing is scrolled; on again brings the bar on show', async () => {
         const { user, engine, video } = await openVideo();
         act(() => video.playAt(4.5));

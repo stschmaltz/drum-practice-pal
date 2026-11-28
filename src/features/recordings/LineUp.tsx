@@ -15,7 +15,7 @@ import {
 import { canLineUp, type RecordingPlayer } from './recordingPlayer';
 import type { SongLink } from './songLinks';
 import { useRecordingStatus } from './useRecordingPlayer';
-import { useLinkAtPress, useSaveBarOne } from './useSaveBarOne';
+import { useLineUpFailure, useLinkAtPress, useSaveBarOne } from './useSaveBarOne';
 import { videoClockLabel } from './videoClock';
 import {
   canNudge,
@@ -75,6 +75,8 @@ export function LineUp({
   const online = useOnline();
   const status = useRecordingStatus(player);
   const save = useSaveBarOne(songId);
+  // From the shared cache: a save can fail after the line-up that sent it has left the page.
+  const saveError = useLineUpFailure(songId, link.id);
   const linkAtPress = useLinkAtPress(songId);
   const focusWhenReady = useFocusWhenReady();
   // "Line up again" was pressed: the prompt is back, and the saved line-up stays until the next press.
@@ -202,7 +204,7 @@ export function LineUp({
           <LineUpMessage
             notice={{
               online,
-              saveError: save.error,
+              saveError,
               unavailable,
               needsFirstTap,
               pressedEarly: pressedEarly && !status.started,
