@@ -14,10 +14,12 @@ import { readVisitSittings } from '@/features/practice/visitSittings';
 import type { Settings } from '@/features/settings/settingsForm';
 import { songFilePath } from '@/lib/schema';
 import {
+  opArgs,
   queryResult,
   resetFakeSupabase,
   storageResult,
   type FakeResult,
+  type QueryCall,
   type StorageCall,
 } from '@/test/fakeSupabase';
 import { FakePlayerEngine, startOfBar, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
@@ -1140,6 +1142,155 @@ describe('LoopPracticePage', () => {
       );
       await waitFor(() => expect(playButton()).toBeEnabled());
       expect(speed()).toHaveTextContent('71%');
+    });
+
+    // Unit 20 Test: the inputs the Build's list reasoned about but didn't test.
+
+    it('a late answer carrying another device’s speed leaves the player alone; the next nudge saves the speed played here', async () => {
+      const { user, engine, release, queryClient } = await openOnAHungRead();
+      later(FRESH_READ_WAIT_MS);
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      release();
+      // The other device's 71% is in the list; the player still plays the cached 100%.
+      await waitFor(() =>
+        expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.708333),
+      );
+      await settle();
+      expect(speed()).toHaveTextContent('100%');
+      expect(loops.sent('update')).toEqual([]);
+
+      await user.click(screen.getByRole('button', { name: 'Slower by 5%' }));
+
+      // 5% under what is playing here, not under the speed the answer brought.
+      expect(speed()).toHaveTextContent('95%');
+      await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.95 }]));
+      await waitFor(() => expect(loops.rows()[0]?.speed_ratio).toBe(0.95));
+      await settle();
+      expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.95);
+      expect(engine.setSpeed).toHaveBeenLastCalledWith(0.95);
+      expect(loops.sent('update')).toHaveLength(1);
+    });
+
+    it('a nudge while the read still hangs is saved, and the read answering with the rows from before it puts nothing back', async () => {
+      serve();
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(loopsKey, [{ ...chorus, speed_ratio: 1 }, verse]);
+      // The read sent as the screen opens answers only when told to, with the rows the
+      // server had when it was sent (71%): an answer older than anything done since.
+      const asServed = queryResult.getMockImplementation()!;
+      const isLoopsRead = (call: QueryCall) =>
+        call.table === 'loops' &&
+        !['insert', 'update', 'delete'].some((write) => opArgs(call, write));
+      let answerTheHungRead: (() => void) | null = null;
+      queryResult.mockImplementation((call) => {
+        if (!isLoopsRead(call) || answerTheHungRead) return asServed(call);
+        const rowsThen = loops.rows();
+        return new Promise((resolve) => {
+          answerTheHungRead = () => resolve(ok(rowsThen));
+        });
+      });
+      const user = renderPractice(CHORUS_ID, queryClient);
+      const engine = await loadPlayer({ beforeTheLoop: true });
+      later(FRESH_READ_WAIT_MS);
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      expect(answerTheHungRead).not.toBeNull();
+
+      const releaseWrite = loops.holdNext('update');
+      await user.click(screen.getByRole('button', { name: 'Slower by 5%' }));
+      expect(speed()).toHaveTextContent('95%');
+      await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.95 }]));
+
+      // The hung read answers now, while the save is on its way.
+      answerTheHungRead!();
+      await settle();
+      expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.95);
+      expect(speed()).toHaveTextContent('95%');
+
+      releaseWrite();
+      await waitFor(() => expect(loops.rows()[0]?.speed_ratio).toBe(0.95));
+      await settle();
+      expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.95);
+      expect(speed()).toHaveTextContent('95%');
+      expect(engine.setSpeed).toHaveBeenLastCalledWith(0.95);
+      // One save, of the nudge: nothing wrote the old speed, or the cached one, back.
+      expect(loops.sent('update')).toEqual([{ speed_ratio: 0.95 }]);
+    });
+
+    it('a nudge before the loop is open saves nothing to it', async () => {
+      const { user } = await openOnAHungRead();
+      const slower = screen.getByRole('button', { name: 'Slower by 5%' });
+      // The press is heard: the speed control works as soon as the score is in.
+      expect(slower).toBeEnabled();
+      await user.click(slower);
+      expect(speed()).toHaveTextContent('95%');
+
+      later(FRESH_READ_WAIT_MS);
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await settle();
+      // Opened as a link opens it, at the loop's saved speed; the nudge was the player's alone.
+      expect(speed()).toHaveTextContent('100%');
+      expect(loops.sent('update')).toEqual([]);
+    });
+
+    it('Space plays nothing inside the wait, and plays the loop once the wait is over', async () => {
+      const { user, engine } = await openOnAHungRead();
+      expect(document.activeElement).toBe(document.body);
+      later(FRESH_READ_WAIT_MS - 500);
+      await user.keyboard(' ');
+      await settle();
+      expect(engine.play).not.toHaveBeenCalled();
+
+      later(500);
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.keyboard(' ');
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(9),
+        endTick: startOfBar(13),
+      });
+    });
+
+    it('a loop key inside the wait opens the loop it moves to; neither the wait ending nor the answer opens the requested one over it', async () => {
+      const { user, engine, release, queryClient } = await openOnAHungRead();
+      expect(playButton()).toBeDisabled();
+
+      // From no loop, "next" is the first in the panel's order: Verse, not the one the URL names.
+      await user.keyboard('{ArrowRight}');
+      expect(await screen.findByRole('heading', { level: 1, name: 'Verse' })).toBeInTheDocument();
+      await waitFor(() => expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${VERSE_ID}`));
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      const verseRange = { startTick: startOfBar(1), endTick: startOfBar(3) };
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith(verseRange);
+      await settle();
+      const before = {
+        ranges: engine.setPlaybackRange.mock.calls.length,
+        speeds: engine.setSpeed.mock.calls.length,
+        seeks: engine.seek.mock.calls.length,
+      };
+      const unchanged = () => {
+        expect(screen.getByRole('heading', { level: 1, name: 'Verse' })).toBeInTheDocument();
+        expect(engine.setPlaybackRange).toHaveBeenCalledTimes(before.ranges);
+        expect(engine.setSpeed).toHaveBeenCalledTimes(before.speeds);
+        expect(engine.seek).toHaveBeenCalledTimes(before.seeks);
+        expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${VERSE_ID}`);
+      };
+
+      // The wait ends, for the loop the URL named first and for the one it names now.
+      later(FRESH_READ_WAIT_MS * 2);
+      await settle();
+      unchanged();
+
+      release();
+      await waitFor(() =>
+        expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.708333),
+      );
+      await settle();
+      unchanged();
+      expect(loops.sent('update')).toEqual([]);
+
+      await user.click(playButton());
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith(verseRange);
     });
   });
 

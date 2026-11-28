@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { PlayerService } from '@/features/player/PlayerService';
 import { LOOP_NAME_MAX_LENGTH } from '@/lib/schema';
-import { resetFakeSupabase } from '@/test/fakeSupabase';
+import { opArgs, queryResult, resetFakeSupabase } from '@/test/fakeSupabase';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
 import { stubPointer } from '@/test/mediaQueries';
@@ -351,6 +351,48 @@ describe('LoopEditorForm for a new loop', () => {
     expect(ids).toHaveLength(2);
     expect(new Set(ids).size).toBe(1);
     expect(view.table.rows().map((row) => row.name)).toEqual(['Second half']);
+  });
+
+  // Unit 20 Test: the read back after "already saved" (23505) is one of the reads that lost
+  // postgrest-js's retries (13.14). Lost too, it is one more failed save under the same button.
+  it('pressed again after a lost answer with the read back lost too: says so, and the next press saves the one loop', async () => {
+    const view = await renderForm();
+    view.table.loseNext('insert');
+    await fill(view, { first: '9', last: '12', name: 'Second half' });
+    await view.user.click(view.save());
+    expect(await view.form.findByRole('alert')).toBeInTheDocument();
+    expect(view.table.rows()).toHaveLength(1);
+    // The failed save reads the list again; let that land, so the next read lost is the read back.
+    await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+    const readsBack = () =>
+      queryResult.mock.calls.filter(
+        ([call]) =>
+          call.table === 'loops' &&
+          !opArgs(call, 'insert') &&
+          call.ops.some((op) => op.method === 'eq' && op.args[0] === 'id'),
+      );
+    expect(readsBack()).toHaveLength(0);
+
+    view.table.loseNext('select');
+    await view.user.click(view.save());
+    await waitFor(() => expect(readsBack()).toHaveLength(1));
+    await waitFor(() => expect(view.save()).toHaveTextContent('Save loop'));
+    expect(view.form.getByRole('alert')).toHaveTextContent(
+      "Couldn't save the loop. The server couldn't be reached.",
+    );
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(view.name()).toHaveValue('Second half');
+    expect(view.save()).toBeEnabled();
+
+    await view.user.click(view.save());
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(onSaved.mock.calls[0]?.[0]).toMatchObject({ name: 'Second half', start_bar: 9 });
+    expect(readsBack()).toHaveLength(2);
+    const ids = view.table.sent('insert').map((row) => (row as { id: string }).id);
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids).size).toBe(1);
+    expect(view.table.rows().map((row) => row.name)).toEqual(['Second half']);
+    expect(view.form.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   // Unit 13 Test: what the server has wins over what was typed between the two presses

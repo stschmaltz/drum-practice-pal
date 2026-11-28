@@ -2900,6 +2900,31 @@ describe('SongPage recordings (Unit 14)', () => {
         expect(playedWrites()).toEqual([]);
       });
 
+      // Unit 20 Test: the tab's player is loaded under "Loading the recording…", so the key
+      // has to refuse by itself while no Play is offered.
+      it('Space plays nothing while the recording is waited for, and plays the tab once the wait is over', async () => {
+        serve({ links: [original] });
+        links.holdNext('select');
+        renderSong(`${SONG_A}?source=original`);
+        const user = userEvent.setup();
+        expect(await screen.findByText('Loading the recording…')).toBeVisible();
+        await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+        const engine = engines[0]!;
+        act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+        later(FRESH_READ_WAIT_MS - 500);
+        expect(document.activeElement).toBe(document.body);
+
+        await user.keyboard(' ');
+        await settle();
+        expect(engine.play).not.toHaveBeenCalled();
+        expect(screen.getByText('Loading the recording…')).toBeVisible();
+
+        later(500);
+        await waitFor(() => expect(playButton()).toBeEnabled());
+        await user.keyboard(' ');
+        expect(engine.play).toHaveBeenCalledTimes(1);
+      });
+
       it('an answer inside the wait shows the recording, and the wait ending changes nothing', async () => {
         serve({ links: [original] });
         const release = links.holdNext('select');
