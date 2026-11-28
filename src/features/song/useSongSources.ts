@@ -46,12 +46,17 @@ export function useSongSources(songId: string) {
 
   const choice: SourceChoice = forLoopForm
     ? { state: 'tab', dropRequest: false }
-    : chooseSource(requested, {
-        data: usable,
-        fetching: links.fetchStatus === 'fetching' && !gaveUpWaiting,
-        fetchedAfterMount: links.isFetchedAfterMount,
-      });
-  const videos = forLoopForm ? [] : videoSources(usable ?? []);
+    : chooseSource(
+        requested,
+        {
+          data: usable,
+          fetching: links.fetchStatus === 'fetching' && !gaveUpWaiting,
+          fetchedAfterMount: links.isFetchedAfterMount,
+        },
+        // The player answers this page and no other (Unit 19).
+        window.location.origin,
+      );
+  const videos = forLoopForm ? [] : videoSources(usable ?? [], window.location.origin);
   const shown = sourceShown(choice);
 
   const setSource = useCallback(

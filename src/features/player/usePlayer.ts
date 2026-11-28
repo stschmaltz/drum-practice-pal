@@ -25,8 +25,9 @@ export interface UsePlayerOptions {
   initialVisibleBars?: BarRange | null;
   /**
    * The score is only read, by hand, under something else that plays (a
-   * recording): page layout at every width (`layoutToDraw`). Live, like the
-   * width: changing it redraws the score and never stops, plays or reloads.
+   * recording): page layout at every width (`layoutToDraw`), and the score box
+   * is never scrolled to the tab's own cursor (`setCursorScroll`). Live, like
+   * the width: changing it redraws the score and never stops, plays or reloads.
    */
   readAlong?: boolean;
   /** Tests pass a fake; the default loads alphaTab lazily. */
@@ -119,6 +120,12 @@ export function usePlayer({
       if (created) exposePlayerForDebugging(null);
     };
   }, []);
+
+  // Before the layout below: the drawing a change of layout asks for must not be followed by
+  // alphaTab's scroll to its own cursor when the score is only read (19 QA after fix round 1).
+  useEffect(() => {
+    player?.setCursorScroll(!readAlong);
+  }, [player, readAlong]);
 
   useEffect(() => {
     player?.setLayout(layout);

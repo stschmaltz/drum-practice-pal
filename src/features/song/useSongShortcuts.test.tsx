@@ -9,7 +9,8 @@ import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import { saveCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
-import { announcementText, useSongShortcuts } from './useSongShortcuts';
+import { announcementText } from '@/lib/announcement';
+import { useSongShortcuts } from './useSongShortcuts';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 

@@ -89,7 +89,7 @@ function applyLoopRange(player: PlayerService, range: BarRange | null): void {
  *   if none is open (unless `dragOpensForm` is false: the practice screen
  *   picks bars only once "Show whole song" has opened the form).
  * - The score highlights the form's bars while it is open, otherwise the
- *   playing loop's.
+ *   playing loop's; `mark` takes the place of both.
  */
 export function useLoopPractice(
   player: PlayerService | null,
@@ -98,8 +98,16 @@ export function useLoopPractice(
   {
     dragOpensForm = true,
     previewPickedBars = false,
+    mark = null,
   }: {
     dragOpensForm?: boolean;
+    /**
+     * Bars the screen marks for a reason of its own, in place of the loop's:
+     * the bar a recording is on (Unit 19). This hook stays the one caller of
+     * `setHighlight` on its screen, so the two never write over each other;
+     * when it goes back to null the loop's mark is back.
+     */
+    mark?: BarRange | null;
     /**
      * While the form is open, a whole range picked on the score is what plays
      * (the practice screen's "Show whole song": hear a new loop before saving
@@ -258,7 +266,8 @@ export function useLoopPractice(
 
   const activeRange = activeLoop ? rangeOf(activeLoop) : null;
   // An open form shows its bars; until any are picked, the loop playing stays marked.
-  const highlight = editorOpen ? (editorRange ?? activeRange) : (dragPreview ?? activeRange);
+  const highlight =
+    mark ?? (editorOpen ? (editorRange ?? activeRange) : (dragPreview ?? activeRange));
   const highlightStart = highlight?.startBar ?? null;
   const highlightEnd = highlight?.endBar ?? null;
   useEffect(() => {

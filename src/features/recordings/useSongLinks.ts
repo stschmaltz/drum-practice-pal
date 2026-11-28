@@ -6,12 +6,26 @@ import { songLinkKeys } from './songLinkKeys';
 import { fetchSongLinks, saveSongLinks } from './songLinksApi';
 import { usableLinks, type SongLink } from './songLinks';
 
-/** One song's links as saved, oldest first: what the form edits. */
+/**
+ * One song's links as saved, oldest first: what the form edits.
+ *
+ * It doesn't refetch by itself (focus, reconnect, a screen mounting) while a
+ * line-up of one of them is on its way (Unit 19): a read that starts then is
+ * from before the save, and would put the old place of bar 1 back over the
+ * one on show, moving the mark under someone playing. `useSaveBarOne` reads
+ * the list once its last save has settled.
+ */
 export function useSongLinks(songId: string) {
   const user = useSignedInUser();
+  const queryClient = useQueryClient();
+  const whenIdle = () =>
+    queryClient.isMutating({ mutationKey: songLinkKeys.lineUpsOf(user.id, songId) }) === 0;
   return useQuery({
     queryKey: songLinkKeys.forSong(user.id, songId),
     queryFn: () => fetchSongLinks(user.id, songId),
+    refetchOnWindowFocus: whenIdle,
+    refetchOnReconnect: whenIdle,
+    refetchOnMount: whenIdle,
   });
 }
 

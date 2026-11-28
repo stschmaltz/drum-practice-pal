@@ -14,6 +14,12 @@ export const songLinkKeys = {
    * by this key, so it outlives the form that sent it (`useSongLinkSaves`).
    */
   savesOf: (userId: string, songId: string) => [...songLinkKeys.writes(userId), songId] as const,
+  /**
+   * One song's saves of where bar 1 falls in a video (Unit 19). Under `writes`, so sign-out
+   * waits for one; not under `savesOf`, whose mutations are the recordings form's.
+   */
+  lineUpsOf: (userId: string, songId: string) =>
+    [...songLinkKeys.writes(userId), 'line-up', songId] as const,
   /** One song's links: its overview's Play along block and its play screen's sources. */
   forSong: (userId: string, songId: string) =>
     [...songLinkKeys.forUser(userId), 'song', songId] as const,

@@ -8,13 +8,20 @@
 import type { BrowserContext, Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
 import { expect, signIn, type E2eUser } from './auth';
-import { openSongOverview, uploadFixture } from './playerPage';
+import { highlightBoxes } from './loopsPage';
+import { boxOf, openSongOverview, uploadFixture, viewport } from './playerPage';
 
 const admin = createAdminClient();
 
 export const VIDEO_ID = 'dQw4w9WgXcQ';
 export const WATCH_URL = `https://www.youtube.com/watch?v=${VIDEO_ID}`;
-export const EMBED_URL = `https://www.youtube-nocookie.com/embed/${VIDEO_ID}?playsinline=1&rel=0`;
+/** The origin every spec's pages are on (`baseURL` in playwright.config.ts). */
+const APP_ORIGIN = `http://localhost:${Number(process.env.E2E_PORT ?? 4173)}`;
+/** What the frame's address carries so the player answers the app, and only the app (Unit 19). */
+export const PLAYER_API_PARAMS = `&enablejsapi=1&origin=${encodeURIComponent(APP_ORIGIN)}`;
+export const EMBED_URL = `https://www.youtube-nocookie.com/embed/${VIDEO_ID}?playsinline=1&rel=0${PLAYER_API_PARAMS}`;
+/** YouTube's IFrame Player API: the one script the app asks YouTube for, when a video's frame is drawn. */
+export const PLAYER_API_URL = 'https://www.youtube.com/iframe_api';
 export const SPOTIFY_URL = 'https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC';
 
 /** Anything of YouTube's or Spotify's: their pages, players, thumbnails and video. */
@@ -24,24 +31,352 @@ const SERVICE_HOSTS =
 export const STUB_PLAYER_TEXT = 'Stub YouTube player';
 
 /**
- * Answers every request to YouTube and Spotify with a stub page, so nothing
- * leaves the machine, and records each one. A spec that says "no request was
- * made" first proves the recorder sees one (an empty list must not pass by
- * the routes never having been reached).
+ * The stub of YouTube's embedded player: a page with a clock of its own that
+ * runs while it "plays", a Play / Pause button (the tap a real video needs
+ * before a page may drive it), and the player's side of a small message
+ * protocol with `STUB_PLAYER_API` below. It posts only to the origin its
+ * address names in `origin`, as YouTube's does: an address without the app's
+ * own origin gets no answer, and nothing follows. A test drives it through
+ * `window.stub` in the frame (`videoStub(page)`).
  */
-export async function stubServices(context: BrowserContext): Promise<{ requests: string[] }> {
+const STUB_PLAYER_PAGE = `<!doctype html><title>Stub</title>
+<body style="margin:0;background:#000;color:#fff;font:16px sans-serif">
+<p>${STUB_PLAYER_TEXT}</p><p id="at"></p>
+<button id="toggle" type="button" style="font:inherit;min-height:44px">Play</button>
+<p id="clock">0.00</p>
+<script>
+document.getElementById('at').textContent = location.href;
+(function () {
+  var params = new URLSearchParams(location.search);
+  var apiOn = params.get('enablejsapi') === '1';
+  var pageOrigin = params.get('origin');
+  var time = Number(params.get('start') || 0), rate = 1, playing = false, started = false;
+  var last = performance.now(), listening = false;
+  function now() {
+    var at = performance.now();
+    if (playing) time += ((at - last) / 1000) * rate;
+    last = at;
+    return time;
+  }
+  // YT.PlayerState: -1 until the video has been tapped, then 1 playing or 2 paused.
+  function state() { return playing ? 1 : started ? 2 : -1; }
+  function post(extra) {
+    if (!listening || !apiOn || !pageOrigin) return;
+    parent.postMessage(Object.assign({ stub: 'yt', time: now(), rate: rate, now: state() }, extra || {}), pageOrigin);
+  }
+  function setPlaying(next) {
+    now();
+    playing = next;
+    if (next) started = true;
+    document.getElementById('toggle').textContent = next ? 'Pause' : 'Play';
+    post({ event: 'state', state: next ? 1 : 2 });
+  }
+  window.stub = {
+    play: function () { setPlaying(true); },
+    pause: function () { setPlaying(false); },
+    // Like a real player (checked on one in 19 Review): a seek while it plays comes with a
+    // change of state; one while it is paused only moves the clock, and no event says so.
+    seek: function (seconds) { now(); time = seconds; post(playing ? { event: 'state', state: 1 } : undefined); },
+    setRate: function (next) { now(); rate = next; post({ event: 'rate' }); },
+    time: function () { return now(); },
+    playing: function () { return playing; },
+  };
+  document.getElementById('toggle').addEventListener('click', function () { setPlaying(!playing); });
+  window.addEventListener('message', function (event) {
+    var data = event.data;
+    if (event.source !== parent || event.origin !== pageOrigin || !data || data.stub !== 'yt') return;
+    if (data.cmd === 'listening') { if (!listening) { listening = true; post({ event: 'ready' }); } }
+    // Like a real player: a page can't start a video nobody has tapped.
+    else if (data.cmd === 'play') { if (started) setPlaying(true); }
+    else if (data.cmd === 'pause') setPlaying(false);
+    else if (data.cmd === 'seek') window.stub.seek(data.seconds);
+  });
+  setInterval(function () {
+    document.getElementById('clock').textContent = now().toFixed(2);
+    if (playing) post();
+  }, 100);
+})();
+</script></body>`;
+
+/**
+ * The stub of `https://www.youtube.com/iframe_api`: `YT.Player` over a frame
+ * the page already has, with the methods and events the app uses
+ * (youTubePlayer.ts), speaking to `STUB_PLAYER_PAGE` in that frame.
+ */
+const STUB_PLAYER_API = `(function () {
+  function Player(frame, options) {
+    var self = this;
+    this.frame = frame; this.time = 0; this.rate = 1; this.state = -1; this.ready = false;
+    window.addEventListener('message', function (event) {
+      var data = event.data;
+      if (event.source !== frame.contentWindow || !data || data.stub !== 'yt') return;
+      if (typeof data.time === 'number') self.time = data.time;
+      if (typeof data.rate === 'number') self.rate = data.rate;
+      // Known before "ready" is passed on: a video tapped before this script arrived is playing.
+      if (typeof data.now === 'number') self.state = data.now;
+      if (data.event === 'ready' && !self.ready) { self.ready = true; options.events.onReady({ target: self }); }
+      if (data.event === 'state') options.events.onStateChange({ target: self, data: data.state });
+      if (data.event === 'rate') options.events.onPlaybackRateChange({ target: self, data: data.rate });
+    });
+    // The frame may still be loading: say hello until it answers.
+    var hello = setInterval(function () {
+      if (self.ready || !frame.isConnected) return clearInterval(hello);
+      self.send({ cmd: 'listening' });
+    }, 50);
+  }
+  Player.prototype.send = function (message) {
+    if (this.frame.contentWindow) this.frame.contentWindow.postMessage(Object.assign({ stub: 'yt' }, message), '*');
+  };
+  Player.prototype.getCurrentTime = function () { return this.time; };
+  Player.prototype.getPlaybackRate = function () { return this.rate; };
+  Player.prototype.getPlayerState = function () { return this.state; };
+  Player.prototype.seekTo = function (seconds) { this.time = seconds; this.send({ cmd: 'seek', seconds: seconds }); };
+  Player.prototype.playVideo = function () { this.send({ cmd: 'play' }); };
+  Player.prototype.pauseVideo = function () { this.send({ cmd: 'pause' }); };
+  window.YT = { Player: Player };
+  if (window.onYouTubeIframeAPIReady) window.onYouTubeIframeAPIReady();
+})();`;
+
+/**
+ * Answers every request to YouTube and Spotify with a stub, so nothing
+ * leaves the machine, and records each one: YouTube's player API script by
+ * `STUB_PLAYER_API`, everything else by the stub player's page. A spec that
+ * says "no request was made" first proves the recorder sees one (an empty
+ * list must not pass by the routes never having been reached).
+ *
+ * `requests` is every request; `frames()` those for a page (the video frame
+ * itself), `scripts()` those for the player API.
+ */
+export async function stubServices(context: BrowserContext): Promise<{
+  requests: string[];
+  frames: () => string[];
+  scripts: () => string[];
+}> {
   const requests: string[] = [];
   await context.route(
     (url) => SERVICE_HOSTS.test(url.hostname),
     async (route) => {
-      requests.push(route.request().url());
-      await route.fulfill({
-        contentType: 'text/html',
-        body: `<!doctype html><title>Stub</title><body style="margin:0;background:#000;color:#fff;font:16px sans-serif"><p>${STUB_PLAYER_TEXT}</p><p id="at"></p><script>document.getElementById('at').textContent = location.href</script></body>`,
-      });
+      const url = route.request().url();
+      requests.push(url);
+      if (url === PLAYER_API_URL) {
+        await route.fulfill({ contentType: 'text/javascript', body: STUB_PLAYER_API });
+      } else {
+        await route.fulfill({ contentType: 'text/html', body: STUB_PLAYER_PAGE });
+      }
     },
   );
-  return { requests };
+  return {
+    requests,
+    frames: () => requests.filter((url) => url !== PLAYER_API_URL),
+    scripts: () => requests.filter((url) => url === PLAYER_API_URL),
+  };
+}
+
+/** What the stub player's page exposes to a test (`window.stub` in the frame). */
+interface VideoStub {
+  play(): void;
+  pause(): void;
+  seek(seconds: number): void;
+  setRate(rate: number): void;
+  time(): number;
+  playing(): boolean;
+}
+
+/**
+ * The stub video on the page, driven as a viewer would drive YouTube's own
+ * controls: `tapPlay` is the tap on the video a real one needs first; the
+ * rest act inside the frame.
+ */
+export function videoStub(page: Page) {
+  const frame = () => {
+    const found = page.frames().find((candidate) => candidate.url().includes('/embed/'));
+    if (!found) throw new Error('No video frame on the page');
+    return found;
+  };
+  /** Calls one of the stub's methods inside the frame. */
+  const call = <Method extends keyof VideoStub>(
+    method: Method,
+    ...given: Parameters<VideoStub[Method]>
+  ) =>
+    frame().evaluate(
+      ([name, args]) => {
+        const stub = (
+          window as unknown as { stub: Record<string, (...args: unknown[]) => unknown> }
+        ).stub;
+        return stub[name]!(...args);
+      },
+      [method, given] as const,
+    ) as Promise<ReturnType<VideoStub[Method]>>;
+  return {
+    tapPlay: () =>
+      page
+        .frameLocator('[data-testid="recording-frame"]')
+        .getByRole('button', { name: 'Play' })
+        .click(),
+    pause: () => call('pause'),
+    play: () => call('play'),
+    seek: (seconds: number) => call('seek', seconds),
+    setRate: (rate: number) => call('setRate', rate),
+    time: () => call('time'),
+    playing: () => call('playing'),
+  };
+}
+
+/** What these helpers read of the mounted player and keep in the page (debugPlayer.ts). */
+interface FollowWindow {
+  __drumPalPlayer?: {
+    getSnapshot(): {
+      highlight: { startBar: number; endBar: number } | null;
+      barCount: number | null;
+    };
+    barRectInWindow(barNumber: number): { top: number; bottom: number } | null;
+  };
+  __followSamples?: FollowSample[];
+  __followTimer?: number;
+}
+
+/** The line-up under the video (Unit 19) and its controls. */
+export const lineUp = (page: Page) => page.getByTestId('line-up');
+export const lineUpMessage = (page: Page) => page.getByTestId('line-up-message');
+export const lineUpButton = (
+  page: Page,
+  name:
+    | 'Bar 1 starts now'
+    | 'Type a time'
+    | 'Save'
+    | 'Line up again'
+    | 'Tab earlier'
+    | 'Tab later'
+    | 'Follow'
+    | 'Cancel',
+) => lineUp(page).getByRole('button', { name, exact: true });
+/** The field "Type a time" opens. */
+export const lineUpField = (page: Page) =>
+  lineUp(page).getByRole('textbox', { name: 'Bar 1 starts at' });
+
+/**
+ * Lines the user's link of that kind up as another device would: straight
+ * into the database. The page shows it at its next read (a reload).
+ */
+export async function setBarOne(
+  user: E2eUser,
+  kind: 'original' | 'drumless',
+  barOneSeconds: number | null,
+): Promise<void> {
+  const { data, error } = await admin
+    .from('song_links')
+    .update({ bar_one_seconds: barOneSeconds })
+    .eq('user_id', user.id)
+    .eq('kind', kind)
+    .select('id');
+  if (error) throw error;
+  if (data.length !== 1) throw new Error(`Expected one ${kind} link, found ${data.length}`);
+}
+
+/**
+ * Resolves once the score has been laid out: its bars have places. Not "an
+ * svg is visible": alphaTab draws a line only when it scrolls into view, and
+ * on a short window (a phone on its side) a fresh load has the whole score
+ * below the fold.
+ */
+export async function scoreLaidOut(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const player = (window as unknown as FollowWindow).__drumPalPlayer;
+          return !!player && player.barRectInWindow(1) !== null;
+        }),
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+}
+
+/** One reading of where the follow has put things, taken in the page in one instant. */
+export interface FollowSample {
+  /** The marked bar, 1-based. */
+  bar: number;
+  /** The marked bar's top and bottom in the window. */
+  marked: { top: number; bottom: number } | null;
+  /** The bar after it by number, or null for the tab's last bar or one not drawn. */
+  next: { top: number; bottom: number } | null;
+  /**
+   * The part of the window the score is read in: under the video's bar, above
+   * a phone's tab bar, and inside the score's own box, which from 768 px has a
+   * height of its own and clips what is scrolled out of it.
+   */
+  view: { top: number; bottom: number };
+}
+
+/**
+ * Records a `FollowSample` each time the marked bar changes, from now on,
+ * read in the page in the same task as the change is seen: where the marked
+ * bar and the next one are, and what of the window is free for the score.
+ * Read them back with `followSamples`.
+ */
+export async function recordFollow(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const scope = window as unknown as FollowWindow;
+    const player = scope.__drumPalPlayer;
+    if (!player) throw new Error('No player on window.__drumPalPlayer');
+    window.clearInterval(scope.__followTimer);
+    const samples: FollowSample[] = [];
+    scope.__followSamples = samples;
+    let last: number | null = null;
+    const span = (rect: { top: number; bottom: number } | null) =>
+      rect && { top: rect.top, bottom: rect.bottom };
+    scope.__followTimer = window.setInterval(() => {
+      const snapshot = player.getSnapshot();
+      const bar = snapshot.highlight?.startBar ?? null;
+      if (bar === last) return;
+      last = bar;
+      if (bar === null) return;
+      const videoBar = document.querySelector('[data-testid="recording-bar"]');
+      const tabs = document.querySelector('[data-bottom-tabs]')?.getBoundingClientRect();
+      const box = document.querySelector('[data-testid="score-viewport"]')?.getBoundingClientRect();
+      samples.push({
+        bar,
+        marked: span(player.barRectInWindow(bar)),
+        next: bar < (snapshot.barCount ?? 0) ? span(player.barRectInWindow(bar + 1)) : null,
+        view: {
+          top: Math.max(videoBar?.getBoundingClientRect().bottom ?? 0, box?.top ?? 0),
+          bottom: Math.min(
+            tabs && tabs.height > 0 ? tabs.top : window.innerHeight,
+            box?.bottom ?? Infinity,
+          ),
+        },
+      });
+    }, 20);
+  });
+}
+
+export const followSamples = (page: Page): Promise<FollowSample[]> =>
+  page.evaluate(() => (window as unknown as FollowWindow).__followSamples ?? []);
+
+/** Whether a span lies wholly in the part of the window the score is read in. */
+export const onShowIn = (
+  span: { top: number; bottom: number } | null,
+  view: { top: number; bottom: number },
+): boolean => span !== null && span.top >= view.top - 1 && span.bottom <= view.bottom + 1;
+
+/** The bars marked on the score, 1-based, as the mounted player has them (debugPlayer.ts); null for none. */
+export function markedBars(page: Page): Promise<[number, number] | null> {
+  return page.evaluate(() => {
+    const player = (window as unknown as FollowWindow).__drumPalPlayer;
+    if (!player) throw new Error('No player on window.__drumPalPlayer');
+    const { highlight } = player.getSnapshot();
+    return highlight ? [highlight.startBar, highlight.endBar] : null;
+  });
+}
+
+/** Where bar 1 falls in each of the user's links' videos, as the database has it, by kind. */
+export async function barOneOf(user: E2eUser): Promise<Record<string, number | null>> {
+  const { data, error } = await admin
+    .from('song_links')
+    .select('kind, bar_one_seconds')
+    .eq('user_id', user.id);
+  if (error) throw error;
+  return Object.fromEntries(data.map((link) => [link.kind, link.bar_one_seconds]));
 }
 
 /** A new user's one song, Groove 120 with no links yet, on its overview. */
@@ -70,7 +405,7 @@ export const sourceSwitch = (page: Page) =>
   page.getByRole('radiogroup', { name: 'Play along with' });
 export const recordingFrame = (page: Page) => page.getByTestId('recording-frame');
 export const recordingBar = (page: Page) => page.getByTestId('recording-bar');
-/** Why the tab's controls aren't there: in the bar from 1024 px and in a phone on its side, under it otherwise, one of the two drawn. */
+/** Why the tab's controls aren't there: in the bar from 1024 px, under it otherwise, one of the two drawn. */
 export const recordingNote = (page: Page) =>
   page.getByText(/^The video has its own controls\./).filter({ visible: true });
 
@@ -131,4 +466,57 @@ export async function lastPlayedOf(user: E2eUser): Promise<Record<string, string
     .eq('user_id', user.id);
   if (error) throw error;
   return Object.fromEntries(data.map((song) => [song.title, song.last_played_at]));
+}
+
+// The tab follows the video (Unit 19): the steps its tests share.
+
+/** A new user's Groove 120 on its play screen, on its Original video, the score drawn. */
+export async function openVideo(page: Page, user: E2eUser) {
+  await openNewSongOverview(page, user);
+  await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
+  await recordingLink(page, 'Original').click();
+  await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+  await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
+}
+
+/** The part of the window the score is read in: under the sticky video, above a phone's tab bar. */
+export async function readableView(page: Page) {
+  const bar = await boxOf(recordingBar(page), 'recording bar');
+  const tabs = await page.locator('[data-bottom-tabs]').boundingBox();
+  const height = page.viewportSize()!.height;
+  return { top: bar.y + bar.height, bottom: tabs && tabs.height > 0 ? tabs.y : height };
+}
+
+/** The marked bar's box, once exactly one bar is marked. */
+export async function markedBox(page: Page) {
+  await expect.poll(async () => (await highlightBoxes(page)).length).toBe(1);
+  return (await highlightBoxes(page))[0]!;
+}
+
+/** `openVideo`, on a link lined up already (as from another device), bar 1 at `barOne` seconds. */
+export async function openLinedVideo(page: Page, user: E2eUser, barOne: number) {
+  await openVideo(page, user);
+  await setBarOne(user, 'original', barOne);
+  await page.reload();
+  await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+  await scoreLaidOut(page);
+  await expect(lineUpMessage(page)).toContainText('Bar 1 at');
+  // A reload keeps the window's scroll; a fresh load starts at the top.
+  await page.evaluate(() => window.scrollTo(0, 0));
+}
+
+/** Plays the stub video through the tab at twice the speed, and gives what the follow did at each bar. */
+export async function followThrough(page: Page, lastBar = 16) {
+  const video = videoStub(page);
+  await recordFollow(page);
+  await video.tapPlay();
+  await video.setRate(2);
+  await expect.poll(() => markedBars(page), { timeout: 40_000 }).toEqual([lastBar, lastBar]);
+  await video.pause();
+  const samples = await followSamples(page);
+  // Every bar was seen, in order: an empty or thin record must not pass what follows.
+  expect(samples.map((sample) => sample.bar)).toEqual(
+    Array.from({ length: lastBar }, (_, index) => index + 1),
+  );
+  return samples;
 }

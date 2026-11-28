@@ -54,6 +54,7 @@ import { clockLabel } from '@/features/stats/statLabels';
 import { waitsForNetwork } from '@/lib/network';
 import { loopPracticePath, songPath } from '@/lib/routes';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
+import { announcementText } from '@/lib/announcement';
 import {
   fullBleedBarClass,
   PlayerStatusLine,
@@ -69,7 +70,7 @@ import { SongFileGate } from './SongFileGate';
 import { BackLink, OfflineMessage, SongGate } from './SongGate';
 import { useJamMode } from './useJamMode';
 import { useRequestedLoop } from './useRequestedLoop';
-import { announcementText, useSongShortcuts } from './useSongShortcuts';
+import { useSongShortcuts } from './useSongShortcuts';
 
 /**
  * /songs/:id/loops/:loopId, the practice screen (Unit 16). Lazy-loaded with

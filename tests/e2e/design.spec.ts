@@ -48,9 +48,12 @@ import {
   playAlong,
   recordingFrame,
   recordingLink,
+  lineUp,
+  lineUpButton,
   recordingsForm,
   saveRecordingsButton,
   stubServices,
+  videoStub,
   WATCH_URL,
 } from './recordingsPage';
 
@@ -396,6 +399,19 @@ test('a song’s recordings: the overview’s buttons and form, and the play scr
   const throughLabel = await expectFocusRings(page, 'play screen, on a recording');
   // The source switch's radios are hidden inside their labels, which draw the ring.
   expect(throughLabel.join(' ')).toContain('Original');
+  // The line-up under the video (Unit 19), as a prompt and then as the nudges.
+  expect(await textSpillingOutOf(lineUp(page)), 'line-up prompt').toEqual([]);
+  const video = videoStub(page);
+  await video.tapPlay();
+  await lineUpButton(page, 'Bar 1 starts now').click();
+  await expect(lineUpButton(page, 'Tab later')).toBeVisible();
+  await video.pause();
+  await expectWellDrawn(page, 'play screen, video lined up');
+  await expectFocusRings(page, 'play screen, video lined up');
+  expect(await textSpillingOutOf(lineUp(page)), 'line-up nudges').toEqual([]);
+  await lineUpButton(page, 'Line up again').click();
+  await expect(lineUpButton(page, 'Cancel')).toBeVisible();
+  await expectWellDrawn(page, 'play screen, lining up again');
 });
 
 test('a long unbroken loop name wraps inside the loop panel and on the home page', async ({

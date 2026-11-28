@@ -3,12 +3,25 @@
  * order (a repeated bar appears once per playthrough), with 0-based indexes.
  */
 
+/** A tempo that takes effect at a tick, in the file's BPM (quarter notes a minute). */
+export interface TempoChange {
+  tick: number;
+  tempo: number;
+}
+
 /** Tick span of one played master bar, as alphaTab's tick cache reports it. */
 export interface BarTicks {
   /** 0-based master bar index */
   barIndex: number;
   start: number;
   end: number;
+  /**
+   * The tempos in force during this playthrough: the one it starts at (at its
+   * first tick) and any change inside it, as alphaTab's tick cache lists
+   * them. What turns its ticks into time exactly (videoSync.ts, Unit 19).
+   * Left out by tests that only need bars.
+   */
+  tempoChanges?: readonly TempoChange[];
 }
 
 export interface TickRange {

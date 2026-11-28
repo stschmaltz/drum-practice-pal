@@ -62,6 +62,16 @@ export interface PlayerEngine {
    */
   loadSoundFont(urls: readonly string[]): Promise<void>;
   setLayout(layout: LayoutChoice): void;
+  /**
+   * Whether alphaTab scrolls its box to its own cursor: while it plays, and a
+   * frame after every drawing (a new width, a change of layout). On by
+   * default. Off while the score is only read under something else that
+   * plays (a recording): the cursor is hidden there and says nothing about
+   * where the song is, and its scroll lands after, and over, the screen's own
+   * (19 QA after fix round 1, issue 1). Draws nothing again; playback is
+   * untouched. `scrollToBar` works either way.
+   */
+  setCursorScroll(on: boolean): void;
   /** Must start audio synchronously: on iOS this has to run inside the tap. */
   play(): void;
   /**
@@ -110,9 +120,29 @@ export interface PlayerEngine {
    * cursor during playback. Scrolling only; playback is untouched. False when
    * it couldn't tell because the score hasn't rendered yet (no bounds): ask
    * again on `rendered`. True once it could, scrolled or not.
+   *
+   * With `nextBarIndex`, the bar played after it, the box also turns a line
+   * early: when that bar is on a line below that isn't all on show, the
+   * bar's own line goes to the top (`scrollToShow`).
    */
-  scrollToBar(barIndex: number): boolean;
+  scrollToBar(barIndex: number, nextBarIndex?: number): boolean;
+  /**
+   * Where a bar (0-based) is drawn in the window at this moment, for a screen
+   * that keeps it on show by scrolling the window (a phone's read-along
+   * score is as tall as its lines and scrolls with the page: Unit 19). A
+   * reading only. Null while the score has no bounds, during a redraw, or
+   * for a bar that isn't drawn.
+   */
+  barRectInWindow(barIndex: number): WindowRect | null;
   destroy(): void;
+}
+
+/** A box in the window's coordinates, as `getBoundingClientRect` gives one. */
+export interface WindowRect {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
 }
 
 export interface EngineMount {
