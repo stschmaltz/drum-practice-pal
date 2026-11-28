@@ -1,7 +1,9 @@
 import { SONG_LINK_URL_MAX_LENGTH } from '@/lib/schema';
 import {
   chooseSource,
+  keptLinkText,
   LINK_REFUSAL_COPY,
+  otherLinkLabel,
   parseSongLink,
   playAlongLabel,
   recognisedAs,
@@ -178,8 +180,14 @@ describe('parseSongLink: refusals', () => {
     ['a vbscript: address', 'vbscript:msgbox(1)', 'notHttps'],
     ['a word', 'hello', 'notALink'],
     ['a sentence', 'the one from the lesson', 'notALink'],
-    ['two links', `https://youtu.be/${VIDEO} https://youtu.be/${VIDEO}`, 'notALink'],
-    ['an address with a space inside', 'https://example.com/a b', 'notALink'],
+    ['words with a link that has no scheme', `the song youtu.be/${VIDEO}`, 'notALink'],
+    ['words round an http: link', `the song http://youtu.be/${VIDEO}`, 'notHttps'],
+    [
+      'words round a look-alike',
+      `watch https://youtube.com.evil.test/watch?v=${VIDEO}`,
+      'lookAlike',
+    ],
+    ['a javascript: address and a word', 'javascript:alert(1) x', 'notALink'],
     ['a scheme and nothing else', 'https://', 'notALink'],
     ['a host with no dot', 'https://localhost/x', 'notALink'],
     ['a look-alike host', `https://youtube.com.evil.test/watch?v=${VIDEO}`, 'lookAlike'],
@@ -188,12 +196,14 @@ describe('parseSongLink: refusals', () => {
     ['a look-alike Spotify host', `https://open.spotify.com.evil.test/track/${TRACK}`, 'lookAlike'],
     ['a host that only contains the name', 'https://youtube-login.test/watch', 'lookAlike'],
     ['a host that ends in the name', `https://notyoutube.com/watch?v=${VIDEO}`, 'lookAlike'],
+    // Refused for carrying sign-in details, whatever the host: "youtube.com@evil.test" opens evil.test.
+    ['a sign-in part before the host', `https://youtube.com@evil.test/watch?v=${VIDEO}`, 'signIn'],
+    ['a sign-in part with a password', 'https://user:pass@example.com/', 'signIn'],
     [
-      'a sign-in part before the host',
-      `https://youtube.com@evil.test/watch?v=${VIDEO}`,
-      'lookAlike',
+      'a sign-in part on YouTube itself',
+      `https://user:pw@www.youtube.com/watch?v=${VIDEO}`,
+      'signIn',
     ],
-    ['a sign-in part with a password', 'https://user:pass@example.com/', 'lookAlike'],
   ])('refuses %s', (_name, text, reason) => {
     expect(refusal(text)).toBe(reason);
   });
@@ -240,10 +250,36 @@ describe('labels', () => {
     expect(recognisedAs(accepted(`${WATCH}&t=90`))).toBe(
       'YouTube video, starting at 1:30. Plays here, with the tab under it.',
     );
+    expect(recognisedAs(accepted(WATCH), 'drumless')).toBe(
+      'YouTube video. Plays here, with the tab under it.',
+    );
     expect(recognisedAs(accepted(SPOTIFY))).toContain("can't slow a song down");
     expect(recognisedAs(accepted('https://example.com/x'))).toBe(
       'Link to example.com. Opens in a new tab.',
     );
+  });
+
+  // 14 QA issue 4: only an Original or Drumless video plays in the app.
+  it('says a YouTube video in an Other field opens in YouTube, not that it plays here', () => {
+    expect(recognisedAs(accepted(WATCH), 'other')).toBe('YouTube video. Opens in YouTube.');
+    expect(recognisedAs(accepted(`${WATCH}&t=90`), 'other')).toBe(
+      'YouTube video, starting at 1:30. Opens in YouTube.',
+    );
+    expect(recognisedAs(accepted(SPOTIFY), 'other')).toBe(recognisedAs(accepted(SPOTIFY)));
+  });
+
+  // 14 QA issue 8: an Other link reads as a link, not as a raw address.
+  it.each([
+    ['https://www.drumeo.com/beat', 'drumeo.com/beat'],
+    ['https://example.com/', 'example.com'],
+    ['https://example.com', 'example.com'],
+    [SPOTIFY.replace('/track/', '/album/'), 'open.spotify.com/album/4uLU6hMCjMI75M1A…'],
+    [`${WATCH}x`, 'youtube.com/watch?v=dQw4w9WgXcQx'],
+    ['https://example.com/a?b=1#part', 'example.com/a?b=1#part'],
+    [`https://example.com/${'a'.repeat(300)}`, `example.com/${'a'.repeat(27)}…`],
+    [`https://${'a'.repeat(50)}.example.com/lesson/one`, `${'a'.repeat(50)}.example.com/…`],
+  ])('shows the other link %s as %s', (url, label) => {
+    expect(otherLinkLabel(accepted(url))).toBe(label);
   });
 
   it('names a button by its kind, and by where it goes when it leaves the app', () => {
@@ -522,8 +558,8 @@ describe('parseSongLink: an address that says one host and opens another', () =>
   it.each<[string, LinkRefusal]>([
     [`https://www.youtube.com%2eevil.test/watch?v=${VIDEO}`, 'lookAlike'],
     [`https://youtube.com.au/watch?v=${VIDEO}`, 'lookAlike'],
-    [`https://www.youtube.com.:pw@evil.test/`, 'lookAlike'],
-    [`https://open.spotify.com:x@evil.test/track/${TRACK}`, 'lookAlike'],
+    [`https://www.youtube.com.:pw@evil.test/`, 'signIn'],
+    [`https://open.spotify.com:x@evil.test/track/${TRACK}`, 'signIn'],
     [`https://my-spotify-playlists.test/track/${TRACK}`, 'lookAlike'],
   ])('refuses %s', (text, reason) => {
     expect(refusal(text)).toBe(reason);
@@ -551,8 +587,6 @@ describe('parseSongLink: more refusals', () => {
     ['an IPv6 address', 'https://[::1]/x', 'notALink'],
     // Read as the scheme "example.com:", which an address bar wouldn't; refused either way.
     ['a host and port with no scheme', 'example.com:8080/x', 'notHttps'],
-    ['a line break inside', `https://youtu.be/\n${VIDEO}`, 'notALink'],
-    ['a no-break space inside', `https://youtu.be/\u00a0${VIDEO}`, 'notALink'],
   ])('refuses %s', (_name, text, reason) => {
     expect(refusal(text)).toBe(reason);
   });
@@ -628,4 +662,60 @@ describe('parseSongLink: what every saved link is', () => {
       if (link.provider === 'spotify') expect(link.url).toBe(SPOTIFY);
     },
   );
+});
+
+// 14 QA issue 6: a share sheet's text, or a title typed before the link. The first http(s)
+// address in the paste is the link; the words round it are dropped.
+describe('parseSongLink: a link with words round it', () => {
+  it.each([
+    ['a title before it', `Never Gonna Give You Up https://youtu.be/${VIDEO}`, WATCH],
+    ['a share sheet’s sentence', `Check out this song on Spotify: ${SPOTIFY}?si=abc`, SPOTIFY],
+    ['words after it', `https://youtu.be/${VIDEO}?t=90 from the solo`, `${WATCH}&t=90s`],
+    ['words on both sides, over lines', `Listen:\n${SPOTIFY}\nsent from my phone`, SPOTIFY],
+    ['two links, the first', `https://youtu.be/${VIDEO} ${SPOTIFY}`, WATCH],
+    ['two links with words between', `${SPOTIFY} or https://youtu.be/${VIDEO}`, SPOTIFY],
+    ['a full stop that ends the sentence', `It is https://youtu.be/${VIDEO}. Enjoy`, WATCH],
+    ['brackets round it in a sentence', `the video (https://youtu.be/${VIDEO}) is good`, WATCH],
+    ['quotes and a comma', `see "https://youtu.be/${VIDEO}", then play`, WATCH],
+    ['the scheme in capitals', `song HTTPS://youtu.be/${VIDEO}`, WATCH],
+    [
+      'another site',
+      'my lesson https://example.com/lesson?id=7 (week 2)',
+      'https://example.com/lesson?id=7',
+    ],
+    ['a no-break space before it', `Song\u00a0https://youtu.be/${VIDEO}`, WATCH],
+  ])('takes the link from %s', (_name, text, url) => {
+    expect(accepted(text).url).toBe(url);
+  });
+
+  // What was kept is what the field then shows, so the user sees what will be saved.
+  it.each([
+    [`Never Gonna Give You Up https://youtu.be/${VIDEO}`, `https://youtu.be/${VIDEO}`],
+    [`It is https://youtu.be/${VIDEO}. Enjoy`, `https://youtu.be/${VIDEO}`],
+    [`https://youtu.be/${VIDEO} ${SPOTIFY}`, `https://youtu.be/${VIDEO}`],
+    ['https://example.com/a b', 'https://example.com/a'],
+    // An address broken by a line break keeps its first part, on show, never a guess at the rest.
+    [`https://youtu.be/\n${VIDEO}`, 'https://youtu.be/'],
+  ])('keeps %j as %s', (text, kept) => {
+    expect(keptLinkText(text)).toBe(kept);
+    expect(parseSongLink(text)).toEqual(parseSongLink(kept));
+  });
+
+  it.each([
+    `https://youtu.be/${VIDEO}`,
+    ` https://youtu.be/${VIDEO}\n`,
+    `youtu.be/${VIDEO}`,
+    'the one from the lesson',
+    `the song youtu.be/${VIDEO}`,
+    '',
+    `https://youtu.be/${VIDEO}.`,
+  ])('leaves %j as it was typed', (text) => {
+    expect(keptLinkText(text)).toBe(text);
+  });
+
+  it('counts the length of the link, not of the words round it', () => {
+    const words = 'la '.repeat(1000);
+    expect(accepted(`${words}https://youtu.be/${VIDEO}`).url).toBe(WATCH);
+    expect(refusal(`song https://example.com/${'a'.repeat(3000)}`)).toBe('tooLong');
+  });
 });

@@ -3,6 +3,7 @@ import { Navigate, useLocation, useSearchParams } from 'react-router';
 import { useAuth } from '@/lib/auth';
 import { signInFailureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
+import { pointerIsFine } from '@/lib/pointer';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { FullPageMessage } from '@/components/FullPageMessage';
 import { OfflineNote } from '@/components/OfflineNote';
@@ -153,11 +154,6 @@ function EmailStep({
       {sendError}
     </form>
   );
-}
-
-/** A mouse or trackpad: no on-screen keyboard to bring up. False where it can't be asked (tests, old browsers). */
-function pointerIsFine(): boolean {
-  return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: fine)').matches;
 }
 
 function CodeStep({

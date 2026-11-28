@@ -3002,6 +3002,79 @@ describe('SongPage recordings (Unit 14)', () => {
     });
   });
 
+  // 14 QA fix round 1.
+  describe('the score under a recording on a phone (QA issue 2)', () => {
+    // jsdom has no matchMedia, so the layout goes by the window's width.
+    beforeEach(() => vi.stubGlobal('innerWidth', 390));
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('is drawn as a page, lines down the screen, and goes back to one line on Tab, without a restart', async () => {
+      const { user, engine } = await openSong();
+      expect(engine.mount?.layout).toBe('horizontal');
+      const restarts = engine.restartCalls();
+
+      await user.click(screen.getByRole('radio', { name: 'Original' }));
+      await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('page'));
+      expect(frame()).toBeInTheDocument();
+
+      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('horizontal'));
+      // Redrawn only: nothing was stopped, started or loaded again.
+      expect(engine.restartCalls()).toBe(restarts);
+      expect(engine.loadScore).toHaveBeenCalledTimes(1);
+      expect(engine.play).not.toHaveBeenCalled();
+    });
+
+    it('opens as a page when the screen opens on the recording', async () => {
+      const { engine } = await openSong({ query: '?source=original' });
+      expect(engine.mount?.layout).toBe('page');
+      expect(engine.setLayout).not.toHaveBeenCalledWith('horizontal');
+    });
+
+    it('back on Tab, brings the bar the paused player is at back on show in its one line', async () => {
+      const { user, engine } = await openSong();
+      // Paused at bar 9, as after playing that far.
+      act(() => engine.fire('position', { tick: startOfBar(9) }));
+      await user.click(screen.getByRole('radio', { name: 'Original' }));
+      await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('page'));
+      engine.scrollToBar.mockClear();
+
+      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await waitFor(() => expect(engine.scrollToBar).toHaveBeenLastCalledWith(8));
+      // After the layout was asked for, so the scroll is to the bar's place in the new drawing.
+      expect(engine.scrollToBar.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+        engine.setLayout.mock.invocationCallOrder.at(-1)!,
+      );
+      expect(engine.seek).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('offline on a recording, the way out (QA issue 9)', () => {
+    it('locks Open in YouTube with the note beside it, refuses a press, and is heard again once back', async () => {
+      await openSong({ query: '?source=original' });
+      await screen.findByTestId('recording-frame');
+      const out = screen.getByRole('link', { name: /^Open in YouTube/ });
+      expectUnlocked(out);
+      expect(fireEvent.click(out)).toBe(true);
+
+      // Pressed before the link has caught up with the connection going: refused all the same.
+      let allowed = true;
+      act(() => {
+        onlineManager.setOnline(false);
+        allowed = fireEvent.click(out);
+      });
+      expect(allowed).toBe(false);
+      expectLocked(screen.getByRole('link', { name: /^Open in YouTube/ }));
+      expect(screen.getByText("You're offline. The video needs a connection.")).toBeVisible();
+      expect(fireEvent.click(screen.getByRole('link', { name: /^Open in YouTube/ }))).toBe(false);
+
+      act(() => onlineManager.setOnline(true));
+      const back = screen.getByRole('link', { name: /^Open in YouTube/ });
+      expectUnlocked(back);
+      expect(fireEvent.click(back)).toBe(true);
+    });
+  });
+
   // 14 Test: the checklist's rows for the source switch, and the cases the plan's Test focus names.
   describe('?source= for a link that is no video (14 Test)', () => {
     it.each<[string, SongLinkRow]>([

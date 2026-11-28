@@ -48,23 +48,18 @@ import {
 } from '@/lib/itemFocus';
 import { waitsForNetwork } from '@/lib/network';
 import type { LoopStatus } from '@/lib/schema';
-import {
-  editLoopPath,
-  legacyLoopRedirect,
-  loopPracticePath,
-  newLoopPath,
-  songPlayPath,
-} from '@/lib/routes';
+import { editLoopPath, legacyLoopRedirect, loopPracticePath, newLoopPath } from '@/lib/routes';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import { BackLink, SongGate } from './SongGate';
 
 /**
  * /songs/:id, a song's overview (Unit 16): how much of it is mastered, and its
  * loops, the ones on the go first (last practised first), then the mastered
- * ones. Each loop opens its practice screen; "New loop" and "Play whole song"
- * open the player. A song with links to its recordings (Unit 14) has "Play
- * along" above the loops instead: the tab, the original, a drumless version;
- * "Manage recordings" in the header's menu edits the links. This screen loads
+ * ones. Each loop opens its practice screen; "New loop" opens the player on
+ * the loop form. "Play along" above the loops (Unit 14) has the ways of
+ * hearing the whole song: the tab's own player ("Tab"), and, for a song with
+ * links to its recordings, the original and a drumless version; "Manage
+ * recordings" in the header's menu edits the links. This screen loads
  * no player, no file and nothing of YouTube's, so a loop's speed
  * is a percent only (its BPM needs the file's tempo). Under the header, once,
  * what was practised on the song in this visit (`VisitSummary`). An old link,
@@ -136,25 +131,16 @@ function SongOverview({ song }: { song: Song }) {
           // The form goes: focus back to what opened it, once that is on the page again.
           focusWhenReady(findRecordingsOpener);
         }}
-        actions={(playWholeSong) => (
-          <>
-            <Link
-              to={newLoopPath(song.id)}
-              className={`${ghostButtonClass} -ml-4`}
-              {...NEW_LOOP_BUTTON_ATTRIBUTES}
-            >
-              <Icon name="plus" />
-              New loop
-            </Link>
-            {/* With recordings, "Tab" in Play along is this link. */}
-            {playWholeSong && (
-              <Link to={songPlayPath(song.id)} className={ghostButtonClass}>
-                <Icon name="music" />
-                Play whole song
-              </Link>
-            )}
-          </>
-        )}
+        actions={
+          <Link
+            to={newLoopPath(song.id)}
+            className={`${ghostButtonClass} -ml-4`}
+            {...NEW_LOOP_BUTTON_ATTRIBUTES}
+          >
+            <Icon name="plus" />
+            New loop
+          </Link>
+        }
       />
       <SongLoops song={song} loops={loops} />
     </div>

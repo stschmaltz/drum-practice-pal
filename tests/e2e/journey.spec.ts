@@ -64,7 +64,7 @@ test('first run: sign in, upload, jam, make a loop, practise, hit full speed, fi
   await expect(page.getByText(/No loops yet/)).toBeVisible();
 
   // Jam the whole song: it opens at 100%, plays, and a tap on a bar moves there.
-  await page.getByRole('link', { name: 'Play whole song' }).click();
+  await page.getByRole('link', { name: 'Tab', exact: true }).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(page.getByTestId('jam-speed')).toContainText('100%');
   await viewport(page).scrollIntoViewIfNeeded();

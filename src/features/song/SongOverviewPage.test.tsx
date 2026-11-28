@@ -160,14 +160,14 @@ describe('SongOverviewPage', () => {
     expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG}/loops/${LOOP_A}`);
   });
 
-  it('has New loop and Play whole song as links into the player', async () => {
+  it('has New loop and Tab as links into the player', async () => {
     serve();
     renderOverview();
     expect(await screen.findByRole('link', { name: 'New loop' })).toHaveAttribute(
       'href',
       `/songs/${SONG}/play?new=1`,
     );
-    expect(screen.getByRole('link', { name: 'Play whole song' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Tab' })).toHaveAttribute(
       'href',
       `/songs/${SONG}/play`,
     );
@@ -440,8 +440,13 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
   const original = videoLink();
   const drumless = spotifyLink();
   const playAlong = () => screen.getByRole('region', { name: 'Play along' });
-  const noPlayAlong = () =>
-    expect(screen.queryByRole('region', { name: 'Play along' })).not.toBeInTheDocument();
+  /** No recording: the block has the tab's button, and no link to anything else. */
+  const noRecordingButtons = () =>
+    expect(
+      within(playAlong())
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual(['Tab']);
   const form = () => screen.getByRole('form', { name: 'Recordings' });
   const noForm = () =>
     expect(screen.queryByRole('form', { name: 'Recordings' })).not.toBeInTheDocument();
@@ -477,12 +482,12 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
   }
 
   describe('a song with no links', () => {
-    it('looks as it did, plus a quiet Add a recording, and loads nothing of YouTube’s', async () => {
+    it('has the tab under Play along and a quiet Add a recording, and loads nothing of YouTube’s', async () => {
       await opened();
       expect(await screen.findByRole('button', { name: 'Add a recording' })).toBeVisible();
-      expect(screen.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+      expect(screen.getByRole('link', { name: 'Tab' })).toBeVisible();
       expect(screen.getByRole('link', { name: 'New loop' })).toBeVisible();
-      noPlayAlong();
+      noRecordingButtons();
       expect(document.querySelector('iframe')).toBeNull();
       expect(document.querySelector('script[src*="youtube"]')).toBeNull();
     });
@@ -496,7 +501,7 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
       );
       expect(screen.queryByRole('button', { name: 'Add a recording' })).not.toBeInTheDocument();
       // The tab is still a tap away.
-      expect(screen.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+      expect(screen.getByRole('link', { name: 'Tab' })).toBeVisible();
 
       await user.click(
         within(
@@ -527,7 +532,7 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
           user_id: 'user-1',
         },
       ]);
-      // The buttons are there at once: "Tab" stands in for "Play whole song".
+      // The new button is there at once, beside "Tab".
       const buttons = within(playAlong());
       expect(buttons.getByRole('link', { name: 'Tab' })).toHaveAttribute(
         'href',
@@ -537,7 +542,6 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
         'href',
         `/songs/${SONG}/play?source=original`,
       );
-      expect(screen.queryByRole('link', { name: 'Play whole song' })).not.toBeInTheDocument();
       // "Add a recording" has gone with the empty state: focus is on the header's menu, which manages them now.
       await waitFor(() => expect(headerMenu()).toHaveFocus());
     });
@@ -566,6 +570,11 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
       [
         `http://www.youtube.com/watch?v=${VIDEO_ID}`,
         'Only links that start with https:// can be saved.',
+      ],
+      // 14 QA issue 5: refused for its sign-in details, and told so, not called a look-alike.
+      [
+        'https://user:pw@example.com/x',
+        'That address has a sign-in name or password in it, before an @.',
       ],
     ])(
       'refuses %s with fixed copy, saves nothing and puts focus on the field',
@@ -745,8 +754,8 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
 
       await user.click(save());
       await waitFor(() => expect(links.sent('delete')).toEqual([[original.id]]));
-      await waitFor(() => noPlayAlong());
-      expect(screen.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+      await waitFor(() => noRecordingButtons());
+      expect(screen.getByRole('link', { name: 'Tab' })).toBeVisible();
       await waitFor(() =>
         expect(screen.getByRole('button', { name: 'Add a recording' })).toHaveFocus(),
       );
@@ -999,7 +1008,6 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
         .getAllByRole('link')
         .map((link) => link.textContent);
       expect(names).toEqual(['Tab', 'Original', 'Drumless on Spotify (opens in a new tab)']);
-      expect(screen.queryByRole('link', { name: 'Play whole song' })).not.toBeInTheDocument();
       noForm();
     });
 
@@ -1008,8 +1016,8 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
       await screen.findByRole('link', { name: 'Original' });
       links.setRows([]);
       await act(() => client.invalidateQueries({ queryKey: linksKey }));
-      await waitFor(() => noPlayAlong());
-      expect(screen.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+      await waitFor(() => noRecordingButtons());
+      expect(screen.getByRole('link', { name: 'Tab' })).toBeVisible();
       expect(screen.getByRole('button', { name: 'Add a recording' })).toBeVisible();
     });
 
@@ -1096,7 +1104,7 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
       expect(links.sent('delete')).toEqual([[original.id]]);
       expect(links.sent('insert')).toEqual([]);
       expect(await screen.findByRole('button', { name: 'Add a recording' })).toBeVisible();
-      expect(screen.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+      expect(screen.getByRole('link', { name: 'Tab' })).toBeVisible();
     });
 
     it('a change whose answer was lost and is pressed again sends the same change, and ends with one link', async () => {
@@ -1216,13 +1224,13 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
         queryClient,
       });
 
-      expect(await screen.findByRole('link', { name: 'Play whole song' })).toBeVisible();
+      expect(await screen.findByRole('link', { name: 'Tab' })).toBeVisible();
       expect(screen.getByRole('link', { name: 'New loop' })).toBeVisible();
       await settle();
       // Not known to be none, so not offered; and not a failure either.
       expect(screen.queryByRole('button', { name: 'Add a recording' })).not.toBeInTheDocument();
       expect(screen.queryByText(/Couldn't load this song's recordings/)).not.toBeInTheDocument();
-      noPlayAlong();
+      noRecordingButtons();
       expect(queryResult.mock.calls.filter(([call]) => call.table === 'song_links')).toEqual([]);
 
       // Back online the links are read and the way in appears.
@@ -1241,9 +1249,13 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
       const spotify = screen.getByRole('link', { name: /^Drumless on Spotify/ });
       const other = within(screen.getByRole('list', { name: 'Other links' })).getByRole('link');
       for (const control of [video, spotify, other]) expectLocked(control);
-      expect(within(playAlong()).getByTestId('offline-note')).toHaveTextContent(
-        "You're offline. Recordings need a connection",
-      );
+      const note = within(playAlong()).getByTestId('offline-note');
+      expect(note).toHaveTextContent("You're offline. Recordings need a connection");
+      // Above the list of other links, beside the buttons it is about (14 QA issue 8).
+      expect(
+        note.compareDocumentPosition(screen.getByRole('list', { name: 'Other links' })) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
       expectUnlocked(screen.getByRole('link', { name: 'Tab' }));
 
       // The presses are refused: no navigation, no new tab, nothing recorded as played.
@@ -1307,6 +1319,325 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
         "The server couldn't be reached.",
       );
       expect(save()).toHaveTextContent('Save');
+    });
+  });
+
+  describe('QA fix round 1', () => {
+    const dropped = { message: 'TypeError: Failed to fetch', code: '' };
+    /** A mouse or trackpad (`fine`), or a touch screen. */
+    const stubPointer = (fine: boolean) =>
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: fine && query === '(pointer: fine)',
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }));
+    afterEach(() => vi.unstubAllGlobals());
+
+    // Issue 7: on a cold load the links arrive after the page is drawn. What is already there
+    // stays the same element in the same place; what comes joins the end of the buttons' row.
+    it('keeps Tab, the heading and New loop where they are when the links arrive', async () => {
+      serve(undefined, [original, drumless]);
+      const release = links.holdNext('select');
+      renderOverview();
+      const tab = await screen.findByRole('link', { name: 'Tab' });
+      const newLoop = screen.getByRole('link', { name: 'New loop' });
+      const heading = screen.getByRole('heading', { name: 'Play along' });
+      const row = screen.getByTestId('play-along-buttons');
+      const block = playAlong();
+      expect([...row.children]).toEqual([tab]);
+      // Not known to be none yet, so nothing stands where a recording's button may come.
+      expect(screen.queryByRole('button', { name: 'Add a recording' })).not.toBeInTheDocument();
+      const before = [...block.children];
+
+      release();
+      await screen.findByRole('link', { name: 'Original' });
+      expect(screen.getByRole('link', { name: 'Tab' })).toBe(tab);
+      expect(screen.getByRole('link', { name: 'New loop' })).toBe(newLoop);
+      expect(screen.getByRole('heading', { name: 'Play along' })).toBe(heading);
+      expect(screen.getByTestId('play-along-buttons')).toBe(row);
+      expect([...row.children].map((child) => child.textContent)).toEqual([
+        'Tab',
+        'Original',
+        'Drumless on Spotify (opens in a new tab)',
+      ]);
+      expect(row.firstElementChild).toBe(tab);
+      // Nothing was put before the buttons, and the block is still above New loop.
+      expect([...playAlong().children].slice(0, before.length)).toEqual(before);
+      expect(
+        block.compareDocumentPosition(newLoop) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it('puts Add a recording at the end of the same row when the links arrive and there are none', async () => {
+      serve();
+      const release = links.holdNext('select');
+      renderOverview();
+      const tab = await screen.findByRole('link', { name: 'Tab' });
+      const row = screen.getByTestId('play-along-buttons');
+      expect([...row.children]).toEqual([tab]);
+
+      release();
+      const add = await screen.findByRole('button', { name: 'Add a recording' });
+      expect([...row.children]).toEqual([tab, add]);
+    });
+
+    // Issue 8.
+    it('shows an other link as its host and a short path, with the whole address in its title and name', async () => {
+      const long = linkRow('long', { url: `https://www.example.com/${'a'.repeat(300)}` });
+      await opened([original, long]);
+      const link = within(await screen.findByRole('list', { name: 'Other links' })).getByRole(
+        'link',
+      );
+      expect(within(link).getByText(`example.com/${'a'.repeat(27)}…`)).toHaveAttribute(
+        'aria-hidden',
+        'true',
+      );
+      expect(link).toHaveAttribute('title', long.url);
+      expect(link).toHaveAccessibleName(`example.com/${'a'.repeat(300)} (opens in a new tab)`);
+      expect(link).toHaveAttribute('href', long.url);
+    });
+
+    it('lists three other links, then the rest on request, with focus staying on the button', async () => {
+      const others = [1, 2, 3, 4, 5].map((n) =>
+        linkRow(`other-${n}`, { url: `https://example.com/lesson-${n}` }),
+      );
+      const user = await opened([original, ...others]);
+      const list = await screen.findByRole('list', { name: 'Other links' });
+      const shown = () =>
+        within(list)
+          .getAllByRole('link')
+          .map((link) => link.getAttribute('href'));
+      expect(shown()).toEqual(others.slice(0, 3).map((row) => row.url));
+
+      const more = screen.getByRole('button', { name: 'Show all 5 links' });
+      expect(more).toHaveAttribute('aria-expanded', 'false');
+      expect(more).toHaveAttribute('aria-controls', list.id);
+      await user.click(more);
+      expect(shown()).toEqual(others.map((row) => row.url));
+      expect(more).toHaveFocus();
+      expect(more).toHaveAttribute('aria-expanded', 'true');
+      expect(more).toHaveTextContent('Show fewer links');
+
+      await user.click(more);
+      expect(shown()).toHaveLength(3);
+      expect(more).toHaveFocus();
+    });
+
+    it('offers no "Show all" for three other links or fewer', async () => {
+      await opened([original, linkRow('a'), linkRow('b'), linkRow('c')]);
+      const list = await screen.findByRole('list', { name: 'Other links' });
+      expect(within(list).getAllByRole('link')).toHaveLength(3);
+      expect(screen.queryByRole('button', { name: /^Show all/ })).not.toBeInTheDocument();
+    });
+
+    // Issue 4.
+    it('says a YouTube link in an Other field opens in YouTube, not that it plays here', async () => {
+      const user = await opened([original]);
+      await screen.findByRole('link', { name: 'Original' });
+      await manage(user);
+      await user.click(within(form()).getByRole('button', { name: 'Add another link' }));
+      await user.type(field('Other link 1'), `https://youtu.be/${VIDEO_ID}`);
+      const note = document.getElementById(field('Other link 1').getAttribute('aria-describedby')!);
+      expect(note).toHaveTextContent(/^YouTube video\. Opens in YouTube\.$/);
+      // The Original's own line still says it plays here.
+      expect(
+        document.getElementById(field('Original').getAttribute('aria-describedby')!),
+      ).toHaveTextContent('YouTube video. Plays here, with the tab under it.');
+    });
+
+    // Issue 6.
+    it('takes the link out of a paste with words round it, shows what was kept and saves that', async () => {
+      const user = await opened();
+      await user.click(await screen.findByRole('button', { name: 'Add a recording' }));
+      await user.click(field('Original'));
+      await user.paste(`Never Gonna Give You Up https://youtu.be/${VIDEO_ID}?si=abc`);
+      expect(field('Original')).toHaveValue(`https://youtu.be/${VIDEO_ID}?si=abc`);
+      expect(form()).toHaveTextContent('YouTube video. Plays here, with the tab under it.');
+
+      await user.click(save());
+      await waitFor(() => noForm());
+      expect(links.sent('insert')).toMatchObject([{ kind: 'original', url: WATCH_URL }]);
+    });
+
+    it('leaves words with no link in them as typed, and refuses them at Save', async () => {
+      const user = await opened();
+      await user.click(await screen.findByRole('button', { name: 'Add a recording' }));
+      await user.click(field('Original'));
+      await user.paste('the one from the lesson');
+      expect(field('Original')).toHaveValue('the one from the lesson');
+      await user.click(save());
+      expect(await within(form()).findByRole('alert')).toHaveTextContent("That isn't a link.");
+    });
+
+    // Issue 10.
+    describe('where focus goes as the form opens', () => {
+      it('with a mouse or trackpad, the first empty link field', async () => {
+        stubPointer(true);
+        const user = await opened();
+        await user.click(await screen.findByRole('button', { name: 'Add a recording' }));
+        expect(field('Original')).toHaveFocus();
+      });
+
+      it('with a mouse, the first field that has no link yet', async () => {
+        stubPointer(true);
+        const user = await opened([original]);
+        await screen.findByRole('link', { name: 'Original' });
+        await manage(user);
+        expect(field('Drumless')).toHaveFocus();
+      });
+
+      it('with a mouse and every field filled, the form itself', async () => {
+        stubPointer(true);
+        const user = await opened([original, drumless]);
+        await screen.findByRole('link', { name: 'Original' });
+        await manage(user);
+        expect(form()).toHaveFocus();
+      });
+
+      it('with a mouse and the links still being read, the form, then the field once it is there', async () => {
+        stubPointer(true);
+        serve();
+        const release = links.holdNext('select');
+        const user = renderOverview();
+        await screen.findByRole('link', { name: 'Tab' });
+        await manage(user);
+        expect(form()).toHaveFocus();
+        release();
+        await waitFor(() => expect(field('Original')).toHaveFocus());
+      });
+
+      it('with a mouse, leaves focus where the user has moved it while the links were read', async () => {
+        stubPointer(true);
+        serve();
+        const release = links.holdNext('select');
+        const user = renderOverview();
+        await screen.findByRole('link', { name: 'Tab' });
+        await manage(user);
+        const cancel = within(form()).getByRole('button', { name: 'Cancel' });
+        cancel.focus();
+        release();
+        await waitFor(() => expect(field('Original')).toBeVisible());
+        await settle();
+        expect(cancel).toHaveFocus();
+      });
+
+      it('on a touch screen, the form itself, so no keyboard comes up before a field is tapped', async () => {
+        stubPointer(false);
+        const user = await opened();
+        await user.click(await screen.findByRole('button', { name: 'Add a recording' }));
+        expect(form()).toHaveFocus();
+        await settle();
+        expect(form()).toHaveFocus();
+      });
+    });
+
+    // Test bug 2 / checklist 1, "an exit left open": the page's own links stay live while
+    // the form saves, so the save's failure is kept for whoever is on the overview next.
+    describe('a save whose form was left before it answered', () => {
+      async function savingThenLeft(user: ReturnType<typeof userEvent.setup>) {
+        await user.click(await screen.findByRole('button', { name: 'Add a recording' }));
+        await user.type(field('Original'), WATCH_URL);
+        // Held first, then failed: a failure that lands before the page is left proves nothing.
+        const release = links.holdNext('insert');
+        await user.click(save());
+        await within(form()).findByRole('button', { name: 'Saving…' });
+        await user.click(screen.getByRole('link', { name: 'New loop' }));
+        expect(await screen.findByText('At whole song')).toBeVisible();
+        return release;
+      }
+      const overviewAlert = () => within(playAlong()).getByRole('alert');
+
+      it('says the failure on return, with the form closed, until it is dismissed', async () => {
+        const user = await opened();
+        links.failNext('insert', dropped);
+        const release = await savingThenLeft(user);
+        release();
+        await waitFor(() => expect(client.isMutating()).toBe(0));
+
+        historyBack();
+        await screen.findByRole('link', { name: 'Tab' });
+        expect(await within(playAlong()).findByRole('alert')).toHaveTextContent(
+          "Couldn't save the recordings. The server couldn't be reached. Check the connection and try again. Some changes may have been saved: this shows what is saved now.",
+        );
+        noForm();
+        expect(links.rows()).toEqual([]);
+
+        await user.click(within(overviewAlert()).getByRole('button', { name: 'Dismiss' }));
+        expect(within(playAlong()).queryByRole('alert')).not.toBeInTheDocument();
+        // Its button went with it: focus to the way back into the form.
+        await waitFor(() =>
+          expect(screen.getByRole('button', { name: 'Add a recording' })).toHaveFocus(),
+        );
+      });
+
+      it('says it when the answer lands after the user is back on the overview', async () => {
+        const user = await opened();
+        links.failNext('insert', dropped);
+        const release = await savingThenLeft(user);
+        historyBack();
+        await screen.findByRole('button', { name: 'Add a recording' });
+        expect(within(playAlong()).queryByRole('alert')).not.toBeInTheDocument();
+
+        release();
+        expect(await within(playAlong()).findByRole('alert')).toHaveTextContent(
+          "Couldn't save the recordings.",
+        );
+        // Opening the form again shows the same failure there, and Cancel puts it away.
+        await user.click(screen.getByRole('button', { name: 'Add a recording' }));
+        expect(within(form()).getByRole('alert')).toHaveTextContent(
+          "Couldn't save the recordings.",
+        );
+        await user.click(within(form()).getByRole('button', { name: 'Cancel' }));
+        noForm();
+        expect(within(playAlong()).queryByRole('alert')).not.toBeInTheDocument();
+      });
+
+      it('locks a form opened again while that save is still on its way, and sends nothing twice', async () => {
+        const user = await opened();
+        const release = await savingThenLeft(user);
+        historyBack();
+        await user.click(await screen.findByRole('button', { name: 'Add a recording' }));
+
+        expect(save()).toHaveTextContent('Saving…');
+        expectLocked(save());
+        expectLocked(within(form()).getByRole('button', { name: 'Cancel' }));
+        expect(field('Original')).toHaveAttribute('readonly');
+        fireEvent.submit(form());
+        await settle();
+        expect(links.sent('insert')).toHaveLength(1);
+
+        // Its answer unlocks the form, whose field now shows what was saved.
+        release();
+        await waitFor(() => expectUnlocked(save()));
+        expect(field('Original')).toHaveValue(WATCH_URL);
+        expect(within(form()).queryByRole('alert')).not.toBeInTheDocument();
+        expect(links.sent('insert')).toHaveLength(1);
+      });
+
+      it('says nothing on return when the save went through', async () => {
+        const user = await opened();
+        const release = await savingThenLeft(user);
+        release();
+        await waitFor(() => expect(client.isMutating()).toBe(0));
+        historyBack();
+        expect(await screen.findByRole('link', { name: 'Original' })).toBeVisible();
+        expect(within(playAlong()).queryByRole('alert')).not.toBeInTheDocument();
+      });
+    });
+
+    it('a failed save read in the form and cancelled isn’t said again on the overview', async () => {
+      const user = await opened();
+      await user.click(await screen.findByRole('button', { name: 'Add a recording' }));
+      await user.type(field('Original'), WATCH_URL);
+      links.failNext('insert', dropped);
+      await user.click(save());
+      expect(await within(form()).findByRole('alert')).toHaveTextContent(
+        "Couldn't save the recordings.",
+      );
+      await user.click(within(form()).getByRole('button', { name: 'Cancel' }));
+      noForm();
+      await screen.findByRole('button', { name: 'Add a recording' });
+      expect(within(playAlong()).queryByRole('alert')).not.toBeInTheDocument();
     });
   });
 });

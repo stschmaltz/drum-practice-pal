@@ -4,7 +4,7 @@ import { Icon } from '@/components/icons';
 import { nameLinkClass, quietButtonClass } from '@/components/styles';
 import type { PracticeLoop } from '@/features/loops/practiceList';
 import { loopPracticePath } from '@/lib/routes';
-import { ExpandButton } from './ExpandButton';
+import { ExpandButton } from '@/components/ExpandButton';
 import { LOOP_PROGRESS_SHOWN, loopProgress, speedChange, type LoopProgress } from './loopProgress';
 import { Sparkline } from './Sparkline';
 import { SpeedChart } from './SpeedChart';

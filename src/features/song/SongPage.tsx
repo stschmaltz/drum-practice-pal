@@ -83,7 +83,9 @@ import { useStaysOnScreen } from './useStaysOnScreen';
  * opens on one. On a recording the video sits in a box that stays on screen,
  * with the score under it, silent and scrolled by hand: the tab's player is
  * paused, and its Play, speed, metronome, count-in, mixer, loop panel and
- * keys are not offered, since none of them acts on the video.
+ * keys are not offered, since none of them acts on the video. The score is
+ * then in page layout at every width (`readAlong`), so a phone shows lines
+ * down the page that scroll with the window under the video.
  */
 export function SongPage() {
   const { id = '' } = useParams();
@@ -111,15 +113,20 @@ function SongScreen({ song }: { song: Song }) {
           {/* Sticky like the jam bar it stands in for, so the video stays on screen over the score. */}
           <div
             data-testid="recording-bar"
-            className={`sticky top-0 ${fullBleedBarClass} flex flex-col gap-1 pb-1 pt-[max(0.5rem,env(safe-area-inset-top))] lg:flex-row-reverse lg:items-start lg:justify-between lg:gap-6 lg:pb-3`}
+            // One row from 1024 px, and in a phone on its side, where the video's 200 px are
+            // already half the window: the note and the way out go beside it, not under it.
+            className={`sticky top-0 ${fullBleedBarClass} flex flex-col gap-1 pb-1 pt-[max(0.5rem,env(safe-area-inset-top))] lg:flex-row-reverse lg:items-start lg:justify-between lg:gap-6 lg:pb-3 sideways:flex-row-reverse sideways:items-start sideways:justify-between sideways:gap-4 sideways:pt-[max(0.25rem,env(safe-area-inset-top))]`}
           >
             <RecordingBox
               songTitle={song.title}
               video={sources.choice.state === 'recording' ? sources.choice.video : null}
             />
           </div>
-          {/* From 1024 px the same words sit in the bar, beside the video (RecordingBox). */}
-          <p className="text-sm text-ink-muted lg:hidden" data-testid="recording-note">
+          {/* From 1024 px, and in a phone on its side, the same words sit in the bar, beside the video (RecordingBox). */}
+          <p
+            className="text-sm text-ink-muted lg:hidden sideways:hidden"
+            data-testid="recording-note"
+          >
             {RECORDING_NOTE}
           </p>
         </>
@@ -306,6 +313,8 @@ function SongPlayer({
     fileBytes,
     drumTrackIndex,
     initialOptions,
+    // Under a recording the score is read by hand: lines down the page at every width.
+    readAlong: recording,
   });
   const stickyBarRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
@@ -338,6 +347,16 @@ function SongPlayer({
   useEffect(() => {
     if (recording && running) player?.pause();
   }, [recording, running, player]);
+  // Back on the tab the score is laid out for the width again (one line on a phone): the bar
+  // the paused player is at is brought back on show, as alphaTab follows its cursor only
+  // while it plays. Asked while the score is still being drawn again, it is kept for `rendered`.
+  const wasRecording = useRef(recording);
+  useEffect(() => {
+    if (wasRecording.current && !recording && player) {
+      player.showBar(player.getSnapshot().barNumber ?? 1);
+    }
+    wasRecording.current = recording;
+  }, [recording, player]);
   // And puts the loop form away, whose bars are picked on the score. Not one that is saving:
   // its answer still finds it (the panel stays mounted, hidden), and closes it then.
   const { editor, closeEditor } = practice;

@@ -51,7 +51,7 @@ export const sourceSwitch = (page: Page) =>
   page.getByRole('radiogroup', { name: 'Play along with' });
 export const recordingFrame = (page: Page) => page.getByTestId('recording-frame');
 export const recordingBar = (page: Page) => page.getByTestId('recording-bar');
-/** Why the tab's controls aren't there: in the bar from 1024 px, under it below, one of the two drawn. */
+/** Why the tab's controls aren't there: in the bar from 1024 px and in a phone on its side, under it otherwise, one of the two drawn. */
 export const recordingNote = (page: Page) =>
   page.getByText(/^The video has its own controls\./).filter({ visible: true });
 
@@ -85,6 +85,8 @@ export async function saveRecordings(
   await recordingsForm(page).getByRole('button', { name: 'Save' }).click();
   await expect(recordingsForm(page)).toHaveCount(0);
 }
+
+export const openInYouTube = (page: Page) => page.getByRole('link', { name: /^Open in YouTube/ });
 
 /** The user's links as the database has them, by the service role. */
 export async function linksOf(user: E2eUser) {

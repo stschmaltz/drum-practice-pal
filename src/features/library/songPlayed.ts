@@ -44,6 +44,24 @@ function setCachedPlayedAt(
   );
 }
 
+/**
+ * The time the cached list shows once a write's answer is in. `sent` is the
+ * time that write asked for, `kept` what the database holds after it.
+ *
+ * While the list still shows this write's own time, it takes what the
+ * database kept: the same time, or the database's clock if this device's ran
+ * ahead. Showing anything else (a newer opening's time, whose own answer may
+ * already be in), the answer is only an older fact about the row and never
+ * moves the time back: answers can land in either order (14 Test, bug 4).
+ */
+export function playedAtAfterAnswer(
+  current: string | null,
+  sent: string,
+  kept: string,
+): string | null {
+  return current === sent ? kept : latest([current, kept]);
+}
+
 /** One definition of the write, for a press on this page and for the replay of one an earlier page left. */
 function songPlayedOptions(queryClient: QueryClient, userId: string) {
   const mutationKey = songKeys.plays(userId);
@@ -73,13 +91,11 @@ function songPlayedOptions(queryClient: QueryClient, userId: string) {
       await queued;
       return { queueId };
     },
-    // What the database kept: its own clock's time if this device's ran ahead. While another
-    // of these is on its way its newer time may be showing, so then the later of the two stays.
-    onSuccess: (kept: string | null, { songId }: SongPlayed) => {
+    // What the database kept, unless a newer opening's time is showing (`playedAtAfterAnswer`).
+    onSuccess: (kept: string | null, { songId, playedAt }: SongPlayed) => {
       if (kept === null) return;
-      const othersPending = queryClient.isMutating({ mutationKey }) > 1;
       setCachedPlayedAt(queryClient, userId, songId, (current) =>
-        othersPending ? latest([current, kept]) : kept,
+        playedAtAfterAnswer(current, playedAt, kept),
       );
     },
     // Answered either way: kept, the song gone, or refused (it would be refused again). A

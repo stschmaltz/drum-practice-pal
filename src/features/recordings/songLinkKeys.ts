@@ -9,6 +9,11 @@ export const songLinkKeys = {
   forUser: (userId: string) => [...songLinkKeys.all, userId] as const,
   /** Shared by every mutation that writes this user's links, so sign-out can see one pending. */
   writes: (userId: string) => [...songLinkKeys.forUser(userId), 'write'] as const,
+  /**
+   * One song's saves, under `writes`: how the latest went is read from the mutation cache
+   * by this key, so it outlives the form that sent it (`useSongLinkSaves`).
+   */
+  savesOf: (userId: string, songId: string) => [...songLinkKeys.writes(userId), songId] as const,
   /** One song's links: its overview's Play along block and its play screen's sources. */
   forSong: (userId: string, songId: string) =>
     [...songLinkKeys.forUser(userId), 'song', songId] as const,

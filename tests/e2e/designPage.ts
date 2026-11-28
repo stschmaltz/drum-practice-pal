@@ -216,17 +216,29 @@ export const NO_FAULTS = {
  * Words inside `container` drawn past its left or right edge, one string per
  * text. Measured on the text's own line boxes (a Range), not on the element
  * around it: text that overflows its paragraph leaves the paragraph's box
- * where it was. Screen-reader-only text (`.sr-only`) is clipped and left out;
+ * where it was. Screen-reader-only text is clipped and left out, whether it
+ * is so at every width (`.sr-only`) or only at this one (`max-md:sr-only`, a
+ * label a phone has no room for: told by its 1 px clipped box, not its class);
  * text truncated with an ellipsis is measured by the box that clips it.
  */
 export function textSpillingOutOf(container: Locator): Promise<string[]> {
   return container.evaluate((root) => {
     const bounds = root.getBoundingClientRect();
     const spilled: string[] = [];
+    const clippedToNothing = (element: Element | null): boolean => {
+      for (let at = element; at && at !== root; at = at.parentElement) {
+        const box = at.getBoundingClientRect();
+        if (box.width <= 1 && box.height <= 1 && getComputedStyle(at).overflow === 'hidden') {
+          return true;
+        }
+      }
+      return false;
+    };
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const text = node.textContent?.trim();
       if (!text || node.parentElement?.closest('.sr-only, svg')) continue;
+      if (clippedToNothing(node.parentElement)) continue;
       // Text cut short with an ellipsis is meant to run on, hidden: its box is what shows.
       const parent = node.parentElement;
       const ellipsis =

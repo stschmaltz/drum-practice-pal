@@ -1,17 +1,31 @@
+import type { MouseEvent } from 'react';
 import { Icon } from '@/components/icons';
 import { OfflineNote } from '@/components/OfflineNote';
 import { LoadingLine } from '@/components/StatusMessages';
-import { linkClass } from '@/components/styles';
+import { lockableLinkClass } from '@/components/styles';
 import { useOnline } from '@/lib/network';
+import { canOpenRecording } from './recordingGate';
 import { RECORDING_NOTE, SONG_LINK_KIND_LABELS, type VideoSource } from './songLinks';
 
 /** The frame's permissions: what YouTube's player uses, and no more (no autoplay, no clipboard). */
 const FRAME_ALLOW = 'accelerometer; encrypted-media; picture-in-picture; fullscreen';
 
-const frameShapeClass =
-  // 16:9; on a phone at most a third of the window's height, from 1024 px a fixed 356 px. Never under
-  // 200 px tall: YouTube's terms want a player of at least 200 by 200 px.
-  'mx-auto aspect-video w-full max-w-[calc(max(33dvh,200px)*16/9)] overflow-hidden rounded-card border border-line bg-surface lg:mx-0 lg:w-[356px] lg:max-w-none lg:shrink-0';
+/**
+ * The box round the player, its border outside the frame. On a phone as wide
+ * as the page, up to the width whose 16:9 frame is a third of the window's
+ * height; a fixed width from 1024 px, and beside its note in a short window.
+ * The 2 px are the border's, so the frame inside keeps the width meant for it.
+ */
+const frameBoxClass =
+  'mx-auto w-full max-w-[calc(max(33dvh,200px)*16/9+2px)] shrink-0 overflow-hidden rounded-card border border-line bg-surface lg:mx-0 lg:w-[358px] lg:max-w-none sideways:mx-0';
+
+/**
+ * The player itself: 16:9 where the width allows, and never under 200 px
+ * either way, which YouTube's terms ask of an embedded player. The minimum is
+ * on the frame element, so on a phone narrower than 356 px the box is taller
+ * than 16:9 rather than the player too small (14 QA issue 1).
+ */
+const frameShapeClass = 'block aspect-video min-h-[200px] w-full min-w-[200px]';
 
 /**
  * A song's recording on its play screen: YouTube's own player in a frame,
@@ -19,7 +33,7 @@ const frameShapeClass =
  * beside it, since a video that refuses to be embedded only says so inside
  * the frame, where the app can't see it. Nothing of YouTube's loads until
  * this is drawn, and nothing at all while offline, when the frame would hold
- * the browser's error page.
+ * the browser's error page and the way out would open one.
  *
  * `video` null: the song's links are still being read for the source the
  * page was opened on.
@@ -34,21 +48,27 @@ export function RecordingBox({
   const online = useOnline();
   if (!video) {
     return (
-      <div className={`${frameShapeClass} grid place-items-center`}>
-        <LoadingLine small>Loading the recording…</LoadingLine>
+      <div className={frameBoxClass}>
+        <div className={`${frameShapeClass} grid place-items-center`}>
+          <LoadingLine small>Loading the recording…</LoadingLine>
+        </div>
       </div>
     );
   }
   const label = SONG_LINK_KIND_LABELS[video.source];
+  // Asked at the press, like every way of opening a recording: offline it would open an error page.
+  const refuseOffline = (event: MouseEvent) => {
+    if (!canOpenRecording()) event.preventDefault();
+  };
   return (
     <>
-      <div className={`${frameShapeClass} ${online ? '' : 'grid place-items-center p-3'}`}>
+      <div className={frameBoxClass}>
         {online ? (
           <iframe
             // A new frame per video: switching from Original to Drumless must stop the first.
             key={video.embedUrl}
             data-testid="recording-frame"
-            className="size-full"
+            className={frameShapeClass}
             src={video.embedUrl}
             title={`${label} recording of ${songTitle} (YouTube video player)`}
             allow={FRAME_ALLOW}
@@ -57,17 +77,22 @@ export function RecordingBox({
             referrerPolicy="strict-origin-when-cross-origin"
           />
         ) : (
-          <OfflineNote>You're offline. The video needs a connection.</OfflineNote>
+          <div className={`${frameShapeClass} grid place-items-center p-3`}>
+            <OfflineNote>You're offline. The video needs a connection.</OfflineNote>
+          </div>
         )}
       </div>
-      <div className="flex min-w-0 flex-col items-center lg:items-start">
+      <div className="flex min-w-0 flex-col items-center lg:items-start sideways:items-start">
         {/* Beside the video where there is room; under the bar, off it, on a narrower window. */}
-        <p className="text-sm text-ink-muted max-lg:hidden">{RECORDING_NOTE}</p>
+        <p className="hidden text-sm text-ink-muted lg:block sideways:block">{RECORDING_NOTE}</p>
         <a
           href={video.link.url}
           target="_blank"
           rel="noopener noreferrer"
-          className={`${linkClass} text-sm`}
+          className={`${lockableLinkClass} text-sm`}
+          // Locked, not taken away, offline: the note in the box says why.
+          aria-disabled={!online || undefined}
+          onClick={refuseOffline}
         >
           <Icon name="external" className="mr-1.5 size-4" />
           Open in YouTube<span className="sr-only"> (opens in a new tab)</span>

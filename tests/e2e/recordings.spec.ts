@@ -8,6 +8,7 @@ import {
   lastPlayedOf,
   linkField,
   linksOf,
+  openInYouTube,
   openRecordingsForm,
   playAlong,
   recordingBar,
@@ -55,9 +56,9 @@ test('a YouTube link plays in the play screen over the tab, and nothing of YouTu
   test.setTimeout(90_000);
   const services = await stubServices(context);
   await songWithOverviewOpen(page, user);
-  // A song with no links: the page as it was, and one quiet way in.
-  await expect(page.getByRole('link', { name: 'Play whole song' })).toBeVisible();
-  await expect(playAlong(page)).toHaveCount(0);
+  // A song with no links: the tab under Play along, and one quiet way in.
+  await expect(playAlong(page).getByRole('link')).toHaveText(['Tab']);
+  await expect(playAlong(page).getByRole('button', { name: 'Add a recording' })).toBeVisible();
 
   // Pasted as the YouTube app's share sheet gives it: saved in its normal form.
   await saveRecordings(page, 'Groove 120', {
@@ -121,10 +122,11 @@ test('a YouTube link plays in the play screen over the tab, and nothing of YouTu
   const size = page.viewportSize()!;
   const box = await boxOf(frame, 'recording frame');
   expect(box.width / box.height).toBeCloseTo(16 / 9, 1);
-  if (size.width >= 1024) expect(Math.round(box.width)).toBe(356 - 2);
+  if (size.width >= 1024) expect(Math.round(box.width)).toBe(356);
   else expect(box.height).toBeLessThanOrEqual(Math.max(size.height / 3, 200) + 1);
-  // YouTube's terms: a player of at least 200 by 200 px.
-  expect(box.height).toBeGreaterThanOrEqual(198);
+  // YouTube's terms: a player of at least 200 by 200 px (every width is measured further down).
+  expect(box.height).toBeGreaterThanOrEqual(200);
+  expect(box.width).toBeGreaterThanOrEqual(200);
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(size.width);
 
@@ -236,7 +238,7 @@ test('a link that isn’t one is refused with fixed copy, and nothing is saved',
 
   await recordingsForm(page).getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByRole('button', { name: 'Add a recording' })).toBeFocused();
-  await expect(page.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+  await expect(playAlong(page).getByRole('link')).toHaveText(['Tab']);
 });
 
 test('the Songs list’s recently practised order follows a recording being opened', async ({
@@ -400,12 +402,19 @@ test('offline, the recording buttons are off and a press goes nowhere; on a reco
   await expect(page.getByText("You're offline. The video needs a connection.")).toBeVisible();
   await expect(recordingFrame(page)).toHaveCount(0);
   expect(await page.locator('iframe').count()).toBe(0);
+  // The way out is locked like the overview's: it would only open a page that can't load.
+  await expect(openInYouTube(page)).toHaveAttribute('aria-disabled', 'true');
+  const pagesOnRecording = context.pages().length;
+  await openInYouTube(page).click({ force: true });
+  await page.waitForTimeout(300);
+  expect(context.pages()).toHaveLength(pagesOnRecording);
   // The score under it is still there to read, and the tab one press away.
   await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
   await expect(sourceOption(page, 'Tab')).toBeVisible();
 
   await context.setOffline(false);
   await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+  await expect(openInYouTube(page)).not.toHaveAttribute('aria-disabled', 'true');
   await expect.poll(() => services.requests, { timeout: 10_000 }).toEqual([EMBED_URL, EMBED_URL]);
 });
 
@@ -487,4 +496,248 @@ test('Back and Forward step between the song and its recording, never through th
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(recordingFrame(page)).toHaveCount(0);
   await expect(sourceSwitch(page)).toBeVisible();
+});
+
+// 14 QA fix round 1 from here on.
+
+/** The widths QA measured the player at, a tablet, a laptop, and a phone on its side. */
+const FRAME_SIZES = [
+  { width: 320, height: 568 },
+  { width: 360, height: 740 },
+  { width: 375, height: 667 },
+  { width: 390, height: 844 },
+  { width: 820, height: 1180 },
+  { width: 1440, height: 900 },
+  { width: 844, height: 390 },
+];
+
+test('the YouTube frame is at least 200 px wide and tall at every width, and a phone on its side keeps half its window for the score', async ({
+  user,
+  page,
+  context,
+}) => {
+  test.setTimeout(120_000);
+  await stubServices(context);
+  await songWithOverviewOpen(page, user);
+  await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
+  await playAlong(page).getByRole('link', { name: 'Original' }).click();
+  const frame = recordingFrame(page);
+  await expect(frame).toBeVisible();
+  await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
+
+  for (const size of FRAME_SIZES) {
+    const at = `${size.width}x${size.height}`;
+    await page.setViewportSize(size);
+    // The frame element itself, not the box round it: its border is outside what YouTube draws in.
+    await expect
+      .poll(async () => (await boxOf(frame, 'recording frame')).width, { message: at })
+      .toBeLessThanOrEqual(size.width);
+    const box = await boxOf(frame, `recording frame at ${at}`);
+    expect(box.width, `width at ${at}`).toBeGreaterThanOrEqual(200);
+    expect(box.height, `height at ${at}`).toBeGreaterThanOrEqual(200);
+    // 16:9 where the width allows it; on a narrower phone the box is taller instead.
+    if ((box.width * 9) / 16 >= 200) expect(box.width / box.height, at).toBeCloseTo(16 / 9, 1);
+    else expect(box.height, at).toBeLessThan(201);
+    expect(box.x, at).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, at).toBeLessThanOrEqual(size.width);
+    // Nothing is pushed off the side by the frame's minimum width.
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+      `sideways scroll at ${at}`,
+    ).toBeLessThanOrEqual(0);
+    // The same frame throughout: turning the phone doesn't start the video again.
+    await expect(frame).toHaveAttribute('src', EMBED_URL);
+  }
+
+  // The last size is a phone on its side (QA issue 3): the bar is the 200 px frame with the
+  // note and the way out beside it, about half the window, and the score has the rest.
+  const size = FRAME_SIZES.at(-1)!;
+  const bar = await boxOf(recordingBar(page), 'recording bar');
+  expect(bar.height).toBeLessThanOrEqual(size.height * 0.56);
+  const video = await boxOf(frame, 'recording frame');
+  for (const beside of [recordingNote(page), openInYouTube(page)]) {
+    const box = await boxOf(beside, 'beside the video');
+    expect(box.y).toBeLessThan(video.y + video.height);
+    expect(box.y + box.height).toBeGreaterThan(video.y);
+    // Beside it, never over it.
+    expect(box.x + box.width <= video.x + 1 || box.x >= video.x + video.width - 1).toBe(true);
+  }
+  // Scrolled so the score starts right under the stuck bar, as someone reading along has it.
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect.poll(async () => (await boxOf(recordingBar(page), 'bar')).y).toBeLessThanOrEqual(1);
+  const stuck = await boxOf(recordingBar(page), 'recording bar');
+  const hidden = stuck.y + stuck.height - (await boxOf(viewport(page), 'score box')).y;
+  await page.evaluate((by) => window.scrollBy(0, -by), hidden);
+  const score = await boxOf(viewport(page), 'score box');
+  expect(Math.abs(score.y - (stuck.y + stuck.height))).toBeLessThan(2);
+  const scoreOnShow = Math.min(score.y + score.height, size.height) - (stuck.y + stuck.height);
+  expect(scoreOnShow).toBeGreaterThanOrEqual(size.height * 0.4);
+});
+
+/** How the score box is laid out: one line that scrolls sideways, or lines down the page. */
+const scoreShape = (page: Page) =>
+  viewport(page).evaluate((box) => ({
+    scrollsSideways: box.scrollWidth > box.clientWidth + 1,
+    height: box.getBoundingClientRect().height,
+  }));
+
+test('under a recording a phone draws the score as a page that scrolls with the window, and Tab puts its one line back', async ({
+  user,
+  page,
+  context,
+}) => {
+  test.setTimeout(90_000);
+  await stubServices(context);
+  await songWithOverviewOpen(page, user);
+  await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
+  await playAlong(page).getByRole('link', { name: 'Tab', exact: true }).click();
+  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+  const size = page.viewportSize()!;
+  const phone = size.width < 768;
+  const onTab = await scoreShape(page);
+  // The tab's own player: one line scrolled sideways on a phone, a page from 768 px.
+  expect(onTab.scrollsSideways).toBe(phone);
+
+  await sourceOption(page, 'Original').click();
+  await expect(recordingFrame(page)).toBeVisible();
+  await expect.poll(async () => (await scoreShape(page)).scrollsSideways).toBe(false);
+  if (phone) {
+    // Lines wrap down the page: the box is as tall as the whole song and scrolls with the window.
+    await expect.poll(async () => (await scoreShape(page)).height).toBeGreaterThan(size.height);
+    const box = viewport(page);
+    expect(await box.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+    // The video stays put above it while the window scrolls down the score.
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect
+      .poll(async () => (await boxOf(recordingBar(page), 'bar')).y)
+      .toBeLessThanOrEqual(1);
+    const video = await boxOf(recordingFrame(page), 'recording frame');
+    expect(video.y).toBeGreaterThanOrEqual(0);
+    expect(video.y + video.height).toBeLessThan(size.height / 2);
+    const score = await boxOf(box, 'score box');
+    expect(score.y + score.height).toBeGreaterThan(video.y + video.height + 200);
+  }
+
+  // Back on Tab the layout for the width is back, and the player was never loaded again:
+  // Play is there at once, where it was.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await sourceOption(page, 'Tab').click();
+  await expect(playButton(page)).toBeEnabled();
+  await expect(page.getByTestId('player-status')).toHaveText(/^Bar 1 of 16$/);
+  await expect.poll(async () => (await scoreShape(page)).scrollsSideways).toBe(phone);
+  if (phone) {
+    await expect.poll(async () => (await scoreShape(page)).height).toBeLessThan(onTab.height + 20);
+  }
+});
+
+test('nothing on the overview moves when the links arrive on a cold load', async ({
+  user,
+  page,
+  context,
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  await stubServices(context);
+  await songWithOverviewOpen(page, user);
+  await saveRecordings(page, 'Groove 120', {
+    Original: WATCH_URL,
+    Drumless: 'https://www.youtube.com/watch?v=aaaaaaaaaaa',
+  });
+  const overview = new URL(page.url()).pathname;
+
+  // A second device has nothing cached: the page is drawn before its links are read.
+  const other = await browser.newContext({ viewport: page.viewportSize() });
+  try {
+    const cold = await other.newPage();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let asked = 0;
+    await other.route(/\/rest\/v1\/song_links\?/, async (route) => {
+      asked += 1;
+      await held;
+      await route.continue();
+    });
+    await signIn(cold, user, overview);
+    await expect(cold.getByRole('heading', { level: 1, name: 'Groove 120' })).toBeVisible();
+    await expect(cold.getByText(/^No loops yet\./)).toBeVisible();
+    // The read is on its way and held: the recordings aren't known yet.
+    await expect.poll(() => asked).toBeGreaterThan(0);
+    await expect(playAlong(cold).getByRole('link')).toHaveText(['Tab']);
+
+    const drawn = {
+      heading: cold.getByRole('heading', { name: 'Play along' }),
+      tab: playAlong(cold).getByRole('link', { name: 'Tab', exact: true }),
+      newLoop: cold.getByRole('link', { name: 'New loop' }),
+      loops: cold.getByText(/^No loops yet\./),
+    };
+    const places = async () =>
+      Object.fromEntries(
+        await Promise.all(
+          Object.entries(drawn).map(async ([name, locator]) => {
+            const box = await boxOf(locator, name);
+            return [name, { x: Math.round(box.x), y: Math.round(box.y) }] as const;
+          }),
+        ),
+      );
+    const before = await places();
+
+    release();
+    await expect(playAlong(cold).getByRole('link')).toHaveText(['Tab', 'Original', 'Drumless']);
+    expect(await places()).toEqual(before);
+  } finally {
+    await other.close();
+  }
+});
+
+test('the form: Remove stays on its field’s row, a paste with words keeps its link, and a mouse lands in the first empty field', async ({
+  user,
+  page,
+  context,
+}, testInfo) => {
+  test.setTimeout(60_000);
+  await stubServices(context);
+  await songWithOverviewOpen(page, user);
+  await page.getByRole('button', { name: 'Add a recording' }).click();
+  // A mouse or trackpad: ready for the paste. A touch screen: the form, so no keyboard comes up.
+  if (testInfo.project.name === 'desktop') await expect(linkField(page, 'Original')).toBeFocused();
+  else await expect(recordingsForm(page)).toBeFocused();
+
+  // As a share sheet copies it: the title, then the link.
+  await linkField(page, 'Original').fill(
+    `Never Gonna Give You Up https://youtu.be/${VIDEO_ID}?si=AbCdEf123456`,
+  );
+  await expect(linkField(page, 'Original')).toHaveValue(
+    `https://youtu.be/${VIDEO_ID}?si=AbCdEf123456`,
+  );
+  await recordingsForm(page).getByRole('button', { name: 'Add another link' }).click();
+  await linkField(page, 'Other link 1').fill(`https://youtu.be/${VIDEO_ID}`);
+  await expect(recordingsForm(page)).toContainText('YouTube video. Opens in YouTube.');
+  await recordingsForm(page).getByRole('button', { name: 'Save' }).click();
+  await expect(recordingsForm(page)).toHaveCount(0);
+  await expect
+    .poll(() => linksOf(user))
+    .toEqual([
+      { kind: 'original', provider: 'youtube', url: WATCH_URL },
+      { kind: 'other', provider: 'youtube', url: WATCH_URL },
+    ]);
+
+  // Each saved link's Remove is on the row of its field, the line about the link under both.
+  await openRecordingsForm(page, 'Groove 120');
+  for (const name of ['Original', 'Other link 1'] as const) {
+    const field = linkField(page, name);
+    const input = await boxOf(field, `${name} field`);
+    const remove = await boxOf(
+      recordingsForm(page).getByRole('button', { name: `Remove ${name}` }),
+      `Remove ${name}`,
+    );
+    expect(Math.abs(remove.y + remove.height / 2 - (input.y + input.height / 2))).toBeLessThan(2);
+    expect(remove.x).toBeGreaterThanOrEqual(input.x + input.width);
+    expect(remove.width).toBeGreaterThanOrEqual(44);
+    expect(remove.height).toBeGreaterThanOrEqual(44);
+    const noteId = await field.getAttribute('aria-describedby');
+    const note = await boxOf(page.locator(`[id="${noteId}"]`), `${name} note`);
+    expect(note.y).toBeGreaterThanOrEqual(
+      Math.max(input.y + input.height, remove.y + remove.height) - 1,
+    );
+  }
 });

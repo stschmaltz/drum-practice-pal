@@ -341,3 +341,91 @@ Seen and not logged as issues: Escape leaves the form open; on a phone the sourc
 - The cleanup script read its list of users from a file in the session's scratch folder, which already held eight addresses from an earlier agent's run (`qa2-…@drumpal.test`). It asked the stack on 54421 to delete those too. They were throwaway accounts by their names, and the script didn't record whether they still existed. No `qa14-` user is left.
 
 **Verdict: FAIL.** No blocker. Major: issue 1 (the player under 200 px tall), issue 2 (the tab under the video can't be read along to on a phone in portrait; Shane's call on page layout under a recording).
+
+## Build (QA fix round 1)
+
+Fixes for QA's issues 1 to 10 and 14, Test's bugs 2 and 4, and the plan's tap count. No migration; nothing of the database changed.
+
+### Product walk-through (docs/product.md)
+
+Walked again, since two of the fixes change what a user sees on every song.
+
+- _Day one with a song (no loops, no links):_ Songs, the song (1). "Play along" now has "Tab" where "Play whole song" was, and "Add a recording" beside it; "New loop" is the row under. Nothing is asked for and nothing is in a new order. With a mouse, "Add a recording" (2) lands in the Original field; paste the share sheet's text, title and all; Save (3).
+- _Missing a piece:_ no links, no loops, only a Spotify link, only Other links: the same block, with fewer buttons. A song with only Other links has "Tab", then the list. Nothing here needs a loop.
+- _Offline:_ recording buttons, Other links and now "Open in YouTube" are off, with the note above the list; the tab plays. A recordings save can't be started offline, as before.
+- _A phone in portrait, sticks in hand:_ the video stays at the top and the tab is a page under it: at 390 px one bar to a line, five lines on show, a flick down every few lines. That is Shane's call and is in the plan's open questions with this as the default.
+- _Taps to sound:_ unchanged for a recording (three for YouTube). Back to a loop is three (Back, the loop, Play), which the plan now says.
+
+Nothing forces an order or adds a chore, so it was built.
+
+### What changed, by item
+
+1. **(QA 1) The frame is never under 200 px either way.** `RecordingBox.tsx`: the minimum is on the `<iframe>` (`frameShapeClass`: `aspect-video min-h-[200px] min-w-[200px] w-full`), and the border is on the box round it (`frameBoxClass`, whose widths carry the border's 2 px). 16:9 from 356 px of frame; narrower, the box is taller than 16:9. `recordings.spec.ts` measures the frame element at 320, 360, 375, 390, 820, 1440 and 844 x 390 in one test at each project, and the first test's 198 is 200.
+2. **(QA 2) Below 768 px the score under a recording is a page.** `usePlayer({ readAlong })` and `layoutToDraw` (`layout.ts`, pure): page layout at every width while the score is only read. `SongPlayer` passes `readAlong: recording`. It goes through `PlayerService.setLayout`, which sets alphaTab's layout and draws again: no stop, play or load (`engine.restartCalls()` and `loadScore` asserted). The box has no fixed height below 768 px, so it is as tall as the song and scrolls with the window under the sticky video. **The cursor:** the tab's player is paused, so its cursor stays on the bar it was at and is drawn at that bar's new place; back on Tab the layout for the width returns and that bar is scrolled back on show (`player.showBar`, kept for `rendered` when asked mid-draw), since alphaTab follows its cursor only while playing.
+3. **(QA 3) A phone on its side.** A new `sideways` variant (`index.css`: at most 30rem tall and at least 32rem wide). There the bar is one row: the note and "Open in YouTube" beside the video. At 844 x 390 the bar is about 211 px (54%; the test allows 56%) and the score has what is left, about 179 px (the test asks for 40% of the window).
+4. **(QA 4)** `recognisedAs(link, kind)`: a YouTube video in an Other field says "YouTube video. Opens in YouTube."
+5. **(QA 5)** A new refusal, `signIn`: "That address has a sign-in name or password in it, before an @. Paste the link without them."
+6. **(QA 6)** `parseSongLink` takes the first http(s) address out of text with spaces in it, less the sentence punctuation after it; `keptLinkText` is what the form's field then shows. Text with no such address is refused as before.
+7. **(QA 7) One layout for the overview.** `PlayAlong` always draws "Play along" with "Tab" first; Original, Drumless or "Add a recording" join the end of that row when the links are read; "New loop" is the row under. Measured in e2e on a second device with the links held: the heading, "Tab", "New loop" and the loops' block are at the same x and y before and after, at all three sizes.
+8. **(QA 8)** Other links show `otherLinkLabel` (the host and as much of the path as fits in 40 characters), the whole address in `title` and the accessible name; three, then "Show all n links" / "Show fewer links" (`ExpandButton`, moved to `src/components/`); the offline note is above the list.
+9. **(QA 9)** "Open in YouTube" is `aria-disabled` offline with a handler that asks `canOpenRecording()`; the note is the one in the box.
+10. **(QA 10)** The form focuses its first empty field where `pointerIsFine()` (now `src/lib/pointer.ts`, shared with the login page and the loop form), once the fields are there and only if focus is still on the form; on a touch screen, the form.
+11. **(QA 14)** The field and its Remove are one row at every width; below 768 px Remove is its icon (44 px, the name unchanged).
+12. **(Test bug 4)** `playedAtAfterAnswer` (`songPlayed.ts`, pure): an answer is taken whole only while the cache still shows the time its write sent; otherwise the later of the two stays. The `it.fails` is a passing test.
+13. **(Test bug 2) Chosen: keep the failure, not lock the exits.** Locking can't be complete: the nav is outside the page and the browser's Back is nobody's to lock, and a lock that covers five kinds of link but not those two only makes the loss rarer. So the save's state is read from the mutation cache (`useSongLinkSaves`, key `songLinkKeys.savesOf(user, song)`, under `writes`, so sign-out still waits for it): the form's "Saving…" and error come from there, a form opened again while the save is on its way is locked and can't send a second, and a failure is said on the overview (with Dismiss) when the form has gone. Cancel forgets a failure the form showed.
+
+Also: the plan's walk-through says three taps back to a loop. `textSpillingOutOf` (`designPage.ts`) now leaves out text clipped to a 1 px box, which is how it met `max-md:sr-only`.
+
+### Decisions
+
+- **"Tab" on every song.** One layout was the only way nothing moves; keeping "Play whole song" until a link exists is the two layouts swapping. The plan's scope already read this way ("Tab (today's Play whole song)"). It is an open question for Shane. Five e2e files that pressed "Play whole song" press "Tab" now.
+- **Nothing stands in for what may come.** "Add a recording" is still drawn only once the links are read: a button there earlier would turn into "Original" under a finger.
+- **Words are dropped from a paste as it is typed or pasted,** not only at Save, so the field never holds something other than what will be saved. A link broken by a space keeps its first part, on show.
+- **Sentence punctuation is stripped only from a link lifted out of words.** A lone paste ending in a full stop is still the plain link Test pinned.
+- **The failure alert shows in a reopened form too,** until Cancel or the next save. One source for it, so the overview and the form can't disagree.
+- **Screenshots:** Build had none for this unit. `docs/units/14-rec-shots/fix1-*.png` are the changed screens at the three sizes, 320 px and a phone on its side, on the stub player.
+
+### Async windows and inputs
+
+- **A recordings save on its way** (as before, plus):
+  - The page left by any link, the nav or Back: the write carries on; its answer updates the cache as before. A failure stays in the mutation cache and is drawn by whichever of the overview or the form is mounted, then or on return.
+  - The form opened again meanwhile: fields read-only, Save, Cancel and Remove locked, a submit refused at the press (`isSaving()` asks the cache). Its answer unlocks it; the fields then show what is saved. No `onSuccess: onClose` belongs to this form, so it stays open.
+  - Dismiss, or Cancel: errored saves of this song are removed from the mutation cache. A pending one is never touched.
+  - Another tab: sees none of this (its own mutation cache); it reads the links at its next read, as before.
+  - Five minutes with nothing watching: the failed mutation is collected and the message goes.
+- **The form opening while the links are read** (mouse): focus is on the form; when the fields arrive it moves to the first empty one only if it is still on the form.
+- **The score drawn again for a change of source** (`setLayout`, until `rendered`): taps and drags do nothing on a recording; `showBar` asked in that window is kept and done on `rendered`; a second change of source asks `setLayout` again, which is a no-op when the layout is already that one. Width crossing 768 px meanwhile: `layoutToDraw` is recomputed in the same effect.
+- **Two "recording opened" writes in flight:** each answer goes through `playedAtAfterAnswer`; either order ends on the later time, and a capped time (this clock ahead) is taken only by the write that sent the time on show.
+- **The connection going on a recording:** the frame goes (as before) and "Open in YouTube" locks; a press made before the re-render is refused by the handler.
+
+### Tests
+
+Written before or with each fix, then run against the app code as it was at the last commit (each app file put back from `HEAD`, then restored from a copy): 14 of the overview's 19 new tests, 4 of the play screen's 5, and 4 of the player's failed there; the rest pin what didn't change (three links need no "Show all", words with no link stay as typed, a touch screen focuses the form, a save that landed says nothing). The parser's table ran red first (41 failures). The new e2e tests were not run against the old build.
+
+- `songLinks.test.ts`: a link with words round it (12 pastes, what is kept, what is left alone, length counted on the link), `signIn`, `recognisedAs` by kind, `otherLinkLabel`. Four refusals that are now accepted moved to the new table.
+- `songPlayed.test.tsx`: `playedAtAfterAnswer` as a table; the out-of-order test passes.
+- `layout.test.ts`, `usePlayer.test.tsx`: `layoutToDraw`; mount and live change with `readAlong`, no restart.
+- `SongOverviewPage.test.tsx` "QA fix round 1" (19): the same nodes before and after the links arrive; Other links; the Other field's line; a paste with words; focus on opening (six cases); a save left, held then failed (said on return, said when it lands after the return, a reopened form locked, nothing said on success); Cancel forgets.
+- `SongPage.test.tsx`: page layout on a recording at 390 px and back; opening on a recording; the bar shown on return; "Open in YouTube" offline, with a press before the re-render.
+- `recordings.spec.ts` (9 to 13 tests): the frame at seven sizes and the bar on a phone's side; the page under the video and back; nothing moves on a cold load; the form's row, paste and focus. The offline test also presses the locked "Open in YouTube".
+
+Run: `npm run check` green, 5550 passed, 2 skipped, no expected failure. e2e on `E2E_PORT=4283`: `recordings.spec.ts`, `journey.spec.ts`, `library.spec.ts`, the design test for the recordings screens, and the three tests whose "Play whole song" became "Tab" (`drums-only`, `loop-scroll`, `offline`), at phone, tablet and desktop: 89 passed, 4 skipped (the landscape-only cases off the phone). The full suite was not run.
+
+### Known gaps
+
+- On the overview's cold load a row that needs a second line (a link out with a long name on a phone, three buttons at 320 px) or Other links still push "New loop" and the loops down when the links arrive.
+- A save left and failed loses what was typed; only its message is kept, for five minutes.
+- A link lifted out of a sentence loses a closing bracket or full stop that was really its own.
+- Page layout at 390 px is one bar to a line. Not seen with a real song of several pages, or with a real video.
+- A phone on its side shows about one line of the page under the video.
+- Other e2e specs that open the player go through `openSongPlayer`, which now presses "Tab"; only the ones listed above were run.
+- Not built: QA's "Paste" button per field.
+
+### Manual verify
+
+1. A song with no links: "Play along" has "Tab" and "Add a recording"; "New loop" under it.
+2. With a mouse, "Add a recording": the cursor is in Original. Paste `Some title https://youtu.be/<id>`: the field shows only the link. Add another link with a YouTube address: its line says "Opens in YouTube". On a phone, Remove is an icon on the field's row.
+3. On a phone, "Original": the video, and the tab as a page under it; scroll, the video stays. Switch to Tab: one line again, Play ready.
+4. Turn the phone on its side on a recording: the note and "Open in YouTube" are beside the video.
+5. Go offline on a recording: "Open in YouTube" is faded and does nothing.
+6. Slow the network (DevTools), Save a link and press "New loop" before it answers, with the request blocked: come back, and the overview says the save failed, with Dismiss.

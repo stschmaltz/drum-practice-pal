@@ -14,7 +14,7 @@ import {
 } from '@/test/fakeSupabase';
 import { settle, testQueryClient, wrapperFor } from '@/test/render';
 import type { LibrarySong } from './songForm';
-import { markSongPlayedUnobserved, useMarkSongPlayed } from './songPlayed';
+import { markSongPlayedUnobserved, playedAtAfterAnswer, useMarkSongPlayed } from './songPlayed';
 import { songKeys } from './useSongs';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -193,10 +193,9 @@ describe('two played times for one song in flight', () => {
     expect(hasUnsentWrites(queryClient, USER)).toBe(false);
   });
 
-  // 14 Test, bug 4: the last answer to land is taken whole once nothing else is pending, so
-  // an older write's answer that arrives after a newer one's moves the shown time back until
-  // the list is next read. Take ".fails" off once it is fixed.
-  it.fails('never shows the older time when the answers land in the other order', async () => {
+  // 14 Test, bug 4: the last answer to land was taken whole once nothing else was pending, so
+  // an older write's answer arriving after a newer one's moved the shown time back.
+  it('never shows the older time when the answers land in the other order', async () => {
     const { answer } = holdAnswers();
     const { result, queryClient, cachedPlayedAt } = renderMark();
     act(() => result.current.mark('a'));
@@ -210,6 +209,26 @@ describe('two played times for one song in flight', () => {
     await answer(0);
     await waitFor(() => expect(pendingPlays(queryClient)).toBe(0));
     expect(cachedPlayedAt('a')).toBe(LATER);
+  });
+});
+
+describe('playedAtAfterAnswer', () => {
+  const EARLIER = '2026-11-27T09:00:00.000Z';
+  const SENT = '2026-11-27T10:00:00.000Z';
+  const NEWER = '2026-11-27T11:00:00.000Z';
+
+  it.each([
+    ['its own time, kept as sent', SENT, SENT, SENT],
+    // This device's clock ran ahead: the database's time takes the place of the one shown.
+    ['its own time, capped by the database’s clock', SENT, EARLIER, EARLIER],
+    ['a newer opening’s time, over this older answer', NEWER, SENT, NEWER],
+    // A newer opening on a clock that runs ahead: its own answer will cap it, not this one.
+    ['a newer opening’s time, over a capped answer', NEWER, EARLIER, NEWER],
+    // A list read since put an older time back: the answer is newer than that.
+    ['an older time from a read made meanwhile', EARLIER, SENT, SENT],
+    ['nothing (the row read as never played)', null, SENT, SENT],
+  ])('showing %s', (_name, current, kept, shown) => {
+    expect(playedAtAfterAnswer(current, SENT, kept)).toBe(shown);
   });
 });
 

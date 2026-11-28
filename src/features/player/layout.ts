@@ -18,3 +18,14 @@ export function layoutForWidth(width: number): LayoutChoice {
  * stylesheet's is, so a raised default font size moves both together.
  */
 export const PAGE_LAYOUT_QUERY = `(min-width: ${PAGE_LAYOUT_MIN_REM}rem)`;
+
+/**
+ * The layout the score is drawn in. `readAlong`: the score is only read, by
+ * hand, under something else that plays (a recording, Unit 14). It is then in
+ * page layout at every width: lines that wrap down the page and scroll with
+ * the window, since nothing moves a single horizontal line along for a
+ * drummer with sticks in hand. Otherwise the layout for the width.
+ */
+export function layoutToDraw(forWidth: LayoutChoice, readAlong: boolean): LayoutChoice {
+  return readAlong ? 'page' : forWidth;
+}

@@ -39,18 +39,18 @@ export const viewport = (page: Page) => page.getByTestId('score-viewport');
 export async function openSongOverview(page: Page, title: string) {
   await page.getByRole('main').getByRole('list').getByRole('link', { name: title }).click();
   await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
-  // On every overview; "Play whole song" gives way to "Tab" once the song has recordings (Unit 14).
+  // On every overview, from its first drawing.
   await expect(page.getByRole('link', { name: 'New loop' })).toBeVisible();
 }
 
 /**
- * From the songs list (`/`), the song's overview and then "Play whole song":
- * jam mode, where the earlier units' specs run (Unit 16 put it a level down).
- * For a song with no recordings; one with them has "Tab" in Play along instead.
+ * From the songs list (`/`), the song's overview and then "Tab" under Play
+ * along (what "Play whole song" was before Unit 14): jam mode, where the
+ * earlier units' specs run (Unit 16 put it a level down).
  */
 export async function openSongPlayer(page: Page, title: string) {
   await openSongOverview(page, title);
-  await page.getByRole('link', { name: 'Play whole song' }).click();
+  await page.getByRole('link', { name: 'Tab', exact: true }).click();
   await expect(page).toHaveURL(/\/songs\/[^/]+\/play$/);
 }
 

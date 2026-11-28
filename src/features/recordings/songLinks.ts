@@ -16,6 +16,9 @@
  *   parameters. Opens in a new tab.
  *
  * Anything else is refused with fixed copy (`LINK_REFUSAL_COPY`).
+ *
+ * A paste with words round the link (a share sheet's "Check out this song:
+ * https://…") is taken as its first http(s) address (`keptLinkText`).
  */
 import { SONG_LINK_URL_MAX_LENGTH, type SongLinkKind, type SongLinkProvider } from '@/lib/schema';
 
@@ -31,7 +34,7 @@ export interface ParsedLink {
   hostLabel: string;
 }
 
-export type LinkRefusal = 'empty' | 'tooLong' | 'notALink' | 'notHttps' | 'lookAlike';
+export type LinkRefusal = 'empty' | 'tooLong' | 'notALink' | 'notHttps' | 'signIn' | 'lookAlike';
 
 export type LinkParse = { ok: true; link: ParsedLink } | { ok: false; reason: LinkRefusal };
 
@@ -40,6 +43,8 @@ export const LINK_REFUSAL_COPY: Record<LinkRefusal, string> = {
   tooLong: `That link is too long. Keep it to ${SONG_LINK_URL_MAX_LENGTH} characters or fewer.`,
   notALink: "That isn't a link. Paste the address from YouTube, Spotify or the page itself.",
   notHttps: 'Only links that start with https:// can be saved.',
+  signIn:
+    'That address has a sign-in name or password in it, before an @. Paste the link without them.',
   lookAlike:
     "That address only looks like YouTube or Spotify. Paste the link from the app's own Share button.",
 };
@@ -63,12 +68,41 @@ const MAX_START_SECONDS = 24 * 60 * 60;
 const isHostOf = (host: string, domains: readonly string[]) =>
   domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
 
+/** The first http(s) address among other words, up to the next space. */
+const ADDRESS_IN_TEXT = /https?:\/\/\S+/i;
+/** What a sentence puts after an address, or wraps it in: not part of it. */
+const SENTENCE_PUNCTUATION = /[.,;:!?)\]}>"'’”]+$/;
+
+/**
+ * A paste with words round its link ("Song title https://youtu.be/…", a share
+ * sheet's sentence): the first http(s) address in it, less the punctuation
+ * the sentence put after it. Null when the words hold no such address.
+ */
+function firstAddressIn(text: string): string | null {
+  const found = ADDRESS_IN_TEXT.exec(text);
+  return found ? found[0].replace(SENTENCE_PUNCTUATION, '') : null;
+}
+
+/**
+ * What the form's field shows for what was typed or pasted: the text itself,
+ * or, when it has words round a link, only the link, so what will be saved is
+ * what is on show. Text that is one unbroken run, or has no http(s) address
+ * in it, is left exactly as it was.
+ */
+export function keptLinkText(text: string): string {
+  const trimmed = text.trim();
+  if (!/\s/.test(trimmed)) return text;
+  return firstAddressIn(trimmed) ?? text;
+}
+
 /** What a pasted or saved link is, or why it is refused. */
 export function parseSongLink(text: string): LinkParse {
-  const trimmed = text.trim();
-  if (trimmed === '') return refused('empty');
+  const typed = text.trim();
+  if (typed === '') return refused('empty');
+  // Words round the link: the link is its first http(s) address, and without one it is no link.
+  const trimmed = /\s/.test(typed) ? firstAddressIn(typed) : typed;
+  if (trimmed === null) return refused('notALink');
   if (trimmed.length > SONG_LINK_URL_MAX_LENGTH) return refused('tooLong');
-  if (/\s/.test(trimmed)) return refused('notALink');
 
   const spotifyUri = SPOTIFY_URI.exec(trimmed);
   if (spotifyUri?.[1]) return accepted(spotifyTrack(spotifyUri[1]));
@@ -78,7 +112,7 @@ export function parseSongLink(text: string): LinkParse {
   if (!url) return refused('notALink');
   if (url.protocol !== 'https:') return refused('notHttps');
   // "https://youtube.com@evil.test/" opens evil.test: an address with a sign-in part is never a share link.
-  if (url.username !== '' || url.password !== '') return refused('lookAlike');
+  if (url.username !== '' || url.password !== '') return refused('signIn');
   const host = url.hostname.replace(/\.$/, '');
   if (!host.includes('.')) return refused('notALink');
 
@@ -196,12 +230,18 @@ export function startTimeLabel(seconds: number): string {
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${secs}` : `${minutes}:${secs}`;
 }
 
-/** What the form says a link was recognised as, under its field. */
-export function recognisedAs(link: ParsedLink): string {
+/**
+ * What the form says a link was recognised as, under its field. `kind` is the
+ * field it is in: only a song's Original and Drumless play in the app, so a
+ * YouTube video among the other links opens YouTube like any link out.
+ */
+export function recognisedAs(link: ParsedLink, kind: SongLinkKind = 'original'): string {
   if (link.provider === 'youtube') {
     const start =
       link.startSeconds === null ? '' : `, starting at ${startTimeLabel(link.startSeconds)}`;
-    return `YouTube video${start}. Plays here, with the tab under it.`;
+    return kind === 'other'
+      ? `YouTube video${start}. Opens in YouTube.`
+      : `YouTube video${start}. Plays here, with the tab under it.`;
   }
   if (link.provider === 'spotify') {
     return "Spotify track. Opens Spotify, which can't slow a song down: for that, add a YouTube link.";
@@ -250,6 +290,24 @@ export function usableLinks(rows: readonly SavedLink[]): SongLink[] {
       const parsed = parseSongLink(row.url);
       return parsed.ok ? [{ ...parsed.link, id: row.id, kind: row.kind }] : [];
     });
+}
+
+/** How long an other link's words may be before its path is cut short. */
+const OTHER_LINK_LABEL_LENGTH = 40;
+
+/**
+ * An other link's words in the song's list: its host and as much of its path
+ * as fits ("drumeo.com/beat/lesson…"), not the raw address. The whole address
+ * goes in the link's title and accessible name.
+ */
+export function otherLinkLabel(link: Pick<ParsedLink, 'url'>): string {
+  const url = new URL(link.url);
+  const host = url.hostname.replace(/^www\./, '');
+  const rest = `${url.pathname}${url.search}${url.hash}`;
+  if (rest === '/') return host;
+  if (host.length + rest.length <= OTHER_LINK_LABEL_LENGTH) return `${host}${rest}`;
+  const room = Math.max(1, OTHER_LINK_LABEL_LENGTH - 1 - host.length);
+  return `${host}${rest.slice(0, room)}…`;
 }
 
 /** "Original", or "Original on Spotify" for a link that leaves the app. */

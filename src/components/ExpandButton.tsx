@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { Icon } from '@/components/icons';
-import { ghostButtonClass } from '@/components/styles';
+import { Icon } from './icons';
+import { ghostButtonClass } from './styles';
 
 /**
  * Under a list that shows only its first few: one button whose words change

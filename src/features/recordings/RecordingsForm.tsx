@@ -17,6 +17,7 @@ import {
 import type { Song } from '@/features/library/songForm';
 import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
+import { pointerIsFine } from '@/lib/pointer';
 import { randomUuid } from '@/lib/randomUuid';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import { linkInputId } from './recordingFocus';
@@ -32,12 +33,13 @@ import {
   type SongLinkRow,
 } from './songLinkForm';
 import {
+  keptLinkText,
   LINK_REFUSAL_COPY,
   recognisedAs,
   SONG_LINK_KIND_LABELS,
   type LinkRefusal,
 } from './songLinks';
-import { useSaveSongLinks } from './useSongLinks';
+import { useSaveSongLinks, useSongLinkSaves } from './useSongLinks';
 
 const FIELD_HINTS: Record<'original' | 'drumless', string> = {
   original: 'The song as it was recorded.',
@@ -51,8 +53,16 @@ const FIELD_HINTS: Record<'original' | 'drumless', string> = {
  * Online only (AGENTS.md): Save is off offline and says why, the handler
  * refuses, and the write fails rather than waits.
  *
- * While the save is on its way every field and every way out of the form is
- * locked, so its answer always finds the form it was sent from.
+ * While a save is on its way every field and the form's own ways out are
+ * locked. The page's other links aren't (the nav and the browser's Back can't
+ * be), so how the save is going is read from the mutation cache
+ * (`useSongLinkSaves`): a form opened again meanwhile is locked on the save
+ * still on its way, and a failure is shown here or, with the form gone, on
+ * the overview. Cancel is the user's "I've read it": the failure goes with it.
+ *
+ * Opening it puts focus in the first empty link field where there is a mouse
+ * or trackpad, and on the form itself on a touch screen, where a focused
+ * field would bring the keyboard up over the page before anything is tapped.
  */
 export function RecordingsForm({
   song,
@@ -64,6 +74,7 @@ export function RecordingsForm({
   onClose: () => void;
 }) {
   const save = useSaveSongLinks(song.id);
+  const saves = useSongLinkSaves(song.id);
   const online = useOnline();
   const formId = useId();
   const focusWhenReady = useFocusWhenReady();
@@ -76,12 +87,23 @@ export function RecordingsForm({
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => formRef.current?.focus({ preventScroll: true }), []);
 
-  const saving = save.isPending;
+  const saving = saves.saving;
   const fields = links.data ? linkFields(links.data, draft, newIds) : null;
+  // With a mouse or trackpad the first empty field takes focus, ready for the paste, once the
+  // fields are there. Only from the form itself, where opening put it: someone who has
+  // tabbed on while the links loaded keeps their place.
+  const fieldsShown = fields !== null;
+  useEffect(() => {
+    const form = formRef.current;
+    if (!fieldsShown || !form || !pointerIsFine() || document.activeElement !== form) return;
+    firstEmptyLinkInput(form)?.focus();
+  }, [fieldsShown]);
 
   const setText = (slot: LinkSlot, text: string) => {
     if (saving) return;
-    setDraft((current) => ({ ...current, texts: { ...current.texts, [slot]: text } }));
+    // A paste with words round its link ("Song title https://…") shows as the link it holds.
+    const kept = keptLinkText(text);
+    setDraft((current) => ({ ...current, texts: { ...current.texts, [slot]: kept } }));
     setErrors((current) => without(current, slot));
   };
   const addOther = () => {
@@ -103,12 +125,18 @@ export function RecordingsForm({
     });
     focusWhenReady(() => document.getElementById(`${formId}-add`));
   };
+  /** Closed by the user's own hand: a failure shown here has been read, and isn't said again. */
+  const close = () => {
+    saves.forgetFailure();
+    onClose();
+  };
   const cancel = () => {
-    if (!saving) onClose();
+    if (!saving) close();
   };
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!fields || saving || !isOnline()) return;
+    // Asked of the cache at the press: a save an earlier opening of the form sent counts too.
+    if (!fields || saving || saves.isSaving() || !isOnline()) return;
     const check = planLinkSave(fields);
     if (!check.ok) {
       setErrors(check.errors);
@@ -117,7 +145,7 @@ export function RecordingsForm({
       return;
     }
     if (isEmptyPlan(check.plan)) {
-      onClose();
+      close();
       return;
     }
     save.mutate(check.plan, { onSuccess: onClose });
@@ -177,9 +205,9 @@ export function RecordingsForm({
           </button>
         </>
       )}
-      {save.error && (
+      {saves.error && (
         <ErrorAlert>
-          Couldn't save the recordings. {failureCopy(save.error)} Some changes may have been saved:
+          Couldn't save the recordings. {failureCopy(saves.error)} Some changes may have been saved:
           the fields show what is saved now.
         </ErrorAlert>
       )}
@@ -210,6 +238,12 @@ export function RecordingsForm({
       )}
     </form>
   );
+}
+
+/** The first link field with nothing in it: where a paste would go. */
+function firstEmptyLinkInput(form: HTMLFormElement): HTMLInputElement | null {
+  const inputs = form.querySelectorAll<HTMLInputElement>('input[data-link-field]');
+  return [...inputs].find((input) => input.value.trim() === '' && !input.readOnly) ?? null;
 }
 
 /** A copy of a by-slot record with one slot taken out. */
@@ -253,9 +287,11 @@ function LinkFieldRow({
         {label}
         {hint && <span className="font-normal text-ink-muted"> · {hint}</span>}
       </label>
-      <div className="flex flex-wrap items-center gap-2">
+      {/* One row at every width: Remove never drops between the field and the line about it. */}
+      <div className="flex items-center gap-2">
         <input
           id={inputId}
+          data-link-field
           // Not type="url": the browser's own check would refuse "youtu.be/…" pasted without
           // its scheme, which the parser takes, and its message isn't ours.
           type="text"
@@ -264,7 +300,7 @@ function LinkFieldRow({
           autoCorrect="off"
           spellCheck={false}
           placeholder="https://"
-          className={`${inputClass} min-w-0 flex-1 basis-64`}
+          className={`${inputClass} min-w-0 flex-1`}
           value={field.text}
           // Read-only, not disabled, while saving: focus may be here (Enter saves), and stays.
           readOnly={locked}
@@ -275,7 +311,7 @@ function LinkFieldRow({
         {removable && (
           <button
             type="button"
-            className={quietButtonClass}
+            className={`${quietButtonClass} min-w-touch shrink-0`}
             // Locked, not disabled, once the saved link's field is empty: focus is on it then.
             aria-disabled={locked || nothingToRemove || undefined}
             onClick={() => {
@@ -283,7 +319,9 @@ function LinkFieldRow({
             }}
           >
             <Icon name="trash" className="size-4" />
-            Remove<span className="sr-only"> {label}</span>
+            {/* A phone has no room for the word beside the field: the icon, and the name unchanged. */}
+            <span className="max-md:sr-only">Remove</span>
+            <span className="sr-only"> {label}</span>
           </button>
         )}
       </div>
@@ -297,7 +335,7 @@ function LinkFieldRow({
           : nothingToRemove
             ? 'This link is removed when you save.'
             : reading?.ok
-              ? recognisedAs(reading.link)
+              ? recognisedAs(reading.link, field.kind)
               : null}
       </p>
     </div>
