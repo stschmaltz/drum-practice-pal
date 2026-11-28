@@ -67,6 +67,7 @@ import {
 } from '@/test/render';
 import { readVisitSittings } from '@/features/practice/visitSittings';
 import { SongPage } from './SongPage';
+import { FRESH_READ_WAIT_MS } from './useGaveUpWaiting';
 
 /** Unfolds the controls bar, which folds to a strip while playback runs. */
 async function showControls(user: ReturnType<typeof userEvent.setup>) {
@@ -2853,6 +2854,200 @@ describe('SongPage recordings (Unit 14)', () => {
 
       release();
       expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+    });
+
+    describe('on a links read that hangs (Unit 20, 14.4b)', () => {
+      // Only the timers are faked, and they still run in real time, so Testing Library's
+      // waits and TanStack Query work as ever; `later` jumps the wait for the read.
+      beforeEach(() =>
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true }),
+      );
+      afterEach(() => vi.useRealTimers());
+      const later = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+
+      it('gives up for the tab, which needs no network, and a late answer only offers the recording', async () => {
+        serve({ links: [original] });
+        const release = links.holdNext('select');
+        renderSong(`${SONG_A}?source=original`);
+        const user = userEvent.setup();
+        expect(await screen.findByText('Loading the recording…')).toBeVisible();
+        await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+        const engine = engines[0]!;
+        act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+        later(FRESH_READ_WAIT_MS - 500);
+        await settle();
+        expect(screen.getByText('Loading the recording…')).toBeVisible();
+        expect(screen.queryByRole('button', { name: /^(Play|Pause)$/ })).not.toBeInTheDocument();
+
+        later(500);
+
+        await waitFor(() => expect(playButton()).toBeEnabled());
+        expect(screen.queryByText('Loading the recording…')).not.toBeInTheDocument();
+        noFrame();
+        // The request is dropped from the URL, so the answer can't switch the source later.
+        await waitFor(() => expect(location()).toBe(`/songs/${SONG_A}/play`));
+        await user.click(playButton());
+        act(() => engine.fire('stateChanged', { playing: true }));
+
+        release();
+
+        expect(await screen.findByRole('radio', { name: 'Original' })).not.toBeChecked();
+        await settle();
+        expect(source('Tab')).toBeChecked();
+        noFrame();
+        expect(playButton()).toHaveTextContent('Pause');
+        expect(engine.pause).not.toHaveBeenCalled();
+        expect(playedWrites()).toEqual([]);
+      });
+
+      // Unit 20 Test: the tab's player is loaded under "Loading the recording…", so the key
+      // has to refuse by itself while no Play is offered.
+      it('Space plays nothing while the recording is waited for, and plays the tab once the wait is over', async () => {
+        serve({ links: [original] });
+        links.holdNext('select');
+        renderSong(`${SONG_A}?source=original`);
+        const user = userEvent.setup();
+        expect(await screen.findByText('Loading the recording…')).toBeVisible();
+        await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+        const engine = engines[0]!;
+        act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+        later(FRESH_READ_WAIT_MS - 500);
+        expect(document.activeElement).toBe(document.body);
+
+        await user.keyboard(' ');
+        await settle();
+        expect(engine.play).not.toHaveBeenCalled();
+        expect(screen.getByText('Loading the recording…')).toBeVisible();
+
+        later(500);
+        await waitFor(() => expect(playButton()).toBeEnabled());
+        await user.keyboard(' ');
+        expect(engine.play).toHaveBeenCalledTimes(1);
+      });
+
+      it('an answer inside the wait shows the recording, and the wait ending changes nothing', async () => {
+        serve({ links: [original] });
+        const release = links.holdNext('select');
+        renderSong(`${SONG_A}?source=original`);
+        expect(await screen.findByText('Loading the recording…')).toBeVisible();
+        later(FRESH_READ_WAIT_MS - 500);
+
+        release();
+        expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+
+        later(FRESH_READ_WAIT_MS);
+        await settle();
+        expect(frame()).toHaveAttribute('src', EMBED_URL);
+        expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
+      });
+
+      it('a recording the cached links have shows at once and stays through the wait', async () => {
+        const queryClient = testQueryClient();
+        queryClient.setQueryData(linksKey, [original]);
+        await queryClient.invalidateQueries({ queryKey: linksKey, refetchType: 'none' });
+        serve({ links: [original] });
+        links.holdNext('select');
+        renderRoutes(<Route path="/songs/:id/play" element={<SongPage />} />, {
+          path: `/songs/${SONG_A}/play?source=original`,
+          queryClient,
+        });
+        expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+
+        later(FRESH_READ_WAIT_MS * 2);
+        await settle();
+        expect(frame()).toHaveAttribute('src', EMBED_URL);
+        expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
+      });
+    });
+
+    // Copilot review on #36: with both songs' rows on the device the screen stays mounted from
+    // one song to the next, so whatever it keeps per `?source=` has to be kept per song too.
+    describe('from one song straight to another on the same source', () => {
+      beforeEach(() =>
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true }),
+      );
+      afterEach(() => vi.useRealTimers());
+      const later = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+
+      const B_EMBED = 'https://www.youtube-nocookie.com/embed/bbbbbbbbbbb?playsinline=1&rel=0';
+      const originalOfB = videoLink('link-original-b', {
+        song_id: SONG_B,
+        url: 'https://www.youtube.com/watch?v=bbbbbbbbbbb',
+      });
+      const pathOf = (songId: string) => `/songs/${songId}/play?source=original`;
+
+      /**
+       * On song A's Original for longer than the wait, then Back to song B's, whose links
+       * read is held: `cachedLinksOfB` is what the device has of them (a list from before
+       * the link was saved, or nothing). Returns what lets the read answer.
+       */
+      async function fromSongAToSongB({ cachedLinksOfB }: { cachedLinksOfB?: SongLinkRow[] } = {}) {
+        const queryClient = testQueryClient();
+        queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+        queryClient.setQueryData(songKeys.detail(USER, SONG_B), songRow(SONG_B));
+        if (cachedLinksOfB) {
+          const key = songLinkKeys.forSong(USER, SONG_B);
+          queryClient.setQueryData(key, cachedLinksOfB);
+          await queryClient.invalidateQueries({ queryKey: key, refetchType: 'none' });
+        }
+        serve({ links: [original, originalOfB] });
+        renderRoutes(<Route path="/songs/:id/play" element={<SongPage />} />, {
+          path: pathOf(SONG_A),
+          before: [pathOf(SONG_B)],
+          queryClient,
+        });
+        expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+        await waitFor(() => expect(playedWrites()).toHaveLength(1));
+        later(FRESH_READ_WAIT_MS * 2);
+
+        const release = links.holdNext('select');
+        historyBack();
+        expect(
+          await screen.findByRole('heading', { level: 1, name: 'Tempo Change' }),
+        ).toBeVisible();
+        return release;
+      }
+
+      it("waits for the second song's recording until its answer, though the wait on the first is long over", async () => {
+        const release = await fromSongAToSongB({ cachedLinksOfB: [] });
+        await settle();
+        expect(screen.getByText('Loading the recording…')).toBeVisible();
+        expect(location()).toBe(pathOf(SONG_B));
+        later(FRESH_READ_WAIT_MS - 500);
+        await settle();
+        expect(screen.getByText('Loading the recording…')).toBeVisible();
+
+        release();
+
+        expect(await frameShown()).toHaveAttribute('src', B_EMBED);
+        expect(location()).toBe(pathOf(SONG_B));
+      });
+
+      it("gives up on the second song's recording only after that song's own wait", async () => {
+        await fromSongAToSongB();
+        later(FRESH_READ_WAIT_MS - 500);
+        await settle();
+        expect(screen.getByText('Loading the recording…')).toBeVisible();
+        expect(location()).toBe(pathOf(SONG_B));
+
+        later(500);
+
+        await waitFor(() => expect(location()).toBe(`/songs/${SONG_B}/play`));
+        expect(screen.queryByText('Loading the recording…')).not.toBeInTheDocument();
+        noFrame();
+      });
+
+      it('counts the second song as played too, once its recording shows', async () => {
+        const release = await fromSongAToSongB();
+        release();
+        expect(await frameShown()).toHaveAttribute('src', B_EMBED);
+
+        await waitFor(() => expect(playedWrites()).toHaveLength(2));
+        expect(playedWrites()[0]!.ops).toContainEqual({ method: 'eq', args: ['id', SONG_A] });
+        expect(playedWrites()[1]!.ops).toContainEqual({ method: 'eq', args: ['id', SONG_B] });
+        await settle();
+        expect(playedWrites()).toHaveLength(2);
+      });
     });
 
     it('opens a link saved on another device since the list was cached', async () => {

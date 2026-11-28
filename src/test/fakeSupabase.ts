@@ -65,6 +65,8 @@ function queryBuilder(table: string) {
     order: chain('order'),
     limit: chain('limit'),
     range: chain('range'),
+    // postgrest-js's own retry of a failed read, asked for or refused per request.
+    retry: chain('retry'),
     single: () => queryResult(call),
     maybeSingle: () => queryResult(call),
     // supabase-js builders are thenables: awaiting the chain runs the query.

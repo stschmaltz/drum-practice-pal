@@ -7,6 +7,7 @@ import {
   canPlay,
   canUseDrumToggles,
   type PlayGate,
+  type SpeedGate,
 } from '@/features/player/controlGates';
 import {
   isRunning,
@@ -31,6 +32,8 @@ interface SongShortcutInputs {
   loops: readonly Loop[] | undefined;
   /** Space's gate, the same one the screen's Play/Pause button takes (`canPlay` unless given). */
   playGate?: PlayGate;
+  /** The speed keys' gate, the same one the screen's speed control takes (`canChangeOptions` unless given). */
+  speedGate?: SpeedGate;
   /**
    * True while the screen offers none of what the keys work (the play screen
    * on a recording, Unit 14): every key is left to the browser, so Space
@@ -53,6 +56,7 @@ export function useSongShortcuts({
   practice,
   loops,
   playGate = canPlay,
+  speedGate = canChangeOptions,
   off = false,
 }: SongShortcutInputs) {
   const [helpOpen, setHelpOpen] = useState(false);
@@ -63,9 +67,9 @@ export function useSongShortcuts({
   const closeHelp = useCallback(() => setHelpOpen(false), []);
 
   // Read by the listener at each press, so it is installed once and never sees an old render.
-  const latest = useRef({ player, practice, loops, playGate, helpOpen, off });
+  const latest = useRef({ player, practice, loops, playGate, speedGate, helpOpen, off });
   useLayoutEffect(() => {
-    latest.current = { player, practice, loops, playGate, helpOpen, off };
+    latest.current = { player, practice, loops, playGate, speedGate, helpOpen, off };
   });
 
   useEffect(() => {
@@ -147,7 +151,7 @@ export function announcementText({ text, count }: Announcement): string {
 /** Runs the action; returns where a loop key moved to, for the announcement. */
 function runShortcut(
   action: Exclude<ShortcutAction, 'help'>,
-  { player, practice, loops, playGate = canPlay }: SongShortcutInputs,
+  { player, practice, loops, playGate = canPlay, speedGate = canChangeOptions }: SongShortcutInputs,
 ): string | null {
   if (!player) return null;
   const snapshot = player.getSnapshot();
@@ -157,7 +161,7 @@ function runShortcut(
       return null;
     case 'speedUp':
     case 'speedDown':
-      if (!canChangeOptions(player, snapshot)) return null;
+      if (!speedGate(player, snapshot)) return null;
       player.setSpeed(
         nudgeSpeedRatio(
           snapshot.speedRatio,

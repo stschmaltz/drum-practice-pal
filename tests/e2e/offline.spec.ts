@@ -13,6 +13,7 @@ import {
   saveLoopButton,
   saveNewLoop,
 } from './loopsPage';
+import { persistedCacheHolds } from './deviceCache';
 import { chooseSongAction } from './libraryPage';
 import { openFixture, openSongOverview, playButton } from './playerPage';
 import {
@@ -36,37 +37,6 @@ async function serviceWorkerReady(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
   });
-}
-
-/**
- * Waits until the query cache kept for offline (IndexedDB, written a second
- * after a change) holds `text`, so a reload offline finds it.
- */
-async function persistedCacheHolds(page: Page, text: string): Promise<void> {
-  await expect
-    .poll(
-      () =>
-        page.evaluate(
-          () =>
-            new Promise<string>((resolve) => {
-              const open = indexedDB.open('drum-practice-pal');
-              open.onerror = () => resolve('');
-              open.onsuccess = () => {
-                const db = open.result;
-                if (!db.objectStoreNames.contains('queryCache')) return resolve('');
-                const get = db
-                  .transaction('queryCache')
-                  .objectStore('queryCache')
-                  .get('query-cache');
-                get.onsuccess = () =>
-                  resolve((get.result as { value?: string } | undefined)?.value ?? '');
-                get.onerror = () => resolve('');
-              };
-            }),
-        ),
-      { timeout: 10_000 },
-    )
-    .toContain(text);
 }
 
 /** Entries in the device's outbox: writes not yet confirmed by the server. */

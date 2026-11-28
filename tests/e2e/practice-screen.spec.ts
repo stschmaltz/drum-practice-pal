@@ -1,8 +1,19 @@
 /// <reference lib="dom" />
-import type { Page } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
 import { expect, test } from './auth';
+import { persistedCacheHolds } from './deviceCache';
 import { saveNewLoop } from './loopsPage';
-import { cursorBarPoint, openFixture, scoreSettled, status, viewport } from './playerPage';
+import {
+  barNumber,
+  cursorBarPoint,
+  openFixture,
+  playButton,
+  recordedStatuses,
+  recordStatuses,
+  scoreSettled,
+  status,
+  viewport,
+} from './playerPage';
 import { backTo, loopsOf, openPractice, practiceSpeed } from './practicePage';
 
 // Unit 16, from Shane's first try: the practice screen draws its loop alone until "Show whole
@@ -159,4 +170,60 @@ test('the speed is set by 1 BPM, a typed BPM and a typed percent, each saved as 
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('practice-bpm')).toHaveText('74 BPM');
   await expect.poll(savedRatio).toBe(0.62);
+});
+
+// Unit 20, 13.06: the practice screen waited for a fresh read of the song's loops before it
+// opened its loop, and Play is off until the loop is open, so a connection that never answered
+// kept Play off for as long as the read took to give up. The device already has the loop.
+test('on a connection that never answers the loops read, Play is on about 2 seconds after the screen opens', async ({
+  page,
+  user,
+}) => {
+  await openMiddleLoop(page, user);
+  // The list is kept on the device a second after it changes. A reload restores it as stale,
+  // so the screen reads it again, as it does on a visit more than 30 seconds after the last.
+  await persistedCacheHolds(page, 'Middle');
+
+  // From here no read of the loops is ever answered (writes go through).
+  const held: Route[] = [];
+  let answering = false;
+  await page.route(/\/rest\/v1\/loops\?/, (route) => {
+    if (answering || route.request().method() !== 'GET') return route.fallback();
+    held.push(route);
+  });
+  try {
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 1, name: 'Middle' })).toBeVisible();
+    const named = Date.now();
+    // The wait is 2 seconds from the screen naming the loop. Before the cap this never came.
+    await expect(playButton(page)).toBeEnabled({ timeout: 6000 });
+    const waited = Date.now() - named;
+    // The read really is hanging, or this passes on a read that simply answered.
+    expect(held.length).toBeGreaterThan(0);
+    expect(waited).toBeLessThan(4000);
+
+    // The loop is open, not the whole song: its bars, its range.
+    await expect(status(page)).toContainText('Bar 7 of 16');
+    await recordStatuses(page);
+    await playButton(page).click();
+    await expect(playButton(page)).toHaveAccessibleName('Pause');
+    // Three seconds at 120 BPM is a bar and a half: past the loop's end, were there no range.
+    await page.waitForTimeout(3000);
+    expect([7, 8]).toContain(await barNumber(page));
+
+    // The answers come after all: nothing is opened again, and playback carries on.
+    const answered = page.waitForResponse(
+      (response) =>
+        /\/rest\/v1\/loops\?/.test(response.url()) && response.request().method() === 'GET',
+    );
+    answering = true;
+    await Promise.all(held.map((route) => route.continue()));
+    await answered;
+    await page.waitForTimeout(1000);
+    await expect(playButton(page)).toHaveAccessibleName('Pause');
+    expect([7, 8]).toContain(await barNumber(page));
+    expect(await recordedStatuses(page)).toEqual(['ready', 'playing']);
+  } finally {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  }
 });

@@ -3,6 +3,7 @@ import { ErrorAlert } from '@/components/ErrorAlert';
 import { Icon } from '@/components/icons';
 import { ProgressBar } from '@/components/ProgressMarks';
 import { focusRing, inputClass } from '@/components/styles';
+import type { SpeedGate } from '@/features/player/controlGates';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import {
   nudgeSpeedBpm,
@@ -45,12 +46,15 @@ export function PracticeSpeed({
   loop,
   player,
   snapshot,
+  gate,
 }: {
   loop: Loop;
   player: PlayerService | null;
   snapshot: PlayerSnapshot;
+  /** When the speed can be changed; the screen's speed keys go by the same one. */
+  gate: SpeedGate;
 }) {
-  const { saves, canSetSpeed, tempo, ratio, setSpeed } = useLoopSpeed(loop, player, snapshot);
+  const { saves, canSetSpeed, tempo, ratio, setSpeed } = useLoopSpeed(loop, player, snapshot, gate);
   const percent = ratioToPercent(ratio);
   const bpm = tempo === null ? null : bpmAtSpeed(tempo, ratio);
   const bpmOff = !canSetSpeed || tempo === null;

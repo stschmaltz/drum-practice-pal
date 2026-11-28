@@ -46,5 +46,14 @@ export const supabase: DbClient = createClient<Database>(
       // Magic links come back with the session in the URL fragment.
       detectSessionInUrl: true,
     },
+    db: {
+      // postgrest-js would send every failed read again itself, up to three times with
+      // 1, 2 and 4 s between, and TanStack Query retries on top of that: with no
+      // connection a list said "Loading…" for about 24 s before its error. One layer
+      // retries, the one whose state the screens read (`retry` on the query client, and
+      // `queuedWriteRetry` for queued writes). A read made outside a query that wants
+      // postgrest's own retries asks for them with `.retry(true)` (`findSavedSong`).
+      retry: false,
+    },
   },
 );
