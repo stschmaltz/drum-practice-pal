@@ -248,7 +248,29 @@ export async function updateSong(
 }
 
 /**
- * Removes the file, then the row (loops and sessions cascade). File first: if
+ * Moves the song's "last played" to `playedAt` (Unit 14: a recording of it was
+ * opened). The database keeps the later of that and what it holds, and never
+ * a time ahead of its own clock, so this is safe to send twice, late or out
+ * of order; what it kept comes back. Null when the song is gone.
+ */
+export async function markSongPlayed(
+  userId: string,
+  songId: string,
+  playedAt: string,
+): Promise<string | null> {
+  const result = await supabase
+    .from('songs')
+    .update({ last_played_at: playedAt })
+    .eq('id', songId)
+    .eq('user_id', userId)
+    .select('last_played_at')
+    .maybeSingle();
+  throwIfError(result);
+  return result.data?.last_played_at ?? null;
+}
+
+/**
+ * Removes the file, then the row (loops, sessions and links cascade). File first: if
  * the second step fails the song is still listed, so the error shows and
  * Delete can be tried again, and removing a file that's already gone succeeds.
  * Row first would leave an orphan file nothing can reach.

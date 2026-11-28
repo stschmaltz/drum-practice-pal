@@ -45,6 +45,8 @@ Two migrations add checks that existing rows can fail, and one failing row stops
   select id from loops where name !~ '\S';
   ```
 
+- [ ] `20261130000000_song_links.sql` (Unit 14) needs no check: it creates `song_links` and adds the nullable `songs.last_played_at`, and its checks are on the new table only. It is additive, so the build before it keeps working.
+
 - [ ] Before `20261123010000_session_sanity.sql` (a session longer than a day is refused):
 
   ```sql

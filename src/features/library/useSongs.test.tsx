@@ -7,6 +7,7 @@ import {
   type FakeResult,
 } from '@/test/fakeSupabase';
 import { loopKeys } from '@/features/loops/loopKeys';
+import { songLinkKeys } from '@/features/recordings/songLinkKeys';
 import { sessionKeys } from '@/features/practice/sessionKeys';
 import { signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import type { ParseResult } from './parseScore';
@@ -316,6 +317,21 @@ describe('useDeleteSong', () => {
     expect(view.queryClient.getQueryData(detailKey)).toBeNull();
     expect(view.queryClient.getQueryData(fileKey)).toBeUndefined();
     expect(view.queryClient.getQueryData(otherFileKey)).toEqual(new Uint8Array([2]));
+  });
+
+  it("forgets the deleted song's links, and only that song's", async () => {
+    const view = await renderLoaded([song('a'), song('b')]);
+    const linksKey = songLinkKeys.forSong('user-1', 'a');
+    const otherLinksKey = songLinkKeys.forSong('user-1', 'b');
+    view.queryClient.setQueryData(linksKey, [{ id: 'link-a' }]);
+    view.queryClient.setQueryData(otherLinksKey, [{ id: 'link-b' }]);
+    queryResult.mockResolvedValueOnce(ok(null));
+    queryResult.mockResolvedValue(ok([listRow(song('b'))]));
+
+    act(() => view.result.current.remove.mutate('a'));
+    await waitFor(() => expect(view.result.current.remove.isSuccess).toBe(true));
+    expect(view.queryClient.getQueryData(linksKey)).toBeUndefined();
+    expect(view.queryClient.getQueryData(otherLinksKey)).toEqual([{ id: 'link-b' }]);
   });
 
   it("forgets the deleted song's loops, and only that song's", async () => {

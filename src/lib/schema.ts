@@ -7,6 +7,8 @@ import { Constants, type Database } from './database.types';
 export type LoopStatus = Database['public']['Enums']['loop_status'];
 export type CountInMode = Database['public']['Enums']['count_in_mode'];
 export type MetronomeSound = Database['public']['Enums']['metronome_sound'];
+export type SongLinkKind = Database['public']['Enums']['song_link_kind'];
+export type SongLinkProvider = Database['public']['Enums']['song_link_provider'];
 
 export const GP_FILES_BUCKET = 'gp-files';
 /** The bucket's file_size_limit. */
@@ -29,6 +31,9 @@ export const SONG_TEXT_MAX_LENGTH = 300;
 /** songs.original_tempo must be above 0 and at most this. */
 export const SONG_TEMPO_MAX = 1000;
 export const LOOP_NAME_MAX_LENGTH = 100;
+/** song_links.url can't be longer. */
+export const SONG_LINK_URL_MAX_LENGTH = 2048;
+export const SONG_LINK_KINDS = Constants.public.Enums.song_link_kind;
 
 /** practice_sessions.duration_seconds can't be longer: no sitting lasts a day. */
 export const SESSION_MAX_DURATION_SECONDS = 24 * 60 * 60;

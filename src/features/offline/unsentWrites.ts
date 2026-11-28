@@ -2,7 +2,8 @@
  * Whether the user has writes the server hasn't answered yet: loop edits and
  * creates and deletes (one mutation key), practice session logs, those sent
  * with `keepalive` from a hidden page included (keepaliveSends.ts), song
- * uploads, edits and deletes, a settings save, and every entry in the outbox,
+ * uploads, edits and deletes, a settings save, a save of a song's links, a
+ * "recording opened" time (Unit 14), and every entry in the outbox,
  * which is shared by the user's tabs on this device. Signing out empties the
  * device, the outbox with it, and ends this tab's session mid-request, so it
  * waits until these have gone (SignOutButton). Paused offline or retrying a
@@ -19,6 +20,7 @@ import { songKeys } from '@/features/library/useSongs';
 import { loopKeys } from '@/features/loops/loopKeys';
 import { keepaliveSendsPending, subscribeKeepaliveSends } from '@/features/practice/keepaliveSends';
 import { sessionKeys } from '@/features/practice/sessionKeys';
+import { songLinkKeys } from '@/features/recordings/songLinkKeys';
 import { settingsKeys } from '@/features/settings/useSettings';
 import { hasOutboxEntries, watchOutboxEntries } from './outbox';
 
@@ -27,7 +29,18 @@ const unsentFilters = (userId: string) => [
   { mutationKey: sessionKeys.logs(userId) },
   { mutationKey: songKeys.writes(userId) },
   { mutationKey: settingsKeys.writes(userId) },
+  { mutationKey: songLinkKeys.writes(userId) },
+  { mutationKey: songKeys.plays(userId) },
 ];
+
+/** Whether a mutation's key is one of the user's writes above (TanStack's prefix match). */
+function isUnsentWriteKey(key: readonly unknown[] | undefined, userId: string): boolean {
+  if (!key) return false;
+  return unsentFilters(userId).some(
+    ({ mutationKey }) =>
+      mutationKey.length <= key.length && mutationKey.every((part, index) => key[index] === part),
+  );
+}
 
 /** At the press: asked of the mutation cache, not taken from the last render. */
 export function hasUnsentWrites(queryClient: QueryClient, userId: string): boolean {
@@ -50,9 +63,10 @@ export async function hasUnsentWritesAnywhere(
 
 /** `hasUnsentWritesAnywhere` for React, for the control's `disabled` and its note. */
 export function useHasUnsentWrites(userId: string): boolean {
-  const [loops, sessions, songs, settings] = unsentFilters(userId);
-  const pendingWrites =
-    useIsMutating(loops) + useIsMutating(sessions) + useIsMutating(songs) + useIsMutating(settings);
+  // One count over every kind `unsentFilters` lists, so a new kind there is counted here too.
+  const pendingWrites = useIsMutating({
+    predicate: (mutation) => isUnsentWriteKey(mutation.options.mutationKey, userId),
+  });
   const keepalives = useSyncExternalStore(subscribeKeepaliveSends, () =>
     keepaliveSendsPending(userId),
   );

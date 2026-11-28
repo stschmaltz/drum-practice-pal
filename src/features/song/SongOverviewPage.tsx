@@ -28,6 +28,11 @@ import { lastPracticedLabel } from '@/features/practice/sessions';
 import { useVisitSittings } from '@/features/practice/useVisitSittings';
 import { VisitSummary } from '@/features/practice/VisitSummary';
 import { isVisitSummaryShown } from '@/features/practice/visitSummaryFocus';
+import { PlayAlong } from '@/features/recordings/PlayAlong';
+import {
+  findRecordingsOpener,
+  RECORDINGS_MENU_ATTRIBUTES,
+} from '@/features/recordings/recordingFocus';
 import { failureCopy } from '@/lib/errorCopy';
 import {
   findItemControl,
@@ -52,7 +57,10 @@ import { BackLink, SongGate } from './SongGate';
  * /songs/:id, a song's overview (Unit 16): how much of it is mastered, and its
  * loops, the ones on the go first (last practised first), then the mastered
  * ones. Each loop opens its practice screen; "New loop" and "Play whole song"
- * open the player. This screen loads no player and no file, so a loop's speed
+ * open the player. A song with links to its recordings (Unit 14) has "Play
+ * along" above the loops instead: the tab, the original, a drumless version;
+ * "Manage recordings" in the header's menu edits the links. This screen loads
+ * no player, no file and nothing of YouTube's, so a loop's speed
  * is a percent only (its BPM needs the file's tempo). Under the header, once,
  * what was practised on the song in this visit (`VisitSummary`). An old link,
  * `/songs/:id?loop=<id>`, goes on to that loop's practice screen.
@@ -70,23 +78,42 @@ function SongOverview({ song }: { song: Song }) {
   const mastery = loops.data ? masteryOf(loops.data) : null;
   const visit = useVisitSittings(song.id);
   const focusWhenReady = useFocusWhenReady();
+  // The recordings form, in place of the Play along buttons while it is open.
+  const [managingRecordings, setManagingRecordings] = useState(false);
 
   return (
     <div className="flex flex-col gap-5">
       <BackLink to="/">Songs</BackLink>
-      <PageHeader title={song.title}>
-        {song.artist && <span className="block">{song.artist}</span>}
-        <span className="block text-sm" data-testid="song-facts">
-          {songFactsLabel(song)}
-          {mastery && mastery.total > 0 && <> · {masterySummary(mastery)}</>}
-        </span>
-        {song.drum_track_index === null && (
-          <span className="mt-1 flex items-start gap-2 text-sm text-warning">
-            <Icon name="alert" className="mt-0.5 size-4" />
-            {NO_DRUM_TRACK_NOTE}
-          </span>
-        )}
-      </PageHeader>
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <PageHeader title={song.title}>
+            {song.artist && <span className="block">{song.artist}</span>}
+            <span className="block text-sm" data-testid="song-facts">
+              {songFactsLabel(song)}
+              {mastery && mastery.total > 0 && <> · {masterySummary(mastery)}</>}
+            </span>
+            {song.drum_track_index === null && (
+              <span className="mt-1 flex items-start gap-2 text-sm text-warning">
+                <Icon name="alert" className="mt-0.5 size-4" />
+                {NO_DRUM_TRACK_NOTE}
+              </span>
+            )}
+          </PageHeader>
+        </div>
+        <OverflowMenu
+          name={song.title}
+          buttonAttributes={RECORDINGS_MENU_ATTRIBUTES}
+          items={[
+            {
+              id: 'recordings',
+              label: 'Manage recordings',
+              icon: 'video',
+              // Open already: the form is on the page, and takes focus when it mounts.
+              onSelect: () => setManagingRecordings(true),
+            },
+          ]}
+        />
+      </div>
       <VisitSummary
         sittings={visit.sittings}
         onDismiss={() => {
@@ -95,20 +122,35 @@ function SongOverview({ song }: { song: Song }) {
           focusWhenReady(() => (isVisitSummaryShown() ? null : findFormOpener({ kind: 'new' })));
         }}
       />
-      <div className="flex flex-wrap gap-x-2 gap-y-1">
-        <Link
-          to={newLoopPath(song.id)}
-          className={`${ghostButtonClass} -ml-4`}
-          {...NEW_LOOP_BUTTON_ATTRIBUTES}
-        >
-          <Icon name="plus" />
-          New loop
-        </Link>
-        <Link to={songPlayPath(song.id)} className={ghostButtonClass}>
-          <Icon name="music" />
-          Play whole song
-        </Link>
-      </div>
+      <PlayAlong
+        song={song}
+        managing={managingRecordings}
+        onManage={() => setManagingRecordings(true)}
+        onDoneManaging={() => {
+          setManagingRecordings(false);
+          // The form goes: focus back to what opened it, once that is on the page again.
+          focusWhenReady(findRecordingsOpener);
+        }}
+        actions={(playWholeSong) => (
+          <>
+            <Link
+              to={newLoopPath(song.id)}
+              className={`${ghostButtonClass} -ml-4`}
+              {...NEW_LOOP_BUTTON_ATTRIBUTES}
+            >
+              <Icon name="plus" />
+              New loop
+            </Link>
+            {/* With recordings, "Tab" in Play along is this link. */}
+            {playWholeSong && (
+              <Link to={songPlayPath(song.id)} className={ghostButtonClass}>
+                <Icon name="music" />
+                Play whole song
+              </Link>
+            )}
+          </>
+        )}
+      />
       <SongLoops song={song} loops={loops} />
     </div>
   );

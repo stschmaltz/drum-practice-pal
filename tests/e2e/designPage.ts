@@ -269,7 +269,8 @@ interface FocusedRing {
  * one the user sees is its label's, so the label is measured instead, and a
  * hidden control with no label is at fault. Otherwise the hidden control's own
  * invisible `auto` outline would pass. `throughLabel` names those controls, so
- * a test can prove the label was the thing measured.
+ * a test can prove the label was the thing measured. Focus inside an
+ * `<iframe>` is another document's to draw, and isn't measured.
  */
 export async function controlsWithoutFocusRing(
   page: Page,
@@ -296,6 +297,13 @@ export async function controlsWithoutFocusRing(
         focusedEl instanceof HTMLInputElement
           ? (focusedEl.labels?.[0] ?? focusedEl.closest('label'))
           : focusedEl.closest('label');
+      // Focus is inside a frame (the YouTube player, Unit 14): on a control of the frame's own
+      // document, which draws its own ring where this page can't read it. The frame element is
+      // only this document's stand-in for it, and matches neither `:focus` nor, reached by Tab,
+      // its box's `:focus-within` (measured in Chromium). Counted as reached, not measured.
+      if (focusedEl instanceof HTMLIFrameElement) {
+        return { name: '<iframe>', ring: null, key: String(index), throughLabel: false };
+      }
       const el = hidden && label ? label : focusedEl;
       const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 30);
       const name = `<${el.tagName.toLowerCase()}> "${el.getAttribute('aria-label') ?? text}"`;

@@ -17,8 +17,8 @@ describe('select strings', () => {
     expect(SONG_SELECT.split(', ')).toEqual([...SONG_FIELDS]);
   });
 
-  it('LIBRARY_SELECT adds the loops embed', () => {
-    expect(LIBRARY_SELECT).toBe(`${SONG_SELECT}, loops(last_practiced_at)`);
+  it('LIBRARY_SELECT adds when a recording was last opened, and the loops embed', () => {
+    expect(LIBRARY_SELECT).toBe(`${SONG_SELECT}, last_played_at, loops(last_practiced_at)`);
   });
 });
 
@@ -50,6 +50,19 @@ describe('toLibrarySong', () => {
     expect(
       toLibrarySong({ ...base, loops: [{ last_practiced_at: null }] }).last_practiced_at,
     ).toBeNull();
+  });
+
+  it('keeps when a recording was last opened, apart from the loops’ practice', () => {
+    const row = {
+      ...base,
+      last_played_at: '2026-11-09T10:00:00Z',
+      loops: [{ last_practiced_at: '2026-11-03T10:00:00Z' }],
+    };
+    expect(toLibrarySong(row)).toEqual({
+      ...base,
+      last_played_at: '2026-11-09T10:00:00Z',
+      last_practiced_at: '2026-11-03T10:00:00Z',
+    });
   });
 
   it('drops the loops array', () => {

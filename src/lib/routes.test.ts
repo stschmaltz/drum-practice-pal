@@ -8,6 +8,7 @@ import {
   showsScore,
   songPath,
   songPlayPath,
+  songSourcePath,
 } from './routes';
 
 const SONG = '11111111-1111-4111-8111-111111111111';
@@ -19,6 +20,7 @@ it('builds the three levels under a song', () => {
   expect(loopPracticePath(SONG, LOOP)).toBe(`/songs/${SONG}/loops/${LOOP}`);
   expect(newLoopPath(SONG)).toBe(`/songs/${SONG}/play?new=1`);
   expect(editLoopPath(SONG, LOOP)).toBe(`/songs/${SONG}/play?edit=${LOOP}`);
+  expect(songSourcePath(SONG, 'drumless')).toBe(`/songs/${SONG}/play?source=drumless`);
 });
 
 it('sends an old ?loop= link to the loop’s practice screen', () => {

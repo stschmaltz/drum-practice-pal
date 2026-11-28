@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useIsRestoring, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { markSongPlayedUnobserved } from '@/features/library/songPlayed';
 import type { LoopEdit } from '@/features/loops/loopForm';
 import { loopKeys } from '@/features/loops/loopKeys';
 import { loopEditOptions, type LoopUpdate } from '@/features/loops/useLoops';
@@ -42,6 +43,15 @@ export function useOutboxReplay(): void {
 function replayEntry(queryClient: QueryClient, userId: string, entry: OutboxEntry): void {
   if (entry.kind === 'session') {
     void logSessionUnobserved(queryClient, userId, entry.record);
+    return;
+  }
+  if (entry.kind === 'songPlayed') {
+    markSongPlayedUnobserved(queryClient, userId, {
+      songId: entry.songId,
+      playedAt: entry.playedAt,
+      queueId: entry.id,
+      queuedAt: entry.queuedAt,
+    });
     return;
   }
   // An edit made on this page before the outbox was read is newer, and joined the queue

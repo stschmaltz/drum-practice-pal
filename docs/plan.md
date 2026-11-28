@@ -471,6 +471,7 @@ Nothing here waits for loops to exist or be finished.
 - Spotify can't be slowed, and its embed plays full tracks only for a browser logged into Spotify. So a Spotify link always opens Spotify (the app, on a phone). The app says so where the link is added: for slowing a song down, add a YouTube link
 - Neither works offline, and neither gives the app its audio, so drums out is a second link to a drumless version. The tab's synth already does drums out with Mute drums
 - A pasted link's title is not fetched: the song already has its title and artist from the tab
+- Checked in 14 Build against YouTube's and Spotify's own pages (docs/units/14-recordings.md, "What the services allow, checked"): an embedded player must be at least 200 by 200 px and its frame must send a Referer (`referrerpolicy="strict-origin-when-cross-origin"`, or the player shows error 153); `rel=0` keeps the end screen's related videos to the same channel, it doesn't remove them; the speeds on offer are per video
 
 **Scope**
 
@@ -483,7 +484,7 @@ Nothing here waits for loops to exist or be finished.
   - On a Spotify or other link the button is a link out (`target="_blank"`, `rel="noopener noreferrer"`), named for where it goes ("Original on Spotify")
   - "Manage recordings" (in the header's More menu, and what "Add a recording" opens) is a small form in the page: a URL field per kind with what it was recognised as, the note about Spotify and speed, Save, and Remove per link
 - **The play screen (`/songs/:id/play`) gets a source switch: Tab, Original, Drumless**, showing only the YouTube sources the song has (a `SegmentedControl`; none when the song has no YouTube link). `?source=original|drumless` picks one from a link; otherwise it opens on Tab. The source is in the URL (`replace`), so Back goes to the song, not through the sources
-  - **On a recording source** the video sits in a box that stays on screen (sticky under the top bar; 16:9, full width on a phone up to a third of the window's height, a fixed 320 px wide box beside the header from 1024 px) with "Open in YouTube" under it. The score stays below, silent, scrolled by hand: the tab's player is paused and its Play, speed, metronome, count-in and loop panel are not shown as if they acted on the video. One line says so: "The video has its own controls. Switch to Tab for loops, speed and the metronome."
+  - **On a recording source** the video sits in a box that stays on screen (sticky under the top bar; 16:9, full width on a phone up to a third of the window's height, a fixed 356 px wide box from 1024 px; never under 200 px tall, which YouTube's terms require of an embedded player: 14 Build found the 320 px first written here is 180 px tall) with "Open in YouTube" under it. The score stays below, silent, scrolled by hand: the tab's player is paused and its Play, speed, metronome, count-in and loop panel are not shown as if they acted on the video. One line says so: "The video has its own controls. Switch to Tab for loops, speed and the metronome."
   - Switching source stops whichever was sounding (the tab's player is paused; the video's iframe is unmounted)
   - The embed is `https://www.youtube-nocookie.com/embed/<id>?playsinline=1&rel=0` plus `start=` when the link had one. No YouTube script or frame loads until a recording source is opened, and none on any other screen
 - **Recently played:** opening a recording (the play screen on a recording source, or a link out from the overview) sets `songs.last_played_at` to now, a queued write (the pattern in AGENTS.md, safe to send twice). The Songs list's "recently practised" order uses the later of a song's last practice and `last_played_at`. No session is logged and nothing asks what was played
@@ -529,7 +530,9 @@ Nothing here waits for loops to exist or be finished.
 
 **Carried forward**
 
-None yet.
+- From 14 Build: on a phone on its side (a window under about 600 px tall) the video keeps YouTube's 200 px minimum height, which with its bar is most of the window, so the score under it shows a line at a time only by scrolling. Decide whether a short window should put the video beside the score. (docs/units/14-recordings.md, Known gaps)
+- From 14 Build: the seed (`scripts/seed.ts`) has no links, since the database in use couldn't be reseeded during the build. Add an Original and a Drumless to a demo song when it next can be.
+- From 14 Build: `removeOutboxEntry` (`src/features/offline/outbox.ts`) forgets an entry's id before its row is deleted, so a replay that reads the outbox in between sends that write once more. Harmless for every queued write today (each is safe to send twice), and older than this unit; delete from `queuedHere` after the row has gone.
 
 ### 15 Play-along player, markers and loops on a recording
 

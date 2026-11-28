@@ -61,6 +61,7 @@ function queryBuilder(table: string) {
     update: chain('update'),
     delete: chain('delete'),
     eq: chain('eq'),
+    in: chain('in'),
     order: chain('order'),
     limit: chain('limit'),
     range: chain('range'),

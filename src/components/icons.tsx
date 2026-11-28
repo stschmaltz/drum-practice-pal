@@ -156,6 +156,15 @@ const PATHS = {
       <circle cx="17.5" cy="16" r="2.5" />
     </>
   ),
+  video: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m10 9 5 3-5 3z" fill="currentColor" />
+    </>
+  ),
+  external: (
+    <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+  ),
   chevronUp: <path d="m6 15 6-6 6 6" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
 } satisfies Record<string, ReactNode>;
