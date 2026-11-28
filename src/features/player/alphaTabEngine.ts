@@ -240,9 +240,9 @@ export function createAlphaTabEngine({
     setHighlight(range) {
       highlight.show(range);
     },
-    scrollToBar(barIndex) {
+    scrollToBar(barIndex, nextBarIndex) {
       if (redrawing) return false;
-      return scrollBoxToBar(element, scrollElement, staffSystems(), barIndex);
+      return scrollBoxToBar(element, scrollElement, staffSystems(), barIndex, nextBarIndex);
     },
     barRectInWindow(barIndex) {
       if (redrawing) return null;
@@ -407,7 +407,8 @@ function createHighlightLayer(element: HTMLElement, staffSystems: StaffSystems) 
 }
 
 /**
- * Scrolls the box so the bar can be read, unless all of it is on show. False
+ * Scrolls the box so the bar can be read, unless all of it is on show (and,
+ * given the bar played after it, that one too: see `scrollToShow`). False
  * when the score has no bounds yet (not rendered), so the caller can ask again;
  * true once it could decide, scrolled or not.
  */
@@ -416,6 +417,7 @@ function scrollBoxToBar(
   scrollElement: HTMLElement,
   systems: readonly SystemBoundsLike[],
   barIndex: number,
+  nextBarIndex?: number,
 ): boolean {
   const surface = element.querySelector('.at-surface');
   if (!surface || systems.length === 0) return false;
@@ -431,15 +433,14 @@ function scrollBoxToBar(
   // Bounds are relative to the surface; the box scrolls in its own content's coordinates.
   const surfaceRect = surface.getBoundingClientRect();
   const boxRect = scrollElement.getBoundingClientRect();
-  const target = scrollToShow(
-    {
-      x: bar.x + surfaceRect.left - boxRect.left - scrollElement.clientLeft + view.left,
-      y: bar.y + surfaceRect.top - boxRect.top - scrollElement.clientTop + view.top,
-      w: bar.w,
-      h: bar.h,
-    },
-    view,
-  );
+  const inContent = (rect: { x: number; y: number; w: number; h: number }) => ({
+    x: rect.x + surfaceRect.left - boxRect.left - scrollElement.clientLeft + view.left,
+    y: rect.y + surfaceRect.top - boxRect.top - scrollElement.clientTop + view.top,
+    w: rect.w,
+    h: rect.h,
+  });
+  const next = nextBarIndex === undefined ? null : barBounds(systems, nextBarIndex);
+  const target = scrollToShow(inContent(bar), view, next && inContent(next));
   if (!target) return true;
   // At once, not animated: a count-in may be a second long, and the bar is to be read during it.
   if (typeof scrollElement.scrollTo === 'function') {

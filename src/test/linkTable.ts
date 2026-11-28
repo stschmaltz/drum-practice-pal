@@ -63,17 +63,15 @@ export function linkTable(initial: SongLinkRow[] = []) {
   let rows = initial;
   const failures = new Map<LinkQueryMethod, NonNullable<FakeResult['error']>>();
   const lost = new Set<LinkQueryMethod>();
-  const gates = new Map<LinkQueryMethod, Promise<void>>();
+  /** Held calls, in the order asked for: each `holdNext` holds one more call of its method. */
+  const gates = new Map<LinkQueryMethod, Promise<void>[]>();
   const filter = (call: QueryCall, method: string, column: string) =>
     call.ops.find((op) => op.method === method && op.args[0] === column)?.args[1];
 
   async function answer(call: QueryCall): Promise<FakeResult> {
     const method = LINK_WRITES.find((write) => opArgs(call, write)) ?? 'select';
-    const gate = gates.get(method);
-    if (gate) {
-      gates.delete(method);
-      await gate;
-    }
+    const gate = gates.get(method)?.shift();
+    if (gate) await gate;
     const failed = failures.get(method);
     if (failed) {
       failures.delete(method);
@@ -109,6 +107,11 @@ export function linkTable(initial: SongLinkRow[] = []) {
     if (method === 'update') {
       const id = filter(call, 'eq', 'id');
       const changes = opArgs(call, 'update')?.[0] as Partial<SongLinkRow>;
+      // A write for one address of the link (a line-up) matches nothing once it has another.
+      const url = filter(call, 'eq', 'url');
+      if (url !== undefined && rows.find((row) => row.id === id)?.url !== url) {
+        return { data: null, error: null };
+      }
       // The database's own rule: a link pointed at another address loses its line-up,
       // unless the same write sets one (song_links_before_write).
       const applied = (row: SongLinkRow): SongLinkRow =>
@@ -124,6 +127,9 @@ export function linkTable(initial: SongLinkRow[] = []) {
       rows = rows.filter((row) => !ids.includes(row.id));
       return { data: null, error: null };
     }
+    // One link asked for by its id (`.maybeSingle()`): the row, or nothing.
+    const id = filter(call, 'eq', 'id');
+    if (id !== undefined) return { data: rows.find((row) => row.id === id) ?? null, error: null };
     return {
       data: rows.filter((row) => row.song_id === filter(call, 'eq', 'song_id')),
       error: null,
@@ -147,7 +153,9 @@ export function linkTable(initial: SongLinkRow[] = []) {
     },
     holdNext: (method: LinkQueryMethod) => {
       let release!: () => void;
-      gates.set(method, new Promise<void>((resolve) => (release = resolve)));
+      const held = gates.get(method) ?? [];
+      held.push(new Promise<void>((resolve) => (release = resolve)));
+      gates.set(method, held);
       return release;
     },
     /** What every `method` write sent so far carried: a payload, or the ids of a delete. */

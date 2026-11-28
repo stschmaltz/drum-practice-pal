@@ -715,6 +715,59 @@ describe('song_links.bar_one_seconds (where bar 1 falls in the video)', () => {
     expect((await linkAsAdmin(id))?.bar_one_seconds).toBe(3);
   });
 
+  // 19 QA issue 6: the app's save is for the video the line-up was made on, matched by `url`.
+  describe('a line-up sent for the address the link had', () => {
+    /** `saveBarOne` in songLinksApi.ts: the same write, filtered on the address the page knew. */
+    const saveFor = (user: TestUser, id: string, url: string, barOneSeconds: number | null) =>
+      user.client
+        .from('song_links')
+        .update({ bar_one_seconds: barOneSeconds })
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .eq('url', url)
+        .select('id, bar_one_seconds')
+        .maybeSingle();
+
+    it('is saved while the link still has that address, whatever characters it holds', async () => {
+      // A start time and a query: characters a filter in the request's address must carry whole.
+      const url = `${WATCH}&t=30s&list=PL_a-b.c~d`;
+      const id = await insertLink(a, songA, { provider: 'youtube', url });
+      const saved = await saveFor(a, id, url, 5.58);
+      expect(saved.error).toBeNull();
+      expect(saved.data).toEqual({ id, bar_one_seconds: 5.58 });
+    });
+
+    it('matches nothing once the link points at another video, and leaves the new one not lined up', async () => {
+      const id = await insertLink(a, songA, { provider: 'youtube', url: WATCH });
+      expect((await saveFor(a, id, WATCH, 5.58)).data).toEqual({ id, bar_one_seconds: 5.58 });
+      // Another device points the link elsewhere: its line-up is cleared.
+      const moved = await a.client
+        .from('song_links')
+        .update({ provider: 'youtube', url: `${WATCH}&t=30s` })
+        .eq('id', id)
+        .eq('user_id', a.id);
+      expect(moved.error).toBeNull();
+
+      // The page that hasn't heard nudges the old video's line-up.
+      const late = await saveFor(a, id, WATCH, 5.83);
+      // No error and no row: the app then looks the link up to say "changed" or "removed".
+      expect(late.error).toBeNull();
+      expect(late.data).toBeNull();
+      expect(await linkAsAdmin(id)).toMatchObject({
+        url: `${WATCH}&t=30s`,
+        bar_one_seconds: null,
+      });
+      const still = await a.client
+        .from('song_links')
+        .select('id')
+        .eq('id', id)
+        .eq('user_id', a.id)
+        .maybeSingle();
+      expect(still.error).toBeNull();
+      expect(still.data).toEqual({ id });
+    });
+  });
+
   it('adds nothing else to what a client may update: the song, the kind and the timestamps stay refused', async () => {
     const id = await insertLink(a, songA);
     const other = await insertSong(a);

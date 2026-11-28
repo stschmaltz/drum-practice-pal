@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { createRef } from 'react';
+import { barsInPlayOrder } from '@/test/fakePlayerEngine';
 import { FakeRecordingPlayer } from '@/test/fakeRecordingPlayer';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import {
@@ -60,6 +61,7 @@ function renderFollow({
     engine,
     player,
     video,
+    barRef,
     finishLoading,
     onNeedsFirstTap,
     bar: () => view.result.current,
@@ -133,8 +135,9 @@ describe('useVideoFollow', () => {
     expect(view.bar()).toBe(2);
     view.engine.laidOut = true;
     act(() => view.engine.fire('rendered', undefined));
-    // Asked once before the bounds were there, and done when they were.
-    expect(view.shown()).toEqual([2, 2]);
+    // Asked before the bounds were there, and done when they were: by the player's own
+    // kept request, and by the follow, which places the bar in the window then too.
+    expect(view.shown()).toEqual([2, 2, 2]);
   });
 
   it('with Follow off gives the bar and scrolls nothing', () => {
@@ -269,5 +272,160 @@ describe('toggleRecording', () => {
     const video = new FakeRecordingPlayer();
     video.set({ status: 'unavailable' });
     expect(toggleRecording(sessionOf(video).session)).toBe(false);
+  });
+});
+
+describe('useVideoFollow and the window (19 QA fix round 1)', () => {
+  const scrollBy = vi.fn();
+  const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 200 });
+  const WINDOW = { width: window.innerWidth, height: window.innerHeight };
+  /** A window of another size, as a rotation leaves it. */
+  const resizeTo = (width: number, height: number) => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+  };
+  /** The video's sticky bar, as laid out: jsdom lays nothing out itself. */
+  const videoBar = (top: number, height: number) => {
+    const bar = document.createElement('div');
+    bar.getBoundingClientRect = () => ({ top, bottom: top + height, height }) as DOMRect;
+    document.body.append(bar);
+    return bar;
+  };
+
+  beforeEach(() => {
+    scrollBy.mockReset();
+    vi.stubGlobal('scrollBy', scrollBy);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: WINDOW.width });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: WINDOW.height });
+    document.body.replaceChildren();
+  });
+
+  it('a phone on its side, a fresh load: the first marked bar is brought under where the video sticks', () => {
+    const view = renderFollow();
+    // 844 x 390: the video's bar hasn't stuck yet, and ends below the window's foot.
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 390 });
+    view.barRef.current = videoBar(219, 210);
+    view.engine.barRects.set(0, rect(445, 582));
+    act(() => view.video.playAt(4.5));
+    // Under the 210 px the bar takes once stuck, not 16 px up to where it is now.
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith({ top: 445 - 210 - 12, behavior: 'instant' });
+  });
+
+  it('turns the page a line early: the last bar on show goes to the top, a bar with the next on show stays', () => {
+    const view = renderFollow();
+    view.barRef.current = videoBar(0, 300);
+    view.engine.barRects.set(0, rect(320, 440));
+    view.engine.barRects.set(1, rect(450, 570));
+    view.engine.barRects.set(2, rect(580, 700));
+    // Cut off by the window's foot (768 px).
+    view.engine.barRects.set(3, rect(710, 830));
+
+    act(() => view.video.playAt(4.5));
+    act(() => view.video.tick(6.5));
+    expect(scrollBy).not.toHaveBeenCalled();
+    // Bar 3 is all on show, and the last that is: the page turns now, not when bar 4 starts.
+    act(() => view.video.tick(8.5));
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith({ top: 580 - 300 - 12, behavior: 'instant' });
+  });
+
+  it('goes by the bar played next, not the next by number: a repeat going back turns nothing', () => {
+    const view = renderFollow({ loaded: false });
+    // Bars 3 and 4 are played twice; two seconds a bar, bar 1 at 4 s.
+    act(() =>
+      view.engine.finishLoading({ barCount: 6, bars: barsInPlayOrder([1, 2, 3, 4, 3, 4, 5, 6]) }),
+    );
+    view.engine.barRects.set(2, rect(400, 520));
+    view.engine.barRects.set(3, rect(530, 650));
+    view.engine.barRects.set(4, rect(700, 820));
+
+    // Bar 4, first time through: bar 3 comes next, and it is on show above.
+    act(() => view.video.playAt(10.5));
+    expect(view.bar()).toBe(4);
+    act(() => view.video.tick(12.5));
+    expect(view.bar()).toBe(3);
+    expect(scrollBy).not.toHaveBeenCalled();
+    // Bar 4 again: now bar 5 follows, and it is cut off.
+    act(() => view.video.tick(14.5));
+    expect(view.bar()).toBe(4);
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith({ top: 530 - 12, behavior: 'instant' });
+  });
+
+  it('a bar marked before the score has drawn is placed in the window when it has', () => {
+    const view = renderFollow();
+    view.engine.laidOut = false;
+    view.engine.barRects.set(1, rect(900, 1020));
+    act(() => view.video.playAt(6.5));
+    expect(scrollBy).not.toHaveBeenCalled();
+    view.engine.laidOut = true;
+    act(() => view.engine.fire('rendered', undefined));
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith({ top: 888, behavior: 'instant' });
+    // Placed: a later drawing is not a reason to move the reader's window again.
+    act(() => view.engine.fire('rendered', undefined));
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+  });
+
+  it('after a rotation the marked bar is brought back at once, paused too, and again when the score has been drawn', () => {
+    const view = renderFollow();
+    view.engine.barRects.set(1, rect(300, 420));
+    act(() => view.video.playAt(6.5));
+    act(() => view.video.pauseAt(6.5));
+    expect(scrollBy).not.toHaveBeenCalled();
+
+    // Turned on its side: the same bar is now below a much shorter window.
+    view.engine.barRects.set(1, rect(533, 630));
+    resizeTo(844, 390);
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith({ top: 521, behavior: 'instant' });
+    // alphaTab draws the score for the new width a moment later, and the bar moves again.
+    view.engine.barRects.set(1, rect(700, 800));
+    act(() => view.engine.fire('rendered', undefined));
+    expect(scrollBy).toHaveBeenLastCalledWith({ top: 688, behavior: 'instant' });
+    expect(scrollBy).toHaveBeenCalledTimes(2);
+    // Only that drawing: the next one has nothing to do with the rotation.
+    act(() => view.engine.fire('rendered', undefined));
+    expect(scrollBy).toHaveBeenCalledTimes(2);
+  });
+
+  it('a rotation’s drawing that lands after the mark has moved on still brings the new bar on show', () => {
+    const view = renderFollow();
+    view.engine.barRects.set(1, rect(300, 420));
+    view.engine.barRects.set(2, rect(430, 550));
+    act(() => view.video.playAt(6.5));
+    resizeTo(844, 390);
+    act(() => view.video.tick(8.5));
+    scrollBy.mockClear();
+    view.engine.barRects.set(2, rect(900, 1000));
+    act(() => view.engine.fire('rendered', undefined));
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith({ top: 888, behavior: 'instant' });
+  });
+
+  it('a change of height alone (a phone’s address bar) and a drawing with no rotation leave the reader’s scroll alone', () => {
+    const view = renderFollow();
+    view.engine.barRects.set(1, rect(300, 420));
+    act(() => view.video.playAt(6.5));
+    // The reader flicks ahead; the bar being played is far above.
+    view.engine.barRects.set(1, rect(-900, -780));
+    resizeTo(WINDOW.width, 500);
+    act(() => view.engine.fire('rendered', undefined));
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it('with Follow off a rotation moves nothing, and stops listening when the screen goes', () => {
+    const view = renderFollow({ follow: false });
+    view.engine.barRects.set(1, rect(900, 1020));
+    act(() => view.video.playAt(6.5));
+    resizeTo(844, 390);
+    expect(scrollBy).not.toHaveBeenCalled();
+
+    view.rerender({ follow: true });
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+    view.unmount();
+    resizeTo(390, 844);
+    expect(scrollBy).toHaveBeenCalledTimes(1);
   });
 });

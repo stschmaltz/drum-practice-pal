@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 import type { Page } from '@playwright/test';
 import { expect, signIn, test, type E2eUser } from './auth';
+import { textSpillingOutOf } from './designPage';
 import { boxOf, openSongOverview, playButton, uploadFixture, viewport } from './playerPage';
 import { highlightBoxes } from './loopsPage';
 import { navLink } from './practicePage';
@@ -8,11 +9,17 @@ import {
   addRecordingButton,
   barOneOf,
   EMBED_URL,
+  followSamples,
   gotoSource,
   lastPlayedOf,
   lineUp,
   lineUpButton,
+  lineUpField,
   lineUpMessage,
+  onShowIn,
+  recordFollow,
+  scoreLaidOut,
+  setBarOne,
   markedBars,
   linkField,
   linksOf,
@@ -551,12 +558,16 @@ test('the YouTube frame is at least 200 px wide and tall at every width, and a p
   }
 
   // The last size is a phone on its side (QA issue 3): the bar is the 200 px frame with the
-  // note and the way out beside it, about half the window, and the score has the rest.
+  // way out and the line-up beside it (19 QA issue 2: the note is under the bar there, the
+  // room beside the video being the line-up's), about half the window, and the score has the rest.
   const size = FRAME_SIZES.at(-1)!;
   const bar = await boxOf(recordingBar(page), 'recording bar');
   expect(bar.height).toBeLessThanOrEqual(size.height * 0.56);
   const video = await boxOf(frame, 'recording frame');
-  for (const beside of [recordingNote(page), openInYouTube(page)]) {
+  expect((await boxOf(recordingNote(page), 'note')).y).toBeGreaterThanOrEqual(
+    bar.y + bar.height - 1,
+  );
+  for (const beside of [openInYouTube(page), lineUp(page)]) {
     const box = await boxOf(beside, 'beside the video');
     expect(box.y).toBeLessThan(video.y + video.height);
     expect(box.y + box.height).toBeGreaterThan(video.y);
@@ -1117,6 +1128,364 @@ test.describe('the tab follows the video (Unit 19)', () => {
     await lineUpButton(page, 'Follow').click();
     await expect.poll(onShow).toBe(true);
   });
+
+  // 19 QA fix round 1 from here to the end of the block.
+
+  /** `openVideo`, on a link lined up already (as from another device), bar 1 at `barOne` seconds. */
+  async function openLinedVideo(page: Page, user: E2eUser, barOne: number) {
+    await openVideo(page, user);
+    await setBarOne(user, 'original', barOne);
+    await page.reload();
+    await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+    await scoreLaidOut(page);
+    await expect(lineUpMessage(page)).toContainText('Bar 1 at');
+    // A reload keeps the window's scroll; a fresh load starts at the top.
+    await page.evaluate(() => window.scrollTo(0, 0));
+  }
+
+  /** Plays the stub video through the tab at twice the speed, and gives what the follow did at each bar. */
+  async function followThrough(page: Page, lastBar = 16) {
+    const video = videoStub(page);
+    await recordFollow(page);
+    await video.tapPlay();
+    await video.setRate(2);
+    await expect.poll(() => markedBars(page), { timeout: 40_000 }).toEqual([lastBar, lastBar]);
+    await video.pause();
+    const samples = await followSamples(page);
+    // Every bar was seen, in order: an empty or thin record must not pass what follows.
+    expect(samples.map((sample) => sample.bar)).toEqual(
+      Array.from({ length: lastBar }, (_, index) => index + 1),
+    );
+    return samples;
+  }
+
+  test('the page turns a line early: whenever the mark changes, the bar played next is on show under it too', async ({
+    user,
+    page,
+    context,
+  }) => {
+    test.setTimeout(120_000);
+    await stubServices(context);
+    await openLinedVideo(page, user, 1);
+    const samples = await followThrough(page);
+    for (const { bar, marked, next, view } of samples) {
+      expect(onShowIn(marked, view), `bar ${bar} is on show when it is marked`).toBe(true);
+      // The tab's last bar has nothing after it.
+      if (bar < 16) expect(onShowIn(next, view), `the bar after ${bar} is on show too`).toBe(true);
+    }
+  });
+
+  test('a phone on its side: the score is on show from bar 1 of a fresh load, and after a turn of the phone', async ({
+    user,
+    page,
+    context,
+  }) => {
+    test.skip(test.info().project.name !== 'phone', 'about a phone turned sideways');
+    test.setTimeout(150_000);
+    await stubServices(context);
+    await openVideo(page, user);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await setBarOne(user, 'original', 1);
+    await page.reload();
+    await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+    await scoreLaidOut(page);
+    await expect(lineUpMessage(page)).toContainText('Bar 1 at');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    // The fresh load QA saw: the score box starts below the window's foot.
+    expect((await boxOf(viewport(page), 'score box')).y).toBeGreaterThan(390);
+
+    const samples = await followThrough(page, 6);
+    for (const { bar, marked, view } of samples) {
+      expect(onShowIn(marked, view), `bar ${bar} is on show when it is marked`).toBe(true);
+    }
+
+    // Paused in bar 6. Turned upright, and back: the bar is brought back on show each time,
+    // with nothing playing to bring it (19 QA issue 7).
+    const view = async () => {
+      const bar = await boxOf(recordingBar(page), 'recording bar');
+      const tabs = await page.locator('[data-bottom-tabs]').boundingBox();
+      const height = page.viewportSize()!.height;
+      return { top: bar.y + bar.height, bottom: tabs && tabs.height > 0 ? tabs.y : height };
+    };
+    const markedOnShow = async () => {
+      const boxes = await highlightBoxes(page);
+      const box = boxes[0];
+      const shown = await view();
+      return (
+        boxes.length === 1 &&
+        box !== undefined &&
+        onShowIn({ top: box.y, bottom: box.y + box.height }, shown)
+      );
+    };
+    for (const size of [
+      { width: 390, height: 844 },
+      { width: 844, height: 390 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(size);
+      await expect
+        .poll(markedOnShow, { message: `bar 6 on show at ${size.width}x${size.height}` })
+        .toBe(true);
+      expect(await markedBars(page)).toEqual([6, 6]);
+      // And it stays there once the score has been drawn for the new width.
+      await page.waitForTimeout(1_000);
+      expect(await markedOnShow(), `still on show at ${size.width}x${size.height}`).toBe(true);
+    }
+  });
+
+  test('a video already playing when YouTube’s script arrives is followed, with no pause and play', async ({
+    user,
+    page,
+    context,
+  }) => {
+    test.setTimeout(120_000);
+    await stubServices(context);
+    await openVideo(page, user);
+    await setBarOne(user, 'original', 1);
+    // A slow connection: the script is held until the video has been playing for a while.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let asked = 0;
+    await context.route(PLAYER_API_URL, async (route) => {
+      asked++;
+      await held;
+      await route.fallback();
+    });
+    await page.reload();
+    await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+    await scoreLaidOut(page);
+    await expect(lineUpMessage(page)).toContainText('Bar 1 at');
+    const video = videoStub(page);
+    await video.tapPlay();
+    await video.seek(5.2);
+    await page.waitForTimeout(600);
+    // The script was asked for and hasn't come: nothing is marked yet.
+    expect(asked).toBe(1);
+    expect(await markedBars(page)).toBeNull();
+    expect(await video.playing()).toBe(true);
+
+    release();
+    // Bar 3 is the video from 5 to 7 s; the mark comes without anything being pressed.
+    await expect.poll(() => markedBars(page)).not.toBeNull();
+    expect(await video.playing()).toBe(true);
+    await expect.poll(() => markedBars(page), { timeout: 10_000 }).toEqual([4, 4]);
+
+    // Space works it at once, with no "press Play on the video once".
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press('Space');
+    await expect.poll(() => video.playing()).toBe(false);
+    await expect(lineUpMessage(page)).toContainText('Bar 1 at');
+    // And so does lining up again, on the paused clock (19 QA issue 9).
+    await lineUpButton(page, 'Line up again').click();
+    await expect(lineUpButton(page, 'Bar 1 starts now')).not.toHaveAttribute('aria-disabled');
+    const at = await video.time();
+    await lineUpButton(page, 'Bar 1 starts now').click();
+    await expect.poll(async () => (await barOneOf(user)).original).toBeCloseTo(at, 1);
+    await expect.poll(() => markedBars(page)).toEqual([1, 1]);
+  });
+
+  test('“Bar 1 starts now” before the video has been played says why, and a failed save moves nothing', async ({
+    user,
+    page,
+    context,
+  }) => {
+    test.setTimeout(120_000);
+    await stubServices(context);
+    await openVideo(page, user);
+    const video = videoStub(page);
+    await expect(lineUpButton(page, 'Bar 1 starts now')).toHaveAttribute('aria-disabled', 'true');
+    // Forced: Playwright waits for a control marked off to come on. A finger doesn't.
+    await lineUpButton(page, 'Bar 1 starts now').click({ force: true });
+    await expect(lineUpMessage(page)).toHaveText('Press Play on the video first.');
+    await expect(page.getByTestId('line-up-announcement')).toContainText(
+      'Press Play on the video first.',
+    );
+    expect(await barOneOf(user)).toEqual({ original: null });
+
+    await video.tapPlay();
+    await video.seek(3);
+    await video.pause();
+    await expect(lineUpMessage(page)).toHaveText('Line the tab up: when bar 1 starts, press');
+    await lineUpButton(page, 'Bar 1 starts now').click();
+    await expect.poll(async () => (await barOneOf(user)).original).toBeCloseTo(3, 1);
+    await expect(lineUpButton(page, 'Tab later')).toBeVisible();
+
+    // Where things are in the page, at a phone's width and at the narrowest (19 QA issue 10).
+    const place = async () => {
+      const scrollY = await page.evaluate(() => window.scrollY);
+      const score = await boxOf(viewport(page), 'score');
+      const bar = await boxOf(recordingBar(page), 'recording bar');
+      const block = await boxOf(lineUp(page), 'line-up');
+      return { scoreTop: Math.round(score.y + scrollY), bar: bar.height, lineUp: block.height };
+    };
+    // The last is the narrowest phone with the reader's text a quarter larger: there the
+    // words are more lines than their row holds, which is what the fixed rows are for (at
+    // the plain sizes they happen to fit, and would pass on rows that grow).
+    const sizes: { width: number; text?: string }[] =
+      test.info().project.name === 'phone'
+        ? [{ width: 390 }, { width: 320 }, { width: 320, text: '125%' }]
+        : [{ width: page.viewportSize()!.width }];
+    for (const { width, text } of sizes) {
+      await page.setViewportSize({ width, height: page.viewportSize()!.height });
+      await page.evaluate((size) => {
+        document.documentElement.style.fontSize = size;
+      }, text ?? '');
+      await expect(lineUpMessage(page)).toContainText('Bar 1 at');
+      const before = await place();
+      const saved = (await barOneOf(user)).original;
+      await page.route('**/rest/v1/song_links*', (route) =>
+        route.request().method() === 'PATCH' ? route.abort() : route.fallback(),
+      );
+      await lineUpButton(page, 'Tab later').click();
+      await expect(lineUp(page).getByRole('alert')).toContainText('Couldn’t save the line-up.');
+      await page.unroute('**/rest/v1/song_links*');
+      expect(await place(), `a failed save at ${width} px ${text ?? ''}`).toEqual(before);
+      // Every control is still its own 44 px, and the words stay off the buttons under them.
+      const alert = await boxOf(lineUp(page).getByRole('alert'), 'alert');
+      const nudge = await boxOf(lineUpButton(page, 'Tab earlier'), 'Tab earlier');
+      expect(alert.y + alert.height).toBeLessThanOrEqual(nudge.y + 1);
+      expect(nudge.height).toBeGreaterThanOrEqual(44);
+      expect((await barOneOf(user)).original).toBe(saved);
+      // The next save takes the words away again, and nothing moves then either.
+      await lineUpButton(page, 'Tab later').click();
+      await expect(lineUp(page).getByRole('alert')).toHaveCount(0);
+      expect(await place(), `after the next save at ${width} px ${text ?? ''}`).toEqual(before);
+    }
+  });
+
+  for (const size of [
+    { name: 'a phone on its side', width: 844, height: 390 },
+    { name: 'a 320 px phone', width: 320, height: 700 },
+  ]) {
+    test(`${size.name}: every control of the line-up is on screen and takes a tap in every state, and nothing moves between them`, async ({
+      user,
+      page,
+      context,
+    }) => {
+      test.skip(test.info().project.name !== 'phone', 'about a phone');
+      test.setTimeout(150_000);
+      await stubServices(context);
+      await openVideo(page, user);
+      await page.setViewportSize({ width: size.width, height: size.height });
+      const video = videoStub(page);
+
+      /** Where the page is, whatever the window has scrolled to. */
+      const place = async () => {
+        const scrollY = await page.evaluate(() => window.scrollY);
+        const score = await boxOf(viewport(page), 'score');
+        const bar = await boxOf(recordingBar(page), 'recording bar');
+        return { scoreTop: Math.round(score.y + scrollY), bar: Math.round(bar.height) };
+      };
+      /**
+       * Every button and field of the line-up: what is wrong with each, if anything. A control
+       * must lie inside the window's width, clear of the video's frame, be 44 px tall, and be
+       * what a tap at its middle lands on.
+       */
+      const faults = (state: string) =>
+        lineUp(page).evaluate((block, label) => {
+          // The line-up is in a sticky bar: bring it on screen as someone about to tap it would.
+          block.scrollIntoView({ block: 'nearest' });
+          const frame = document
+            .querySelector('[data-testid="recording-frame"]')!
+            .getBoundingClientRect();
+          const found: string[] = [];
+          const controls = Array.from(block.querySelectorAll<HTMLElement>('button, input'));
+          if (controls.length === 0) found.push(`${label}: no controls`);
+          for (const control of controls) {
+            const name = control.textContent || control.getAttribute('aria-label') || '?';
+            const box = control.getBoundingClientRect();
+            if (box.left < 0 || box.right > window.innerWidth + 0.5) {
+              found.push(`${label}: “${name}” is off the side (${box.left} to ${box.right})`);
+            }
+            if (box.top < 0 || box.bottom > window.innerHeight + 0.5) {
+              found.push(`${label}: “${name}” is off the window (${box.top} to ${box.bottom})`);
+            }
+            if (box.height < 43.5) found.push(`${label}: “${name}” is ${box.height} px tall`);
+            const overFrame =
+              box.left < frame.right - 0.5 &&
+              box.right > frame.left + 0.5 &&
+              box.top < frame.bottom - 0.5 &&
+              box.bottom > frame.top + 0.5;
+            if (overFrame) found.push(`${label}: “${name}” is under the video`);
+            const hit = document.elementFromPoint(
+              box.left + box.width / 2,
+              box.top + box.height / 2,
+            );
+            if (!hit || !control.contains(hit)) {
+              found.push(`${label}: a tap on “${name}” lands on ${hit?.tagName ?? 'nothing'}`);
+            }
+          }
+          if (document.documentElement.scrollWidth > window.innerWidth) {
+            found.push(`${label}: the page scrolls sideways`);
+          }
+          return found;
+        }, state);
+      const places: Record<string, { scoreTop: number; bar: number }> = {};
+      const check = async (state: string) => {
+        expect(await faults(state)).toEqual([]);
+        expect(await textSpillingOutOf(lineUp(page)), `${state}: text out of its box`).toEqual([]);
+        places[state] = await place();
+      };
+
+      await check('the prompt');
+      await lineUpButton(page, 'Type a time').click();
+      await expect(lineUpField(page)).toBeFocused();
+      await check('typing');
+      // The field and the Save row are as far apart as any two rows (19 QA issue 15).
+      const field = await boxOf(lineUpField(page), 'field');
+      const save = await boxOf(lineUpButton(page, 'Save'), 'Save');
+      const rowGap = save.y - (field.y + field.height);
+      expect(rowGap).toBeGreaterThanOrEqual(4);
+      await lineUpField(page).fill('soon');
+      await lineUpButton(page, 'Save').click();
+      await expect(lineUp(page).getByRole('alert')).toBeVisible();
+      await check('a refused time');
+      await lineUpField(page).fill('1h2m3s');
+      await lineUpButton(page, 'Save').click();
+      await expect(lineUpMessage(page)).toContainText('Bar 1 at 1:02:03.00');
+      await check('lined up, a long time');
+      const nudge = await boxOf(lineUpButton(page, 'Tab earlier'), 'Tab earlier');
+      const message = await boxOf(lineUpMessage(page), 'message');
+      expect(nudge.y - (message.y + message.height)).toBeCloseTo(rowGap, 0);
+
+      await lineUpButton(page, 'Line up again').click();
+      await expect(lineUpButton(page, 'Cancel')).toBeVisible();
+      await check('lining up again');
+      // Cancel takes the tap, and the nudges are back.
+      await lineUpButton(page, 'Cancel').tap();
+      await expect(lineUpButton(page, 'Tab later')).toBeVisible();
+      await lineUpButton(page, 'Line up again').click();
+      await lineUpButton(page, 'Type a time').click();
+      await check('typing over a saved time');
+      await lineUpField(page).fill('1');
+      await lineUpField(page).press('Enter');
+      await expect(lineUpMessage(page)).toContainText('Bar 1 at 0:01.00');
+
+      // The note about the first tap, the longest of the messages.
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.press('Space');
+      await expect(lineUpMessage(page)).toContainText('Press Play on the video once.');
+      await check('the first-tap note');
+
+      const first = Object.values(places)[0]!;
+      for (const [state, at] of Object.entries(places)) {
+        expect(at, `the page at “${state}”`).toEqual(first);
+      }
+
+      // And from a fresh load the first bar is clear of the video's bar and the tab bar (QA 8).
+      await page.reload();
+      await scoreLaidOut(page);
+      await expect(lineUpMessage(page)).toContainText('Bar 1 at');
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await recordFollow(page);
+      await videoStub(page).tapPlay();
+      await expect.poll(() => markedBars(page), { timeout: 10_000 }).toEqual([1, 1]);
+      await video.pause();
+      const [bar1] = await followSamples(page);
+      expect(bar1!.bar).toBe(1);
+      expect(onShowIn(bar1!.marked, bar1!.view), 'bar 1 on show on a fresh load').toBe(true);
+    });
+  }
 
   test('a song with only a Spotify link asks YouTube for nothing on its play screen and has no line-up; Space plays its tab', async ({
     user,

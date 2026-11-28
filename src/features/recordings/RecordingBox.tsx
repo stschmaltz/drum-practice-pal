@@ -27,7 +27,7 @@ const frameBoxClass =
  */
 const frameShapeClass = 'block aspect-video min-h-[200px] w-full min-w-[200px]';
 
-/** The note, the way out and the line-up: under the video, or beside it where there is room. */
+/** The way out and the line-up (and from 1024 px the note): under the video, or beside it where there is room. */
 const besideVideoClass =
   'flex min-w-0 flex-col items-center lg:items-start sideways:min-w-0 sideways:flex-1 sideways:items-start';
 
@@ -96,7 +96,7 @@ export function RecordingBox({
       </div>
       <div className={besideVideoClass}>
         {/* Beside the video where there is room; under the bar, off it, on a narrower window. */}
-        <p className="hidden text-sm text-ink-muted lg:block sideways:block">{RECORDING_NOTE}</p>
+        <p className="hidden text-sm text-ink-muted lg:block">{RECORDING_NOTE}</p>
         <LinkOut
           link={video.link}
           className={`${lockableLinkClass} gap-1.5 text-sm`}

@@ -57,9 +57,11 @@ document.getElementById('at').textContent = location.href;
     last = at;
     return time;
   }
+  // YT.PlayerState: -1 until the video has been tapped, then 1 playing or 2 paused.
+  function state() { return playing ? 1 : started ? 2 : -1; }
   function post(extra) {
     if (!listening || !apiOn || !pageOrigin) return;
-    parent.postMessage(Object.assign({ stub: 'yt', time: now(), rate: rate }, extra || {}), pageOrigin);
+    parent.postMessage(Object.assign({ stub: 'yt', time: now(), rate: rate, now: state() }, extra || {}), pageOrigin);
   }
   function setPlaying(next) {
     now();
@@ -101,12 +103,14 @@ document.getElementById('at').textContent = location.href;
 const STUB_PLAYER_API = `(function () {
   function Player(frame, options) {
     var self = this;
-    this.frame = frame; this.time = 0; this.rate = 1; this.ready = false;
+    this.frame = frame; this.time = 0; this.rate = 1; this.state = -1; this.ready = false;
     window.addEventListener('message', function (event) {
       var data = event.data;
       if (event.source !== frame.contentWindow || !data || data.stub !== 'yt') return;
       if (typeof data.time === 'number') self.time = data.time;
       if (typeof data.rate === 'number') self.rate = data.rate;
+      // Known before "ready" is passed on: a video tapped before this script arrived is playing.
+      if (typeof data.now === 'number') self.state = data.now;
       if (data.event === 'ready' && !self.ready) { self.ready = true; options.events.onReady({ target: self }); }
       if (data.event === 'state') options.events.onStateChange({ target: self, data: data.state });
       if (data.event === 'rate') options.events.onPlaybackRateChange({ target: self, data: data.rate });
@@ -122,6 +126,7 @@ const STUB_PLAYER_API = `(function () {
   };
   Player.prototype.getCurrentTime = function () { return this.time; };
   Player.prototype.getPlaybackRate = function () { return this.rate; };
+  Player.prototype.getPlayerState = function () { return this.state; };
   Player.prototype.seekTo = function (seconds) { this.time = seconds; this.send({ cmd: 'seek', seconds: seconds }); };
   Player.prototype.playVideo = function () { this.send({ cmd: 'play' }); };
   Player.prototype.pauseVideo = function () { this.send({ cmd: 'pause' }); };
@@ -207,8 +212,140 @@ export const lineUp = (page: Page) => page.getByTestId('line-up');
 export const lineUpMessage = (page: Page) => page.getByTestId('line-up-message');
 export const lineUpButton = (
   page: Page,
-  name: 'Bar 1 starts now' | 'Line up again' | 'Tab earlier' | 'Tab later' | 'Follow' | 'Cancel',
+  name:
+    | 'Bar 1 starts now'
+    | 'Type a time'
+    | 'Save'
+    | 'Line up again'
+    | 'Tab earlier'
+    | 'Tab later'
+    | 'Follow'
+    | 'Cancel',
 ) => lineUp(page).getByRole('button', { name, exact: true });
+/** The field "Type a time" opens. */
+export const lineUpField = (page: Page) =>
+  lineUp(page).getByRole('textbox', { name: 'Bar 1 starts at' });
+
+/**
+ * Lines the user's link of that kind up as another device would: straight
+ * into the database. The page shows it at its next read (a reload).
+ */
+export async function setBarOne(
+  user: E2eUser,
+  kind: 'original' | 'drumless',
+  barOneSeconds: number | null,
+): Promise<void> {
+  const { data, error } = await admin
+    .from('song_links')
+    .update({ bar_one_seconds: barOneSeconds })
+    .eq('user_id', user.id)
+    .eq('kind', kind)
+    .select('id');
+  if (error) throw error;
+  if (data.length !== 1) throw new Error(`Expected one ${kind} link, found ${data.length}`);
+}
+
+/**
+ * Resolves once the score has been laid out: its bars have places. Not "an
+ * svg is visible": alphaTab draws a line only when it scrolls into view, and
+ * on a short window (a phone on its side) a fresh load has the whole score
+ * below the fold.
+ */
+export async function scoreLaidOut(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const player = (
+            window as never as {
+              __drumPalPlayer?: { barRectInWindow(barNumber: number): unknown };
+            }
+          ).__drumPalPlayer;
+          return !!player && player.barRectInWindow(1) !== null;
+        }),
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+}
+
+/** One reading of where the follow has put things, taken in the page in one instant. */
+export interface FollowSample {
+  /** The marked bar, 1-based. */
+  bar: number;
+  /** The marked bar's top and bottom in the window. */
+  marked: { top: number; bottom: number } | null;
+  /** The bar after it by number, or null for the tab's last bar or one not drawn. */
+  next: { top: number; bottom: number } | null;
+  /**
+   * The part of the window the score is read in: under the video's bar, above
+   * a phone's tab bar, and inside the score's own box, which from 768 px has a
+   * height of its own and clips what is scrolled out of it.
+   */
+  view: { top: number; bottom: number };
+}
+
+/**
+ * Records a `FollowSample` each time the marked bar changes, from now on,
+ * read in the page in the same task as the change is seen: where the marked
+ * bar and the next one are, and what of the window is free for the score.
+ * Read them back with `followSamples`.
+ */
+export async function recordFollow(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    interface Rect {
+      top: number;
+      bottom: number;
+    }
+    const scope = window as never as {
+      __drumPalPlayer?: {
+        getSnapshot(): { highlight: { startBar: number } | null; barCount: number | null };
+        barRectInWindow(barNumber: number): Rect | null;
+      };
+      __followSamples?: unknown[];
+      __followTimer?: number;
+    };
+    const player = scope.__drumPalPlayer;
+    if (!player) throw new Error('No player on window.__drumPalPlayer');
+    window.clearInterval(scope.__followTimer);
+    const samples: unknown[] = [];
+    scope.__followSamples = samples;
+    let last: number | null = null;
+    const span = (rect: Rect | null) => rect && { top: rect.top, bottom: rect.bottom };
+    scope.__followTimer = window.setInterval(() => {
+      const snapshot = player.getSnapshot();
+      const bar = snapshot.highlight?.startBar ?? null;
+      if (bar === last) return;
+      last = bar;
+      if (bar === null) return;
+      const videoBar = document.querySelector('[data-testid="recording-bar"]');
+      const tabs = document.querySelector('[data-bottom-tabs]')?.getBoundingClientRect();
+      const box = document.querySelector('[data-testid="score-viewport"]')?.getBoundingClientRect();
+      samples.push({
+        bar,
+        marked: span(player.barRectInWindow(bar)),
+        next: bar < (snapshot.barCount ?? 0) ? span(player.barRectInWindow(bar + 1)) : null,
+        view: {
+          top: Math.max(videoBar?.getBoundingClientRect().bottom ?? 0, box?.top ?? 0),
+          bottom: Math.min(
+            tabs && tabs.height > 0 ? tabs.top : window.innerHeight,
+            box?.bottom ?? Infinity,
+          ),
+        },
+      });
+    }, 20);
+  });
+}
+
+export const followSamples = (page: Page): Promise<FollowSample[]> =>
+  page.evaluate(
+    () => (window as never as { __followSamples?: FollowSample[] }).__followSamples ?? [],
+  );
+
+/** Whether a span lies wholly in the part of the window the score is read in. */
+export const onShowIn = (
+  span: { top: number; bottom: number } | null,
+  view: { top: number; bottom: number },
+): boolean => span !== null && span.top >= view.top - 1 && span.bottom <= view.bottom + 1;
 
 /** The bars marked on the score, 1-based, as the mounted player has them (debugPlayer.ts); null for none. */
 export function markedBars(page: Page): Promise<[number, number] | null> {
@@ -262,7 +399,7 @@ export const sourceSwitch = (page: Page) =>
   page.getByRole('radiogroup', { name: 'Play along with' });
 export const recordingFrame = (page: Page) => page.getByTestId('recording-frame');
 export const recordingBar = (page: Page) => page.getByTestId('recording-bar');
-/** Why the tab's controls aren't there: in the bar from 1024 px and in a phone on its side, under it otherwise, one of the two drawn. */
+/** Why the tab's controls aren't there: in the bar from 1024 px, under it otherwise, one of the two drawn. */
 export const recordingNote = (page: Page) =>
   page.getByText(/^The video has its own controls\./).filter({ visible: true });
 

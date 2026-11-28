@@ -148,6 +148,12 @@ export type PlayerEvents = {
   /** The user tapped a bar in the score. Jam mode seeks there; nothing happens by itself. */
   barTapped: { barNumber: number };
   /**
+   * The score has been drawn, or drawn again (a new width, a change of
+   * layout): every bar may be somewhere else, and `barRectInWindow` answers
+   * for the new drawing. For a screen that keeps a bar on show itself.
+   */
+  rendered: undefined;
+  /**
    * The user dragged a mouse across bars (desktop only; a finger scrolls).
    * 1-based and in ascending order whichever way the drag ran. Fires as the
    * drag reaches each bar, and once more with `done` on release. No barTapped
@@ -234,7 +240,7 @@ export class PlayerService {
   /** The bar a seek asked for, until the engine reports a position in it (see SEEK_SETTLE_MS). */
   private pendingSeek: { bar: BarTicks; until: number } | null = null;
   /** A showBar asked for before the song was ready, done once it is (see showBar). */
-  private pendingShowBar: number | null = null;
+  private pendingShowBar: { barNumber: number; nextBarNumber: number | null } | null = null;
   /** Cancels the count-in that is clicking now; null once it has handed over to playback. */
   private cancelCountIn: (() => void) | null = null;
   /**
@@ -436,27 +442,39 @@ export class PlayerService {
    * song is ready (a loop opened by link while the sounds load), or before the
    * notation has rendered (the sounds cached, the score still drawing), it is
    * kept and done when both are; a setRange meanwhile drops it.
+   *
+   * `nextBarNumber` is the bar played after it, for a screen that keeps a bar
+   * on show while something else plays (a recording): the box then turns a
+   * line early, so the line after the bar is on show too (`scrollToShow`).
    */
-  showBar(barNumber: number): void {
+  showBar(barNumber: number, nextBarNumber: number | null = null): void {
     if (this.disposed) return;
     if (!this.isLoaded()) {
-      this.pendingShowBar = barNumber;
+      this.pendingShowBar = { barNumber, nextBarNumber };
       return;
     }
     if (this.snapshot.status === 'playing') return;
     if (startTickOfBar(this.bars, barNumber) === null) return;
-    this.scrollToBarWhenRendered(barNumber);
+    const next =
+      nextBarNumber !== null && startTickOfBar(this.bars, nextBarNumber) !== null
+        ? nextBarNumber
+        : null;
+    this.scrollToBarWhenRendered(barNumber, next);
   }
 
   /** The engine can't scroll to a bar before the score has bounds; then it waits for `rendered`. */
-  private scrollToBarWhenRendered(barNumber: number): void {
-    this.pendingShowBar = this.engine.scrollToBar(barNumber - 1) ? null : barNumber;
+  private scrollToBarWhenRendered(barNumber: number, nextBarNumber: number | null = null): void {
+    const done =
+      nextBarNumber === null
+        ? this.engine.scrollToBar(barNumber - 1)
+        : this.engine.scrollToBar(barNumber - 1, nextBarNumber - 1);
+    this.pendingShowBar = done ? null : { barNumber, nextBarNumber };
   }
 
   private showPendingBar(): void {
     const shown = this.pendingShowBar;
     this.pendingShowBar = null;
-    if (shown !== null) this.showBar(shown);
+    if (shown !== null) this.showBar(shown.barNumber, shown.nextBarNumber);
   }
 
   /** The tempo a 1-based bar starts at, in the file's BPM; null before the score loads or for no such bar. */
@@ -715,8 +733,9 @@ export class PlayerService {
       this.showPendingBar();
     });
     engine.on('rendered', () => {
-      if (this.disposed || !this.isLoaded()) return;
-      this.showPendingBar();
+      if (this.disposed) return;
+      if (this.isLoaded()) this.showPendingBar();
+      this.events.emit('rendered', undefined);
     });
     engine.on('stateChanged', ({ playing }) => {
       if (this.disposed) return;

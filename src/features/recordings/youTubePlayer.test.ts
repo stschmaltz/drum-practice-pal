@@ -5,6 +5,8 @@ class StubYtPlayer {
   static made: StubYtPlayer[] = [];
   time = 0;
   rate = 1;
+  /** `YT.PlayerState` as the player would answer it now: -1 until the video has been started. */
+  playerState = -1;
   seekTo = vi.fn((seconds: number) => {
     this.time = seconds;
   });
@@ -26,6 +28,7 @@ class StubYtPlayer {
   }
   getCurrentTime = () => this.time;
   getPlaybackRate = () => this.rate;
+  getPlayerState = () => this.playerState;
   ready() {
     this.options.events.onReady();
   }
@@ -743,5 +746,101 @@ describe('the script failing (19 Test)', () => {
     document.head.querySelector('script')!.dispatchEvent(new Event('error'));
     await vi.advanceTimersByTimeAsync(0);
     expect(heard).not.toHaveBeenCalled();
+  });
+});
+
+describe('a video already going when its player first answers (19 QA issue 3)', () => {
+  it('the script arrives late, the video already playing: it is playing, started and polled from the answer on', async () => {
+    const { createYouTubePlayer, CLOCK_POLL_MS } = await loadModule();
+    const player = createYouTubePlayer(frameOnPage());
+    const heard: RecordingState[] = [];
+    player.subscribe((state) => heard.push(state));
+    expect(player.getState()).toMatchObject({ status: 'loading', started: false });
+
+    // A slow connection: the user tapped Play on the video long before the script landed.
+    window.YT = { Player: StubYtPlayer as never };
+    window.onYouTubeIframeAPIReady?.();
+    await vi.advanceTimersByTimeAsync(0);
+    const yt = StubYtPlayer.made.at(-1)!;
+    yt.time = 9;
+    yt.rate = 1.5;
+    yt.playerState = PLAYING;
+    yt.ready();
+    expect(heard.at(-1)).toEqual({
+      status: 'ready',
+      started: true,
+      playing: true,
+      seconds: 9,
+      rate: 1.5,
+    });
+
+    // No state change ever comes for a video that was playing all along: the poll runs anyway.
+    yt.time = 9.4;
+    await vi.advanceTimersByTimeAsync(CLOCK_POLL_MS);
+    expect(heard.at(-1)).toMatchObject({ playing: true, seconds: 9.4 });
+    player.pause();
+    expect(yt.pauseVideo).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['paused', PAUSED, { started: true, playing: false }],
+    ['buffering', BUFFERING, { started: true, playing: false }],
+    ['ended', 0, { started: true, playing: false }],
+    ['not started', -1, { started: false, playing: false }],
+    ['cued', 5, { started: false, playing: false }],
+  ])(
+    'a video that is %s when the player answers is read as that, and not polled',
+    async (_name, playerState, expected) => {
+      const { player, heard, yt, CLOCK_POLL_MS } = await setup();
+      yt.time = 31;
+      yt.playerState = playerState;
+      yt.ready();
+      expect(player.getState()).toMatchObject({ status: 'ready', seconds: 31, ...expected });
+      const count = heard.length;
+      await vi.advanceTimersByTimeAsync(CLOCK_POLL_MS * 4);
+      expect(heard).toHaveLength(count);
+    },
+  );
+
+  it('a wrapper made on a frame whose video is already playing starts playing, and polls', async () => {
+    const { createYouTubePlayer, frame, player: first, yt, CLOCK_POLL_MS } = await setup();
+    yt.ready();
+    yt.playerState = PLAYING;
+    yt.state(PLAYING);
+    first.dispose();
+
+    yt.time = 12;
+    const second = createYouTubePlayer(frame);
+    expect(second.getState()).toMatchObject({ status: 'ready', started: true, playing: true });
+    const heard: RecordingState[] = [];
+    second.subscribe((state) => heard.push(state));
+    yt.time = 12.3;
+    await vi.advanceTimersByTimeAsync(CLOCK_POLL_MS);
+    expect(heard.at(-1)).toMatchObject({ seconds: 12.3 });
+  });
+
+  it.each([
+    [
+      'throws',
+      () => {
+        throw new Error('gone');
+      },
+    ],
+    ['answers nonsense', () => undefined as unknown as number],
+  ])(
+    'a player whose state %s is ready and not started, as before',
+    async (_name, getPlayerState) => {
+      const { player, yt } = await setup();
+      yt.getPlayerState = getPlayerState;
+      yt.ready();
+      expect(player.getState()).toMatchObject({ status: 'ready', started: false, playing: false });
+    },
+  );
+
+  it('a player with no way to ask its state (an API of another shape) is ready and not started', async () => {
+    const { player, yt } = await setup();
+    (yt as { getPlayerState?: unknown }).getPlayerState = undefined;
+    yt.ready();
+    expect(player.getState()).toMatchObject({ status: 'ready', started: false, playing: false });
   });
 });

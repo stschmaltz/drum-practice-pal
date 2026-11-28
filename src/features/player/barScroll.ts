@@ -39,17 +39,36 @@ export function barBounds(systems: readonly SystemBoundsLike[], barIndex: number
  * the box's start, which is where alphaTab puts the playing bar (the bar at the
  * left edge in horizontal layout, its line at the top in page layout): the
  * score then doesn't move again when playback starts.
+ *
+ * `next` is the bar played after it, for a caller that keeps a bar on show
+ * while something else plays (a recording, Unit 19): when that bar is on a
+ * line below and not all on show, the box turns now, a line early, putting
+ * `rect`'s line at the top, so there is always something ahead to read. A
+ * next bar beside it, or above it (a repeat going back), turns nothing, and
+ * neither does a line that is at the top already in a box that holds one.
  */
-export function scrollToShow(rect: Rect, view: ScrollView): ScrollTarget | null {
+export function scrollToShow(
+  rect: Rect,
+  view: ScrollView,
+  next: Rect | null = null,
+): ScrollTarget | null {
   const left = axisScroll(rect.x, rect.w, view.left, view.width);
-  const top = axisScroll(rect.y, rect.h, view.top, view.height);
+  let top = axisScroll(rect.y, rect.h, view.top, view.height);
+  const nextCutOff =
+    next !== null &&
+    next.y > rect.y + EDGE_TOLERANCE_PX &&
+    !isInView(next.y, next.h, view.top, view.height);
+  if (top === view.top && nextCutOff) top = Math.max(0, rect.y);
+  if (left === view.left && Math.abs(top - view.top) <= EDGE_TOLERANCE_PX) top = view.top;
   if (left === view.left && top === view.top) return null;
   return { left, top };
 }
 
+const isInView = (start: number, length: number, scroll: number, size: number) =>
+  start >= scroll - EDGE_TOLERANCE_PX && start + length <= scroll + size + EDGE_TOLERANCE_PX;
+
 function axisScroll(start: number, length: number, scroll: number, size: number): number {
-  const inView =
-    start >= scroll - EDGE_TOLERANCE_PX && start + length <= scroll + size + EDGE_TOLERANCE_PX;
+  const inView = isInView(start, length, scroll, size);
   // A rect longer than the box can't all show: its start is what gets read first.
   const startsInView = length > size && Math.abs(start - scroll) <= EDGE_TOLERANCE_PX;
   if (inView || startsInView) return scroll;

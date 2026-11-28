@@ -151,12 +151,16 @@ const toMilliseconds = (seconds: number) => Math.round(seconds * 1000) / 1000;
 
 /**
  * What "Bar 1 starts now" saves for the video's clock at the press: that
- * second, to the millisecond, inside what the column takes. Null for a
- * reading that isn't a time.
+ * second, down to the millisecond, inside what the column takes. Down, never
+ * up: bar 1 must not start after the clock it was pressed at, or a video
+ * lined up while paused would count as "before bar 1" and mark nothing until
+ * it is played. Null for a reading that isn't a time.
  */
 export function lineUpSeconds(videoSeconds: number): number | null {
   if (!Number.isFinite(videoSeconds)) return null;
-  return toMilliseconds(Math.min(BAR_ONE_SECONDS_MAX, Math.max(0, videoSeconds)));
+  const inRange = Math.min(BAR_ONE_SECONDS_MAX, Math.max(0, videoSeconds));
+  // The margin is float noise: 7.432 * 1000 is a hair under 7432.
+  return Math.floor(inRange * 1000 + FLOAT_MARGIN_SECONDS) / 1000;
 }
 
 /**
@@ -178,15 +182,22 @@ export function canNudge(barOneSeconds: number, direction: NudgeDirection): bool
  * A time of the video as someone types it, in seconds to the millisecond, or
  * null for anything that isn't one the column takes: "7.25", "0:07.25",
  * "1:02:03.5" (minutes and seconds under 60 once there is a part before
- * them), and YouTube's own "1m30s". A comma is a decimal point. Never
- * clamped: a time past the limit is refused, not quietly moved.
+ * them), and YouTube's own "1m30s" and "1h2m3s", by the same rule ("1m90s"
+ * is refused). A comma is a decimal point. Never clamped: a time past the
+ * limit is refused, not quietly moved.
  */
 export function parseVideoClock(text: string): number | null {
   const typed = text.trim().replace(',', '.');
   let seconds: number | null = null;
-  const units = /^(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(typed);
-  if (typed !== '' && units && (units[1] !== undefined || units[2] !== undefined)) {
-    seconds = Number(units[1] ?? 0) * 60 + Number(units[2] ?? 0);
+  const units = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(typed);
+  if (typed !== '' && units && units.slice(1).some((part) => part !== undefined)) {
+    const [hours, minutes, secs] = units
+      .slice(1)
+      .map((part) => (part === undefined ? null : Number(part)));
+    // As with colons, a part after a larger one counts in sixties: "1m90s" isn't a time.
+    if (hours != null && minutes != null && minutes >= 60) return null;
+    if ((hours != null || minutes != null) && secs != null && secs >= 60) return null;
+    seconds = (hours ?? 0) * 3600 + (minutes ?? 0) * 60 + (secs ?? 0);
   } else {
     const parts = typed.split(':');
     const last = parts[parts.length - 1] ?? '';

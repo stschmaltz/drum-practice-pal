@@ -2,10 +2,12 @@
  * Supabase calls for a song's links. Plain async functions that throw on
  * error; the hooks in useSongLinks.ts are the only callers.
  */
+import { UserFacingError } from '@/lib/errorCopy';
 import { fetchAllPages } from '@/lib/fetchAllPages';
 import { PG } from '@/lib/postgresCodes';
 import { supabase } from '@/lib/supabase';
 import { throwIfError, unwrap } from '@/lib/supabaseResult';
+import { LINE_UP_COPY } from './lineUpCopy';
 import {
   SONG_LINK_SELECT,
   type LinkInsert,
@@ -94,27 +96,46 @@ async function pointLinkAt(userId: string, { id, provider, url }: LinkUpdate): P
   return updated.data !== null;
 }
 
+/** The link a line-up was made for now points at another video: the save was not made. */
+export class LinkChangedError extends UserFacingError {
+  override name = 'LinkChangedError';
+  constructor() {
+    super(LINE_UP_COPY.changed);
+  }
+}
+
 /**
  * Saves where bar 1 of the tab falls in a link's video (Unit 19), and returns
- * what the database now holds. The row is asked for back, as `pointLinkAt`
- * does: an update that matched no row is the link removed on another device,
- * and is said so (`PG.NO_ROWS`), not taken for a save.
+ * what the database now holds. The write is for the video the line-up was
+ * made on: it matches the row only while the link still has the address the
+ * page knew at the press (`url`), so a page that hasn't heard the link was
+ * pointed at another video on another device can't put the old video's
+ * line-up on the new one (19 QA issue 6). The row is asked for back, as
+ * `pointLinkAt` does, since PostgREST answers an update that matched nothing
+ * as a success; then the link is looked up to say which it was: removed
+ * (`PG.NO_ROWS`) or changed (`LinkChangedError`).
  */
 export async function saveBarOne(
   userId: string,
-  linkId: string,
-  barOneSeconds: number | null,
+  { linkId, url, barOneSeconds }: { linkId: string; url: string; barOneSeconds: number | null },
 ): Promise<number | null> {
   const updated = await supabase
     .from('song_links')
     .update({ bar_one_seconds: barOneSeconds })
     .eq('id', linkId)
     .eq('user_id', userId)
+    .eq('url', url)
     .select('id, bar_one_seconds')
     .maybeSingle();
   throwIfError(updated);
-  if (updated.data === null) {
-    throw Object.assign(new Error('No such song link'), { code: PG.NO_ROWS });
-  }
-  return updated.data.bar_one_seconds;
+  if (updated.data !== null) return updated.data.bar_one_seconds;
+  const still = await supabase
+    .from('song_links')
+    .select('id')
+    .eq('id', linkId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  throwIfError(still);
+  if (still.data !== null) throw new LinkChangedError();
+  throw Object.assign(new Error('No such song link'), { code: PG.NO_ROWS });
 }

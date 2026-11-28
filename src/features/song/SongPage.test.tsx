@@ -3542,7 +3542,7 @@ describe('SongPage recordings (Unit 14)', () => {
     }
 
     describe('a link that isn’t lined up', () => {
-      it('offers the line-up under the video, off until the video plays, and marks and moves nothing', async () => {
+      it('offers the line-up under the video, off until the video has been played, and marks and moves nothing', async () => {
         const { engine, video } = await openVideo({ links: [original] });
         expect(message()).toHaveTextContent('Line the tab up: when bar 1 starts, press');
         expectLocked(lineUpButton('Bar 1 starts now'));
@@ -3554,8 +3554,9 @@ describe('SongPage recordings (Unit 14)', () => {
         act(() => video.playAt(12));
         expectUnlocked(lineUpButton('Bar 1 starts now'));
         act(() => video.tick(20));
+        // Paused on a video that has been started: its clock is still the song's (19 QA issue 9).
         act(() => video.pauseAt(21));
-        expectLocked(lineUpButton('Bar 1 starts now'));
+        expectUnlocked(lineUpButton('Bar 1 starts now'));
 
         // Exactly Unit 14: no bar marked, nothing scrolled, a tap does nothing, nothing saved.
         act(() => engine.fire('barTapped', { barIndex: 5 }));
@@ -3567,19 +3568,36 @@ describe('SongPage recordings (Unit 14)', () => {
         expect(screen.getByTestId('score-viewport')).not.toHaveClass('score-tappable');
       });
 
-      it('a press while the video isn’t playing saves nothing; the same press while it plays does', async () => {
-        const { user, video } = await openVideo({ links: [original] });
+      it('a press before the video has been played saves nothing and says why; paused on a started video it saves the paused clock', async () => {
+        const { user, engine, video } = await openVideo({ links: [original] });
         act(() => video.becomeReady());
         await user.click(lineUpButton('Bar 1 starts now'));
-        act(() => video.playAt(3));
-        act(() => video.pauseAt(3));
-        await user.click(lineUpButton('Bar 1 starts now'));
+        expect(message()).toHaveTextContent('Press Play on the video first.');
+        expect(said()).toHaveTextContent('Press Play on the video first.');
         await settle();
         expect(links.sent('update')).toEqual([]);
 
         act(() => video.playAt(3));
+        act(() => video.pauseAt(3.5));
+        expect(message()).toHaveTextContent('Line the tab up: when bar 1 starts, press');
         await user.click(lineUpButton('Bar 1 starts now'));
-        await waitFor(() => expect(barOneSent()).toEqual([3]));
+        await waitFor(() => expect(barOneSent()).toEqual([3.5]));
+        // Bar 1 is marked on the paused clock itself, with nothing played since.
+        expect(marked(engine)).toEqual([1, 1]);
+      });
+
+      it('a video already playing when its player first answers is followed, with no pause and play (19 QA issue 3)', async () => {
+        const { user, engine, video } = await openVideo();
+        // A slow connection: YouTube's script lands with the video nine seconds in.
+        act(() => video.set({ status: 'ready', started: true, playing: true, seconds: 9 }));
+        expect(marked(engine)).toEqual([3, 3]);
+        expect(shown(engine)).toEqual([3]);
+        // Space works it: no "press Play on the video once".
+        await user.keyboard(' ');
+        expect(video.pause).toHaveBeenCalledTimes(1);
+        expect(message()).toHaveTextContent('Bar 1 at 0:04.00');
+        await user.click(lineUpButton('Line up again'));
+        expectUnlocked(lineUpButton('Bar 1 starts now'));
       });
     });
 
@@ -3630,7 +3648,7 @@ describe('SongPage recordings (Unit 14)', () => {
 
         release();
         expect(await within(lineUp()).findByRole('alert')).toHaveTextContent(
-          'Couldn’t save where bar 1 starts. The server refused it. Try again, or reload the page.',
+          'Couldn’t save the line-up. The server refused it. Try again, or reload the page.',
         );
         expect(lineUpButton('Bar 1 starts now')).toHaveFocus();
         noLineUpButton('Tab later');
@@ -3748,7 +3766,7 @@ describe('SongPage recordings (Unit 14)', () => {
         links.failNext('update');
         releaseSecond();
         expect(await within(lineUp()).findByRole('alert')).toHaveTextContent(
-          'Couldn’t save where bar 1 starts.',
+          'Couldn’t save the line-up.',
         );
         expect(links.rows()[0]).toMatchObject({ bar_one_seconds: BAR_ONE });
         // Back at what the server holds (4 s), not at the first nudge's 4.25.
@@ -3950,25 +3968,30 @@ describe('SongPage recordings (Unit 14)', () => {
         });
         afterEach(() => vi.unstubAllGlobals());
 
-        it('is scrolled to a bar the score box’s own scroll left out of sight, and never for one on show', async () => {
+        it('is scrolled to a bar the score box’s own scroll left out of sight, a line early, and never for one comfortably on show', async () => {
           const { user, engine, video } = await openVideo();
           // jsdom lays nothing out: the sticky bar ends at 0 and the window is 768 px tall.
           engine.barRects.set(0, { top: 300, bottom: 420, left: 0, right: 200 });
-          engine.barRects.set(1, { top: 900, bottom: 1020, left: 0, right: 200 });
-          engine.barRects.set(2, { top: -500, bottom: -380, left: 0, right: 200 });
+          engine.barRects.set(1, { top: 430, bottom: 550, left: 0, right: 200 });
+          engine.barRects.set(2, { top: 900, bottom: 1020, left: 0, right: 200 });
+          engine.barRects.set(3, { top: -500, bottom: -380, left: 0, right: 200 });
 
+          // Bar 1, with bar 2 on show under it: nothing moves.
           act(() => video.playAt(4.5));
           expect(scrollBy).not.toHaveBeenCalled();
+          // Bar 2 is the last on show: the page turns now, bar 2 to the top (19 QA, question 1).
           act(() => video.tick(6.5));
-          expect(scrollBy).toHaveBeenLastCalledWith({ top: 888, behavior: 'instant' });
+          expect(scrollBy).toHaveBeenLastCalledWith({ top: 418, behavior: 'instant' });
           act(() => video.tick(8.5));
+          expect(scrollBy).toHaveBeenLastCalledWith({ top: 888, behavior: 'instant' });
+          act(() => video.tick(10.5));
           expect(scrollBy).toHaveBeenLastCalledWith({ top: -512, behavior: 'instant' });
-          expect(scrollBy).toHaveBeenCalledTimes(2);
+          expect(scrollBy).toHaveBeenCalledTimes(3);
 
           // Follow off: the window is the reader's own.
           await user.click(lineUpButton('Follow'));
           act(() => video.tick(6.5));
-          expect(scrollBy).toHaveBeenCalledTimes(2);
+          expect(scrollBy).toHaveBeenCalledTimes(3);
         });
       });
     });
@@ -4134,11 +4157,14 @@ describe('SongPage recordings (Unit 14)', () => {
       it('a nudge for a link removed on another device says it has gone, and saves nothing', async () => {
         const { user } = await openVideo();
         links.setRows([]);
-        // The read that follows is held, so the page is still on the video when the answer lands.
+        // The save matches nothing and looks the link up; the read that follows the failure is
+        // held, so the page is still on the video when the answer lands.
+        const lookUp = links.holdNext('select');
         const release = links.holdNext('select');
         await user.click(lineUpButton('Tab later'));
+        lookUp();
         expect(await within(lineUp()).findByRole('alert')).toHaveTextContent(
-          'Couldn’t save where bar 1 starts. It has been deleted',
+          'Couldn’t save the line-up. It has been deleted',
         );
         release();
         await waitFor(() => noFrame());
@@ -4262,7 +4288,7 @@ describe('SongPage recordings (Unit 14)', () => {
         const releaseRead = links.holdNext('select');
         release();
         expect(await within(lineUp()).findByRole('alert')).toHaveTextContent(
-          'Couldn’t save where bar 1 starts. The server refused it. Try again, or reload the page.',
+          'Couldn’t save the line-up. The server refused it. Try again, or reload the page.',
         );
         expect(links.rows()[0]).toMatchObject({ bar_one_seconds: BAR_ONE });
         await waitFor(() => expect(marked(engine)).toEqual([4, 4]));
@@ -4506,11 +4532,15 @@ describe('SongPage recordings (Unit 14)', () => {
         // `display: none` from 768 px: no box.
         tabs.getBoundingClientRect = () => ({ top: 0, bottom: 0, height: 0 }) as DOMRect;
         document.body.append(tabs);
-        engine.barRects.set(0, rect(window.innerHeight - 120, window.innerHeight));
-        engine.barRects.set(1, rect(window.innerHeight - 100, window.innerHeight + 20));
-        act(() => video.playAt(4.5));
+        // The tab's last bar, so no line after it has to be on show too.
+        engine.barRects.set(15, rect(window.innerHeight - 120, window.innerHeight));
+        engine.barRects.set(14, rect(window.innerHeight - 100, window.innerHeight + 20));
+        // Bar 16 is the video from 34 to 36 s.
+        act(() => video.playAt(35));
+        expect(marked(engine)).toEqual([16, 16]);
         expect(scrollBy).not.toHaveBeenCalled();
-        act(() => video.tick(6.5));
+        act(() => video.tick(33));
+        expect(marked(engine)).toEqual([15, 15]);
         expect(scrollBy).toHaveBeenCalledTimes(1);
       });
     });
@@ -4683,7 +4713,7 @@ describe('SongPage recordings (Unit 14)', () => {
         const releaseRead = links.holdNext('select');
         await user.click(lineUpButton('Tab later'));
         expect(await within(lineUp()).findByRole('alert')).toHaveTextContent(
-          "Couldn’t save where bar 1 starts. The server couldn't be reached. Check the connection and try again.",
+          "Couldn’t save the line-up. The server couldn't be reached. Check the connection and try again.",
         );
         // The page is back on what it knew the server held; the server did take the nudge.
         expect(cached()).toEqual([BAR_ONE]);
@@ -4733,31 +4763,55 @@ describe('SongPage recordings (Unit 14)', () => {
     });
 
     describe('nothing moves', () => {
-      it('the line-up’s room is held while the links are read, and its two rows keep their height in every state', async () => {
+      it('the line-up’s room is held while the links are read, and is the same fixed rows in every state', async () => {
         serve({ links: [original] });
         const release = links.holdNext('select');
         renderSong(`${SONG_A}?source=original`);
         expect(await screen.findByText('Loading the recording…')).toBeVisible();
-        const bar = screen.getByTestId('recording-bar');
-        const rowsOf = (block: Element) =>
-          [...block.children].filter((child) => child.tagName === 'DIV');
-        // Two empty rows of the line-up's own heights stand in for it.
-        const space = bar.querySelector('[aria-hidden="true"].flex-col')!;
-        expect(rowsOf(space).map((row) => row.className)).toEqual([
-          expect.stringContaining('h-11'),
-          expect.stringContaining('h-11'),
-        ]);
+        /** What sizes the block: its columns, its rows of fixed height and the gap between them. */
+        const roomOf = (block: Element) =>
+          block.className
+            .split(' ')
+            .filter((name) => /grid|gap-/.test(name))
+            .sort()
+            .join(' ');
+        // An empty grid of the line-up's own rows stands in for it.
+        const space = screen.getByTestId('line-up-space');
+        expect(space).toBeEmptyDOMElement();
+        const room = roomOf(space);
+        expect(room).toContain('grid-rows-[repeat(2,2.75rem)]');
+        expect(room).toContain('sideways:grid-rows-[repeat(3,2.75rem)]');
         release();
         await frameShown();
-        const heights = () =>
-          rowsOf(lineUp()).map((row) => row.className.match(/\b(min-)?h-11\b/)?.[0]);
-        expect(heights()).toEqual(['min-h-11', 'h-11']);
+        expect(roomOf(lineUp())).toBe(room);
 
+        const user = userEvent.setup();
         const video = currentRecordingPlayer();
+        // Typing a time: the same block, as a form.
+        await user.click(lineUpButton('Type a time'));
+        expect(roomOf(lineUp())).toBe(room);
+        await user.click(lineUpButton('Cancel'));
         act(() => video.playAt(5));
-        await userEvent.setup().click(lineUpButton('Bar 1 starts now'));
+        await user.click(lineUpButton('Bar 1 starts now'));
         await waitFor(() => expect(lineUpButton('Tab later')).toBeInTheDocument());
-        expect(heights()).toEqual(['min-h-11', 'h-11']);
+        expect(roomOf(lineUp())).toBe(room);
+        await user.click(lineUpButton('Line up again'));
+        expect(lineUpButton('Cancel')).toBeInTheDocument();
+        expect(roomOf(lineUp())).toBe(room);
+      });
+
+      it('a failed save’s words are in the message’s cell of the same fixed rows, and every control is still there', async () => {
+        const { user } = await openVideo();
+        links.failNext('update');
+        await user.click(lineUpButton('Tab later'));
+        const alert = await within(lineUp()).findByRole('alert');
+        // In the cell, which grows upward out of its fixed row rather than pushing the rows apart.
+        expect(message()).toContainElement(alert);
+        expect(message()).toHaveClass('justify-end');
+        expect(lineUp().className).toContain('grid-rows-[repeat(2,2.75rem)]');
+        for (const name of ['Line up again', 'Tab earlier', 'Tab later', 'Follow']) {
+          expect(lineUpButton(name)).toBeInTheDocument();
+        }
       });
     });
   });

@@ -6,6 +6,8 @@ import { saveBarOne } from './songLinksApi';
 
 export interface BarOneSave {
   linkId: string;
+  /** The link's address as the page knew it at the press: the video the line-up is for. */
+  url: string;
   /** The second of the video at which the tab's bar 1 starts; null takes the line-up away. */
   barOneSeconds: number | null;
 }
@@ -31,9 +33,22 @@ export function cachedBarOne(
   rows: readonly SongLinkRow[] | undefined,
   linkId: string,
 ): number | null | undefined {
+  return cachedLineUp(rows, linkId)?.barOneSeconds;
+}
+
+/** A link as a press finds it in the cache: its line-up, and the address it is a line-up of. */
+export interface LinkAtPress {
+  barOneSeconds: number | null;
+  url: string;
+}
+
+function cachedLineUp(
+  rows: readonly SongLinkRow[] | undefined,
+  linkId: string,
+): LinkAtPress | undefined {
   const row = rows?.find((link) => link.id === linkId);
-  // A row cached by a build from before Unit 19 has no such field.
-  return row && (row.bar_one_seconds ?? null);
+  // A row cached by a build from before Unit 19 has no `bar_one_seconds`.
+  return row && { barOneSeconds: row.bar_one_seconds ?? null, url: row.url };
 }
 
 function withBarOne(
@@ -78,8 +93,7 @@ export function useSaveBarOne(songId: string) {
     mutationKey,
     networkMode: 'always',
     scope: { id: `line-up:${user.id}:${songId}` },
-    mutationFn: ({ linkId, barOneSeconds }: BarOneSave) =>
-      saveBarOne(user.id, linkId, barOneSeconds),
+    mutationFn: (save: BarOneSave) => saveBarOne(user.id, save),
     onMutate: ({ linkId, barOneSeconds }) => {
       // A read already on its way is from before this save: it must not land over it.
       void queryClient.cancelQueries({ queryKey });
@@ -107,15 +121,18 @@ export function useSaveBarOne(songId: string) {
 }
 
 /**
- * A link's line-up as the cache shows it at the moment of asking, for a
- * press: a nudge moves what is there now, an earlier nudge's optimistic value
- * included, not what the last render drew.
+ * A link as the cache shows it at the moment of asking, for a press: a nudge
+ * moves the line-up that is there now, an earlier nudge's optimistic value
+ * included, not what the last render drew; and every save carries the
+ * address the page knows then, the stored one, which the server matches
+ * (never the parser's tidied copy of it). Undefined when the link isn't
+ * cached.
  */
-export function useBarOneAtPress(songId: string): (linkId: string) => number | null | undefined {
+export function useLinkAtPress(songId: string): (linkId: string) => LinkAtPress | undefined {
   const user = useSignedInUser();
   const queryClient = useQueryClient();
   return (linkId) =>
-    cachedBarOne(
+    cachedLineUp(
       queryClient.getQueryData<SongLinkRow[]>(songLinkKeys.forSong(user.id, songId)),
       linkId,
     );

@@ -69,11 +69,14 @@ export function canDriveRecording(state: RecordingState): boolean {
 }
 
 /**
- * Whether the video's clock says where the song is at this moment: "Bar 1
- * starts now" takes it, so it must be the video's own and running.
+ * Whether the video's clock says where the song is: "Bar 1 starts now" takes
+ * it, so it must be the video's own, which it is once the video has been
+ * started. Playing or paused: pausing on the downbeat and pressing is the
+ * most exact way to line up by hand (19 QA issue 9). Before the first Play
+ * the clock may be an advert's, and the button says so when pressed.
  */
 export function canLineUp(state: RecordingState): boolean {
-  return canDriveRecording(state) && state.playing;
+  return canDriveRecording(state);
 }
 
 /** Whether two states are the same in everything but the clock's reading. */

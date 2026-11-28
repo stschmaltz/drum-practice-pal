@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore, type RefObject } from 'react';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import {
   canDriveRecording,
@@ -11,7 +11,7 @@ import {
   videoSecondsOfBar,
   type BarTime,
 } from '@/features/recordings/videoSync';
-import { windowScrollToShow } from './followScroll';
+import { windowScrollToShow, type ReadableView } from './followScroll';
 
 /** What the play screen hands its player while it is on a recording (Unit 19). */
 export interface RecordingSession {
@@ -44,9 +44,10 @@ function useBarTimes(player: PlayerService | null, snapshot: PlayerSnapshot): re
 }
 
 /**
- * The bar a state of the video falls in, or null when there is none to mark:
- * the video hasn't started (its clock may be an advert's), bar 1 hasn't come
- * yet, or the tab has run out.
+ * Where in the tab's play order (an index into `barTimes`) a state of the
+ * video falls, or null when there is no bar to mark: the video hasn't started
+ * (its clock may be an advert's), bar 1 hasn't come yet, or the tab has run
+ * out.
  */
 function barOf(
   state: RecordingState,
@@ -55,15 +56,17 @@ function barOf(
 ): number | null {
   if (!canDriveRecording(state)) return null;
   const position = barAtVideoSeconds(barTimes, barOneSeconds, state.seconds);
-  return position?.at === 'bar' ? position.barNumber : null;
+  return position?.at === 'bar' ? position.playIndex : null;
 }
 
 /**
- * The bar a lined-up video is on, re-rendering only when it changes (the
- * clock is heard a few times a second). Null when nothing is followed: no
- * frame, a link not lined up, the tab not timed yet.
+ * Where a lined-up video is in the tab's play order, re-rendering only when
+ * it moves to another bar (the clock is heard a few times a second). The
+ * place, not the bar's number: a repeated bar is followed by a different bar
+ * each time through. Null when nothing is followed: no frame, a link not
+ * lined up, the tab not timed yet.
  */
-function useVideoBar(
+function useVideoPlace(
   recording: RecordingSession | null,
   barTimes: readonly BarTime[],
 ): number | null {
@@ -94,13 +97,22 @@ function useVideoBar(
   return useSyncExternalStore(store.subscribe, store.get);
 }
 
-/** The part of the window the score can be read in: under the sticky video, above a phone's tab bar. */
-function readableView(barRef: RefObject<HTMLElement | null>) {
-  const top = barRef.current?.getBoundingClientRect().bottom ?? 0;
+/**
+ * The part of the window the score can be read in: under the sticky video,
+ * above a phone's tab bar. On a fresh load the video's bar hasn't stuck yet
+ * and ends lower than it will (below the window's foot, in a phone on its
+ * side): `stuckTop` is where it ends once it has, which is what a scroll is
+ * aimed under (19 QA issue 1).
+ */
+function readableView(barRef: RefObject<HTMLElement | null>): ReadableView {
+  const videoBar = barRef.current;
+  const rect = videoBar?.getBoundingClientRect();
+  // Where the bar sticks: its own `top` (0, or a safe-area inset), as the stylesheet has it.
+  const stickyTop = videoBar ? Number.parseFloat(getComputedStyle(videoBar).top) || 0 : 0;
   // Fixed along the bottom below 768 px (AppShell); not drawn at all from there up.
   const tabBar = document.querySelector('[data-bottom-tabs]')?.getBoundingClientRect();
   const bottom = tabBar && tabBar.height > 0 ? tabBar.top : window.innerHeight;
-  return { top, bottom };
+  return { top: rect?.bottom ?? 0, bottom, stuckTop: rect ? stickyTop + rect.height : 0 };
 }
 
 /** Where a lined-up video is in the tab. */
@@ -118,7 +130,15 @@ export interface VideoFollow {
  *   `useLoopPractice`'s `mark`, the one owner of the score's highlight).
  * - With `follow` on, brings that bar on show whenever it changes: the score
  *   box by `player.showBar` (a bar already on show moves nothing), then the
- *   window when the bar still isn't in the part of it the score is read in.
+ *   window when the bar isn't in the part of it the score is read in, or is
+ *   the last bar on show there (`windowScrollToShow`: the page turns a line
+ *   early). Between two bars the window is the reader's own, with two
+ *   exceptions, both of them the page moving under the reader rather than
+ *   the reader moving the page: a bar that couldn't be placed when it was
+ *   marked (the score still drawing) is brought on show when it can be, and
+ *   after the window's width changes (a rotation) the bar is brought back at
+ *   once and again when the score has been drawn for the new width, playing
+ *   or paused. A change of height alone (a phone's address bar) is nothing.
  *
  * It reads the video's own clock and nothing else: a pause, a seek in
  * YouTube's controls, buffering and a change of speed all arrive as the
@@ -130,19 +150,47 @@ export function useVideoFollow(
   recording: RecordingSession | null,
 ): VideoFollow {
   const barTimes = useBarTimes(player, snapshot);
-  const bar = useVideoBar(recording, barTimes);
+  const place = useVideoPlace(recording, barTimes);
+  const bar = place === null ? null : (barTimes[place]?.barNumber ?? null);
+  // The bar played after it, which is not always the next by number (a repeat).
+  const nextBar = place === null ? null : (barTimes[place + 1]?.barNumber ?? null);
   const follow = recording?.follow ?? false;
   const barRef = recording?.barRef;
+  // Kept across bars: a rotation's redraw can land after the mark has moved on.
+  const layout = useRef({ width: 0, redrawAwaited: false });
 
   useEffect(() => {
     if (!player || bar === null || !follow || !barRef) return;
-    player.showBar(bar);
-    const rect = player.barRectInWindow(bar);
-    if (!rect) return;
-    const distance = windowScrollToShow(rect, readableView(barRef));
-    // At once, not animated: the bar is being played now. jsdom has no scrollBy.
-    if (distance !== null) window.scrollBy?.({ top: distance, behavior: 'instant' });
-  }, [player, bar, follow, barRef]);
+    /** Brings the bar on show; false when it couldn't be placed (the score not drawn yet). */
+    const bringOnShow = () => {
+      player.showBar(bar, nextBar);
+      const rect = player.barRectInWindow(bar);
+      if (!rect) return false;
+      const next = nextBar === null ? null : player.barRectInWindow(nextBar);
+      const distance = windowScrollToShow(rect, readableView(barRef), next);
+      // At once, not animated: the bar is being played now. jsdom has no scrollBy.
+      if (distance !== null) window.scrollBy?.({ top: distance, behavior: 'instant' });
+      return true;
+    };
+    // A width that changed while nothing was followed is covered by this run's own look.
+    layout.current.width = window.innerWidth;
+    let unplaced = !bringOnShow();
+    const onResize = () => {
+      if (window.innerWidth === layout.current.width) return;
+      layout.current = { width: window.innerWidth, redrawAwaited: true };
+      bringOnShow();
+    };
+    const offRendered = player.on('rendered', () => {
+      if (!unplaced && !layout.current.redrawAwaited) return;
+      layout.current.redrawAwaited = false;
+      unplaced = !bringOnShow();
+    });
+    window.addEventListener('resize', onResize);
+    return () => {
+      offRendered();
+      window.removeEventListener('resize', onResize);
+    };
+  }, [player, bar, nextBar, follow, barRef]);
 
   return { bar, barTimes };
 }

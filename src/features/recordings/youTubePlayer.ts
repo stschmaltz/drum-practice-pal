@@ -12,6 +12,9 @@
  * - There is no time event: `getCurrentTime()` is polled. `onStateChange`
  *   gives -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued;
  *   `onPlaybackRateChange` the new rate; `onError` a code (100, 101, 150, 153…).
+ *   `getPlayerState()` gives the same numbers on asking: a video the user
+ *   started before the player answered (the script on a slow connection)
+ *   fires no state change, so the state is asked for when it first answers.
  * - `destroy()` removes the frame, which is React's: it is never called.
  *
  * Nothing is loaded until a frame is handed over, which is when the play
@@ -27,10 +30,15 @@ export const CLOCK_POLL_MS = 250;
 
 /** `YT.PlayerState`, written out: the API's object isn't there until its script is. */
 const YT_PLAYING = 1;
+/** The states of a video nobody has played yet: unstarted, and cued. */
+const YT_NOT_STARTED: readonly number[] = [-1, 5];
+/** Every state the API has, written out: anything else it answers isn't one. */
+const YT_STATES: readonly number[] = [-1, 0, 1, 2, 3, 5];
 
 interface YtPlayer {
   getCurrentTime(): number;
   getPlaybackRate(): number;
+  getPlayerState?(): number;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
   playVideo(): void;
   pauseVideo(): void;
@@ -158,6 +166,28 @@ export function createYouTubePlayer(frame: HTMLIFrameElement): RecordingPlayer {
     }
   };
 
+  /**
+   * Whether the video is playing, and has ever played, asked of the player
+   * itself: for the moment it first answers, when no event has said. Left as
+   * they were when it can't say.
+   */
+  const readPlayback = () => {
+    const yt = widget.yt;
+    if (!yt || !widget.ready) return;
+    try {
+      const playerState = yt.getPlayerState?.();
+      if (playerState === undefined || !YT_STATES.includes(playerState)) return;
+      const playing = playerState === YT_PLAYING;
+      state = {
+        ...state,
+        playing,
+        started: state.started || playing || !YT_NOT_STARTED.includes(playerState),
+      };
+    } catch {
+      // As readClock.
+    }
+  };
+
   const emit = () => {
     for (const listener of [...listeners]) listener({ ...state });
   };
@@ -188,6 +218,8 @@ export function createYouTubePlayer(frame: HTMLIFrameElement): RecordingPlayer {
       return;
     } else if (event.type === 'ready') {
       state = { ...state, status: 'ready' };
+      // The video may have been started already, by a tap that came before this answer.
+      readPlayback();
       readClock();
     } else if (event.type === 'state') {
       // Buffering, paused, ended, cued, unstarted: the clock stands still in all of them.
@@ -217,8 +249,12 @@ export function createYouTubePlayer(frame: HTMLIFrameElement): RecordingPlayer {
   if (widget.unavailable) state = { ...state, status: 'unavailable' };
   else if (widget.ready) {
     state = { ...state, status: 'ready' };
+    readPlayback();
     readClock();
   }
+
+  // A video already playing on a frame wrapped again has no event to set the poll going.
+  keepPollInStep();
 
   const ifReady = (act: (yt: YtPlayer) => void) => {
     const yt = widget.yt;

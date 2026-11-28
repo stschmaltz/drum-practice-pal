@@ -500,3 +500,52 @@ describe('the scroll at each count-in leaves the count-in as it was', () => {
     expect(service.getSnapshot().status).toBe('playing');
   });
 });
+
+describe('showBar with the bar played after it (19 QA fix round 1)', () => {
+  it('hands the engine both, 0-based, so the box can turn a line early', () => {
+    const { engine, service } = setupCountIn(COUNT_IN_OFF);
+    service.showBar(8, 9);
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(7, 8);
+    // No bar after it: only the bar itself is brought on show.
+    service.showBar(16);
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(15);
+    service.showBar(8, null);
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(7);
+  });
+
+  it('a bar after it that the song doesn’t have is no bar', () => {
+    const { engine, service } = setupCountIn(COUNT_IN_OFF);
+    service.showBar(16, 17);
+    expect(engine.scrollToBar).toHaveBeenLastCalledWith(15);
+  });
+
+  it('asked before the notation has rendered, both are kept and done when it has', () => {
+    const { engine, service } = setupCountIn(COUNT_IN_OFF);
+    engine.laidOut = false;
+    service.showBar(8, 9);
+    engine.laidOut = true;
+    engine.fire('rendered', undefined);
+    expect(engine.scrollToBar.mock.calls).toEqual([
+      [7, 8],
+      [7, 8],
+    ]);
+    // Done: the next drawing asks for nothing.
+    engine.fire('rendered', undefined);
+    expect(engine.scrollToBar).toHaveBeenCalledTimes(2);
+  });
+
+  it('tells a screen that keeps a bar on show itself when the score has been drawn again', () => {
+    const { engine, service } = setupCountIn(COUNT_IN_OFF);
+    const drawn = vi.fn();
+    const off = service.on('rendered', drawn);
+    engine.fire('rendered', undefined);
+    expect(drawn).toHaveBeenCalledTimes(1);
+    off();
+    engine.fire('rendered', undefined);
+    expect(drawn).toHaveBeenCalledTimes(1);
+    service.dispose();
+    service.on('rendered', drawn);
+    engine.fire('rendered', undefined);
+    expect(drawn).toHaveBeenCalledTimes(1);
+  });
+});

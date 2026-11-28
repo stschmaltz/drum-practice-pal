@@ -589,14 +589,32 @@ describe('lining up and nudging', () => {
       );
     });
 
+    // Down to the millisecond, never up: bar 1 must not start after the clock it was pressed
+    // at, or a video lined up while paused would be "before bar 1" until it is played (19 QA
+    // fix round 1, where a paused video can be lined up).
     it.each([
       [0.0004, 0],
-      [0.0006, 0.001],
-      [7.4999, 7.5],
-      [59.9996, 60],
-      [BAR_ONE_SECONDS_MAX - 0.0004, BAR_ONE_SECONDS_MAX],
-    ])('a press at %s s is saved to the millisecond: %s', (video, saved) => {
+      [0.0006, 0],
+      [7.4999, 7.499],
+      [59.9996, 59.999],
+      [7.432, 7.432],
+      [0.001, 0.001],
+      [BAR_ONE_SECONDS_MAX - 0.0004, BAR_ONE_SECONDS_MAX - 0.001],
+    ])('a press at %s s is saved to the millisecond at or before it: %s', (video, saved) => {
       expect(lineUpSeconds(video)).toBe(saved);
+    });
+
+    it('a video lined up on a clock that then stands still (paused) is in bar 1 on that clock', () => {
+      const times = barTimesInPlayOrder(bars([1, 2, 3]), at(120));
+      let checked = 0;
+      for (let clock = 0; clock < 12; clock += 0.0137) {
+        const barOne = lineUpSeconds(clock)!;
+        expect(barOne).toBeLessThanOrEqual(clock + 1e-9);
+        expect(clock - barOne).toBeLessThan(0.001 + 1e-9);
+        expect(barAtVideoSeconds(times, barOne, clock)).toMatchObject({ at: 'bar', barNumber: 1 });
+        checked += 1;
+      }
+      expect(checked).toBeGreaterThan(800);
     });
 
     it('what a press saves, the column takes: never under zero, never over its end, always a number', () => {
@@ -711,6 +729,42 @@ describe('a typed time for bar 1', () => {
     [String(BAR_ONE_SECONDS_MAX + 1)],
     ['99:59:59'],
   ])('refuses %j', (text) => {
+    expect(parseVideoClock(text)).toBeNull();
+  });
+
+  // YouTube's own way of writing a time, hours included (19 QA issue 14).
+  it.each([
+    ['1h2m3s', 3723],
+    ['1h', 3600],
+    ['2h30m', 9000],
+    ['1h5s', 3605],
+    ['1h2m3.5s', 3723.5],
+    ['1h0m0s', 3600],
+    ['12h', 43200],
+    ['90s', 90],
+    ['90m', 5400],
+    ['1m59.9s', 119.9],
+    ['0h59m59s', 3599],
+  ])('reads %j, with its units, as %s seconds', (text, seconds) => {
+    expect(parseVideoClock(text)).toBe(seconds);
+  });
+
+  it.each([
+    ['1m90s'],
+    ['1m60s'],
+    ['1h60m'],
+    ['1h90m'],
+    ['1h2m60s'],
+    ['1h90s'],
+    ['13h'],
+    ['12h0m1s'],
+    ['h'],
+    ['1h2s3m'],
+    ['1m2h'],
+    ['1.5h'],
+    ['1.5m'],
+    ['1h 2m'],
+  ])('refuses %j: a part after a larger one counts in sixties, in a fixed order', (text) => {
     expect(parseVideoClock(text)).toBeNull();
   });
 });

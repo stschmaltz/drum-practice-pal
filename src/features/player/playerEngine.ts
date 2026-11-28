@@ -110,8 +110,12 @@ export interface PlayerEngine {
    * cursor during playback. Scrolling only; playback is untouched. False when
    * it couldn't tell because the score hasn't rendered yet (no bounds): ask
    * again on `rendered`. True once it could, scrolled or not.
+   *
+   * With `nextBarIndex`, the bar played after it, the box also turns a line
+   * early: when that bar is on a line below that isn't all on show, the
+   * bar's own line goes to the top (`scrollToShow`).
    */
-  scrollToBar(barIndex: number): boolean;
+  scrollToBar(barIndex: number, nextBarIndex?: number): boolean;
   /**
    * Where a bar (0-based) is drawn in the window at this moment, for a screen
    * that keeps it on show by scrolling the window (a phone's read-along

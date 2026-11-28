@@ -107,11 +107,22 @@ function SongScreen({ song }: { song: Song }) {
   const { frameRef, player: recordingPlayer } = useRecordingPlayer();
   // Page state, not saved: following is on whenever a lined-up video is opened.
   const [follow, setFollow] = useState(true);
-  // Space or a tap on a bar tried to work a video nobody has tapped yet; said under the video.
-  // Kept per player, so another video doesn't open with the note about the last one.
-  const [askedOf, setAskedOf] = useState<RecordingPlayer | null>(null);
-  const onNeedsFirstTap = useCallback(() => setAskedOf(recordingPlayer), [recordingPlayer]);
-  const needsFirstTap = askedOf !== null && askedOf === recordingPlayer;
+  // Space or a tap on a bar tried to work a video nobody has tapped yet; said under the video,
+  // and again at each try. Kept per player, so another video doesn't open with the note about
+  // the last one.
+  const [asked, setAsked] = useState<{ of: RecordingPlayer | null; times: number }>({
+    of: null,
+    times: 0,
+  });
+  const onNeedsFirstTap = useCallback(
+    () =>
+      setAsked((last) => ({
+        of: recordingPlayer,
+        times: last.of === recordingPlayer ? last.times + 1 : 1,
+      })),
+    [recordingPlayer],
+  );
+  const firstTapAsks = asked.of !== null && asked.of === recordingPlayer ? asked.times : 0;
   const barOneSeconds = video?.link.barOneSeconds ?? null;
   const onRecording = sources.choice.state !== 'tab';
   const recording = useMemo(
@@ -150,7 +161,7 @@ function SongScreen({ song }: { song: Song }) {
           player={recordingPlayer}
           follow={follow}
           onFollowChange={setFollow}
-          needsFirstTap={needsFirstTap}
+          firstTapAsks={firstTapAsks}
         />
       )}
       <SongFileGate song={song}>
@@ -173,8 +184,10 @@ function SongScreen({ song }: { song: Song }) {
 
 /**
  * One row from 1024 px, and in a phone on its side, where the video's 200 px
- * are already half the window: the note and the way out go beside the video,
- * not under it.
+ * are already half the window: the way out and the line-up go beside the
+ * video, not under it. From 1024 px the note is there too; in a phone on its
+ * side the room beside the video is the line-up's, and the note stays under
+ * the bar (19 QA issue 2).
  */
 const recordingBarClass = `sticky top-0 ${fullBleedBarClass} flex flex-col gap-1 pb-1 pt-[max(0.5rem,env(safe-area-inset-top))] lg:flex-row-reverse lg:items-start lg:justify-between lg:gap-6 lg:pb-3 sideways:flex-row-reverse sideways:items-start sideways:justify-between sideways:gap-4 sideways:pt-[max(0.25rem,env(safe-area-inset-top))]`;
 
@@ -194,7 +207,7 @@ function RecordingBar({
   player,
   follow,
   onFollowChange,
-  needsFirstTap,
+  firstTapAsks,
 }: {
   barRef: Ref<HTMLDivElement>;
   frameRef: Ref<HTMLIFrameElement>;
@@ -204,7 +217,7 @@ function RecordingBar({
   player: RecordingPlayer | null;
   follow: boolean;
   onFollowChange: (follow: boolean) => void;
-  needsFirstTap: boolean;
+  firstTapAsks: number;
 }) {
   return (
     <>
@@ -219,7 +232,7 @@ function RecordingBar({
               player={player}
               follow={follow}
               onFollowChange={onFollowChange}
-              needsFirstTap={needsFirstTap}
+              firstTapAsks={firstTapAsks}
             />
           ) : (
             // The same room while the links are read, so the score doesn't move when they arrive.
@@ -227,8 +240,8 @@ function RecordingBar({
           )}
         </RecordingBox>
       </div>
-      {/* From 1024 px, and in a phone on its side, the same words sit in the bar, beside the video (RecordingBox). */}
-      <p className="text-sm text-ink-muted lg:hidden sideways:hidden" data-testid="recording-note">
+      {/* From 1024 px the same words sit in the bar, beside the video (RecordingBox). */}
+      <p className="text-sm text-ink-muted lg:hidden" data-testid="recording-note">
         {RECORDING_NOTE}
       </p>
     </>
