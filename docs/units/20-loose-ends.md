@@ -448,3 +448,70 @@ No async window was added. The ones the change passes through:
 - `npm run check`.
 - `E2E_PORT=4383 npx playwright test tests/e2e/practice.spec.ts --project=phone --project=desktop`.
 - By hand: practise a loop at 80% for a while, nudge to 100% for a few seconds, pause: the row in `practice_sessions` has 0.8. Pause and play a few times past the minimum: the loop's History (More, Show history) shows one "Today" row whose time is the sum, and the summary says "1 day".
+
+### Test
+
+55 unit and component tests and 2 e2e cases added over Build's. No app code changed. No bugs found.
+
+**Per acceptance line**
+
+- _A session's logged speed is the speed most of it was played at._
+  - `sessionTracker.test.ts`, "the speed of a session, window by window" (13): ten changes of speed in one session, with the banked time checked against the play time at every change (nothing lost, nothing counted twice); one entry per speed shown however often it is gone back to; a speed set during the first count-in, during the count-in before a repeat, and arriving in the same step as that count-in; a session still under the minimum carried across two pauses at 60%, 75% and 60% again (logged at 60% with its first start and all 36 seconds); one taken past the minimum by a try at 100% (logged at 60%); a typed BPM's exact ratio (0.708333) logged when most of the time was at it and two other speeds came after; a logged session, a dropped short one and another loop each leave none of their time to the next session; a hidden page's stop (`trackerPhase('playing', true)`) with the Unit 17 case; a speed reported again unchanged moves nothing. Build's describe already has the Unit 17 case itself, the tie to the later speed, and the tie with a speed gone back to.
+  - `usePracticeTracker.test.tsx`, "the speed of a logged session, window by window" (11), through the real hook and player:
+    - The three ways out (the mutation at a pause, `logSessionUnobserved` as the screen goes, the keepalive from a hidden page) send rows equal in every field but the id, 0.708333 in each.
+    - Later sends carry the row as built: a keepalive that failed is sent again by the mutation as the same row though a key changed the speed on the hidden page meanwhile; "Try again" after a failed log sends the row that failed, not one at the speed set since; a log waiting offline sits in the outbox with that speed and is logged with it.
+    - A log on its way: a speed change and a second sitting during it leave the row in flight as sent, and the second row has none of the first's time.
+    - A speed set during a count-in and in the count-in before a repeat (the real `countingIn` status); a short session across pauses at different speeds; a short session ended by hiding the page after a try at 100%; a speed set while the page is hidden gets no play time from the hour in the pocket.
+    - StrictMode: one row, at the speed most of it was played at.
+  - e2e, `practice.spec.ts`, "a sitting mostly at 80% with a last try at 100%…": a loop saved at 80%, about ten seconds played, four nudges to 100% while playing, two seconds more. The database row has `speed_ratio` 0.8; the loop's own saved speed is 1; the overview's summary says "Fill: 1x s, 80% → 100%"; the loop's line says 100%; its History on the overview says "Today · … · 80% · n passes".
+- _A loop's History shows a day once with its total time._
+  - `LoopHistory.test.tsx` (new, 16), the component alone with the clock faked, whole rows asserted: one sitting with pauses is "Today · 8 min · 80% (96 BPM) · 53 passes" and "1 day · 8 min in all"; six sessions on four days, a try at 100% among them, as four rows newest first; each day once in a `<time datetime>` with no clock time; a sitting across midnight as two rows; no tempo known shows the percent alone; a typed BPM (0.775, "78% (93 BPM)", where 78% of 120 would be 94); a session ahead of the clock in the one "Today" row. The preview: 39 sessions on 13 days show ten rows, a total of all 13, and "Show all 13 days"; ten days of forty sessions offer nothing more; eleven days offer the eleventh.
+  - With the history open while a session is logged (`sessionLogged`, as a pause does): today's row grows and there is one "Today", before the list is read again and after; the day's first session adds its row above the older days; a long session at another speed changes the speed the row says; the same session heard of twice is counted once; a first session ever replaces "No practice logged yet"; "Show all" stays pressed.
+  - e2e, `practice.spec.ts`, "a loop's History is a row per day…": 15 sessions written by the service role on 13 days (last night at 23:50, three today from the day's first minute with a 40-second try at 100%, eleven older days). The panel shows "13 days · 1 h 6 min in all", ten rows, "Today · 4 min 40 s · 80% (96 BPM) · 29 passes", "Yesterday · 6 min 40 s · 70% (84 BPM) · 15 passes", no time of day, no text outside the box; "Show all 13 days" gives 13 rows. Then, the history still open, six seconds are played: the database has 16 sessions, there is still one "Today" row, and it says the old total plus the new row's seconds and passes, after the refetch too.
+- _Stored sessions are unchanged._ Every row the tests send is compared whole against the tracker's record (`theRow`); the columns test in `sessions.test.ts` is Build's. The e2e cases read the rows back with the service role.
+- _The Stats page's numbers for the seed user still match `stats.spec.ts`._ Run, not changed: 14 of 14 at phone and desktop, the seed-user test among them (the seed user is on this stack; nothing was seeded or reset).
+
+**`historyDays` against the Stats chart's `dailySpeeds`** (`sessions.test.ts`, "historyDays beside the Stats chart", 15)
+
+- Eight ties on one day, each run through both functions and against the answer worked out in the test (the slowest of the speeds with the most time): the slower played first, played last, three level, level only once a speed gone back to is added up, a typed BPM against the percent above it, two ratios of one percent together against a faster speed, ratios either side of a half percent, 25% against 200%. Each also in reverse order.
+- Three months of sessions made up by a fixed rule (over a hundred sessions on more than fifty days, few distinct lengths and speeds so ties are common), in two orders: the two agree on every day, speed and time.
+- The days add up to the summary line's total with every session in one day; a sitting across midnight; `historyDays` leaves its input alone.
+- The one difference, pinned: a session dated on a later day than the device's today. History counts it in today's row ("Today", one row); the chart gives it a point on that later day. With nothing else today History still says "Today" for it. Once the clock reaches that day the two agree again. A session later today by the clock is not moved.
+
+**Checked by breaking the code** (each restored; `git status` shows no app file changed)
+
+| Break                                                                               | Tests that failed                                                    |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| The record takes the speed the session ended on (the old rule)                      | 22 (9 tracker, 13 hook), and the e2e case (`speed_ratio` 1, not 0.8) |
+| A tie goes to the earlier speed                                                     | Build's two tie tests                                                |
+| A change of speed mid-play banks nothing                                            | 18 (8 tracker, 10 hook)                                              |
+| A stop or count-in banks under the speed that arrives with it                       | 2, the count-in one new                                              |
+| Leaving the loop banks under the speed that arrives with it                         | 3 (Build's and Unit 09's)                                            |
+| Speeds told apart by exact ratio; the first ratio of a percent kept                 | 1 each (Build's)                                                     |
+| `historyDays`: a session ahead of the clock keeps its own day                       | 4 (2 new, the component's, Build's)                                  |
+| `historyDays`: a tie to the faster speed                                            | 10 (7 of the 8 tie rows, the made-up season, Build's two)            |
+| `historyDays`: the fastest speed; the speed played last                             | 14; 11                                                               |
+| `historyDays`: days by UTC date                                                     | 14 (run in a zone west of UTC)                                       |
+| `historyDays`: exact-ratio speeds; first ratio kept; passes not added; oldest first | 3; 1; 11; 17                                                         |
+| `historyDays`: a day's time is its last session's                                   | the e2e case ("Today · 40 s")                                        |
+| `LoopHistory`: eleven days on show; no BPM; the total of the rows on show           | 2; 13; 1                                                             |
+
+One break changed nothing and is not a gap: dropping "a speed set while paused is the speed the next stretch plays at" from the stop branch. The next "sounding" step takes the speed from its own input, so that line only sets what an unplayed session would be logged at, and an unplayed session is never logged.
+
+**Seen while testing** (none is a bug)
+
+- _History and the chart on a session ahead of the clock._ A user would see it as a loop whose History says "1 day" while its Stats row says "2 days" and its chart has a point on tomorrow, until tomorrow comes. It needs a session whose start is on a later local day than the viewing device's today: a device clock set ahead when it was logged (the server allows a day) or put back since. Time zones alone don't do it (a start is an instant, and it is never after now on a right clock). The Stats heatmap already draws days after today empty, so Stats is not of one mind either. Left as Build decided; for Review to weigh whether the chart should fold such a day into today as History does.
+- _A tie inside a session and a tie inside a day go opposite ways_ (later; slower), as Build decided. A session of 20 s at 90% then 20 s at 70% is logged at 70% (the later) and a day of two such sessions reads 70% (the slower), so they agree whenever the drummer ends on the slower speed, and differ only when equal time ends on the faster.
+- _The design spec's "song, loop history" state is the empty history_ ("No practice logged yet"), so it never drew a day row before or after this batch. The new History e2e case checks the rows for text outside the box at phone and desktop; contrast and target size of a row are those of the text it had (`text-ink-muted` on `surface`, no control in a row).
+- The seed-user Stats test passes in under a second; it does check the numbers (it throws if the seed user or their sessions are missing).
+
+**Not covered**
+
+- Tablet e2e, the full e2e suite and `npm run test:db`, by instruction. Safari, Firefox, a real device.
+- History open past midnight (nothing redraws "Today"; Build's note, batch 9).
+- Sessions stored before this change keep the end speed they were logged with; no test can tell them from new ones.
+
+**How to verify**
+
+- `npm run check`: green, 146 files, 5767 tests passed, 2 skipped.
+- `E2E_PORT=4383 npx playwright test tests/e2e/practice.spec.ts tests/e2e/design.spec.ts tests/e2e/stats.spec.ts --project=phone --project=desktop`: 64 passed, 4 skipped (the phone-only cases on desktop). By spec: practice 27, design 23, stats 14.

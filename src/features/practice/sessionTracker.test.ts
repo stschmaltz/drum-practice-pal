@@ -386,6 +386,195 @@ describe('the speed of a session', () => {
   });
 });
 
+// Unit 20, batch 5 Test: the windows a speed can change in, one row each.
+describe('the speed of a session, window by window', () => {
+  const totalOf = (state: TrackerState) =>
+    (state?.speedTimes ?? []).reduce((total, time) => total + time.playedMs, 0);
+
+  it('through many changes it is still the speed with the most time, and no time is lost or counted twice', () => {
+    const t = tracking();
+    // Seconds played at each speed in turn: 60% has 9 + 9 + 9, 70% has 8 + 8 + 8, the rest a few each.
+    const stretches: [number, number][] = [
+      [0.6, 9],
+      [0.7, 8],
+      [0.8, 3],
+      [0.6, 9],
+      [0.9, 5],
+      [0.7, 8],
+      [1, 2],
+      [0.6, 9],
+      [0.7, 8],
+      [1.25, 4],
+    ];
+    let clock = 0;
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.6 });
+    for (const [speedRatio, seconds] of stretches) {
+      t.at(clock, { speedRatio });
+      // What is banked is always everything played before this stretch.
+      expect(totalOf(t.state())).toBe(t.state()!.playedMs);
+      expect(playedMsAt(t.state()!, T0 + clock * SECOND)).toBe(clock * SECOND);
+      clock += seconds;
+    }
+
+    expect(t.at(clock, { phase: 'stopped' })).toMatchObject({
+      durationSeconds: 65,
+      speedRatio: 0.6,
+    });
+    expect(t.ended).toHaveLength(1);
+  });
+
+  it('keeps one entry per speed shown, however often it is gone back to', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    for (let second = 1; second <= 20; second++) {
+      t.at(second, { speedRatio: second % 2 === 0 ? 0.7 : 0.75 });
+    }
+
+    // The stretch banked last (19 to 20 s, at 75%) is the last entry.
+    expect(t.state()!.speedTimes).toEqual([
+      { speedRatio: 0.7, playedMs: 10 * SECOND },
+      { speedRatio: 0.75, playedMs: 10 * SECOND },
+    ]);
+  });
+
+  it('a speed set during a count-in counts from the downbeat, for the time played at it', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'countingIn', speedRatio: 0.7 });
+    t.at(1, { speedRatio: 0.9 });
+    t.at(2, { phase: 'sounding' });
+
+    expect(t.at(34, { phase: 'stopped' })).toMatchObject({
+      startedAt: '2026-11-23T18:00:02.000Z',
+      durationSeconds: 32,
+      speedRatio: 0.9,
+    });
+  });
+
+  it('a speed set during the count-in before a repeat takes none of the pass before it', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    t.at(20, { phase: 'countingIn' });
+    t.at(21, { speedRatio: 1 });
+    t.at(22, { phase: 'sounding' });
+
+    // 20 s at 70%, then 15 at 100%: the two seconds of clicks are nobody's.
+    expect(t.at(37, { phase: 'stopped' })).toMatchObject({ durationSeconds: 35, speedRatio: 0.7 });
+  });
+
+  it('a speed that arrives with the count-in is not what the pass before it was played at', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    t.at(20, { phase: 'countingIn', speedRatio: 1 });
+    t.at(22, { phase: 'sounding' });
+
+    expect(t.at(37, { phase: 'stopped' })).toMatchObject({ durationSeconds: 35, speedRatio: 0.7 });
+  });
+
+  it('a session still under the minimum carries each go at its own speed across the pauses', () => {
+    const t = tracking();
+    // Three goes of 12 seconds, the speed changed in each pause: 60%, 75%, back to 60%.
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.6 });
+    expect(t.at(12, { phase: 'stopped' })).toBeNull();
+    t.at(60, { speedRatio: 0.75 });
+    t.at(61, { phase: 'sounding' });
+    expect(t.at(73, { phase: 'stopped' })).toBeNull();
+    t.at(120, { speedRatio: 0.6 });
+    t.at(121, { phase: 'sounding' });
+
+    expect(t.at(133, { phase: 'stopped' })).toEqual({
+      id: 'session-1',
+      loopId: 'loop-a',
+      startedAt: '2026-11-23T18:00:00.000Z',
+      durationSeconds: 36,
+      speedRatio: 0.6,
+      repeats: 0,
+    });
+  });
+
+  it('a session still under the minimum that ends on a try at full speed is logged at the speed it mostly had', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.6 });
+    t.at(25, { phase: 'stopped' });
+    t.at(26, { speedRatio: 1 });
+    t.at(27, { phase: 'sounding' });
+
+    expect(t.at(33, { phase: 'stopped' })).toMatchObject({ durationSeconds: 31, speedRatio: 0.6 });
+  });
+
+  it("a typed BPM's exact ratio is what is logged when most of the time was at it, whatever came after", () => {
+    const t = tracking();
+    // 85 BPM typed at 120 is 0.708333; then a round nudge to 75% and a try at 100%.
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.708333 });
+    t.at(40, { speedRatio: 0.75 });
+    t.at(55, { speedRatio: 1 });
+
+    expect(t.at(60, { phase: 'stopped' })?.speedRatio).toBe(0.708333);
+  });
+
+  it('a session logged leaves none of its speeds to the next one', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.6 });
+    t.at(300, { phase: 'stopped' });
+    t.at(301, { speedRatio: 0.9 });
+    t.at(302, { phase: 'sounding' });
+
+    // Five minutes at 60% were the last session's: this one is 31 seconds at 90%.
+    expect(t.at(333, { phase: 'stopped' })).toMatchObject({
+      id: 'session-2',
+      durationSeconds: 31,
+      speedRatio: 0.9,
+    });
+  });
+
+  it('another loop starts with none of the time of the loop left, at any speed', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.6 });
+    t.at(300, { loopId: 'loop-b', speedRatio: 0.6 });
+    expect(t.state()).toMatchObject({ loopId: 'loop-b', playedMs: 0, speedTimes: [] });
+    t.at(310, { speedRatio: 0.9 });
+
+    // On loop B: 10 s at 60%, 25 at 90%. Loop A's five minutes at 60% don't count here.
+    expect(t.at(335, { phase: 'stopped' })).toMatchObject({
+      loopId: 'loop-b',
+      durationSeconds: 35,
+      speedRatio: 0.9,
+    });
+  });
+
+  it('a session dropped for being short takes its speeds with it', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.6 });
+    t.at(20, { loopId: null });
+    expect(t.ended).toHaveLength(0);
+    t.at(30, { loopId: 'loop-a', speedRatio: 0.9 });
+    t.at(46, { speedRatio: 0.6 });
+
+    // 16 s at 90%, 15 at 60%: the 20 dropped at 60% would have made it a session at 60%.
+    expect(t.at(61, { phase: 'stopped' })).toMatchObject({ durationSeconds: 31, speedRatio: 0.9 });
+  });
+
+  it('the hidden page ends the stretch at the speed it was played at, like any stop', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.8 });
+    t.at(600, { speedRatio: 1 });
+
+    // trackerPhase gives "stopped" for a hidden page, while the player is still "playing".
+    expect(t.at(660, { phase: trackerPhase('playing', true) })).toMatchObject({
+      durationSeconds: 660,
+      speedRatio: 0.8,
+    });
+  });
+
+  it('a speed reported again unchanged while sounding moves nothing', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    const before = t.state();
+    t.at(10, { speedRatio: 0.7 });
+
+    expect(t.state()).toBe(before);
+  });
+});
+
 describe('leaving the loop', () => {
   it('for another loop logs the first at its own speed and opens the second', () => {
     const t = tracking();

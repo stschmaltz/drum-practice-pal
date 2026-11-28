@@ -327,3 +327,236 @@ describe('historyDays', () => {
     ).toEqual(chart.map(({ key, percent, seconds }) => ({ key, percent, seconds })));
   });
 });
+
+// Unit 20, batch 5 Test: the day rule is written twice (here and in the Stats
+// chart's dailySpeeds). These are the places the two could come apart.
+describe('historyDays beside the Stats chart (dailySpeeds)', () => {
+  const now = local(2026, 11, 23, 21, 0);
+  let nextId = 1;
+  const session = (startedAt: Date, seconds: number, speedRatio: number): PracticeSession => ({
+    id: `d${nextId++}`,
+    loop_id: 'loop-1',
+    started_at: startedAt.toISOString(),
+    duration_seconds: seconds,
+    speed_ratio: speedRatio,
+    repeats: 1,
+  });
+  /** What both say of a loop: each day, newest first, with its speed as shown and its time. */
+  const historySays = (sessions: readonly PracticeSession[], at = now) =>
+    historyDays(sessions, at).map((day) => ({
+      key: day.key,
+      percent: ratioToPercent(day.speedRatio),
+      seconds: day.seconds,
+    }));
+  const chartSays = (sessions: readonly PracticeSession[]) =>
+    dailySpeeds(sessions, 'loop-1')
+      .reverse()
+      .map(({ key, percent, seconds }) => ({ key, percent, seconds }));
+
+  // Each row: [hour, seconds, speed], all on one day.
+  it.each<[string, [number, number, number][]]>([
+    [
+      'two speeds level, the slower played first',
+      [
+        [18, 60, 0.7],
+        [19, 60, 0.9],
+      ],
+    ],
+    [
+      'two speeds level, the slower played last',
+      [
+        [18, 60, 0.9],
+        [19, 60, 0.7],
+      ],
+    ],
+    [
+      'three speeds level',
+      [
+        [17, 45, 1],
+        [18, 45, 0.6],
+        [19, 45, 0.8],
+      ],
+    ],
+    [
+      'level only once a speed gone back to is added up',
+      [
+        [17, 30, 0.9],
+        [18, 60, 0.7],
+        [19, 30, 0.9],
+      ],
+    ],
+    [
+      'level between a typed BPM and the round percent above it',
+      [
+        [18, 60, 0.708333],
+        [19, 60, 0.72],
+      ],
+    ],
+    [
+      'two ratios of one percent together level with a faster speed',
+      [
+        [17, 30, 0.704],
+        [18, 30, 0.696],
+        [19, 60, 1],
+      ],
+    ],
+    [
+      'ratios a hair each side of a half percent',
+      [
+        [17, 50, 0.7449],
+        [18, 50, 0.7451],
+        [19, 60, 0.745],
+      ],
+    ],
+    [
+      'the slowest and the fastest the app takes, level',
+      [
+        [18, 31, 2],
+        [19, 31, 0.25],
+      ],
+    ],
+  ])('a tie: %s', (_name, rows) => {
+    const sessions = rows.map(([hour, seconds, speed]) =>
+      session(local(2026, 11, 23, hour), seconds, speed),
+    );
+    // Worked out here with none of either function: the slowest of the speeds with the most time.
+    const byPercent = new Map<number, number>();
+    for (const [, seconds, speed] of rows) {
+      const percent = ratioToPercent(speed);
+      byPercent.set(percent, (byPercent.get(percent) ?? 0) + seconds);
+    }
+    const most = Math.max(...byPercent.values());
+    const slowestOfTheLongest = Math.min(
+      ...[...byPercent].filter(([, seconds]) => seconds === most).map(([percent]) => percent),
+    );
+
+    expect(historySays(sessions)).toEqual(chartSays(sessions));
+    expect(historySays(sessions)).toHaveLength(1);
+    expect(historySays(sessions)[0]?.percent).toBe(slowestOfTheLongest);
+    // Whatever order the rows are read in.
+    expect(historySays([...sessions].reverse())).toEqual(chartSays(sessions));
+  });
+
+  it('agrees over three months of sessions made up by rule, read in any order', () => {
+    // A fixed sequence, not Math.random: a failure must be the same failure next run.
+    let seed = 20261123;
+    const next = (below: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return Math.floor(seed / 65536) % below;
+    };
+    const speeds = [0.6, 0.65, 0.704, 0.696, 0.708333, 0.85, 1];
+    const sessions: PracticeSession[] = [];
+    for (let daysBack = 0; daysBack < 90; daysBack++) {
+      const count = next(5);
+      for (let i = 0; i < count; i++) {
+        sessions.push(
+          session(
+            // Never after 21:00, so none is ahead of `now` on the latest day.
+            new Date(2026, 10, 23 - daysBack, next(21), next(60)),
+            // Few distinct lengths and speeds, so ties are common.
+            30 * (1 + next(3)),
+            speeds[next(speeds.length)] ?? 1,
+          ),
+        );
+      }
+    }
+    const reordered = [...sessions].sort((a, b) => a.id.localeCompare(b.id));
+
+    expect(sessions.length).toBeGreaterThan(100);
+    expect(historySays(sessions).length).toBeGreaterThan(50);
+    expect(historySays(sessions)).toEqual(chartSays(sessions));
+    expect(historySays(reordered)).toEqual(chartSays(sessions));
+  });
+
+  it('adds up to the same time as the summary line, with every session in exactly one day', () => {
+    const sessions = [
+      session(local(2026, 11, 23, 0, 0), 31, 0.8),
+      session(local(2026, 11, 22, 23, 59), 45, 0.8),
+      session(local(2026, 11, 1, 12), 600, 0.5),
+      session(local(2025, 11, 23, 12), 90, 1),
+    ];
+
+    const days = historyDays(sessions, now);
+
+    expect(days.map((day) => day.key)).toEqual([
+      '2026-11-23',
+      '2026-11-22',
+      '2026-11-01',
+      '2025-11-23',
+    ]);
+    expect(days.reduce((total, day) => total + day.seconds, 0)).toBe(
+      totalPracticeSeconds(sessions),
+    );
+    expect(days.reduce((total, day) => total + day.repeats, 0)).toBe(4);
+  });
+
+  // The one place they differ on purpose (20 Build, Decisions). Pinned so a
+  // change to either side is seen: History has no "tomorrow" row, the chart has
+  // a point on that day. A user sees it only with a device clock that was ahead
+  // when the session was logged, or put back since.
+  it('a session dated ahead of the clock: History counts it for today, the chart on its own later day', () => {
+    const sessions = [
+      session(local(2026, 11, 23, 9), 60, 0.8),
+      session(local(2026, 11, 24, 3), 90, 1),
+    ];
+
+    expect(historySays(sessions)).toEqual([{ key: '2026-11-23', percent: 100, seconds: 150 }]);
+    expect(chartSays(sessions)).toEqual([
+      { key: '2026-11-24', percent: 100, seconds: 90 },
+      { key: '2026-11-23', percent: 80, seconds: 60 },
+    ]);
+    // Once the clock reaches that day the two agree again.
+    expect(historySays(sessions, local(2026, 11, 24, 8))).toEqual(chartSays(sessions));
+  });
+
+  it('a session ahead of the clock with nothing today still makes one row, "Today"', () => {
+    const days = historyDays(
+      [session(local(2026, 11, 24, 3), 90, 1), session(local(2026, 11, 22, 9), 60, 0.8)],
+      now,
+    );
+
+    expect(days.map((day) => [day.key, day.label, day.seconds])).toEqual([
+      ['2026-11-23', 'Today', 90],
+      ['2026-11-22', 'Yesterday', 60],
+    ]);
+  });
+
+  it('later today by the clock is today, and is not moved', () => {
+    // 23:30 tonight when it is 21:00: ahead of the clock, the same day.
+    const days = historyDays([session(local(2026, 11, 23, 23, 30), 60, 0.8)], now);
+
+    expect(days).toEqual([
+      { key: '2026-11-23', label: 'Today', seconds: 60, repeats: 1, speedRatio: 0.8 },
+    ]);
+  });
+
+  it('a sitting across midnight is two rows, each session in the day it began', () => {
+    const afterMidnight = local(2026, 11, 24, 0, 20);
+    const days = historyDays(
+      [
+        session(local(2026, 11, 23, 23, 40), 300, 0.8),
+        // Began at 23:58 and ran past midnight: it is the day before's.
+        session(local(2026, 11, 23, 23, 58), 400, 0.8),
+        session(local(2026, 11, 24, 0, 10), 200, 0.9),
+      ],
+      afterMidnight,
+    );
+
+    expect(days.map((day) => [day.label, day.seconds, day.speedRatio])).toEqual([
+      ['Today', 200, 0.9],
+      ['Yesterday', 700, 0.8],
+    ]);
+  });
+
+  it('does not change the list it is given', () => {
+    const sessions = [
+      session(local(2026, 11, 20, 9), 60, 0.8),
+      session(local(2026, 11, 23, 9), 60, 0.8),
+    ];
+    const before = structuredClone(sessions);
+
+    historyDays(sessions, now);
+
+    expect(sessions).toEqual(before);
+  });
+});

@@ -67,6 +67,45 @@ export async function addLoopLeftAlone(user: E2eUser, name: string, daysAgo: num
   if (session.error) throw session.error;
 }
 
+/** A session as a spec writes it: when it began, on the device's clock, and what was played. */
+export interface PastSession {
+  startedAt: Date;
+  seconds: number;
+  speedRatio: number;
+  repeats: number;
+}
+
+/**
+ * Puts sessions on one of the user's loops, by the service role: practice on
+ * earlier days, which no spec can play its way to. A start more than a day
+ * ahead of the server's clock is refused, and that throws here.
+ */
+export async function addSessions(
+  user: E2eUser,
+  loopName: string,
+  sessions: readonly PastSession[],
+): Promise<void> {
+  const loop = await admin
+    .from('loops')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('name', loopName)
+    .single();
+  if (loop.error) throw loop.error;
+  const inserted = await admin.from('practice_sessions').insert(
+    sessions.map((session) => ({
+      id: crypto.randomUUID(),
+      user_id: user.id,
+      loop_id: loop.data.id,
+      started_at: session.startedAt.toISOString(),
+      duration_seconds: session.seconds,
+      speed_ratio: session.speedRatio,
+      repeats: session.repeats,
+    })),
+  );
+  if (inserted.error) throw inserted.error;
+}
+
 /** The practice screen's speed in large type and its round nudges, each saved as made (Unit 16). */
 export const practiceSpeed = (page: Page) => page.getByTestId('practice-speed');
 export const nudge = (page: Page, which: 'Slower' | 'Faster') =>
