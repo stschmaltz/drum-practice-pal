@@ -9,7 +9,11 @@ import { opArgs, queryResult, type FakeResult, type QueryCall } from './fakeSupa
 export const LINK_SONG_ID = '11111111-1111-4111-8111-111111111111';
 export const VIDEO_ID = 'dQw4w9WgXcQ';
 export const WATCH_URL = `https://www.youtube.com/watch?v=${VIDEO_ID}`;
-export const EMBED_URL = `https://www.youtube-nocookie.com/embed/${VIDEO_ID}?playsinline=1&rel=0`;
+/**
+ * The frame's address on the play screen: the player answers the page's own
+ * origin (Unit 19), which under jsdom is `window.location.origin`.
+ */
+export const EMBED_URL = `https://www.youtube-nocookie.com/embed/${VIDEO_ID}?playsinline=1&rel=0&enablejsapi=1&origin=${encodeURIComponent(globalThis.location?.origin ?? '')}`;
 export const SPOTIFY_URL = 'https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC';
 
 export function linkRow(id: string, overrides: Partial<SongLinkRow> = {}): SongLinkRow {
@@ -20,6 +24,7 @@ export function linkRow(id: string, overrides: Partial<SongLinkRow> = {}): SongL
     provider: 'web',
     url: `https://example.com/${id}`,
     created_at: '2026-11-21T12:00:00Z',
+    bar_one_seconds: null,
     ...overrides,
   };
 }
@@ -58,17 +63,15 @@ export function linkTable(initial: SongLinkRow[] = []) {
   let rows = initial;
   const failures = new Map<LinkQueryMethod, NonNullable<FakeResult['error']>>();
   const lost = new Set<LinkQueryMethod>();
-  const gates = new Map<LinkQueryMethod, Promise<void>>();
+  /** Held calls, in the order asked for: each `holdNext` holds one more call of its method. */
+  const gates = new Map<LinkQueryMethod, Promise<void>[]>();
   const filter = (call: QueryCall, method: string, column: string) =>
     call.ops.find((op) => op.method === method && op.args[0] === column)?.args[1];
 
   async function answer(call: QueryCall): Promise<FakeResult> {
     const method = LINK_WRITES.find((write) => opArgs(call, write)) ?? 'select';
-    const gate = gates.get(method);
-    if (gate) {
-      gates.delete(method);
-      await gate;
-    }
+    const gate = gates.get(method)?.shift();
+    if (gate) await gate;
     const failed = failures.get(method);
     if (failed) {
       failures.delete(method);
@@ -94,6 +97,7 @@ export function linkTable(initial: SongLinkRow[] = []) {
         kind: inserted.kind,
         provider: inserted.provider,
         url: inserted.url,
+        bar_one_seconds: inserted.bar_one_seconds ?? null,
         // The database stamps its own "now": later than every row a test starts with.
         created_at: new Date(Date.UTC(2026, 10, 27, 12, 0, rows.length)).toISOString(),
       });
@@ -103,16 +107,29 @@ export function linkTable(initial: SongLinkRow[] = []) {
     if (method === 'update') {
       const id = filter(call, 'eq', 'id');
       const changes = opArgs(call, 'update')?.[0] as Partial<SongLinkRow>;
-      const found = rows.some((row) => row.id === id);
-      rows = rows.map((row) => (row.id === id ? { ...row, ...changes } : row));
-      // `.select('id').maybeSingle()` after an update: the row's id, or nothing.
-      return { data: found ? { id } : null, error: null };
+      // A write for one address of the link (a line-up) matches nothing once it has another.
+      const url = filter(call, 'eq', 'url');
+      if (url !== undefined && rows.find((row) => row.id === id)?.url !== url) {
+        return { data: null, error: null };
+      }
+      // The database's own rule: a link pointed at another address loses its line-up,
+      // unless the same write sets one (song_links_before_write).
+      const applied = (row: SongLinkRow): SongLinkRow =>
+        changes.url !== undefined && changes.url !== row.url && !('bar_one_seconds' in changes)
+          ? { ...row, ...changes, bar_one_seconds: null }
+          : { ...row, ...changes };
+      rows = rows.map((row) => (row.id === id ? applied(row) : row));
+      // `.select(…).maybeSingle()` after an update: the row as it now is, or nothing.
+      return { data: rows.find((row) => row.id === id) ?? null, error: null };
     }
     if (method === 'delete') {
       const ids = filter(call, 'in', 'id') as string[];
       rows = rows.filter((row) => !ids.includes(row.id));
       return { data: null, error: null };
     }
+    // One link asked for by its id (`.maybeSingle()`): the row, or nothing.
+    const id = filter(call, 'eq', 'id');
+    if (id !== undefined) return { data: rows.find((row) => row.id === id) ?? null, error: null };
     return {
       data: rows.filter((row) => row.song_id === filter(call, 'eq', 'song_id')),
       error: null,
@@ -136,7 +153,9 @@ export function linkTable(initial: SongLinkRow[] = []) {
     },
     holdNext: (method: LinkQueryMethod) => {
       let release!: () => void;
-      gates.set(method, new Promise<void>((resolve) => (release = resolve)));
+      const held = gates.get(method) ?? [];
+      held.push(new Promise<void>((resolve) => (release = resolve)));
+      gates.set(method, held);
       return release;
     },
     /** What every `method` write sent so far carried: a payload, or the ids of a delete. */

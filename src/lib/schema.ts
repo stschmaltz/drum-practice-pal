@@ -33,6 +33,8 @@ export const SONG_TEMPO_MAX = 1000;
 export const LOOP_NAME_MAX_LENGTH = 100;
 /** song_links.url can't be longer. */
 export const SONG_LINK_URL_MAX_LENGTH = 2048;
+/** song_links.bar_one_seconds is between 0 and this: within a 12-hour video. */
+export const BAR_ONE_SECONDS_MAX = 43200;
 export const SONG_LINK_KINDS = Constants.public.Enums.song_link_kind;
 
 /** practice_sessions.duration_seconds can't be longer: no sitting lasts a day. */

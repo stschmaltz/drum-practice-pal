@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { Announcement } from '@/lib/announcement';
 import { loopsInPanelOrder, type Loop } from '@/features/loops/loopForm';
 import type { LoopPractice } from '@/features/loops/useLoopPractice';
 import { readCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
@@ -41,6 +42,13 @@ interface SongShortcutInputs {
    * can see. YouTube's own keys work while its frame has focus.
    */
   off?: boolean;
+  /**
+   * Space on a recording (Unit 19), the one key that still acts while `off`:
+   * it plays and pauses the video. Returns false to leave the key to the
+   * browser (the video's player hasn't answered yet). Asked with the same
+   * input guard as every shortcut, so Space typed into a field is a space.
+   */
+  recordingSpace?: (() => boolean) | null;
 }
 
 /**
@@ -58,6 +66,7 @@ export function useSongShortcuts({
   playGate = canPlay,
   speedGate = canChangeOptions,
   off = false,
+  recordingSpace = null,
 }: SongShortcutInputs) {
   const [helpOpen, setHelpOpen] = useState(false);
   // What the last key changed, for a live region: the control it changed may be folded
@@ -67,9 +76,27 @@ export function useSongShortcuts({
   const closeHelp = useCallback(() => setHelpOpen(false), []);
 
   // Read by the listener at each press, so it is installed once and never sees an old render.
-  const latest = useRef({ player, practice, loops, playGate, speedGate, helpOpen, off });
+  const latest = useRef({
+    player,
+    practice,
+    loops,
+    playGate,
+    speedGate,
+    helpOpen,
+    off,
+    recordingSpace,
+  });
   useLayoutEffect(() => {
-    latest.current = { player, practice, loops, playGate, speedGate, helpOpen, off };
+    latest.current = {
+      player,
+      practice,
+      loops,
+      playGate,
+      speedGate,
+      helpOpen,
+      off,
+      recordingSpace,
+    };
   });
 
   useEffect(() => {
@@ -80,7 +107,8 @@ export function useSongShortcuts({
       // Only for the press whose keydown this is: a keyup lost to another window must not
       // cancel a later Space the page leaves alone (the shortcut list's Close).
       if (event.key === ' ') swallowSpaceKeyup = false;
-      if (latest.current.off) return;
+      const { off, recordingSpace } = latest.current;
+      if (off && !recordingSpace) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       const resolved = resolveShortcut(event, {
         focus: focusKindOf(
@@ -96,6 +124,14 @@ export function useSongShortcuts({
         characterKeys: readCharacterKeysOn(),
       });
       if (!resolved) return;
+      if (off) {
+        // Only Space, and only when the video's player took it: every other key is the browser's.
+        if (resolved.action !== 'togglePlay') return;
+        if (resolved.run && !recordingSpace?.()) return;
+        event.preventDefault();
+        swallowSpaceKeyup = true;
+        return;
+      }
       // The key is ours even when this press does nothing: no page scroll or button press under it.
       event.preventDefault();
       if (event.key === ' ') swallowSpaceKeyup = true;
@@ -131,21 +167,6 @@ export function useSongShortcuts({
   }, []);
 
   return { helpOpen, openHelp, closeHelp, announcement };
-}
-
-/** What the live region says; `count` goes up at every saying, equal or not. */
-export interface Announcement {
-  text: string;
-  count: number;
-}
-
-/**
- * The live region's content. A region whose text doesn't change isn't read
- * again, so every other saying ends in a no-break space, which screen readers
- * don't speak: the same change twice (M, a click, M) is still heard twice.
- */
-export function announcementText({ text, count }: Announcement): string {
-  return count % 2 === 1 ? `${text}\u00a0` : text;
 }
 
 /** Runs the action; returns where a loop key moved to, for the announcement. */

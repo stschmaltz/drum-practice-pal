@@ -175,6 +175,7 @@ Handoff notes written before the Visual design unit was added call the release u
 | 14  | Songs with recordings                       | 13         |
 | 15  | Play-along player, markers, recording loops | 14         |
 | 18  | Songs from a link alone                     | 14         |
+| 19  | The tab follows the video                   | 14         |
 | 16  | Songs first and practice progress           | 13         |
 | 17  | Stats that say something                    | 16         |
 | 20  | Loose ends                                  | 14, 17     |
@@ -537,6 +538,85 @@ Each line carries its class, its id from the Unit 20 triage (`docs/loose-ends.md
 
 None left: Unit 16's note is in the scope above (Unit 20 triage, 15.1).
 
+### 19 The tab follows the video
+
+Shane after Unit 14 (2026-11-28): "can we make the tabs follow along with the videos at all? maybe we need some sort of auto scrolling". Designed with him the same day: real following from the video's own clock, not a blind scroll at the tab's tempo (which falls out of step at the first pause, seek or speed change). It is the first slice of Unit 15: the player behind an interface starts here, and Unit 15's markers and loops build on it.
+
+**Goal:** while a YouTube recording plays on the song's play screen, the tab shows where the song is: the current bar is marked and kept on screen, through pauses, seeks and YouTube's speed changes.
+
+**For whom and when** (job 4 in `docs/product.md`, reading along, and job 2, finding the hard parts): a drummer playing along to the recording, sticks in hand, who can't scroll. On a phone in portrait the tab under the video is one bar to a line, and Unit 14's QA found it needs a flick every few seconds: this removes the flicks.
+
+**What the service allows** (Build checks each from YouTube's IFrame Player API reference and writes what it found into its note; nothing here is relied on unchecked)
+
+- With `enablejsapi=1` and an `origin` parameter the embedded player answers the IFrame Player API: the current time, the playback rate and its changes, the player's state (playing, paused, buffering, ended), `seekTo`, `playVideo`, `pauseVideo`. Whether it does so on `youtube-nocookie.com`, and whether the API script must be loaded from `youtube.com` or the frame can be driven by `postMessage` alone, is to be checked; the app keeps Unit 14's rule that nothing is requested from YouTube until a recording is opened
+- The app can't start a video's sound before the user has tapped the video once (browsers' autoplay rules, YouTube's own); after that, play and pause from the app work
+- Ads play in the same frame; the player's clock is the video's, so an ad shifts nothing, but the app should not mark bars while an ad plays if the API says so
+- Spotify gives the app nothing: this unit is YouTube only, and says so nowhere a Spotify link shows (there is simply no following there)
+
+**Scope**
+
+- **A `RecordingPlayer` behind an interface** (`src/features/recordings/recordingPlayer.ts`, as `PlayerEngine` is for alphaTab): `subscribe` to `{ seconds, rate, playing }`, `seekTo(seconds)`, `play()`, `pause()`, `dispose()`. `youTubePlayer.ts` is the only module that talks to YouTube's API; a `FakeRecordingPlayer` in `src/test/` drives every test. The video box from Unit 14 mounts it; the frame's address stays built by the parser, with the API's parameters added in the same one place
+- **Where the song is, from the video's time** is pure (`src/features/recordings/videoSync.ts`, tests first): the tab's bars in play order with the second each starts at (from the tempos, meters and repeats the player already has: `barStartTempos`, `barMeters`, the played-bars order), `barAtVideoSeconds(barStarts, barOneSeconds, videoSeconds)` and its inverse `videoSecondsOfBar`. Before bar 1's second it is "not started"; after the last bar's end, "ended"
+- **Lining the tab up, once per link:** the app can't know where bar 1 falls in a video. Until a link is lined up, a quiet line under the video offers it: "Line the tab up: when bar 1 starts, press" and one big button, "Bar 1 starts now", on once the video has been started, playing or paused (19 QA, question 2: pausing on the downbeat and pressing is the most exact way by hand). Before the video has ever been played it is off, and a tap on it says why ("Press Play on the video first."). The press saves the video's time as the link's `bar_one_seconds`. After that the same place holds "Tab earlier" / "Tab later" nudges (a quarter of a second each, with bar 1's time in the video on show: "Bar 1 at 0:07.25") and "Line up again". Never required: an unlined video plays exactly as in Unit 14
+- **Or type the time** (Shane, trying it on 2026-11-28: "let's allow users to enter a timestamp directly"). Beside "Bar 1 starts now" is "Type a time": a field in the same rows (nothing moves) that takes "0:07.25", "83.5", "1:02:03.5" or YouTube's "1m30s" and "1h2m3s" (`parseVideoClock`, pure; "1m90s" is refused), opened on the saved time when there is one (by way of "Line up again"), with a phone's whole keyboard (the decimal keypad has no colon). It needs no playing video, only a connection for the save. What isn't a time is refused in fixed copy and never clamped; the time the field opened on, saved back, sends nothing, even when it was saved by a press to the millisecond
+- **Following:** once lined up, the bar the video is on is marked on the score with the highlight the loops use (`setHighlight`, never the orange playback cursor, which stays hidden under a recording) and kept on screen (`showBar`, and the window on a phone): from the first marked bar of a fresh load, at every size and in a phone on its side, and again at once after a rotation, playing or paused. The page turns a line early (19 QA, question 1): when the marked bar is the last one on show, its line goes to the top, so the lines after it are on show before they are played; a bar with the bar after it already on show never moves the page, and between two bars the reader's own scroll is left alone. Per bar, not per beat. It tracks pause, seek, buffering and the video's speed, because it reads the video's own clock (polled while playing, a few times a second, and about once a second while a started video is paused, which is the only way to hear a seek made on YouTube's own bar then). While the score is only read under a recording the score box is never scrolled to the tab's own, hidden cursor, so a turn of the phone or any other redraw leaves the bar the video is on on show. A "Follow" toggle (on by default once lined up, in the URL-free page state) turns the scrolling off for someone who wants to read ahead; the mark stays
+- **Tap a bar to hear it:** while lined up, a tap on a bar seeks the video to that bar's start (`seekTo`); the tab's own player stays set aside
+- **Space plays and pauses the video** on a recording source once the player has reported ready (the page's other playback keys still do nothing there). It can't start a video that has never been tapped; then the note says to press Play on the video once
+- **Data:** `song_links.bar_one_seconds numeric null`, between 0 and 43200, client-writable through a column grant on update (and insert), additive. Saved with the links' existing update (`pointLinkAt`'s pattern: the write asks for its row back), optimistic, online only like the other link edits (a video needs a connection anyway). The save is for the video it was made on: it matches the link only while it still has the address the page knew, so a page that hasn't heard the link was pointed at another video writes nothing onto it and says the recording was changed (no migration: a filter on `url`). Types regenerated; `tests/db` covers the grant and the check. The migration is pushed before the build is live (docs/release.md: the build reads the new column on the play screen)
+- **Drift is said, not hidden:** the tab's tempo and a recording's rarely match over four minutes. The nudges are the answer in this unit, and the line under the video says what they are for beside bar 1's time ("Drifting? Nudge the tab")
+
+**Walk-throughs** (from the song's play screen on a recording, the video already tapped to play)
+
+- _First time on a link:_ "Bar 1 starts now" as the song comes in (1 tap). From then on the bar is marked and the page follows
+- _Every later time, any device:_ Play on the video. Nothing else
+- _The tab runs ahead by the second chorus:_ "Tab later" twice (2 taps), saved
+- _A phone on its side:_ the video on the right, the line-up beside it in rows of its own, the score under both from bar 1; nothing to scroll by hand
+- _A slow connection, the video tapped before YouTube's script has arrived:_ followed from the moment it arrives, with nothing more to press
+- _A hard fill at bar 33:_ tap bar 33; the video jumps there
+- _A link never lined up, or a Spotify or other link:_ exactly Unit 14
+- _A song whose tab has repeats:_ the mark follows the bars in the order they are played, as the tab's own cursor does
+- _Offline:_ no video, so nothing to follow; the tab works as before
+
+**Acceptance:**
+
+- A lined-up video marks the bar it is on and keeps it on screen at phone, tablet and desktop sizes and in a phone on its side, from bar 1 of a fresh load, through pause, seek, a speed change, a rotation and a repeat in the tab, with the bar played next on show under it wherever the window holds two lines
+- Every control of the line-up is on screen and takes a tap in every state at 320 px and in a phone on its side, and no state of it moves the score
+- "Bar 1 starts now" and the nudges are saved with the link and are there on another device
+- A tap on a bar seeks the video to it; Space plays and pauses the video
+- An unlined link, a Spotify link and a song with no links behave exactly as before, and nothing is requested from YouTube before a recording is opened
+
+**Test focus:** the sync maths as tables (a tempo change, a meter change, repeats, before bar 1, past the end, a negative offset after nudges, rates of 0.25 to 2); the player interface with the fake (late events after dispose, a seek while buffering, StrictMode, a source switch mid-poll, the link removed on another device while following); the save (optimistic, a failed save puts the old offset back, two nudges in flight); e2e with a stub page that answers the player protocol, for the frame's parameters and one following pass. **QA focus:** a real video at each size and a phone on its side; lining up late or early and nudging; a video with an ad if one turns up; rotation; a long song; the tab with repeats. **Human check:** at the kit, line a song up and play along on the tablet and on a phone in portrait; whether per-bar marking is enough to read from; how far a real recording drifts over a song.
+
+**Not in this unit, and why**
+
+- No following for Spotify or other links: nothing to read from them
+- No second sync point or tempo stretch (lining up bar 1 and, say, the last chorus, and stretching between): the nudges come first; do it if Shane finds drift is the norm
+- No markers, loops on a recording, speed keys or a pedal: Unit 15, on this unit's player
+- The tab's synth does not play along muted to move its own cursor: two clocks would drift from each other, and the highlight already says where the song is
+
+**Asked of Shane** (the questions and the options are in docs/units/19-follow-video.md, QA and "Build (QA fix round 1)")
+
+- _Per bar, or a beat line too?_ Asked on 2026-11-28, default built: per bar
+- _A tap on a bar: seek the video, or line up to that bar?_ Asked on 2026-11-28, default built: seek
+- _Following on by default?_ Asked on 2026-11-28, default built: yes
+- _When the page turns_ (QA question 1): a line early. Built in QA fix round 1
+- _Lining up while paused_ (QA question 2): yes, and the off button says why. Built in QA fix round 1
+- _The phone's keyboard for "Type a time"_ (QA question 3) and _a phone on its side_ (question 4): the whole keyboard; fixed. Built in QA fix round 1
+- _Taking a line-up away_ (question 5) and _keeping a playing frame through a dropped connection_ (question 6): asked on 2026-11-28, not built; the second goes with the loose-ends work
+- _YouTube's player API script from `www.youtube.com`, or the frame driven by `postMessage` alone?_ Asked on 2026-11-28 (19 Review), default built: the documented API script, asked for only when a video's frame is drawn
+- _A phone on its side narrower than 768 px_ (a line of music doesn't fit between the video and the tab bar), _one line of music at 844 x 390_, _how early a turn should be_ and _the note's place in a phone on its side_: asked on 2026-11-28 (19 QA after fix round 1, 19 Review), default built: as it is
+
+**Carried forward**
+
+None left (19 Review): each line was fixed, accepted below, or moved to Open human checks. The questions are under "Asked of Shane" above.
+
+**Accepted** (each with what would change that)
+
+- From 19 Build: from 768 px, on a song whose sounds failed to load (the status line says so), the video's bar is marked but the score's own box isn't scrolled to it: `showBar` waits for the player to be ready. The sounds are precached and tried again when the connection returns, and a reload puts it right. Revisit if `showBar` is ever let go of its wait for the sounds.
+- From 19 QA fix round 1: on a slow connection, a tap on "Bar 1 starts now" in the seconds between starting the video and YouTube's script arriving says "Press Play on the video first." though the video is playing. Until the script arrives the app can't know that it plays, and on a page just opened those words are the true ones; the button comes on by itself when the script lands. Revisit if the script is ever loaded ahead of the frame.
+- From 19 QA fix round 1: in a phone on its side, with a link lined up, a keyboard's Tab reaches "Line up again" before the two nudges, though it is drawn after them. It is first in the page so that it and "Bar 1 starts now" stay one element and keep focus through a press, and every control is reached. Revisit if the sideways layout is drawn again.
+- From 19 Review: a link removed on another device while this one's focus is in its line-up (a nudge pressed, which then says "It has been deleted…"): the screen goes to Tab, the video and its line-up leave, and focus falls to `<body>`. The screen itself has changed under the reader, as in Unit 14. Revisit with any work on what a removed source does to the play screen.
+
 ### 18 Songs from a link alone
 
 Split from Unit 14 when it was re-walked (2026-11-27). Planned in outline; detail it with `/design` after Unit 14 has been used.
@@ -694,6 +774,8 @@ Rewritten in the Unit 20 triage (2026-11-28) for the screens as they are now: th
 | metronome    | Metronome sounds, phone and laptop by ear: each sound over the kit (loud enough, not harsh, the slider's louder end), beat one louder, 2 and 4 per beat in time at 50% and 150%, a sound changed while paused plays from the same bar, and one changed while playing carries on in time                                                                                                                                                                                                                                                                                                                                                                        |
 | 14           | **Recordings.** A real YouTube video on phone, tablet and laptop: first tap, inline on iOS, slowed with YouTube's speed menu; a video whose owner blocks embedding; a Spotify link opening the app on the phone and coming back. The tab under the video on a phone: one bar to a line upright (14.8c), one line on its side (D7). A short Wi-Fi drop mid-video (D8). Then try `sandbox` on the frame: plays, fullscreen, "Watch on YouTube" (14.2)                                                                                                                                                                                                            |
 | 16, 17       | A week of practice with the songs-first flow: the speed stepper (±5%, ±1 BPM, typed), the overview's summary, and the Stats page read against what was really practised                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 19           | At the kit, a song with a YouTube link: line it up ("Bar 1 starts now" as the song comes in, and with the video paused on the downbeat) and play along on the tablet and on a phone in portrait. Whether a bar-by-bar mark is enough to read from and a turn a line early is early enough; whether a line-up by ear is always a little late (then a fixed reaction time comes off the press); how far a real recording drifts from its tab over a song and whether the nudges are enough                                                                                                                                                                       |
+| 19           | A real phone: "Type a time" brings up a keyboard with a colon and letters and no autocorrect bar in the way; with the video paused, a drag on YouTube's own bar moves the mark within a second; the first turn of the phone to its side mid-song keeps the bar being played on show. iPhone and iPad Safari (everything ran on Chromium): the player API in an iOS frame, Space from a Bluetooth keyboard. A video with an advert in it, if one turns up: does the mark hold still through it                                                                                                                                                                  |
 | 20           | **History by day.** After a real sitting that ends with a try at full speed, read the overview: the summary ("80% → 100%"), the loop's line (100%) and History's row for today (80%, with the line under the total saying a day counts at the speed most of it was played at). Does the 80% read as right, or as the 100% gone missing (D10)? Then with a week of rows on the phone, in the Tab page's loop sheet: can the speeds be read down the list at arm's length, though they don't line up and some rows wrap (20.5a)?                                                                                                                                 |
 
 ## Accepted
