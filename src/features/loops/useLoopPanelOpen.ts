@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { isRunning, type PlayerStatus } from '@/features/player/PlayerService';
+import { isRunning, type PlayerSnapshot, type PlayerStatus } from '@/features/player/PlayerService';
 
 /**
  * Whether pressing "Play loop" should close the loop sheet. The sheet lies
@@ -20,7 +20,10 @@ export function playLoopClosesPanel(status: PlayerStatus): boolean {
  * Only the count-in that starts a run. A sheet open when a repeat's count-in
  * comes was opened while the loop played, for its speed, and closing it at
  * every pass would take that control from under the finger; one opened during
- * a count-in stays for the same reason.
+ * a count-in stays for the same reason. Which of the two a count-in is comes
+ * from the player (`countInCause`), never from the status before it: at the
+ * end of a pass alphaTab may say "stopped" before "finished", and a render
+ * between them makes a repeat's count-in follow `ready`, as a start's does.
  *
  * Never while the loop form is open: taps on the score then pick the form's
  * bars instead of seeking, and a sheet closed over the form leaves that mode
@@ -29,10 +32,11 @@ export function playLoopClosesPanel(status: PlayerStatus): boolean {
  */
 export function countInClosesPanel(
   before: PlayerStatus,
-  now: PlayerStatus,
+  now: Pick<PlayerSnapshot, 'status' | 'countInCause'>,
   { formOpen }: { formOpen: boolean },
 ): boolean {
-  return !formOpen && now === 'countingIn' && !isRunning(before);
+  const starts = now.status === 'countingIn' && now.countInCause === 'start';
+  return !formOpen && starts && !isRunning(before);
 }
 
 /**

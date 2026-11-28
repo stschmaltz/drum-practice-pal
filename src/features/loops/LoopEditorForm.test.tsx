@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { COMMON_TIME } from '@/features/player/countIn';
@@ -40,6 +40,17 @@ function Form({
     saving: false,
     ...initialEditor,
   });
+  // A tap on the score picks the form's bars without passing through the form.
+  useEffect(
+    () =>
+      player.on('barTapped', ({ barNumber }) =>
+        setEditor((current) => ({
+          ...current,
+          bars: { startBar: String(barNumber), endBar: String(barNumber) },
+        })),
+      ),
+    [player],
+  );
   if (loops.isPending || snapshot.barCount === null) return <p>Loading…</p>;
   return (
     <LoopEditorForm
@@ -541,6 +552,68 @@ describe('LoopEditorForm bringing typed bars on screen (13.27a)', () => {
 
       expect(view.player.getSnapshot().status).toBe('ready');
       expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
+  });
+
+  // 20 batch 4 Copilot review: with the sounds in but the notation not yet drawn (a
+  // re-layout), the service keeps the bar for `rendered`. The form drops what it asked
+  // for once it no longer holds those bars, or the score moves for bars nobody wants.
+  describe('typed while the score is still being drawn', () => {
+    async function typedBeforeRender() {
+      const view = await renderForm();
+      view.engine.laidOut = false;
+      await fill(view, { first: '13', last: '15' });
+      expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+      view.engine.scrollToBar.mockClear();
+      return view;
+    }
+
+    function renders(view: View) {
+      view.engine.laidOut = true;
+      act(() => view.engine.fire('rendered', undefined));
+    }
+
+    it('the bars still held are shown once it has drawn', async () => {
+      const view = await typedBeforeRender();
+      await fill(view, { name: 'Fill' });
+      renders(view);
+      expect(view.engine.scrollToBar).toHaveBeenCalledTimes(1);
+      expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    });
+
+    it('a field cleared since: nothing moves', async () => {
+      const view = await typedBeforeRender();
+      await view.user.clear(view.lastBar());
+      expect(screen.getByTestId('loop-bar-count')).toHaveTextContent('');
+      view.engine.scrollToBar.mockClear();
+      renders(view);
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
+
+    it('other bars picked on the score since: nothing moves, a tapped bar stays under the finger', async () => {
+      const view = await typedBeforeRender();
+      act(() => view.engine.fire('barTapped', { barIndex: 2 }));
+      await waitFor(() => expect(view.firstBar()).toHaveValue('3'));
+      view.engine.scrollToBar.mockClear();
+      renders(view);
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
+
+    it('the form closed since: nothing moves', async () => {
+      const view = await typedBeforeRender();
+      view.unmount();
+      renders(view);
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
+
+    it('a bar someone else asked for since is still shown after the form closes', async () => {
+      const view = await typedBeforeRender();
+      act(() => void view.player.showBar(5));
+      view.engine.scrollToBar.mockClear();
+      view.unmount();
+      renders(view);
+      expect(view.engine.scrollToBar).toHaveBeenCalledTimes(1);
+      expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(4);
     });
   });
 

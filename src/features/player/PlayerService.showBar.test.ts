@@ -232,6 +232,85 @@ describe('asked once the sounds are in but before the notation has rendered (Cop
   });
 });
 
+// 20 batch 4 Copilot review: the screen that asked may stop wanting the bar (a form's
+// typed bars cleared, changed on the score, or the form closed) before it can be shown.
+describe('a kept showBar dropped by the one who asked', () => {
+  function readyBeforeRender() {
+    const ctx = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+    ctx.engine.laidOut = false;
+    ctx.engine.finishLoading();
+    return ctx;
+  }
+
+  function renders({ engine }: CountInContext): void {
+    engine.scrollToBar.mockClear();
+    engine.laidOut = true;
+    engine.fire('rendered', undefined);
+  }
+
+  it('kept for the render: nothing scrolls when the score renders', () => {
+    const ctx = readyBeforeRender();
+    const drop = ctx.service.showBar(9);
+    drop();
+    renders(ctx);
+    expect(ctx.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('kept for the sounds: nothing scrolls when they come in', () => {
+    const { engine, service } = setupCountIn({ ...COUNT_IN_OFF, loaded: false });
+    const drop = service.showBar(9);
+    drop();
+    engine.finishLoading();
+    expect(service.getSnapshot().status).toBe('ready');
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('still kept after a render that had no bounds yet, and still dropped by the same call', () => {
+    const ctx = readyBeforeRender();
+    const drop = ctx.service.showBar(9);
+    ctx.engine.fire('rendered', undefined);
+    drop();
+    renders(ctx);
+    expect(ctx.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('leaves a bar asked for since, by anyone, to be shown', () => {
+    const ctx = readyBeforeRender();
+    const drop = ctx.service.showBar(9);
+    ctx.service.showBar(13);
+    drop();
+    renders(ctx);
+    expect(ctx.engine.scrollToBar).toHaveBeenCalledTimes(1);
+    expect(ctx.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+  });
+
+  it('leaves the scroll of a count-in started since', () => {
+    const ctx = setupCountIn({ loaded: false });
+    ctx.engine.laidOut = false;
+    ctx.engine.finishLoading();
+    const drop = ctx.service.showBar(9);
+    ctx.service.seekToBar(13);
+    ctx.service.play();
+    expect(ctx.service.getSnapshot().status).toBe('countingIn');
+    drop();
+    renders(ctx);
+    expect(ctx.engine.scrollToBar).toHaveBeenCalledTimes(1);
+    expect(ctx.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+  });
+
+  it('after the bar was shown, or twice: nothing happens', () => {
+    const ctx = setupCountIn(COUNT_IN_OFF);
+    const drop = ctx.service.showBar(9);
+    expect(ctx.engine.scrollToBar).toHaveBeenCalledTimes(1);
+    const before = playbackOf(ctx);
+    drop();
+    drop();
+    ctx.engine.fire('rendered', undefined);
+    expect(ctx.engine.scrollToBar).toHaveBeenCalledTimes(1);
+    expect(playbackOf(ctx)).toEqual(before);
+  });
+});
+
 describe('showBar as a no-op', () => {
   it('while playing: no scroll, and playback is not interrupted', () => {
     const { engine, service } = setupCountIn(COUNT_IN_OFF);

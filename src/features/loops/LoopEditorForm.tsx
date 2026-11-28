@@ -130,15 +130,33 @@ export function LoopEditorForm({
   // Typed before the sounds are in (the form opens from the score's load on), the bar
   // is kept here and not handed to `showBar`, which would scroll to it whenever the
   // sounds came, however much later, with the form holding other bars by then or gone.
+  //
+  // Typed with the sounds in but the notation not drawn yet (a re-layout), `showBar`
+  // keeps the bar for the render. That request is dropped once the form no longer
+  // holds those bars (a field cleared, other bars picked on the score) or has closed.
   const typedBeforeSounds = useRef<{ startBar: number; endBar: number } | null>(null);
+  const shownBars = useRef<{ startBar: number; endBar: number; drop: () => void } | null>(null);
+  const dropShownBars = () => {
+    shownBars.current?.drop();
+    shownBars.current = null;
+  };
   const showTypedBars = (bars: Partial<LoopBarFields>) => {
     if (!player) return;
+    dropShownBars();
     const { status } = player.getSnapshot();
     if (isRunning(status)) return;
     const typed = formBarRange({ ...values, ...bars }, barCount);
     typedBeforeSounds.current = isLoaded(status) ? null : typed;
-    if (typed && isLoaded(status)) player.showBar(typed.startBar);
+    if (typed && isLoaded(status)) {
+      shownBars.current = { ...typed, drop: player.showBar(typed.startBar) };
+    }
   };
+  useEffect(() => {
+    const shown = shownBars.current;
+    const stillHeld = shown?.startBar === range?.startBar && shown?.endBar === range?.endBar;
+    if (!stillHeld) dropShownBars();
+  });
+  useEffect(() => dropShownBars, []);
   const soundsIn = isLoaded(snapshot.status);
   useEffect(() => {
     const typed = typedBeforeSounds.current;

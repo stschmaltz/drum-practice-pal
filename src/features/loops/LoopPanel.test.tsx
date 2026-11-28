@@ -670,6 +670,32 @@ describe('LoopPanel and a count-in started from outside it (13.32)', () => {
     expect(view.panel.getByRole('group', { name: 'Loop speed' })).toBeVisible();
   });
 
+  // 20 batch 4 Copilot review: alphaTab may say "stopped" before "finished", each in its
+  // own task, so React draws the `ready` between them. That is still the repeat's count-in.
+  it('a repeat’s count-in leaves the sheet open when the page drew the stop before the pass end', async () => {
+    const view = renderPanel();
+    act(() => {
+      view.player.setCountInBars(1);
+      view.player.setCountInMode('every_repeat');
+    });
+    await view.playLoop('Late');
+    view.enginePlays();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    act(() => view.engine.fire('stateChanged', { playing: false }));
+    await settle();
+    expect(view.player.getSnapshot().status).toBe('ready');
+    act(() => {
+      view.engine.fire('finished', undefined);
+      view.engine.fire('position', { tick: startOfBar(9) });
+    });
+    await settle();
+
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.panel.getByRole('group', { name: 'Loop speed' })).toBeVisible();
+  });
+
   it('Pause during the count-in and Play again is a new start: a sheet opened meanwhile closes again', async () => {
     const view = renderPanel({ startsOpen: false });
     act(() => view.player.setCountInBars(2));

@@ -689,3 +689,28 @@ None beyond the lines above (20.4a for batch 3; 20.4b to 20.4e accepted; D9 for 
 - `npm run check`: green. 146 test files (145 passed, 1 skipped), 5,731 tests (5,729 passed, 2 skipped; the skips are main's), after the merge of `origin/main`.
 - e2e, phone and desktop only, on this worktree's build at port 4383 (free when checked with `netstat` before the run; the server stopped with the run): `E2E_PORT=4383 npx playwright test tests/e2e/loop-scroll.spec.ts tests/e2e/shortcuts.spec.ts tests/e2e/loops.spec.ts tests/e2e/count-in.spec.ts --project=phone --project=desktop`: 122 passed, 16 skipped by their own width conditions. The tablet project and the full suite were not run. No screenshot was rewritten.
 - `npm run test:db` was not run: the batch touches no table, policy or grant.
+
+### Copilot review
+
+Two comments on PR #38, both confirmed, each with tests that failed first.
+
+**A. A scroll request kept for the render outlived the bars it was for** (comment 4726364000, `LoopEditorForm.tsx`; checklist 1, "Asked before it can be done, then forgotten", extended). Review's finding 3 covered bars typed before the sounds are in. With the sounds in and the notation not yet drawn (`engine.scrollToBar` false: a re-layout), `player.showBar` still kept the bar for `rendered`, and a field cleared, other bars picked on the score, or Cancel left it to move the score.
+
+- Service: `showBar(barNumber)` now returns a function that drops the request while it is still kept. It drops only its own: a counter (`showBarRequests`) moves on at every `showBar` and at every count-in's scroll, and an older drop then does nothing. The kept bar is re-asked on `readyForPlayback` and `rendered` through the private `requestShowBar`, so it stays its first asker's to drop. Other callers ignore the return, as their bar is the range's and `setRange` drops it.
+- Form: `shownBars` holds the range asked for and its drop. It is dropped before every new request, by an effect once the form's range is no longer that range (which covers bars picked on the score, which don't pass through the form), and on unmount.
+- Tests: `PlayerService.showBar.test.ts`, "a kept showBar dropped by the one who asked" (kept for the render, kept for the sounds, after a render with no bounds, a newer request left alone, a count-in's scroll left alone, harmless after the bar was shown); `LoopEditorForm.test.tsx`, "typed while the score is still being drawn" (sounds ready, `engine.laidOut = false`: still held and shown; cleared; picked on the score; closed; another caller's bar survives the form closing). The harness `Form` now takes score taps as the page does.
+
+**B. A repeat's count-in closed a sheet opened mid-loop when "stopped" came before "finished"** (comment 4726364016, `useLoopPanelOpen.ts`; new checklist row 1, "A cause read off two states in a row"). Review left this for want of evidence of the order; `PlayerService.countInEdges.test.ts` ("counts in when alphaTab reports stopped before finished, too") already holds the service to it, and the two events are separate tasks, so React can draw the `ready` between them. `countInClosesPanel` then saw `ready` to `countingIn` and closed the sheet.
+
+- Service: `snapshot.countInCause` (`'start' | 'repeat' | null`), set by `beginCountIn` where each count-in starts (`countInBeforeRepeat` passes `'repeat'`; from `ready` it is `'start'`; a seek that restarts a count-in keeps what it had) and cleared in `update()` whenever the status isn't `countingIn`, so no way out of a count-in can leave it behind.
+- Rule: `countInClosesPanel(before, snapshot, { formOpen })` closes only for `countInCause === 'start'`; `LoopPanel` passes the snapshot.
+- Tests: `PlayerService.countInEdges.test.ts`, "the snapshot says what a count-in is for" (Play, both event orders at a pass end with the `ready` in between, a seek in each kind, Pause then Play in a repeat's count-in); `useLoopPanelOpen.test.ts`, the table now over the snapshot, with the row `ready` to a repeat's count-in; `LoopPanel.test.tsx`, "a repeat's count-in leaves the sheet open when the page drew the stop before the pass end", which renders between the two events.
+
+**Async windows and inputs**
+
+- _A `showBar` kept by the service_ (until `readyForPlayback` or `rendered`). The asker's drop: the request goes, if it is still the latest. Another `showBar` or a count-in: theirs replaces it and the first asker's drop does nothing. `setRange`, `load`: dropped as before; a drop after that sets null over null. A drop after the scroll was done, twice, or after dispose: nothing.
+- _Between "stopped" and "finished" at a pass end_ (status `ready`, `countInCause` null). A render: the sheet stays as it is. Pause there: `haltRequested`, no count-in, as before. Play there: a `'start'` count-in, which closes the sheet, as a press should.
+
+**Files:** `src/features/player/PlayerService.ts` (additions only, for Unit 19's branch: one snapshot field and type, one counter, `showBar`'s wrapper, a default parameter, two lines in `beginCountIn`, three in `update`), `src/features/loops/useLoopPanelOpen.ts`, `LoopPanel.tsx` (one argument), `LoopEditorForm.tsx`, the five test files above, `AGENTS.md` (Count-in, Loops), `docs/review-checklist.md`. `playerEngine.ts` and `fakePlayerEngine.ts` are untouched.
+
+**Checks:** `npm run check` green (146 test files: 145 passed, 1 skipped; 5,749 tests: 5,747 passed, 2 skipped). e2e on this worktree's build at port 4383 (free when checked with `netstat` before the run, the server gone after it), phone and desktop: `loop-scroll`, `shortcuts`, `loops` and `count-in` specs, 122 passed, 16 skipped by their own width conditions. Tablet and the full suite not run. No screenshot was rewritten.

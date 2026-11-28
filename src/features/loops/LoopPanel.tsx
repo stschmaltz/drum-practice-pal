@@ -141,7 +141,7 @@ export function LoopPanel({
   useEffect(() => {
     const before = statusBefore.current;
     statusBefore.current = status;
-    if (open && countInClosesPanel(before, status, { formOpen })) closeForPlayback();
+    if (open && countInClosesPanel(before, snapshot, { formOpen })) closeForPlayback();
     // Only a change of status closes the sheet: opening it is never undone here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
