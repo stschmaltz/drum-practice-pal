@@ -30,6 +30,9 @@ import { useLoops, useSetLoopStatus } from '@/features/loops/useLoops';
 import { ratioToPercent } from '@/features/player/speed';
 import { LoopHistory } from '@/features/practice/LoopHistory';
 import { lastPracticedLabel } from '@/features/practice/sessions';
+import { useVisitSittings } from '@/features/practice/useVisitSittings';
+import { VisitSummary } from '@/features/practice/VisitSummary';
+import { isVisitSummaryShown } from '@/features/practice/visitSummaryFocus';
 import { failureCopy } from '@/lib/errorCopy';
 import {
   findItemControl,
@@ -55,7 +58,8 @@ import { BackLink, SongGate } from './SongGate';
  * loops, the ones on the go first (last practised first), then the mastered
  * ones. Each loop opens its practice screen; "New loop" and "Play whole song"
  * open the player. This screen loads no player and no file, so a loop's speed
- * is a percent only (its BPM needs the file's tempo). An old link,
+ * is a percent only (its BPM needs the file's tempo). Under the header, once,
+ * what was practised on the song in this visit (`VisitSummary`). An old link,
  * `/songs/:id?loop=<id>`, goes on to that loop's practice screen.
  */
 export function SongOverviewPage() {
@@ -69,6 +73,8 @@ export function SongOverviewPage() {
 function SongOverview({ song }: { song: Song }) {
   const loops = useLoops(song.id);
   const mastery = loops.data ? masteryOf(loops.data) : null;
+  const visit = useVisitSittings(song.id);
+  const focusWhenReady = useFocusWhenReady();
 
   return (
     <div className="flex flex-col gap-5">
@@ -86,6 +92,14 @@ function SongOverview({ song }: { song: Song }) {
           </span>
         )}
       </PageHeader>
+      <VisitSummary
+        sittings={visit.sittings}
+        onDismiss={() => {
+          visit.dismiss();
+          // Dismiss goes with the summary: focus to "New loop", the next control down the page.
+          focusWhenReady(() => (isVisitSummaryShown() ? null : findFormOpener({ kind: 'new' })));
+        }}
+      />
       <div className="flex flex-wrap gap-x-2 gap-y-1">
         <Link
           to={newLoopPath(song.id)}

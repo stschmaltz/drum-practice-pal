@@ -69,7 +69,7 @@ export function metronomeVoiceSummary(voice: MetronomeVoice): string {
  * was too quiet over a full band (Shane, 2026-11-27); alphaTab's channel volume
  * has no upper bound, so the slider's 0 to 1 maps to 0 to this.
  */
-export const METRONOME_MAX_GAIN = 3;
+export const METRONOME_MAX_GAIN = 5;
 
 /**
  * The channel volume for a slider value (0 to 1, as stored). Squared, so the

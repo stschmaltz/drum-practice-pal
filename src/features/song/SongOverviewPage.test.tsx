@@ -1,7 +1,9 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
+import type { Sitting } from '@/features/practice/sittings';
+import { readVisitSittings, recordVisitSitting } from '@/features/practice/visitSittings';
 import {
   queryResult,
   resetFakeSupabase,
@@ -9,7 +11,7 @@ import {
   type FakeResult,
 } from '@/test/fakeSupabase';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
-import { historyBack, historyForward, renderRoutes, RouteMarker } from '@/test/render';
+import { historyBack, historyForward, renderRoutes, RouteMarker, settle } from '@/test/render';
 import { SongOverviewPage } from './SongOverviewPage';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -62,6 +64,7 @@ function serve(saved: ReturnType<typeof loopRow>[] = [older, newer, done]) {
   loops = loopTable(saved);
   queryResult.mockImplementation(async (call) => {
     if (call.table === 'loops') return loops.answer(call);
+    if (call.table === 'practice_sessions') return ok([]);
     return ok(song);
   });
 }
@@ -206,5 +209,193 @@ describe('SongOverviewPage', () => {
     serve();
     renderOverview('?loop=%3Cb%3E');
     expect(await screen.findByRole('heading', { level: 1, name: 'Groove 120' })).toBeVisible();
+  });
+
+  describe('the visit’s practice summary', () => {
+    // The sittings are stamped with real times; only the clock is faked.
+    beforeEach(() => vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 10, 27, 18, 30) }));
+    afterEach(() => vi.useRealTimers());
+
+    const BEGAN = new Date(2026, 10, 27, 18).getTime();
+    function practised(overrides: Partial<Sitting> = {}) {
+      recordVisitSitting(
+        {
+          songId: SONG,
+          loopId: LOOP_B,
+          loopName: 'Chorus fill',
+          beganAt: BEGAN,
+          playedSeconds: 720,
+          repeats: 20,
+          startSpeedRatio: 0.8,
+          endSpeedRatio: 0.9,
+          ...overrides,
+        },
+        30,
+      );
+    }
+    const summary = () => screen.getByTestId('visit-summary');
+    const noSummary = () => expect(screen.queryByTestId('visit-summary')).not.toBeInTheDocument();
+    const session = (day: number, hour = 19) => ({
+      id: `session-${day}-${hour}`,
+      loop_id: LOOP_B,
+      started_at: new Date(2026, 10, day, hour).toISOString(),
+      duration_seconds: 720,
+      speed_ratio: 0.9,
+      repeats: 20,
+    });
+
+    it('says what was practised: the loop, its time, and the speed it went from and to', async () => {
+      practised();
+      serve();
+      renderOverview();
+      await screen.findByRole('heading', { level: 1, name: 'Groove 120' });
+      expect(summary()).toHaveAttribute('role', 'status');
+      expect(summary()).toHaveTextContent('Chorus fill: 12 min, 80% → 90%');
+    });
+
+    it('is there in the overview’s first render, not after its loops', async () => {
+      practised();
+      serve();
+      loops.holdNext('select');
+      renderOverview();
+      await screen.findByRole('heading', { level: 1, name: 'Groove 120' });
+      expect(screen.getByText('Loading loops…')).toBeInTheDocument();
+      expect(summary()).toHaveTextContent('Chorus fill: 12 min');
+    });
+
+    it('says one speed when the speed did not change', async () => {
+      practised({ endSpeedRatio: 0.8 });
+      serve();
+      renderOverview();
+      await screen.findByRole('heading', { level: 1, name: 'Groove 120' });
+      expect(summary()).toHaveTextContent('Chorus fill: 12 min, 80%');
+      expect(summary()).not.toHaveTextContent('→');
+    });
+
+    it('has one line per loop practised', async () => {
+      practised();
+      practised({
+        loopId: LOOP_A,
+        loopName: 'Intro',
+        beganAt: BEGAN + 60_000,
+        playedSeconds: 45,
+        startSpeedRatio: 0.92,
+        endSpeedRatio: 1,
+      });
+      serve();
+      renderOverview();
+      await screen.findByRole('heading', { level: 1, name: 'Groove 120' });
+      expect(
+        within(summary())
+          .getAllByRole('listitem')
+          .map((item) => item.textContent),
+      ).toEqual(['Chorus fill: 12 min, 80% → 90%', 'Intro: 45 s, 92% → 100%']);
+    });
+
+    it('shows nothing with no sitting, and nothing for one too short to be a session', async () => {
+      practised({ playedSeconds: 20 });
+      serve();
+      renderOverview();
+      await screen.findByRole('list', { name: 'Loops on the go' });
+      noSummary();
+    });
+
+    it('shows nothing for a sitting on another song', async () => {
+      practised({ songId: '22222222-2222-4222-8222-222222222222' });
+      serve();
+      renderOverview();
+      await screen.findByRole('list', { name: 'Loops on the go' });
+      noSummary();
+      // And it is forgotten: that song's overview won't show it later either.
+      expect(readVisitSittings()).toEqual([]);
+    });
+
+    it('Dismiss takes it away and hands focus to New loop', async () => {
+      practised();
+      serve();
+      const user = renderOverview();
+      await screen.findByRole('list', { name: 'Loops on the go' });
+
+      await user.click(within(summary()).getByRole('button', { name: 'Dismiss practice summary' }));
+
+      noSummary();
+      await waitFor(() => expect(screen.getByRole('link', { name: 'New loop' })).toHaveFocus());
+      expect(readVisitSittings()).toEqual([]);
+    });
+
+    it('is gone after the overview is left and come back to', async () => {
+      practised();
+      serve();
+      const user = renderOverview('', ['/']);
+      await screen.findByRole('list', { name: 'Loops on the go' });
+      expect(summary()).toBeVisible();
+
+      await user.click(screen.getByRole('link', { name: 'Songs' }));
+      expect(await screen.findByText('At songs')).toBeVisible();
+      historyBack();
+
+      await screen.findByRole('list', { name: 'Loops on the go' });
+      noSummary();
+    });
+
+    it('fills in the streak once the sessions and loops are read, in a line that was already there', async () => {
+      practised();
+      serve();
+      let answerSessions = () => {};
+      const served = queryResult.getMockImplementation()!;
+      queryResult.mockImplementation((call) =>
+        call.table === 'practice_sessions'
+          ? new Promise((resolve) => {
+              answerSessions = () => resolve(ok([session(26), session(27, 18)]));
+            })
+          : served(call),
+      );
+      renderOverview();
+      await screen.findByRole('list', { name: 'Loops on the go' });
+      await settle();
+      const extras = within(summary()).getByTestId('visit-extras');
+      expect(extras).toBeEmptyDOMElement();
+      // Its height is held from the start, so filling it moves nothing below.
+      expect(extras).toHaveClass('min-h-5');
+
+      act(() => answerSessions());
+
+      expect(await within(summary()).findByText('Streak: 2 days')).toBeVisible();
+      expect(within(summary()).getByTestId('visit-extras')).toBe(extras);
+      expect(summary()).not.toHaveTextContent('Badge earned');
+    });
+
+    it('names a badge earned since the first sitting began, and none earned before', async () => {
+      practised();
+      serve();
+      const served = queryResult.getMockImplementation()!;
+      queryResult.mockImplementation(async (call) =>
+        call.table === 'practice_sessions'
+          ? // Two days running before today; the sitting's session makes three.
+            ok([session(25), session(26), session(27, 18)])
+          : served(call),
+      );
+      renderOverview();
+      await screen.findByRole('heading', { level: 1, name: 'Groove 120' });
+
+      expect(await within(summary()).findByText('Streak: 3 days')).toBeVisible();
+      expect(within(summary()).getByText('Badge earned: 3-day streak')).toBeVisible();
+    });
+
+    it('leaves the streak and badges out when the sessions can’t be read', async () => {
+      practised();
+      serve();
+      const served = queryResult.getMockImplementation()!;
+      queryResult.mockImplementation(async (call) =>
+        call.table === 'practice_sessions'
+          ? { data: null, error: { message: 'TypeError: Failed to fetch', code: '' } }
+          : served(call),
+      );
+      renderOverview();
+      await screen.findByRole('list', { name: 'Loops on the go' });
+      await settle();
+      expect(summary()).toHaveTextContent('Chorus fill: 12 min, 80% → 90%');
+      expect(within(summary()).getByTestId('visit-extras')).toBeEmptyDOMElement();
+    });
   });
 });

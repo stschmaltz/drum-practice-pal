@@ -48,7 +48,7 @@ export function sessionLogged(queryClient: QueryClient, userId: string, record: 
       : sessions,
   );
   void queryClient.invalidateQueries({ queryKey: historyKey });
-  // The streak and the totals count it at once, as the Session complete summary does.
+  // The streak and the totals count it at once, as the song overview's practice summary does.
   const everyKey = sessionKeys.every(userId);
   queryClient.setQueryData<PracticeSession[]>(everyKey, (sessions) =>
     sessions && !sessions.some((session) => session.id === record.id)

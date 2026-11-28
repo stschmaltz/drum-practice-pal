@@ -10,11 +10,17 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { PageHeader } from '@/components/PageHeader';
 import { LoadingLine } from '@/components/StatusMessages';
-import { linkClass, quietButtonClass, quietPressedButtonClass } from '@/components/styles';
+import {
+  linkClass,
+  lockableLinkClass,
+  quietButtonClass,
+  quietPressedButtonClass,
+} from '@/components/styles';
 import { Icon } from '@/components/icons';
 import type { Song } from '@/features/library/songForm';
 import { FinishPrompt } from '@/features/loops/FinishPrompt';
 import { LoopEditorForm } from '@/features/loops/LoopEditorForm';
+import { LoopSavedNote } from '@/features/loops/LoopSavedNote';
 import { barsLabel, shouldAskToFinish, type Loop } from '@/features/loops/loopForm';
 import { PracticeSpeed } from '@/features/loops/PracticeSpeed';
 import { useLoopPractice, type LoopPractice } from '@/features/loops/useLoopPractice';
@@ -30,9 +36,9 @@ import {
   type PlayerSnapshot,
 } from '@/features/player/PlayerService';
 import { usePlayer } from '@/features/player/usePlayer';
-import { SessionComplete } from '@/features/practice/SessionComplete';
 import { repeatsLabel } from '@/features/practice/sessions';
 import { usePracticeTracker } from '@/features/practice/usePracticeTracker';
+import { useSittingRecorder } from '@/features/practice/useVisitSittings';
 import { ShortcutOverlay } from '@/features/shortcuts/ShortcutOverlay';
 import { clockLabel } from '@/features/stats/statLabels';
 import { waitsForNetwork } from '@/lib/network';
@@ -58,8 +64,10 @@ import { announcementText, useSongShortcuts } from './useSongShortcuts';
 /**
  * /songs/:id/loops/:loopId, the practice screen (Unit 16). Lazy-loaded with
  * the player. One loop, set up as a link to it always has (its range,
- * looping and saved speed: `useLoopPractice.openLoop`), with the session's
- * play time and passes, the score, the speed and one big Play/Pause. The
+ * looping and saved speed: `useLoopPractice.openLoop`), with the sitting's
+ * play time and passes (every session since the loop was opened here; nothing
+ * appears at a pause, and the song's overview sums the sitting up afterwards),
+ * the score, the speed and one big Play/Pause. The
  * count-in, metronome, drum toggles, keys and "Mark finished?" work as on the
  * whole song; the loop keys move to the song's other loops and the URL
  * follows (replaced, so Back still goes to the song).
@@ -231,7 +239,6 @@ function PracticePlayer({
       song.bar_count,
     ),
   });
-  const navigate = useNavigate();
   const stickyBarRef = useRef<HTMLDivElement>(null);
   const stickyBarHeight = useHeightOf(stickyBarRef);
   // A drag picks bars only in the whole song, where the form is already open.
@@ -242,6 +249,8 @@ function PracticePlayer({
   });
   const wholeSong = practice.editor !== null;
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
+  // Leaving the loop, for another or for the song, ends its sitting.
+  useSittingRecorder(song.id, practice.activeLoop, tracker.sitting);
   // Every change of the loop's speed is saved as it is made (no "Save speed").
   useSaveLoopSpeed(song.id, practice.activeLoop, snapshot.speedRatio);
   const speedMoved = useSpeedMovedSinceChosen(practice.activeLoop);
@@ -278,9 +287,7 @@ function PracticePlayer({
   // Until the player has opened it, the loop the route names.
   const loop = practice.activeLoop ?? routeLoop;
   useDrawnBars(player, loop, song.bar_count, wholeSong);
-  const progress = tracker.progress();
-  const { completed } = tracker;
-  const completedLoopName = loops.data?.find((each) => each.id === completed?.record.loopId)?.name;
+  const sitting = tracker.sitting();
   const askToFinish =
     practice.activeLoop !== null &&
     shouldAskToFinish(practice.activeLoop, speedMoved) &&
@@ -292,20 +299,9 @@ function PracticePlayer({
       className="flex flex-col gap-3 pb-12"
       style={{ '--jam-bar-height': `${stickyBarHeight}px` } as CSSProperties}
     >
-      {completed ? (
-        <SessionComplete
-          completed={completed}
-          loopName={completedLoopName}
-          // The summary goes, and focus with it: to Play, the next thing to press.
-          onKeepGoing={() => {
-            tracker.dismissCompleted();
-            focusWhenReady(findPracticePlay);
-          }}
-          onDone={() => void navigate(songPath(song.id))}
-        />
-      ) : (
-        <SessionNotice tracker={tracker} loops={loops.data} showLogged={false} />
-      )}
+      {/* Only a session that couldn't be sent or is waiting offline: one that is logged
+          says nothing here (a pause is silent), the song's overview sums the sitting up. */}
+      <SessionNotice tracker={tracker} loops={loops.data} showLogged={false} />
       {/* One band, sticky. From 1024 px one row of three columns: the loop (back, name, what
           is going on) left, the speed stepper on the band's centre whatever the name's length,
           the whole-song toggle, Shortcuts and Play right. Below that, and on a tablet beside
@@ -325,8 +321,8 @@ function PracticePlayer({
               band was 105 px of a 390 px window, and the score needs the height more. */}
           <p className="truncate text-sm text-ink-muted tabular-nums short:sr-only">
             <span data-testid="practice-progress">
-              {barsLabel(loop.start_bar, loop.end_bar)} · {clockLabel(progress?.playedSeconds ?? 0)}{' '}
-              · {repeatsLabel(progress?.repeats ?? 0)}
+              {barsLabel(loop.start_bar, loop.end_bar)} · {clockLabel(sitting?.playedSeconds ?? 0)}{' '}
+              · {repeatsLabel(sitting?.repeats ?? 0)}
             </span>{' '}
             · <PlayerStatusText snapshot={snapshot} />
           </p>
@@ -384,6 +380,14 @@ function PracticePlayer({
           practice={practice}
           player={player}
           snapshot={snapshot}
+          onPractise={(saved) => {
+            practice.closeEditor();
+            // The loop and its saved speed, as a link to it would open it: the speed
+            // playing now is the loop being left's, nudged since the save or not.
+            practice.openLoop(saved);
+            // The button goes with its sheet: focus to Play, the next thing to press.
+            focusWhenReady(findPracticePlay);
+          }}
         />
       )}
     </div>
@@ -420,8 +424,8 @@ function WholeSongToggle({
 }
 
 /**
- * "Save as loop", as a sheet at the foot of the window (placed as Session
- * complete is) so nothing on the page moves while bars are tapped. The loop
+ * "Save as loop", as a sheet at the foot of the window (placed as the jam
+ * page's loop sheet is) so nothing on the page moves while bars are tapped. The loop
  * form, in its bar layout: online only, one client id for its lifetime. The
  * new loop becomes the one practised, and the URL follows it (replaced).
  */
@@ -431,15 +435,21 @@ function SaveAsLoopSheet({
   practice,
   player,
   snapshot,
+  onPractise,
 }: {
   songId: string;
   barCount: number;
   practice: LoopPractice;
   player: PlayerService | null;
   snapshot: PlayerSnapshot;
+  /** "Practise it" on the loop just saved. From the screen, which outlives the sheet. */
+  onPractise: (saved: Loop) => void;
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const sheetHeight = useHeightOf(sheetRef);
+  // The loops saved from this sheet, the last one named above its fields.
+  const [savedHere, setSavedHere] = useState<Loop[]>([]);
+  const lastSaved = savedHere[savedHere.length - 1];
   const { editor } = practice;
   if (!editor) return null;
   return (
@@ -449,10 +459,30 @@ function SaveAsLoopSheet({
       <div
         ref={sheetRef}
         data-testid="save-as-loop"
-        // z-10, under Session complete's z-20: a session logged meanwhile is summed up over it.
         className="fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 max-h-[60dvh] overflow-y-auto rounded-t-card border-t border-line bg-surface p-4 shadow-sheet md:right-gutter md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+var(--spacing-gutter))] md:border-x"
       >
+        {/* Outside the keyed form: one status region whose text changes at each save. */}
+        <LoopSavedNote saved={lastSaved ?? null} count={savedHere.length}>
+          {lastSaved && (
+            // A button, not a link: this screen switches loop in place, and its URL follows.
+            <button
+              type="button"
+              className={lockableLinkClass}
+              // Leaving unmounts the form: while the next loop's save is on its way that would
+              // lose its draft, its retry id and its error. Locked, not disabled: focus may be
+              // on it.
+              aria-disabled={editor.saving || undefined}
+              onClick={() => {
+                if (!editor.saving) onPractise(lastSaved);
+              }}
+            >
+              Practise it
+            </button>
+          )}
+        </LoopSavedNote>
         <LoopEditorForm
+          // A new form for each loop saved: its own client id, an empty name.
+          key={savedHere.length}
           layout="bar"
           songId={songId}
           barCount={barCount}
@@ -463,10 +493,13 @@ function SaveAsLoopSheet({
           onBarsChange={practice.setEditorBars}
           onSavingChange={practice.setEditorSaving}
           onSaved={(saved) => {
-            practice.closeEditor();
-            practice.selectLoop(saved.id);
+            // The whole song stays, emptied for the next loop: several are made in one go,
+            // then practised (Shane, 2026-11-27). The loop being practised stays the loop.
+            setSavedHere((loops) => [...loops, saved]);
+            practice.openEditor(null);
           }}
           onCancel={practice.closeEditor}
+          cancelLabel={lastSaved ? 'Done' : undefined}
         />
       </div>
     </>

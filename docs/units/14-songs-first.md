@@ -314,7 +314,6 @@ Main's `docs/plan.md` had taken 14 (Songs with recordings) and 15 (play-along pl
 
 - e2e: `practice.spec.ts` "on a phone on its side the practice bar is one row…" fails at 844 x 390 after the header rework (the band's measured height or a target in it; not looked into, the coordinator stopped e2e). `practice-screen.spec.ts` and the mixer test passed at phone, tablet and desktop; `practice`, `journey` and `design` were otherwise green at desktop and phone before the stepper restyle and the bar count; nothing ran after them.
 - `design.spec.ts` has no audit of the whole-song view or an open mixer yet.
-- A Session complete that comes up while the Save as loop sheet is open lies over it until dismissed.
 - A track name from the file shown in the mixer is not checked for duplicates (two "Guitar" switches read the same).
 
 ### Manual verify steps
@@ -327,3 +326,105 @@ Main's `docs/plan.md` had taken 14 (Songs with recordings) and 15 (play-along pl
 ### Checks
 
 - `npx tsc -b`, eslint, prettier and the touched unit tests green (3,608 in loops, song, player and tests/unit). Full `npm run check` was green before the header rework and the bar count.
+
+## Practice notes (2026-11-27)
+
+Build, from Shane's practice session (PR #31): no Session complete pop-up; a summary on the song page when you leave. The bullet is in docs/plan.md, Unit 16, "From Shane's first try".
+
+### Walk-through, before building
+
+- **Day one, one song, one loop.** Opens the loop, plays, pauses to breathe: nothing comes up, Play is still under the thumb (the sheet used to take focus and want "Keep going"). Back to the song: one line says what was done. Nothing to press; Dismiss is there, and the line goes by itself on leaving. No chore added, one removed.
+- **Missing a piece.** A song with no loops has no practice screen and no sitting: the overview shows no summary and reserves nothing. A loop opened and left unplayed, or played under the 30 seconds a session needs, shows nothing. A song with no drum track is no different here.
+- **Offline.** The sitting is in memory, so its line shows with no connection. The streak and badges need every session and loop: from the persisted cache they show; on a device that never read them their line stays empty (its height is held either way). Sessions queue as before.
+- **No forced order.** Leaving by the nav tabs instead of the back link skips the summary until that song's overview is next opened; opening another song's overview first forgets it. Nothing waits on it.
+
+### Summary
+
+- The Session complete sheet is gone from the practice screen (`SessionComplete.tsx`, `stats/sessionSummary.ts` and their tests deleted). A pause that logs a session shows nothing and leaves focus on Play. A refused or offline-waiting session still says so (`SessionNotice`), as before.
+- The header's time and passes count the sitting: every session since the loop was opened plus the one open, a too-short tail included. A loop key or "Practise it" starts the new loop's sitting at 0.
+- Leaving a loop (the screen, or another loop) keeps its sitting for this visit if it has the play time a session needs (`sessionMinPlaySeconds()`). The song's overview shows them once under its header: a line per loop, the streak, badges earned since the first sitting began, Dismiss.
+- Sessions are logged exactly as before: `sessionTracker.ts` and the three ways out are untouched.
+
+### `usePracticeTracker`
+
+`completed`, `dismissCompleted`, `progress()` and the two refs that fed them (`startSpeeds`, `endedOnScreen`) are removed, not kept as a signal: nothing consumes "a session was logged while the screen stayed" any more. In their place the hook keeps a `SittingTally` beside the tracker's state, fed in the same `sync` from the same inputs plus the session that step ended, and returns `sitting()`.
+
+### Files
+
+- New: `src/features/practice/sittings.ts` (+ test), `visitSittings.ts`, `useVisitSittings.ts` (+ test, the store's too), `VisitSummary.tsx`, `visitSummaryFocus.ts`; `src/features/stats/visitSummary.ts` (+ test).
+- Changed: `usePracticeTracker.ts`, `LoopPracticePage.tsx`, `SongPage.tsx` (one line: the jam page's loops are sittings too), `SongOverviewPage.tsx`, `playerScreen.tsx` and `useSessions.ts` (comments), `src/test/setup.ts` (empties the store).
+- Tests: `LoopPracticePage.test.tsx` ("the sitting", replacing "Session complete"), `SongOverviewPage.test.tsx` ("the visit's practice summary"), `SongPage.test.tsx` (one case); e2e `practice.spec.ts` (two tests), `journey.spec.ts`, `design.spec.ts`, `practicePage.ts`.
+- Deleted: `SessionComplete.tsx`, `stats/sessionSummary.ts`, `stats/sessionSummary.test.ts`.
+
+### Decisions
+
+- **A sitting's time is everything played, not only what was logged.** The header counted a too-short tail while it was open, so the summary counts it too; otherwise the line would say less than the screen just did. A sitting is kept on its total, which reaches the minimum only if a session was logged (a session is dropped only on leaving the loop, which ends the sitting).
+- **"Opened at" and "left at" are the loop's speeds at those two moments,** not the first and last session's. A loop opened at 100%, practised at 80% and taken back to 100% reads "100%" (the journey spec does exactly this).
+- **One line per loop:** a loop gone back to in the same visit is added up, first speed to last.
+- **The jam page records sittings too** (a loop played from its panel, left by Exit loop, another loop or the screen). The bullet says "one line per loop practised in that visit", and leaving them out would make the summary depend on which screen the loop was played on.
+- **The summary is recorded in a layout effect's cleanup,** so it is in the overview's first painted frame. In the tracker's passive cleanup it would land a frame late and push the loops down.
+- **The streak counts the sitting's day before its session reaches the cache** (the unmount's log is still on its way when the overview shows), so it never reads a day short and then corrects itself. A badge waits for the session itself.
+- **Store rules:** another song's overview forgets this song's sittings (as the task asked); sign-out doesn't clear it (names and numbers only, and a reload does).
+- The loop's name on the overview was a 39 px wide target for a short name ("Verse"); it has `min-w-touch` now, found by the design audit this change touches.
+
+### Async windows and inputs
+
+- **A session's log in flight at a pause** (the mutation). Play again, a nudge, a loop key, leaving: all as before; nothing now waits for the answer. The sitting already has the session's time (added when the tracker ended it, not when the server answered), so a refused log still counts as played.
+- **Between the layout cleanup that records a sitting and the tracker's passive effect** (one commit). No input can arrive. On a loop switch the cleanup reads the tally of the loop being left, then the tracker's effect resets it for the new loop; the recorder ignores a tally that is for another loop than the one it was set up for.
+- **The overview's sessions and loops reads.** The summary's lines are there meanwhile; Dismiss works and empties the store; a read that fails leaves the streak line empty; a read that lands later fills it. The unmount's session log landing adds the session to `sessionKeys.every` and the badges are worked out again.
+- **The overview's unmount microtask.** A sitting recorded after an overview was left (the usual order: overview, practice, overview) is kept: the microtask ran long before. StrictMode's remount takes a new token, so the old microtask empties nothing.
+- **bfcache.** `pagehide` ends the session but not the tally (it is fed the loop really open), so a page that comes back carries its sitting on.
+
+### Known gaps
+
+- Nothing sums up practice left by the nav tabs until that song's overview is opened, and another song's overview forgets it.
+- Two tabs each have their own sittings (module state); nothing is shared, nothing is lost but the line.
+- The streak line is one line high; a streak plus several badges on a 320 px phone wraps and grows it when it fills.
+- A loop renamed on another device mid-sitting shows under the name this device last drew.
+
+### Manual verify steps
+
+1. Practise a loop for 40 s, pause: nothing appears, focus stays on Play, the header says 0:40. Play 20 s more, pause: 1:00.
+2. Arrow to another loop: the header starts again at 0:00.
+3. Back to the song: "Name: 1 min, 80% → 90%" for each loop, the streak; Dismiss removes it and focus is on New loop.
+4. Practise again, back to the song (line shows), to Songs, back to the song: no line.
+5. Open a loop, play 10 s, go back: no line.
+
+### Checks
+
+- `npm run check` green. e2e against the stack on 54421, port 4283, phone and desktop: `practice.spec.ts`, `journey.spec.ts` and `design.spec.ts` green (tablet not run).
+
+## PR 31 review (2026-11-27)
+
+Build (fixes), from Copilot's comments on "Saving a loop stays put" and two CI failures. Each fix had a failing test first.
+
+### A. Copilot comments
+
+1. **The saved note was a status mounted with its text** (inside the keyed form). `LoopSavedNote` is now rendered by both callers outside the keyed form: there, empty, from the moment the form opens, and only its text changes at each save (`data-testid="loop-saved-note"` kept). `LoopEditorForm`'s `note` prop is gone. Two loops saved under one name are still two sayings (a no-break space on every other one).
+2. **LoopPanel: "Practise it" stayed usable while the next loop saved.** Locked while `editor.saving`: `aria-disabled` and a click that is refused (`preventDefault` on the link).
+3. **LoopPracticePage: the same** for its "Practise it" button; the handler refuses too.
+4. **LoopPracticePage: "Practise it" took focus with it to `<body>`.** `PracticePlayer`, which outlives the sheet, hands focus to Play (`focusWhenReady(findPracticePlay)`).
+5. **LoopPracticePage: "Practise it" kept the speed playing.** It opens the loop with `practice.openLoop(saved)`: the loop and its saved speed.
+
+`docs/review-checklist.md`: an example under section 1's "Input during a pending write" (an exit left open while a save is pending), and under section 6's live-region row (a region that arrives holding its text).
+
+### B. `design.spec.ts` "the controls bar fits a phone in three rows…"
+
+The bar already fits: with Mute all the five tiles share the first row at 390, 375, 360 and 320 px (measured: rows at y 221, 299 and 360 at 390 px), nothing spills at 320 px, every target is 44 px. The failure was the test's own count of the controls on show, 9, written before Mute all; it is 10 now. No layout change was needed, so none was made.
+
+### C. `loop-scroll.spec.ts` count-in cases on a phone
+
+`chooseCountIn` and `chooseCountInMode` (`tests/e2e/playerPage.ts`) click the option's radio input with `dispatchEvent('click')` and keep the assertion on the checked value. `clearOfStickyBars` is removed (nothing else used it).
+
+### Async windows and inputs
+
+- **The next loop's insert pending, with a note from the save before.** "Practise it" (press, Enter): refused, nothing unmounts. Taps on the score, the whole-song toggle, the fields and Cancel: locked as before. The insert fails: the form, its draft, its id and its error are still there, and "Practise it" unlocks. It succeeds: the note names the new loop.
+- The lock follows `editor.saving`, which the form reports from an effect: a press in the render before that effect has run is not refused. The window is one commit.
+
+### Known gaps
+
+- The song overview's practice summary (above) is itself a `role="status"` that is on the page with its text from the first render, which the task asked for so nothing moves; a screen reader may not announce it on arrival. It is reachable by reading the page.
+
+### Checks
+
+- `npm run check` green. e2e (stack on 54421, port 4283): `design.spec.ts` at phone and desktop; `loop-scroll.spec.ts` and `count-in.spec.ts` at phone, the count-in cases with `--repeat-each=3`; `journey.spec.ts` and `practice-screen.spec.ts` at phone and desktop.

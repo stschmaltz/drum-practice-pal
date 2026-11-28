@@ -72,6 +72,11 @@ test('draws the loop alone; from the whole song a tap picks bars and Save as loo
   await saveSheet(page).getByLabel('Name').fill('Early');
   await saveSheet(page).getByRole('button', { name: 'Save as loop' }).click();
 
+  // The whole song stays for another loop; the note's button opens the one just saved.
+  await expect(saveSheet(page).getByTestId('loop-saved-note')).toContainText('Saved “Early”.');
+  await expect(page.getByRole('heading', { level: 1, name: 'Middle' })).toBeVisible();
+  await saveSheet(page).getByRole('button', { name: 'Practise it' }).click();
+
   await expect(page.getByRole('heading', { level: 1, name: 'Early' })).toBeVisible();
   await expect(page).toHaveURL(/\/songs\/[^/]+\/loops\/[^/]+$/);
   await expect(saveSheet(page)).toHaveCount(0);

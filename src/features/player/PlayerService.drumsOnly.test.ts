@@ -627,3 +627,61 @@ describe('Drums only against any order of presses', () => {
     },
   );
 });
+
+// Shane, practising: read the tab along with the real recording, the cursor moving, no sound.
+describe('Mute all', () => {
+  it('silences every track, live, and brings back what was sounding', () => {
+    const { engine, service } = playing();
+    const restartsBefore = engine.restartCalls();
+    service.setTrackMuted(0, true);
+    expect(engine.soundingTracks()).toEqual([1, 2]);
+
+    service.setAllMuted(true);
+    expect(service.getSnapshot().allMuted).toBe(true);
+    expect(engine.soundingTracks()).toEqual([]);
+
+    service.setAllMuted(false);
+    expect(engine.soundingTracks()).toEqual([1, 2]);
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(service.getSnapshot().status).toBe('playing');
+  });
+
+  it('wins over Drums only and Mute drums without changing them, and they can change under it', () => {
+    const { engine, service } = playing();
+    service.setDrumsOnly(true);
+    service.setAllMuted(true);
+    expect(engine.soundingTracks()).toEqual([]);
+    expect(service.getSnapshot()).toMatchObject({ drumsOnly: true, allMuted: true });
+
+    // Changed while everything is silent: still silent, and heard once Mute all is off.
+    service.setDrumsOnly(false);
+    service.setDrumsMuted(true);
+    expect(engine.soundingTracks()).toEqual([]);
+    service.setAllMuted(false);
+    expect(engine.soundingTracks()).toEqual([0, 1]);
+  });
+
+  it('works for a song with no drum track, and is off when a song opens', () => {
+    const { engine, service } = playing({ drumTrackIndex: null });
+    expect(service.getSnapshot().allMuted).toBe(false);
+    service.setAllMuted(true);
+    expect(engine.soundingTracks()).toEqual([]);
+  });
+
+  it('set before the score has loaded, holds once it has', () => {
+    const { engine, service } = setup();
+    service.load(bytes);
+    service.setAllMuted(true);
+    engine.finishLoading({ trackCount: 3 });
+    expect(engine.soundingTracks()).toEqual([]);
+  });
+
+  it('after a reload with it turned off meanwhile, every track sounds again', () => {
+    const { engine, service } = playing();
+    service.setAllMuted(true);
+    service.load(bytes);
+    service.setAllMuted(false);
+    engine.finishLoading({ trackCount: 3 });
+    expect(engine.soundingTracks()).toEqual([0, 1, 2]);
+  });
+});

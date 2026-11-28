@@ -45,6 +45,7 @@ import {
 import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
+import { readVisitSittings } from '@/features/practice/visitSittings';
 import { SongPage } from './SongPage';
 
 /** Unfolds the controls bar, which folds to a strip while playback runs. */
@@ -1284,6 +1285,107 @@ describe('SongPage loops', () => {
     expect(speedReadout()).toHaveTextContent('80%');
   });
 
+  // Shane, practising: several loops are made in one go, then practised. The overview's "New
+  // loop" used to jump to each new loop's practice screen, and he had to back out for the next.
+  it('"New loop" from the overview keeps the form for the next loop; Done goes back to the song', async () => {
+    serve({ loops: [] });
+    const user = renderSong(`${SONG_A}?new=1`);
+    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    await panel().findByRole('form');
+
+    await user.type(form().getByLabelText('Name'), 'Verse');
+    await user.type(form().getByLabelText('First bar'), '3');
+    await user.type(form().getByLabelText('Last bar'), '4');
+    await user.click(form().getByRole('button', { name: 'Save loop' }));
+
+    // Still here, on an empty form, under a note that names what it saved and links to it.
+    expect(await panel().findByText(/Saved “Verse”\./)).toBeInTheDocument();
+    expect(panel().getByTestId('loop-saved-note')).toHaveTextContent('Saved “Verse”.');
+    expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG_A}/play`);
+    expect(form().getByLabelText('Name')).toHaveValue('');
+    expect(form().getByLabelText('First bar')).toHaveValue('');
+    const [first] = loops.sent('insert') as Loop[];
+    expect(panel().getByRole('link', { name: 'Practise it' })).toHaveAttribute(
+      'href',
+      `/songs/${SONG_A}/loops/${first?.id}`,
+    );
+
+    // A second loop is its own row, not the first sent again.
+    await user.type(form().getByLabelText('Name'), 'Chorus');
+    await user.type(form().getByLabelText('First bar'), '9');
+    await user.type(form().getByLabelText('Last bar'), '12');
+    await user.click(form().getByRole('button', { name: 'Save loop' }));
+    expect(await panel().findByText(/Saved “Chorus”/)).toBeInTheDocument();
+    const sent = loops.sent('insert') as Loop[];
+    expect(sent.map((loop) => loop.name)).toEqual(['Verse', 'Chorus']);
+    expect(sent[0]?.id).not.toBe(sent[1]?.id);
+
+    await user.click(form().getByRole('button', { name: 'Done' }));
+    expect(await screen.findByText('At song overview')).toBeInTheDocument();
+  });
+
+  // PR 31 review: a status mounted with its text is often not read out. One region, on the
+  // panel from the moment the form opens, whose text changes at each save.
+  it('says each save in one status region that is there, empty, before the first', async () => {
+    serve({ loops: [] });
+    const user = renderSong(`${SONG_A}?new=1`);
+    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    await panel().findByRole('form');
+    const note = panel().getByTestId('loop-saved-note');
+    expect(note).toHaveAttribute('role', 'status');
+    expect(note).toBeEmptyDOMElement();
+
+    await user.type(form().getByLabelText('Name'), 'Verse');
+    await user.type(form().getByLabelText('First bar'), '3');
+    await user.type(form().getByLabelText('Last bar'), '4');
+    await user.click(form().getByRole('button', { name: 'Save loop' }));
+
+    await waitFor(() => expect(note).toHaveTextContent('Saved “Verse”.'));
+    expect(form().getByLabelText('Name')).toHaveValue('');
+    expect(panel().getByTestId('loop-saved-note')).toBe(note);
+  });
+
+  it('says nothing saved while a loop is being edited', async () => {
+    const { user } = await openSong([acrossTheChange]);
+    await panel().findByRole('button', { name: 'Play loop Across the change' });
+    await chooseFromMenu(user, panel(), 'Across the change', 'Edit');
+    await panel().findByRole('form');
+    expect(panel().getByTestId('loop-saved-note')).toBeEmptyDOMElement();
+  });
+
+  it('"Practise it" is locked while the next loop is saving: its form, draft and error stay', async () => {
+    serve({ loops: [] });
+    const user = renderSong(`${SONG_A}?new=1`);
+    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    await panel().findByRole('form');
+    await user.type(form().getByLabelText('Name'), 'Verse');
+    await user.type(form().getByLabelText('First bar'), '3');
+    await user.type(form().getByLabelText('Last bar'), '4');
+    await user.click(form().getByRole('button', { name: 'Save loop' }));
+    const practise = await panel().findByRole('link', { name: 'Practise it' });
+    expectUnlocked(practise);
+
+    const release = loops.holdNext('insert');
+    loops.failNext('insert', 'permission denied');
+    await user.type(form().getByLabelText('Name'), 'Chorus');
+    await user.type(form().getByLabelText('First bar'), '9');
+    await user.type(form().getByLabelText('Last bar'), '12');
+    await user.click(form().getByRole('button', { name: 'Save loop' }));
+    expect(await form().findByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expectLocked(practise);
+    await user.click(practise);
+
+    // The press went nowhere: still the jam page, the form and its save.
+    await settle();
+    expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG_A}/play`);
+    expect(form().getByRole('button', { name: 'Saving…' })).toBeInTheDocument();
+
+    release();
+    expect(await form().findByText(/Couldn't save the loop\./)).toBeInTheDocument();
+    expect(form().getByLabelText('Name')).toHaveValue('Chorus');
+    expectUnlocked(panel().getByRole('link', { name: 'Practise it' }));
+  });
+
   it('refuses a form it cannot save, saying why, and sends nothing', async () => {
     const { user } = await openSong();
     await user.click(await panel().findByRole('button', { name: 'New loop' }));
@@ -1619,6 +1721,18 @@ describe('SongPage practice sessions', () => {
     );
     expect(engine.pause).not.toHaveBeenCalled();
     expect(screen.getByTestId('jam-speed')).toHaveTextContent('60%');
+  });
+
+  it('keeps the sitting of a loop left from the panel, for the song’s overview to sum up', async () => {
+    serve({ loops: [verse, chorus] });
+    const { user } = await startVerse();
+    later(40);
+    await user.keyboard('{PageDown}');
+    await waitFor(() => expect(screen.getByTestId('active-loop')).toHaveTextContent('Chorus'));
+
+    expect(readVisitSittings()).toMatchObject([
+      { loopId: 'verse', loopName: 'Verse', playedSeconds: 40, endSpeedRatio: 0.8 },
+    ]);
   });
 
   it('logs nothing for a short go, and nothing for jam mode', async () => {
