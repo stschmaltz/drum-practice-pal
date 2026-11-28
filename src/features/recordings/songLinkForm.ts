@@ -17,19 +17,22 @@ export const SONG_LINK_FIELDS = [
   'provider',
   'url',
   'created_at',
+  'bar_one_seconds',
 ] as const satisfies readonly (keyof SongLinkTableRow)[];
 
 /** A literal, so supabase-js can type the selected row. Tested against SONG_LINK_FIELDS. */
-export const SONG_LINK_SELECT = 'id, song_id, kind, provider, url, created_at';
+export const SONG_LINK_SELECT = 'id, song_id, kind, provider, url, created_at, bar_one_seconds';
 
 export type SongLinkRow = Pick<SongLinkTableRow, (typeof SONG_LINK_FIELDS)[number]>;
 
 /**
- * The update grant in 20261130000000_song_links.sql: a saved link's song and
- * kind never change, only where it points. A test checks the two agree.
+ * The update grants: a saved link's song and kind never change, only where it
+ * points (20261130000000_song_links.sql) and where its video's bar 1 is
+ * (20261201000000_song_link_bar_one.sql, Unit 19). A test checks them against
+ * the two migrations.
  */
-export const SONG_LINK_EDIT_FIELDS = ['provider', 'url'] as const;
-/** The insert grant, likewise. */
+export const SONG_LINK_EDIT_FIELDS = ['provider', 'url', 'bar_one_seconds'] as const;
+/** The insert grants, likewise. */
 export const SONG_LINK_INSERT_FIELDS = [
   'id',
   'user_id',
@@ -37,7 +40,10 @@ export const SONG_LINK_INSERT_FIELDS = [
   'kind',
   'provider',
   'url',
+  'bar_one_seconds',
 ] as const;
+/** What each of those lists gained in Unit 19's migration. */
+export const SONG_LINK_BAR_ONE_FIELDS = ['bar_one_seconds'] as const;
 
 /** A field's place in the form: the two single links, a saved other link, or one being added. */
 export type LinkSlot = RecordingSource | `other:${string}`;
@@ -213,11 +219,24 @@ export function applyLinkSave(
     .filter((row) => !removed.has(row.id))
     .map((row) => {
       const update = updates.get(row.id);
-      return update ? { ...row, provider: update.provider, url: update.url } : row;
+      if (!update) return row;
+      return {
+        ...row,
+        provider: update.provider,
+        url: update.url,
+        // Where bar 1 falls belongs to the video it was lined up on: the database
+        // clears it when a link is pointed somewhere else (song_links_before_write).
+        bar_one_seconds: update.url === row.url ? (row.bar_one_seconds ?? null) : null,
+      };
     });
   const listed = new Set(kept.map((row) => row.id));
   const added = plan.inserts
     .filter((insert) => !listed.has(insert.id))
-    .map((insert): SongLinkRow => ({ ...insert, song_id: songId, created_at: savedAt }));
+    .map((insert): SongLinkRow => ({
+      ...insert,
+      song_id: songId,
+      created_at: savedAt,
+      bar_one_seconds: null,
+    }));
   return [...kept, ...added];
 }

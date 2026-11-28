@@ -643,7 +643,7 @@ describe('parseSongLink: hosts in other scripts', () => {
     expect(link).toMatchObject({ provider: 'web', mediaId: null, hostLabel: 'xn--youtub-8of.com' });
     expect(link.url).toBe(`https://xn--youtub-8of.com/watch?v=${VIDEO}`);
     expect(youTubeEmbedUrl(link)).toBeNull();
-    expect(videoSources([{ ...link, id: 'a', kind: 'original' }])).toEqual([]);
+    expect(videoSources([{ ...link, id: 'a', kind: 'original', barOneSeconds: null }])).toEqual([]);
     expect(recognisedAs(link)).toBe('Link to xn--youtub-8of.com. Opens in a new tab.');
   });
 

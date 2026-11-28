@@ -7,6 +7,7 @@ import {
   isEmptyPlan,
   linkFields,
   planLinkSave,
+  SONG_LINK_BAR_ONE_FIELDS,
   SONG_LINK_EDIT_FIELDS,
   SONG_LINK_FIELDS,
   SONG_LINK_INSERT_FIELDS,
@@ -28,6 +29,7 @@ function linkRow(id: string, overrides: Partial<SongLinkRow> = {}): SongLinkRow 
     provider: 'web',
     url: `https://example.com/${id}`,
     created_at: '2026-11-20T10:00:00Z',
+    bar_one_seconds: null,
     ...overrides,
   };
 }
@@ -45,17 +47,32 @@ describe('columns and grants', () => {
     expect(SONG_LINK_SELECT.split(', ')).toEqual([...SONG_LINK_FIELDS]);
   });
 
-  it('the insert and update fields are the migration’s column grants', () => {
-    const sql = readFileSync(
-      join(process.cwd(), 'supabase', 'migrations', '20261130000000_song_links.sql'),
-      'utf8',
+  it('the insert and update fields are the two migrations’ column grants', () => {
+    const migration = (name: string) =>
+      readFileSync(join(process.cwd(), 'supabase', 'migrations', name), 'utf8');
+    const added = SONG_LINK_BAR_ONE_FIELDS as readonly string[];
+    const first = (fields: readonly string[]) => fields.filter((field) => !added.includes(field));
+    // Unit 14's table, then the column Unit 19 added to each grant.
+    const links = migration('20261130000000_song_links.sql');
+    expect(links).toContain(
+      `grant insert (${first(SONG_LINK_INSERT_FIELDS).join(', ')}) on public.song_links to authenticated`,
     );
-    expect(sql).toContain(
-      `grant insert (${SONG_LINK_INSERT_FIELDS.join(', ')}) on public.song_links to authenticated`,
+    expect(links).toContain(
+      `grant update (${first(SONG_LINK_EDIT_FIELDS).join(', ')}) on public.song_links to authenticated`,
     );
-    expect(sql).toContain(
-      `grant update (${SONG_LINK_EDIT_FIELDS.join(', ')}) on public.song_links to authenticated`,
+    const barOne = migration('20261201000000_song_link_bar_one.sql');
+    for (const verb of ['insert', 'update']) {
+      expect(barOne).toContain(
+        `grant ${verb} (${added.join(', ')}) on public.song_links to authenticated`,
+      );
+    }
+    // Every field is in one grant or the other, and no migration grants more.
+    expect([...first(SONG_LINK_INSERT_FIELDS), ...added]).toEqual([...SONG_LINK_INSERT_FIELDS]);
+    expect([...first(SONG_LINK_EDIT_FIELDS), ...added]).toEqual([...SONG_LINK_EDIT_FIELDS]);
+    const grants = [links, barOne].flatMap(
+      (sql) => sql.match(/grant (insert|update) \([^)]*\) on public\.song_links/g) ?? [],
     );
+    expect(grants).toHaveLength(4);
   });
 });
 
@@ -190,8 +207,30 @@ describe('applyLinkSave', () => {
         provider: 'youtube',
         url: WATCH,
         created_at: '2026-11-27T09:00:00Z',
+        bar_one_seconds: null,
       },
     ]);
+  });
+
+  it('a link pointed at another address loses its line-up, as the database’s trigger does', () => {
+    const lined = { ...original, bar_one_seconds: 7.25 };
+    const other = linkRow('a', { bar_one_seconds: 3 });
+    const moved = {
+      removals: [],
+      updates: [{ id: 'o', provider: 'spotify' as const, url: SPOTIFY }],
+      inserts: [],
+    };
+    expect(applyLinkSave([lined, other], SONG, moved, '2026-11-27T09:00:00Z')).toEqual([
+      { ...original, provider: 'spotify', url: SPOTIFY, bar_one_seconds: null },
+      other,
+    ]);
+    // The same address again (a save pressed twice) keeps it.
+    const same = {
+      removals: [],
+      updates: [{ id: 'o', provider: 'youtube' as const, url: WATCH }],
+      inserts: [],
+    };
+    expect(applyLinkSave([lined], SONG, same, '2026-11-27T09:00:00Z')).toEqual([lined]);
   });
 
   it('doesn’t list a link twice when the list already has the row a plan added', () => {

@@ -1,18 +1,24 @@
 /// <reference lib="dom" />
 import type { Page } from '@playwright/test';
-import { expect, signIn, test } from './auth';
+import { expect, signIn, test, type E2eUser } from './auth';
 import { boxOf, openSongOverview, playButton, uploadFixture, viewport } from './playerPage';
+import { highlightBoxes } from './loopsPage';
 import { navLink } from './practicePage';
 import {
   addRecordingButton,
+  barOneOf,
   EMBED_URL,
   gotoSource,
   lastPlayedOf,
+  lineUpButton,
+  lineUpMessage,
+  markedBars,
   linkField,
   linksOf,
   openInYouTube,
   openNewSongOverview,
   openRecordingsForm,
+  PLAYER_API_URL,
   playAlong,
   recordingBar,
   recordingFrame,
@@ -28,6 +34,7 @@ import {
   stubServices,
   tabLink,
   VIDEO_ID,
+  videoStub,
   WATCH_URL,
 } from './recordingsPage';
 
@@ -97,8 +104,10 @@ test('a YouTube link plays in the play screen over the tab, and nothing of YouTu
   const player = page.frameLocator('[data-testid="recording-frame"]');
   await expect(player.getByText(STUB_PLAYER_TEXT)).toBeVisible();
   await expect(player.locator('#at')).toHaveText(EMBED_URL);
-  // The recorder works, so the empty list above meant no request; and this is the only one.
-  expect(services.requests).toEqual([EMBED_URL]);
+  // The recorder works, so the empty list above meant no request; and this is the only frame,
+  // with the one script that reads the video's clock (Unit 19) asked for with it, not before.
+  expect(services.frames()).toEqual([EMBED_URL]);
+  await expect.poll(() => services.scripts()).toEqual([PLAYER_API_URL]);
 
   // The way out is always there, since a video that refuses embedding only says so inside the frame.
   const out = openInYouTube(page);
@@ -340,7 +349,7 @@ test.describe('with the service worker in charge of the page', () => {
     await expect(player.getByText(STUB_PLAYER_TEXT)).toBeVisible();
     await expect(player.locator('#at')).toHaveText(`${EMBED_URL}&start=90`);
     // The recorder sees the frame, so the empty list above meant no request.
-    expect(services.requests).toEqual([`${EMBED_URL}&start=90`]);
+    expect(services.frames()).toEqual([`${EMBED_URL}&start=90`]);
     // The way out starts at the same place.
     await expect(openInYouTube(page)).toHaveAttribute('href', `${WATCH_URL}&t=90s`);
   });
@@ -382,7 +391,7 @@ test('offline, the recording buttons are off and a press goes nowhere; on a reco
   await expect(original).not.toHaveAttribute('aria-disabled', 'true');
   await original.click();
   await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
-  expect(services.requests).toEqual([EMBED_URL]);
+  expect(services.frames()).toEqual([EMBED_URL]);
   // The tab under it has loaded (its file is on the device from here on).
   await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
 
@@ -404,7 +413,9 @@ test('offline, the recording buttons are off and a press goes nowhere; on a reco
   await context.setOffline(false);
   await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
   await expect(openInYouTube(page)).not.toHaveAttribute('aria-disabled', 'true');
-  await expect.poll(() => services.requests, { timeout: 10_000 }).toEqual([EMBED_URL, EMBED_URL]);
+  await expect.poll(() => services.frames(), { timeout: 10_000 }).toEqual([EMBED_URL, EMBED_URL]);
+  // The player's script was asked for once: the page keeps it across the frame's going and coming back.
+  expect(services.scripts()).toEqual([PLAYER_API_URL]);
 });
 
 test('a second tab sees a link saved in the first at its next read, and its form edits that link', async ({
@@ -757,4 +768,251 @@ test('the form: Remove stays on its field’s row, a paste with words keeps its 
       Math.max(input.y + input.height, remove.y + remove.height) - 1,
     );
   }
+});
+
+// Unit 19: the tab follows the video. The stub player has a clock of its own and
+// speaks the player's protocol (recordingsPage.ts), so these cover the frame's
+// parameters, one following pass, the keys and the tap, and the saved line-up
+// on a second device. Whether a real recording stays in step is for ears at the kit.
+test.describe('the tab follows the video (Unit 19)', () => {
+  /** Groove 120: sixteen 4/4 bars of two seconds. */
+  const BAR_SECONDS = 2;
+
+  /** A new user's Groove 120 on its play screen, on its Original video, the score drawn. */
+  async function openVideo(page: Page, user: E2eUser) {
+    await openNewSongOverview(page, user);
+    await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
+    await recordingLink(page, 'Original').click();
+    await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+    await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
+  }
+
+  /** The part of the window the score is read in: under the sticky video, above a phone's tab bar. */
+  async function readableView(page: Page) {
+    const bar = await boxOf(recordingBar(page), 'recording bar');
+    const tabs = await page.locator('[data-bottom-tabs]').boundingBox();
+    const height = page.viewportSize()!.height;
+    return { top: bar.y + bar.height, bottom: tabs && tabs.height > 0 ? tabs.y : height };
+  }
+
+  /** The marked bar's box, once exactly one bar is marked. */
+  async function markedBox(page: Page) {
+    await expect.poll(async () => (await highlightBoxes(page)).length).toBe(1);
+    return (await highlightBoxes(page))[0]!;
+  }
+
+  test('lining up once marks the bar the video is on and keeps it on show, through pause, seek and speed', async ({
+    user,
+    page,
+    context,
+  }) => {
+    test.setTimeout(120_000);
+    const services = await stubServices(context);
+    await openVideo(page, user);
+    const video = videoStub(page);
+
+    // The frame carries what the player needs to answer this page and no other, and the
+    // one script was asked for with it.
+    const src = new URL((await recordingFrame(page).getAttribute('src'))!);
+    expect(src.hostname).toBe('www.youtube-nocookie.com');
+    expect(Object.fromEntries(src.searchParams)).toEqual({
+      playsinline: '1',
+      rel: '0',
+      enablejsapi: '1',
+      origin: new URL(page.url()).origin,
+    });
+    await expect.poll(() => services.scripts()).toEqual([PLAYER_API_URL]);
+    expect(services.frames()).toEqual([EMBED_URL]);
+
+    // Not lined up: the prompt, its button off until the video plays, and no bar marked.
+    await expect(lineUpMessage(page)).toHaveText('Line the tab up: when bar 1 starts, press');
+    await expect(lineUpButton(page, 'Bar 1 starts now')).toHaveAttribute('aria-disabled', 'true');
+    expect(await markedBars(page)).toBeNull();
+    expect(await barOneOf(user)).toEqual({ original: null });
+
+    // Space can't start a video nobody has tapped: it says so, and nothing plays.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press('Space');
+    await expect(lineUpMessage(page)).toContainText('Press Play on the video once.');
+    expect(await video.playing()).toBe(false);
+
+    // The tap on the video, then the press as bar 1 comes in, three seconds into it.
+    await video.tapPlay();
+    await video.seek(3);
+    await expect(lineUpButton(page, 'Bar 1 starts now')).not.toHaveAttribute('aria-disabled');
+    // Where things are in the page, whatever the window has scrolled to: following may
+    // scroll the window to bar 1, and the bar under the video then sticks to its top.
+    const layout = async () => {
+      const scrollY = await page.evaluate(() => window.scrollY);
+      const score = await boxOf(viewport(page), 'score');
+      const bar = await boxOf(recordingBar(page), 'recording bar');
+      return {
+        scoreTop: Math.round(score.y + scrollY),
+        scoreLeft: score.x,
+        scoreWidth: score.width,
+        barHeight: bar.height,
+        barWidth: bar.width,
+      };
+    };
+    const before = await layout();
+    await lineUpButton(page, 'Bar 1 starts now').click();
+
+    // Saved with the link: the video's time at the press, to the millisecond.
+    await expect.poll(async () => (await barOneOf(user)).original).not.toBeNull();
+    const barOne = (await barOneOf(user)).original!;
+    expect(barOne).toBeGreaterThanOrEqual(3);
+    expect(barOne).toBeLessThan(3 + BAR_SECONDS);
+    await expect(lineUpButton(page, 'Tab later')).toBeVisible();
+    await expect(lineUpButton(page, 'Follow')).toHaveAttribute('aria-pressed', 'true');
+    await expect(lineUpButton(page, 'Line up again')).toBeFocused();
+    await expect(lineUpMessage(page)).toContainText('Bar 1 at 0:0');
+    // The prompt gave way to the nudges and nothing on the page moved.
+    expect(await layout()).toEqual(before);
+
+    // It follows by itself, a bar every two seconds of the video's own clock.
+    await expect.poll(() => markedBars(page)).toEqual([1, 1]);
+    await expect.poll(() => markedBars(page), { timeout: 10_000 }).toEqual([2, 2]);
+    await expect.poll(() => markedBars(page), { timeout: 10_000 }).toEqual([3, 3]);
+    // The tab's own player was never started for it.
+    await expect(playButton(page)).toHaveCount(0);
+
+    // A pause in the video's own controls: the mark stays where the song stopped.
+    await video.pause();
+    const paused = await markedBars(page);
+    await page.waitForTimeout(BAR_SECONDS * 1000 + 300);
+    expect(await markedBars(page)).toEqual(paused);
+
+    // A seek in the video, still paused: the mark goes there, and the bar is brought on show.
+    await video.seek(barOne + 12 * BAR_SECONDS + 0.5);
+    await expect.poll(() => markedBars(page)).toEqual([13, 13]);
+    const view = await readableView(page);
+    await expect
+      .poll(async () => {
+        const box = await markedBox(page);
+        return box.y >= view.top - 1 && box.y + box.height <= view.bottom + 1;
+      })
+      .toBe(true);
+
+    // YouTube's speed at 2x: the same clock, just faster. Bar 14 comes within about a second.
+    await video.setRate(2);
+    await video.play();
+    await expect.poll(() => markedBars(page), { timeout: 5_000 }).toEqual([14, 14]);
+
+    // Space pauses and plays the video, wherever focus is outside a field.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press('Space');
+    await expect.poll(() => video.playing()).toBe(false);
+    await page.keyboard.press('Space');
+    await expect.poll(() => video.playing()).toBe(true);
+    await video.pause();
+    await video.setRate(1);
+
+    // Past the tab's end nothing is marked; back before bar 1, nothing either.
+    await video.seek(barOne + 16 * BAR_SECONDS + 1);
+    await expect.poll(() => markedBars(page)).toBeNull();
+    await video.seek(Math.max(0, barOne - 1));
+    await expect.poll(() => markedBars(page)).toBeNull();
+  });
+
+  test('a tap on a bar moves the video there, the nudges are saved, and a second device follows with no setup', async ({
+    user,
+    page,
+    context,
+    browser,
+  }) => {
+    test.setTimeout(150_000);
+    await stubServices(context);
+    await openVideo(page, user);
+    const video = videoStub(page);
+    await video.tapPlay();
+    await video.seek(5);
+    await lineUpButton(page, 'Bar 1 starts now').click();
+    await expect.poll(async () => (await barOneOf(user)).original).not.toBeNull();
+    const barOne = (await barOneOf(user)).original!;
+    await video.pause();
+
+    // With Follow off the page stays put, so a point measured on the score stays that bar's.
+    await lineUpButton(page, 'Follow').click();
+    await expect(lineUpButton(page, 'Follow')).toHaveAttribute('aria-pressed', 'false');
+    await video.seek(barOne + BAR_SECONDS + 0.5);
+    await expect.poll(() => markedBars(page)).toEqual([2, 2]);
+    const second = await markedBox(page);
+    // A bar that takes a tap looks like one, with the tab's own cursor still not drawn.
+    expect(
+      await viewport(page)
+        .locator('.at-surface')
+        .evaluate((surface) => getComputedStyle(surface).cursor),
+    ).toBe('pointer');
+    await video.seek(barOne + 0.5);
+    await expect.poll(() => markedBars(page)).toEqual([1, 1]);
+
+    await page.mouse.click(second.x + second.width / 2, second.y + second.height / 2);
+    await expect.poll(() => markedBars(page)).toEqual([2, 2]);
+    // The app shows the seek at once; the video itself hears it a message later.
+    await expect.poll(() => video.time()).toBeCloseTo(barOne + BAR_SECONDS, 1);
+    // Still paused: a tap moves the video, it doesn't start it.
+    expect(await video.playing()).toBe(false);
+
+    // The tab running ahead: "Tab later" twice, each a quarter of a second, saved.
+    await lineUpButton(page, 'Tab later').click();
+    await lineUpButton(page, 'Tab later').click();
+    await expect.poll(async () => (await barOneOf(user)).original).toBeCloseTo(barOne + 0.5, 3);
+    await lineUpButton(page, 'Tab earlier').click();
+    await expect.poll(async () => (await barOneOf(user)).original).toBeCloseTo(barOne + 0.25, 3);
+    const lined = barOne + 0.25;
+    const label = await lineUpMessage(page).textContent();
+
+    // Another device, nothing cached: the line-up is the link's, so Play on the video is all it takes.
+    const otherContext = await browser.newContext();
+    try {
+      await stubServices(otherContext);
+      const other = await otherContext.newPage();
+      await signIn(other, user, new URL(page.url()).pathname);
+      await gotoSource(other, 'original');
+      await expect(recordingFrame(other)).toHaveAttribute('src', EMBED_URL);
+      await expect(viewport(other).locator('svg').first()).toBeVisible({ timeout: 20_000 });
+      await expect(lineUpMessage(other)).toHaveText(label!);
+      await expect(lineUpButton(other, 'Bar 1 starts now')).toHaveCount(0);
+      expect(await markedBars(other)).toBeNull();
+
+      const otherVideo = videoStub(other);
+      await otherVideo.tapPlay();
+      await otherVideo.seek(lined + 4 * BAR_SECONDS + 0.2);
+      await expect.poll(() => markedBars(other)).toEqual([5, 5]);
+      await expect.poll(() => markedBars(other), { timeout: 10_000 }).toEqual([6, 6]);
+    } finally {
+      await otherContext.close();
+    }
+  });
+
+  test('a link that isn’t lined up plays as before: no bar marked, a tap and Space change nothing saved', async ({
+    user,
+    page,
+    context,
+  }) => {
+    test.setTimeout(90_000);
+    await stubServices(context);
+    await openVideo(page, user);
+    const video = videoStub(page);
+    await video.tapPlay();
+    await video.seek(9);
+    // The video is heard by the app (the line-up could be pressed), and still nothing is marked.
+    await expect(lineUpButton(page, 'Bar 1 starts now')).not.toHaveAttribute('aria-disabled');
+    await page.waitForTimeout(1000);
+    expect(await markedBars(page)).toBeNull();
+    expect(await highlightBoxes(page)).toEqual([]);
+
+    const score = await boxOf(viewport(page), 'score');
+    const before = await video.time();
+    await page.mouse.click(score.x + score.width / 2, score.y + 60);
+    await page.waitForTimeout(400);
+    // No seek: the clock only moved on with the time that passed.
+    expect((await video.time()) - before).toBeLessThan(2);
+    expect(await barOneOf(user)).toEqual({ original: null });
+    expect(
+      await viewport(page)
+        .locator('.at-surface')
+        .evaluate((surface) => getComputedStyle(surface).cursor),
+    ).toBe('default');
+  });
 });

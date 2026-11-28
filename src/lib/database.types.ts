@@ -101,6 +101,7 @@ export type Database = {
       };
       song_links: {
         Row: {
+          bar_one_seconds: number | null;
           created_at: string;
           id: string;
           kind: Database['public']['Enums']['song_link_kind'];
@@ -112,6 +113,7 @@ export type Database = {
         };
         ComputedFields: never;
         Insert: {
+          bar_one_seconds?: number | null;
           created_at?: string;
           id?: string;
           kind: Database['public']['Enums']['song_link_kind'];
@@ -122,6 +124,7 @@ export type Database = {
           user_id?: string;
         };
         Update: {
+          bar_one_seconds?: number | null;
           created_at?: string;
           id?: string;
           kind?: Database['public']['Enums']['song_link_kind'];

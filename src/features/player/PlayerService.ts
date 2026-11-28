@@ -22,7 +22,7 @@ import { countsInEveryRepeat, meterAtBar, type Meter } from './countIn';
 import { startCountIn } from './countInRunner';
 import { createEmitter, type Handler } from './emitter';
 import type { LayoutChoice } from './layout';
-import type { PlayerEngine } from './playerEngine';
+import type { PlayerEngine, WindowRect } from './playerEngine';
 import { isSameVoice, type MetronomeVoice } from './metronomeSounds';
 import { clampVolume, effectiveMetronomeVolume, type PlayerOptions } from './playerOptions';
 
@@ -462,6 +462,26 @@ export class PlayerService {
   /** The tempo a 1-based bar starts at, in the file's BPM; null before the score loads or for no such bar. */
   tempoAtBar(barNumber: number): number | null {
     return tempoAtBar(this.barTempos, barNumber);
+  }
+
+  /**
+   * The song's bars in the order they are played, with their ticks and the
+   * tempos inside them: what a screen times the tab from when something
+   * else's clock says where the song is (a recording, Unit 19). Empty until
+   * the ticks are in, which is before the status leaves `loading`.
+   */
+  playedBars(): readonly BarTicks[] {
+    return this.bars;
+  }
+
+  /**
+   * Where a 1-based bar is drawn in the window now, or null when it can't be
+   * told (nothing rendered yet, a redraw on its way, a bar not drawn). A
+   * reading only; `showBar` is what scrolls the score box.
+   */
+  barRectInWindow(barNumber: number): WindowRect | null {
+    if (this.disposed || !showsScoreBars(this.snapshot)) return null;
+    return this.engine.barRectInWindow(barNumber - 1);
   }
 
   // --- Range and looping ---

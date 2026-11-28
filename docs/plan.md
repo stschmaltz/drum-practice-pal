@@ -590,18 +590,18 @@ Shane after Unit 14 (2026-11-28): "can we make the tabs follow along with the vi
 
 - **A `RecordingPlayer` behind an interface** (`src/features/recordings/recordingPlayer.ts`, as `PlayerEngine` is for alphaTab): `subscribe` to `{ seconds, rate, playing }`, `seekTo(seconds)`, `play()`, `pause()`, `dispose()`. `youTubePlayer.ts` is the only module that talks to YouTube's API; a `FakeRecordingPlayer` in `src/test/` drives every test. The video box from Unit 14 mounts it; the frame's address stays built by the parser, with the API's parameters added in the same one place
 - **Where the song is, from the video's time** is pure (`src/features/recordings/videoSync.ts`, tests first): the tab's bars in play order with the second each starts at (from the tempos, meters and repeats the player already has: `barStartTempos`, `barMeters`, the played-bars order), `barAtVideoSeconds(barStarts, barOneSeconds, videoSeconds)` and its inverse `videoSecondsOfBar`. Before bar 1's second it is "not started"; after the last bar's end, "ended"
-- **Lining the tab up, once per link:** the app can't know where bar 1 falls in a video. Until a link is lined up, a quiet line under the video offers it: "Line the tab up: when bar 1 starts, press" and one big button, "Bar 1 starts now", enabled while the video plays. The press saves the video's time as the link's `bar_one_seconds`. After that the same place holds "Tab early / Tab late" nudges (a quarter of a second each, shown as a signed offset) and "Line up again". Never required: an unlined video plays exactly as in Unit 14
+- **Lining the tab up, once per link:** the app can't know where bar 1 falls in a video. Until a link is lined up, a quiet line under the video offers it: "Line the tab up: when bar 1 starts, press" and one big button, "Bar 1 starts now", enabled while the video plays. The press saves the video's time as the link's `bar_one_seconds`. After that the same place holds "Tab earlier" / "Tab later" nudges (a quarter of a second each, with bar 1's time in the video on show: "Bar 1 at 0:07.25") and "Line up again". Never required: an unlined video plays exactly as in Unit 14
 - **Following:** once lined up, the bar the video is on is marked on the score with the highlight the loops use (`setHighlight`, never the orange playback cursor, which stays hidden under a recording) and brought on screen when it leaves it (`showBar`: a bar already on show doesn't move the page). Per bar, not per beat. It tracks pause, seek, buffering and the video's speed, because it reads the video's own clock (polled while playing, a few times a second). A "Follow" toggle (on by default once lined up, in the URL-free page state) turns the scrolling off for someone who wants to read ahead; the mark stays
 - **Tap a bar to hear it:** while lined up, a tap on a bar seeks the video to that bar's start (`seekTo`); the tab's own player stays set aside
 - **Space plays and pauses the video** on a recording source once the player has reported ready (the page's other playback keys still do nothing there). It can't start a video that has never been tapped; then the note says to press Play on the video once
 - **Data:** `song_links.bar_one_seconds numeric null`, between 0 and 43200, client-writable through a column grant on update (and insert), additive. Saved with the links' existing update (`pointLinkAt`'s pattern: the write asks for its row back), optimistic, online only like the other link edits (a video needs a connection anyway). Types regenerated; `tests/db` covers the grant and the check. The migration is pushed before the build is live (docs/release.md: the build reads the new column on the play screen)
-- **Drift is said, not hidden:** the tab's tempo and a recording's rarely match over four minutes. The nudges are the answer in this unit, and the line under the video says what they are for the first time one is needed ("Drifting? Nudge the tab")
+- **Drift is said, not hidden:** the tab's tempo and a recording's rarely match over four minutes. The nudges are the answer in this unit, and the line under the video says what they are for beside bar 1's time ("Drifting? Nudge the tab")
 
 **Walk-throughs** (from the song's play screen on a recording, the video already tapped to play)
 
 - _First time on a link:_ "Bar 1 starts now" as the song comes in (1 tap). From then on the bar is marked and the page follows
 - _Every later time, any device:_ Play on the video. Nothing else
-- _The tab runs ahead by the second chorus:_ "Tab late" twice (2 taps), saved
+- _The tab runs ahead by the second chorus:_ "Tab later" twice (2 taps), saved
 - _A hard fill at bar 33:_ tap bar 33; the video jumps there
 - _A link never lined up, or a Spotify or other link:_ exactly Unit 14
 - _A song whose tab has repeats:_ the mark follows the bars in the order they are played, as the tab's own cursor does
@@ -631,7 +631,9 @@ Shane after Unit 14 (2026-11-28): "can we make the tabs follow along with the vi
 
 **Carried forward**
 
-None yet.
+- From 19 Build: the app now asks `www.youtube.com` for the IFrame Player API script whenever a video's frame is drawn (the documented way; the frame itself stays on `youtube-nocookie.com`). Driving the frame by `postMessage` alone would ask YouTube's cookie host for nothing, but the protocol is undocumented. Shane's call whether that trade is right. (docs/units/19-follow-video.md, Decisions)
+- From 19 Build: "Bar 1 starts now" saves the clock as the API reads it at the press; a real player reports its clock in steps, so a line-up can be a fraction of a second late, which one "Tab earlier" takes up. If lining up by ear turns out to be consistently late, subtract a fixed reaction time at the press. (Known gaps)
+- From 19 Build: the mark and the scroll need the tab's sounds to have loaded (`showBar` waits for the player to be ready); a song whose soundfont failed is marked but not scrolled to. A first line-up that the server refuses leaves the prompt back with focus on it; a nudge that fails while focus is on it keeps focus. An advert inside a video isn't told apart by the API; nothing is marked before the video's first play, which covers one before it starts. (Known gaps)
 
 ### 18 Songs from a link alone
 

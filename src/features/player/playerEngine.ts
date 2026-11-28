@@ -112,7 +112,23 @@ export interface PlayerEngine {
    * again on `rendered`. True once it could, scrolled or not.
    */
   scrollToBar(barIndex: number): boolean;
+  /**
+   * Where a bar (0-based) is drawn in the window at this moment, for a screen
+   * that keeps it on show by scrolling the window (a phone's read-along
+   * score is as tall as its lines and scrolls with the page: Unit 19). A
+   * reading only. Null while the score has no bounds, during a redraw, or
+   * for a bar that isn't drawn.
+   */
+  barRectInWindow(barIndex: number): WindowRect | null;
   destroy(): void;
+}
+
+/** A box in the window's coordinates, as `getBoundingClientRect` gives one. */
+export interface WindowRect {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
 }
 
 export interface EngineMount {

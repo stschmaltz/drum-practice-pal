@@ -1,4 +1,13 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type Ref,
+} from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { PageHeader } from '@/components/PageHeader';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -24,8 +33,11 @@ import { bpmAtSpeed } from '@/features/player/tempo';
 import { usePlayer } from '@/features/player/usePlayer';
 import { usePracticeTracker } from '@/features/practice/usePracticeTracker';
 import { useSittingRecorder } from '@/features/practice/useVisitSittings';
+import { LineUp, LineUpSpace } from '@/features/recordings/LineUp';
 import { RecordingBox } from '@/features/recordings/RecordingBox';
+import type { RecordingPlayer } from '@/features/recordings/recordingPlayer';
 import { RECORDING_NOTE, type VideoSource } from '@/features/recordings/songLinks';
+import { useRecordingPlayer } from '@/features/recordings/useRecordingPlayer';
 import { ShortcutOverlay } from '@/features/shortcuts/ShortcutOverlay';
 import { songPath } from '@/lib/routes';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
@@ -46,6 +58,12 @@ import { announcementText, useSongShortcuts } from './useSongShortcuts';
 import { useSongSources } from './useSongSources';
 import { useStaysOnScreen } from './useStaysOnScreen';
 import { useTabSetAside } from './useTabSetAside';
+import {
+  toggleRecording,
+  useTapSeeksVideo,
+  useVideoFollow,
+  type RecordingSession,
+} from './useVideoFollow';
 
 /**
  * /songs/:id/play, the whole song ("Tab" under the overview's Play along).
@@ -70,6 +88,12 @@ import { useTabSetAside } from './useTabSetAside';
  * keys are not offered, since none of them acts on the video. The score is
  * then in page layout at every width (`readAlong`), so a phone shows lines
  * down the page that scroll with the window under the video.
+ *
+ * Once a video has been lined up with the tab (Unit 19: "Bar 1 starts now",
+ * under the video, saved with the link) the bar the video is on is marked on
+ * the score and kept on show, from the video's own clock; a tap on a bar
+ * moves the video there, and Space plays and pauses it. A link that isn't
+ * lined up is as above.
  */
 export function SongPage() {
   const { id = '' } = useParams();
@@ -78,7 +102,31 @@ export function SongPage() {
 
 function SongScreen({ song }: { song: Song }) {
   const sources = useSongSources(song.id);
-  const recording = sources.choice.state !== 'tab';
+  const video = sources.choice.state === 'recording' ? sources.choice.video : null;
+  const recordingBarRef = useRef<HTMLDivElement>(null);
+  const { frameRef, player: recordingPlayer } = useRecordingPlayer();
+  // Page state, not saved: following is on whenever a lined-up video is opened.
+  const [follow, setFollow] = useState(true);
+  // Space or a tap on a bar tried to work a video nobody has tapped yet; said under the video.
+  // Kept per player, so another video doesn't open with the note about the last one.
+  const [askedOf, setAskedOf] = useState<RecordingPlayer | null>(null);
+  const onNeedsFirstTap = useCallback(() => setAskedOf(recordingPlayer), [recordingPlayer]);
+  const needsFirstTap = askedOf !== null && askedOf === recordingPlayer;
+  const barOneSeconds = video?.link.barOneSeconds ?? null;
+  const onRecording = sources.choice.state !== 'tab';
+  const recording = useMemo(
+    (): RecordingSession | null =>
+      onRecording
+        ? {
+            player: recordingPlayer,
+            barOneSeconds,
+            follow,
+            barRef: recordingBarRef,
+            onNeedsFirstTap,
+          }
+        : null,
+    [onRecording, recordingPlayer, barOneSeconds, follow, onNeedsFirstTap],
+  );
   return (
     <div className="flex flex-col gap-4">
       <BackLink to={songPath(song.id)}>{song.title}</BackLink>
@@ -92,10 +140,17 @@ function SongScreen({ song }: { song: Song }) {
           onChange={sources.choose}
         />
       )}
-      {sources.choice.state !== 'tab' && (
+      {onRecording && (
         <RecordingBar
+          barRef={recordingBarRef}
+          frameRef={frameRef}
+          songId={song.id}
           songTitle={song.title}
-          video={sources.choice.state === 'recording' ? sources.choice.video : null}
+          video={video}
+          player={recordingPlayer}
+          follow={follow}
+          onFollowChange={setFollow}
+          needsFirstTap={needsFirstTap}
         />
       )}
       <SongFileGate song={song}>
@@ -127,13 +182,50 @@ const recordingBarClass = `sticky top-0 ${fullBleedBarClass} flex flex-col gap-1
  * The recording the screen is on: its video in a bar that sticks like the jam
  * bar it stands in for, so it stays on screen over the score, and the note
  * that says why the tab's controls aren't there. `video` null while the links
- * are still read for the source the screen was opened on.
+ * are still read for the source the screen was opened on. Under the video (or
+ * beside it), the line-up: how the tab is told where bar 1 falls in it.
  */
-function RecordingBar({ songTitle, video }: { songTitle: string; video: VideoSource | null }) {
+function RecordingBar({
+  barRef,
+  frameRef,
+  songId,
+  songTitle,
+  video,
+  player,
+  follow,
+  onFollowChange,
+  needsFirstTap,
+}: {
+  barRef: Ref<HTMLDivElement>;
+  frameRef: Ref<HTMLIFrameElement>;
+  songId: string;
+  songTitle: string;
+  video: VideoSource | null;
+  player: RecordingPlayer | null;
+  follow: boolean;
+  onFollowChange: (follow: boolean) => void;
+  needsFirstTap: boolean;
+}) {
   return (
     <>
-      <div data-testid="recording-bar" className={recordingBarClass}>
-        <RecordingBox songTitle={songTitle} video={video} />
+      <div ref={barRef} data-testid="recording-bar" className={recordingBarClass}>
+        <RecordingBox songTitle={songTitle} video={video} frameRef={frameRef}>
+          {video ? (
+            <LineUp
+              // Another link is another line-up: "Line up again" half-way doesn't carry over.
+              key={video.link.id}
+              songId={songId}
+              link={video.link}
+              player={player}
+              follow={follow}
+              onFollowChange={onFollowChange}
+              needsFirstTap={needsFirstTap}
+            />
+          ) : (
+            // The same room while the links are read, so the score doesn't move when they arrive.
+            <LineUpSpace />
+          )}
+        </RecordingBox>
       </div>
       {/* From 1024 px, and in a phone on its side, the same words sit in the bar, beside the video (RecordingBox). */}
       <p className="text-sm text-ink-muted lg:hidden sideways:hidden" data-testid="recording-note">
@@ -205,17 +297,20 @@ function SongPlayer({
   initialOptions: PlayerOptions;
   /**
    * The page is on a recording (Unit 14): the score is only read, under the
-   * video. The player is paused and stays so: no Play, no controls, no keys,
-   * no taps or drags on the score, no loop panel.
+   * video. The player is paused and stays so: no Play, no controls, no loop
+   * panel, no drags on the score. With the video lined up (Unit 19) the bar
+   * it is on is marked and kept on show, a tap on a bar moves the video
+   * there, and Space plays and pauses it. Null on the tab.
    */
-  recording: boolean;
+  recording: RecordingSession | null;
 }) {
+  const onRecording = recording !== null;
   const { scoreRef, scrollRef, player, snapshot } = usePlayer({
     fileBytes,
     drumTrackIndex,
     initialOptions,
     // Under a recording the score is read by hand: lines down the page at every width.
-    readAlong: recording,
+    readAlong: onRecording,
   });
   const stickyBarRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
@@ -227,14 +322,33 @@ function SongPlayer({
   // What the window can't scroll back is held as room under the controls.
   useStaysOnScreen(scrollRef, controlsRef, fold.folded);
   const loops = useLoops(songId);
-  const practice = useLoopPractice(player, snapshot, loops.data, { dragOpensForm: !recording });
+  const followed = useVideoFollow(player, snapshot, recording);
+  const followedBar = followed.bar;
+  const practice = useLoopPractice(player, snapshot, loops.data, {
+    dragOpensForm: !onRecording,
+    // The bar the video is on takes the place of a loop's bars on the score.
+    mark: followedBar === null ? null : { startBar: followedBar, endBar: followedBar },
+  });
+  // Under a recording the loop form is put away, unless one is still saving (hidden): until
+  // it has closed, taps are its own.
+  useTapSeeksVideo(player, recording, followed.barTimes, practice.editor === null);
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
   // A loop practised from the panel is summed up on the song's overview like any other.
   useSittingRecorder(songId, practice.activeLoop, tracker.sitting);
   // Every change of the playing loop's speed is saved as it is made (no "Save speed").
   useSaveLoopSpeed(songId, practice.activeLoop, snapshot.speedRatio);
   const linkedForm = useLinkedLoopForm(songId, snapshot, practice, loops.data);
-  const shortcuts = useSongShortcuts({ player, practice, loops: loops.data, off: recording });
+  const recordingSpace = useCallback(
+    () => recording !== null && toggleRecording(recording),
+    [recording],
+  );
+  const shortcuts = useSongShortcuts({
+    player,
+    practice,
+    loops: loops.data,
+    off: onRecording,
+    recordingSpace: onRecording ? recordingSpace : null,
+  });
   const loopPanel = useLoopPanelOpen();
   const { setOpen: setLoopPanelOpen } = loopPanel;
   const pickingBars = practice.editor !== null;
@@ -244,20 +358,20 @@ function SongPlayer({
   }, [pickingBars, setLoopPanelOpen]);
 
   // On a recording the tab is stopped and an idle loop form put away.
-  useTabSetAside(player, snapshot, practice, recording);
+  useTabSetAside(player, snapshot, practice, onRecording);
 
   useJamMode(
     player,
     { scrollRef, stickyBarRef, stickyControlsRef: controlsRef },
     {
-      seekOnTap: !pickingBars && !recording,
+      seekOnTap: !pickingBars && !onRecording,
       // The count-in counter sits over the score, so the score comes on screen for it too. Keyed on
       // the fold rather than on running, so Hide controls brings it back as well: the user had
       // scrolled up to that button, and in phone landscape kept still the score was off the window.
       // Picking bars waits for the panel to be open: the open sheet's room at the page's end is
       // what lets the window scroll the score up above it (16 QA issue 1: a form opened by
       // `?new=1` opens the sheet in the next render, and a scroll before that went nowhere).
-      scoreOnScreen: recording
+      scoreOnScreen: onRecording
         ? null
         : pickingBars && loopPanel.open
           ? 'picking-bars'
@@ -289,13 +403,13 @@ function SongPlayer({
     // score box is one line of music, so the page alone is too short to bring it clear.
     <div
       className={`flex flex-col gap-3 ${
-        loopPanel.open && !recording
+        loopPanel.open && !onRecording
           ? 'pb-[calc(45dvh+4rem)] md:pb-[calc(min(40dvh,30rem)+4rem)]'
           : 'pb-12'
       }`}
       style={{ '--jam-bar-height': `${stickyBarHeight}px` } as CSSProperties}
     >
-      {!recording && (
+      {!onRecording && (
         <JamBar ref={stickyBarRef} player={player} snapshot={snapshot} tempo={readoutTempo} />
       )}
       {/* Folded while playing, the controls are a strip that sticks under the sticky bar. */}
@@ -307,7 +421,7 @@ function SongPlayer({
           fold.folded ? `sticky top-(--jam-bar-height) -mt-3 ${fullBleedBarClass}` : undefined
         }
       >
-        {!recording && (
+        {!onRecording && (
           <PlayerControls
             player={player}
             snapshot={snapshot}
@@ -318,7 +432,7 @@ function SongPlayer({
           />
         )}
       </div>
-      {recording ? (
+      {onRecording ? (
         // Where the tab's playback is says nothing about the video; a score that failed still does.
         snapshot.status === 'error' && <PlayerStatusLine snapshot={snapshot} />
       ) : (
@@ -335,10 +449,14 @@ function SongPlayer({
         snapshot={snapshot}
         hidden={nothingToShow}
         // Under a video the tab's cursor would stand still and read as a playhead.
-        readOnly={recording}
+        readOnly={onRecording}
+        // A lined-up video goes to the bar that is tapped.
+        tappable={
+          recording !== null && recording.player !== null && recording.barOneSeconds !== null
+        }
       />
       {/* Hidden on a recording, not unmounted: a loop save still on its way keeps its form. */}
-      <div hidden={recording} className="contents">
+      <div hidden={onRecording} className="contents">
         <LoopPanel
           songId={songId}
           player={player}

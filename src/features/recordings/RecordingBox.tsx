@@ -1,3 +1,4 @@
+import type { ReactNode, Ref } from 'react';
 import { OfflineNote } from '@/components/OfflineNote';
 import { LoadingLine } from '@/components/StatusMessages';
 import { lockableLinkClass } from '@/components/styles';
@@ -26,6 +27,10 @@ const frameBoxClass =
  */
 const frameShapeClass = 'block aspect-video min-h-[200px] w-full min-w-[200px]';
 
+/** The note, the way out and the line-up: under the video, or beside it where there is room. */
+const besideVideoClass =
+  'flex min-w-0 flex-col items-center lg:items-start sideways:min-w-0 sideways:flex-1 sideways:items-start';
+
 /**
  * A song's recording on its play screen: YouTube's own player in a frame,
  * with YouTube's controls (play, seek, speed), and "Open in YouTube" always
@@ -36,22 +41,33 @@ const frameShapeClass = 'block aspect-video min-h-[200px] w-full min-w-[200px]';
  *
  * `video` null: the song's links are still being read for the source the
  * page was opened on.
+ *
+ * `frameRef` is handed the frame while it is on the page, for the player that
+ * reads the video's clock (Unit 19, `useRecordingPlayer`); `children` is what
+ * the page puts with the video's note and way out (the line-up).
  */
 export function RecordingBox({
   songTitle,
   video,
+  frameRef,
+  children,
 }: {
   songTitle: string;
   video: VideoSource | null;
+  frameRef?: Ref<HTMLIFrameElement>;
+  children?: ReactNode;
 }) {
   const online = useOnline();
   if (!video) {
     return (
-      <div className={frameBoxClass}>
-        <div className={`${frameShapeClass} grid place-items-center`}>
-          <LoadingLine small>Loading the recording…</LoadingLine>
+      <>
+        <div className={frameBoxClass}>
+          <div className={`${frameShapeClass} grid place-items-center`}>
+            <LoadingLine small>Loading the recording…</LoadingLine>
+          </div>
         </div>
-      </div>
+        <div className={besideVideoClass}>{children}</div>
+      </>
     );
   }
   const label = SONG_LINK_KIND_LABELS[video.source];
@@ -62,6 +78,7 @@ export function RecordingBox({
           <iframe
             // A new frame per video: switching from Original to Drumless must stop the first.
             key={video.embedUrl}
+            ref={frameRef}
             data-testid="recording-frame"
             className={frameShapeClass}
             src={video.embedUrl}
@@ -77,7 +94,7 @@ export function RecordingBox({
           </div>
         )}
       </div>
-      <div className="flex min-w-0 flex-col items-center lg:items-start sideways:items-start">
+      <div className={besideVideoClass}>
         {/* Beside the video where there is room; under the bar, off it, on a narrower window. */}
         <p className="hidden text-sm text-ink-muted lg:block sideways:block">{RECORDING_NOTE}</p>
         <LinkOut
@@ -90,6 +107,7 @@ export function RecordingBox({
         >
           Open in YouTube
         </LinkOut>
+        {children}
       </div>
     </>
   );

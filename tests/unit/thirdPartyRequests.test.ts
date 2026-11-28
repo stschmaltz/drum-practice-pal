@@ -1,7 +1,8 @@
 // @vitest-environment node
 /**
  * Unit 14: nothing of YouTube's or Spotify's is asked for until a recording
- * is opened. The component and e2e tests watch the pages; this reads the
+ * is opened. Unit 19 added one script, YouTube's player API, asked for when
+ * a video's frame is drawn and not before. The component and e2e tests watch the pages; this reads the
  * places a request could be made from without any page drawing it: the
  * document every screen loads, the service worker's configuration, and the
  * source itself (one frame, in one component, and no script, fetch or
@@ -98,13 +99,53 @@ describe('the app’s code', () => {
     expect(filesWith(/youtube\.com\/embed/)).toEqual([]);
   });
 
-  it('loads no script of YouTube’s or Spotify’s, and asks neither for a title, a thumbnail or a preview', () => {
+  it('asks neither service for a title, a thumbnail or a preview, and Spotify for no script', () => {
     expect(
       filesWith(
-        /iframe_api|player_api|www-widgetapi|oembed|ytimg|googlevideo|embed\.spotify|open\.spotify\.com\/embed|api\.spotify|scdn\.co/i,
+        /player_api|www-widgetapi|oembed|ytimg|googlevideo|embed\.spotify|open\.spotify\.com\/embed|api\.spotify|scdn\.co/i,
       ),
     ).toEqual([]);
-    expect(filesWith(/createElement\(\s*['"`](script|link)['"`]/)).toEqual([]);
+  });
+
+  // Unit 19: the tab follows the video from the player's own clock, which YouTube's
+  // IFrame Player API reads. Its script is the one outside script the app ever asks for.
+  const YOUTUBE_PLAYER = join('features', 'recordings', 'youTubePlayer.ts');
+
+  it('asks for one outside script, YouTube’s player API, from one module', () => {
+    expect(filesWith(/iframe_api/)).toEqual([YOUTUBE_PLAYER]);
+    expect(filesWith(/createElement\(\s*['"`](script|link)['"`]/)).toEqual([YOUTUBE_PLAYER]);
+    const player = code('src/features/recordings/youTubePlayer.ts');
+    // One address, written out whole: nothing builds another.
+    expect(player.match(/https?:\/\/[^'"`\s]+/g)).toEqual(['https://www.youtube.com/iframe_api']);
+    expect(player).not.toMatch(/\bfetch\(|XMLHttpRequest|sendBeacon|new Image|import\(/);
+  });
+
+  it('asks for that script only when a frame is handed over, never as the module loads', () => {
+    const player = code('src/features/recordings/youTubePlayer.ts');
+    // The loader is a function, called from the one that takes a frame.
+    expect(player).toMatch(/function loadYouTubeApi\(\)/);
+    expect(player.match(/loadYouTubeApi\(\)/g)).toHaveLength(2);
+    expect(player).toMatch(
+      /function widgetFor\(frame: HTMLIFrameElement\)[\s\S]*loadYouTubeApi\(\)\.then/,
+    );
+    // And the only caller of the module is the hook the video box's frame is given to.
+    expect(filesWith(/from '\.\/youTubePlayer'|recordings\/youTubePlayer'/)).toEqual([
+      join('features', 'recordings', 'useRecordingPlayer.ts'),
+    ]);
+    expect(code('src/features/recordings/useRecordingPlayer.ts')).toMatch(
+      /\(frame: HTMLIFrameElement \| null\) => \{\s*if \(!frame\) return;\s*const made = createYouTubePlayer\(frame\)/,
+    );
+  });
+
+  it('turns the player’s API on in the one place the frame’s address is built, for this page’s origin only', () => {
+    expect(filesWith(/enablejsapi/)).toEqual([join('features', 'recordings', 'songLinks.ts')]);
+    expect(code('src/features/recordings/songLinks.ts')).toMatch(
+      /&enablejsapi=1&origin=\$\{encodeURIComponent\(pageOrigin\)\}/,
+    );
+    // The origin handed in is the page's own.
+    expect(
+      code('src/features/song/useSongSources.ts').match(/window\.location\.origin/g),
+    ).toHaveLength(2);
   });
 
   it('lets the frame do no more than play: no autoplay, no camera, microphone, clipboard or location', () => {
@@ -117,6 +158,6 @@ describe('the app’s code', () => {
         .sort(),
     ).toEqual(['accelerometer', 'encrypted-media', 'fullscreen', 'picture-in-picture']);
     expect(box).not.toMatch(/autoplay=1|enablejsapi/);
-    expect(code('src/features/recordings/songLinks.ts')).not.toMatch(/autoplay|enablejsapi/);
+    expect(code('src/features/recordings/songLinks.ts')).not.toMatch(/autoplay/);
   });
 });

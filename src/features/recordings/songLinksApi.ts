@@ -93,3 +93,28 @@ async function pointLinkAt(userId: string, { id, provider, url }: LinkUpdate): P
   throwIfError(updated);
   return updated.data !== null;
 }
+
+/**
+ * Saves where bar 1 of the tab falls in a link's video (Unit 19), and returns
+ * what the database now holds. The row is asked for back, as `pointLinkAt`
+ * does: an update that matched no row is the link removed on another device,
+ * and is said so (`PG.NO_ROWS`), not taken for a save.
+ */
+export async function saveBarOne(
+  userId: string,
+  linkId: string,
+  barOneSeconds: number | null,
+): Promise<number | null> {
+  const updated = await supabase
+    .from('song_links')
+    .update({ bar_one_seconds: barOneSeconds })
+    .eq('id', linkId)
+    .eq('user_id', userId)
+    .select('id, bar_one_seconds')
+    .maybeSingle();
+  throwIfError(updated);
+  if (updated.data === null) {
+    throw Object.assign(new Error('No such song link'), { code: PG.NO_ROWS });
+  }
+  return updated.data.bar_one_seconds;
+}

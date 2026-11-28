@@ -258,16 +258,32 @@ function withoutTracking(url: URL): URL {
  * that host's `/embed/` and an 11-character id, with these parameters and no
  * others: an id of any other shape gives no address, and a start that isn't
  * whole seconds is left out.
+ *
+ * `pageOrigin` is the origin of the page that draws the frame (Unit 19). With
+ * it the player answers YouTube's IFrame Player API (`enablejsapi=1`), and
+ * only to that origin (`origin`), which is how the tab follows the video
+ * (youTubePlayer.ts). Anything but a plain http(s) origin is left out, and
+ * the player is then Unit 14's, with its own controls only.
  */
-export function youTubeEmbedUrl(link: Pick<ParsedLink, 'mediaId' | 'startSeconds'>): string | null {
+export function youTubeEmbedUrl(
+  link: Pick<ParsedLink, 'mediaId' | 'startSeconds'>,
+  pageOrigin: string | null = null,
+): string | null {
   if (!link.mediaId || !YOUTUBE_ID.test(link.mediaId)) return null;
   const { startSeconds } = link;
   const start =
     typeof startSeconds === 'number' && Number.isSafeInteger(startSeconds) && startSeconds > 0
       ? `&start=${startSeconds}`
       : '';
-  return `https://www.youtube-nocookie.com/embed/${link.mediaId}?playsinline=1&rel=0${start}`;
+  const api =
+    pageOrigin !== null && PAGE_ORIGIN.test(pageOrigin)
+      ? `&enablejsapi=1&origin=${encodeURIComponent(pageOrigin)}`
+      : '';
+  return `https://www.youtube-nocookie.com/embed/${link.mediaId}?playsinline=1&rel=0${api}${start}`;
 }
+
+/** A page's origin as `location.origin` gives it: scheme, host and an optional port, nothing more. */
+const PAGE_ORIGIN = /^https?:\/\/[a-z0-9.-]+(:\d{1,5})?$/i;
 
 /** "1:30", "1:02:03": a start time as a player shows it. */
 export function startTimeLabel(seconds: number): string {
@@ -310,6 +326,11 @@ export const SONG_LINK_KIND_LABELS: Record<SongLinkKind, string> = {
 export interface SongLink extends ParsedLink {
   id: string;
   kind: SongLinkKind;
+  /**
+   * The second of the video at which the tab's bar 1 starts (Unit 19), or
+   * null while the link hasn't been lined up.
+   */
+  barOneSeconds: number | null;
 }
 
 interface SavedLink {
@@ -317,6 +338,8 @@ interface SavedLink {
   kind: SongLinkKind;
   url: string;
   created_at: string;
+  /** Missing on a row cached by a build from before Unit 19. */
+  bar_one_seconds?: number | null;
 }
 
 /** Saved links oldest first, by id among ones saved in the same instant: a total order. */
@@ -341,7 +364,16 @@ export function usableLinks(rows: readonly SavedLink[]): SongLink[] {
     .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || oldestFirst(a, b))
     .flatMap((row) => {
       const parsed = parseSongLink(row.url);
-      return parsed.ok ? [{ ...parsed.link, id: row.id, kind: row.kind }] : [];
+      return parsed.ok
+        ? [
+            {
+              ...parsed.link,
+              id: row.id,
+              kind: row.kind,
+              barOneSeconds: row.bar_one_seconds ?? null,
+            },
+          ]
+        : [];
     });
 }
 
@@ -421,12 +453,18 @@ export interface VideoSource {
   embedUrl: string;
 }
 
-/** The song's video sources, Original first. Spotify and other links never play here. */
-export function videoSources(links: readonly SongLink[]): VideoSource[] {
+/**
+ * The song's video sources, Original first. Spotify and other links never
+ * play here. `pageOrigin`: see `youTubeEmbedUrl`.
+ */
+export function videoSources(
+  links: readonly SongLink[],
+  pageOrigin: string | null = null,
+): VideoSource[] {
   return RECORDING_SOURCES.flatMap((source) => {
     const link = links.find((candidate) => candidate.kind === source);
     if (!link || link.provider !== 'youtube') return [];
-    const embedUrl = youTubeEmbedUrl(link);
+    const embedUrl = youTubeEmbedUrl(link, pageOrigin);
     return embedUrl ? [{ source, link, embedUrl }] : [];
   });
 }
@@ -454,9 +492,12 @@ export function chooseSource(
     fetching: boolean;
     fetchedAfterMount: boolean;
   },
+  pageOrigin: string | null = null,
 ): SourceChoice {
   if (!isRecordingSource(requested)) return { state: 'tab', dropRequest: false };
-  const video = videoSources(links.data ?? []).find((candidate) => candidate.source === requested);
+  const video = videoSources(links.data ?? [], pageOrigin).find(
+    (candidate) => candidate.source === requested,
+  );
   if (video) return { state: 'recording', video };
   if (links.fetching && !links.fetchedAfterMount) return { state: 'waiting', source: requested };
   return { state: 'tab', dropRequest: true };

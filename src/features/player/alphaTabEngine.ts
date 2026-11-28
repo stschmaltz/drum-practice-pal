@@ -13,7 +13,7 @@ import { barMeters } from './countIn';
 import type { BarTicks } from './barTicks';
 import { createEmitter, type Emitter } from './emitter';
 import type { LayoutChoice } from './layout';
-import type { EngineEvents, EngineMount, PlayerEngine } from './playerEngine';
+import type { EngineEvents, EngineMount, PlayerEngine, WindowRect } from './playerEngine';
 import { movedBeyondTap, type PointerPoint } from './tapGesture';
 import { NOTATION_SCALE, SCORE_RESOURCES } from './scoreTheme';
 import { barStartTempos } from './tempo';
@@ -244,6 +244,10 @@ export function createAlphaTabEngine({
       if (redrawing) return false;
       return scrollBoxToBar(element, scrollElement, staffSystems(), barIndex);
     },
+    barRectInWindow(barIndex) {
+      if (redrawing) return null;
+      return barRectInWindow(element, staffSystems(), barIndex);
+    },
     destroy() {
       stopWatchingPointer();
       highlight.remove();
@@ -448,6 +452,24 @@ function scrollBoxToBar(
   return true;
 }
 
+/** Where a bar is drawn in the window now, from alphaTab's bounds; null while it has none. */
+function barRectInWindow(
+  element: HTMLElement,
+  systems: readonly SystemBoundsLike[],
+  barIndex: number,
+): WindowRect | null {
+  const surface = element.querySelector('.at-surface');
+  const bar = surface && barBounds(systems, barIndex);
+  if (!surface || !bar) return null;
+  const origin = surface.getBoundingClientRect();
+  return {
+    top: origin.top + bar.y,
+    bottom: origin.top + bar.y + bar.h,
+    left: origin.left + bar.x,
+    right: origin.left + bar.x + bar.w,
+  };
+}
+
 function subscribe<K extends keyof EngineEvents>(
   api: alphaTab.AlphaTabApi,
   taps: Emitter<TapEvents>,
@@ -512,6 +534,7 @@ function playedBars(api: alphaTab.AlphaTabApi): BarTicks[] {
     barIndex: lookup.masterBar.index,
     start: lookup.start,
     end: lookup.end,
+    tempoChanges: lookup.tempoChanges.map(({ tick, tempo }) => ({ tick, tempo })),
   }));
 }
 

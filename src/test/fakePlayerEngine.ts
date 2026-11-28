@@ -12,6 +12,7 @@ import type {
   EngineFactory,
   EngineMount,
   PlayerEngine,
+  WindowRect,
 } from '@/features/player/playerEngine';
 
 export const TICKS_PER_BAR = 3840;
@@ -74,6 +75,11 @@ export class FakePlayerEngine implements PlayerEngine {
   setHighlight = vi.fn();
   setVisibleBars = vi.fn();
   scrollToBar = vi.fn<PlayerEngine['scrollToBar']>(() => this.laidOut);
+  /** Where each bar (0-based) is drawn in the window; a bar a test hasn't placed has no rect. */
+  barRects = new Map<number, WindowRect>();
+  barRectInWindow = vi.fn<PlayerEngine['barRectInWindow']>(
+    (barIndex) => (this.laidOut ? this.barRects.get(barIndex) : null) ?? null,
+  );
   destroy = vi.fn();
 
   on<K extends keyof EngineEvents>(event: K, handler: (payload: EngineEvents[K]) => void): void {
