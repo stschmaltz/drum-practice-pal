@@ -1,13 +1,15 @@
-import { useState } from 'react';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect, useState } from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { COMMON_TIME } from '@/features/player/countIn';
 import type { PlayerService } from '@/features/player/PlayerService';
 import { LOOP_NAME_MAX_LENGTH } from '@/lib/schema';
 import { opArgs, queryResult, resetFakeSupabase } from '@/test/fakeSupabase';
+import { straightBars, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
 import { stubPointer } from '@/test/mediaQueries';
-import { testQueryClient, wrapperFor } from '@/test/render';
+import { settle, testQueryClient, wrapperFor } from '@/test/render';
 import type { Loop } from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';
 import { loopKeys } from './loopKeys';
@@ -38,6 +40,17 @@ function Form({
     saving: false,
     ...initialEditor,
   });
+  // A tap on the score picks the form's bars without passing through the form.
+  useEffect(
+    () =>
+      player.on('barTapped', ({ barNumber }) =>
+        setEditor((current) => ({
+          ...current,
+          bars: { startBar: String(barNumber), endBar: String(barNumber) },
+        })),
+      ),
+    [player],
+  );
   if (loops.isPending || snapshot.barCount === null) return <p>Loading…</p>;
   return (
     <LoopEditorForm
@@ -70,22 +83,43 @@ interface FormOptions {
   initialEditor?: Partial<LoopEditor>;
   /** The speed playing when the form opens. */
   speedRatio?: number;
+  /** The score is in and drawn, its sounds are not: the form opens, Play is still off. */
+  soundsLoading?: boolean;
 }
 
-async function renderForm({ loops, editing, initialEditor, speedRatio }: FormOptions = {}) {
+async function renderForm({
+  loops,
+  editing,
+  initialEditor,
+  speedRatio,
+  soundsLoading = false,
+}: FormOptions = {}) {
   const table = serveLoopTable(loops ?? (editing ? [editing] : []));
-  const { engine, player } = loopPlayer();
+  const { engine, player } = loopPlayer({ loaded: !soundsLoading });
+  if (soundsLoading) {
+    engine.fire('scoreLoaded', {
+      barCount: 16,
+      trackNames: ['Drums'],
+      barTempos: [...TEMPO_CHANGE_BAR_TEMPOS],
+      barMeters: Array.from({ length: 16 }, () => COMMON_TIME),
+    });
+    engine.fire('ticksReady', { bars: [...straightBars(16)] });
+  }
   if (speedRatio !== undefined) player.setSpeed(speedRatio);
   const queryClient = testQueryClient();
-  render(<Form player={player} loopId={editing?.id ?? null} initialEditor={initialEditor} />, {
-    wrapper: wrapperFor(queryClient),
-  });
+  const { unmount } = render(
+    <Form player={player} loopId={editing?.id ?? null} initialEditor={initialEditor} />,
+    { wrapper: wrapperFor(queryClient) },
+  );
   const form = within(await screen.findByRole('form'));
   return {
     user: userEvent.setup(),
     table,
     engine,
     player,
+    unmount,
+    /** The sounds come in: the player is ready. */
+    soundsLoad: () => act(() => engine.fire('readyForPlayback', undefined)),
     queryClient,
     form,
     firstBar: () => form.getByLabelText('First bar'),
@@ -442,6 +476,171 @@ describe('LoopEditorForm for a new loop', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(view.table.sent('insert')).toEqual([]);
   });
+});
+
+describe('LoopEditorForm bringing typed bars on screen (13.27a)', () => {
+  it('scrolls to the first bar once the typed bars make a range, and to nothing before', async () => {
+    const view = await renderForm();
+    await fill(view, { first: '13' });
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+
+    await fill(view, { last: '15' });
+
+    expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+  });
+
+  it('follows the first bar as it is typed over, and ignores bars the song lacks', async () => {
+    const view = await renderForm({ editing: chorus });
+    await replace(view, view.firstBar(), '2');
+    expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(1);
+    view.engine.scrollToBar.mockClear();
+
+    // No digit of it makes a range with the saved last bar, 8.
+    await replace(view, view.firstBar(), '90');
+
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('while the save is on its way a change to a bar field scrolls nowhere', async () => {
+    const view = await renderForm({ editing: chorus });
+    view.table.holdNext('update');
+    await fill(view, { name: ' again' });
+    await view.user.click(view.save());
+    await waitFor(() => expect(view.save()).toHaveTextContent('Saving…'));
+    view.engine.scrollToBar.mockClear();
+
+    // The field is read-only meanwhile; a change that reaches the form anyway is dropped whole.
+    fireEvent.change(view.firstBar(), { target: { value: '2' } });
+    await settle();
+
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  // The service keeps a bar asked for before the sounds are in and scrolls to it when they
+  // come, however much later; by then the form may hold other bars, or be gone.
+  describe('typed before the sounds are in', () => {
+    it('nothing moves until they are, and then the first bar is shown', async () => {
+      const view = await renderForm({ soundsLoading: true });
+      await fill(view, { first: '13', last: '15' });
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+
+      view.soundsLoad();
+
+      expect(view.engine.scrollToBar).toHaveBeenCalledTimes(1);
+      expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    });
+
+    it('bars no longer a range when the sounds come in are not scrolled to', async () => {
+      const view = await renderForm({ soundsLoading: true });
+      await fill(view, { first: '13', last: '15' });
+      await view.user.clear(view.lastBar());
+      expect(screen.getByTestId('loop-bar-count')).toHaveTextContent('');
+
+      view.soundsLoad();
+      await settle();
+
+      expect(view.player.getSnapshot().status).toBe('ready');
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
+
+    it('a form closed before the sounds come in scrolls nothing when they do', async () => {
+      const view = await renderForm({ soundsLoading: true });
+      await fill(view, { first: '13', last: '15' });
+      view.unmount();
+
+      view.soundsLoad();
+
+      expect(view.player.getSnapshot().status).toBe('ready');
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
+  });
+
+  // 20 batch 4 Copilot review: with the sounds in but the notation not yet drawn (a
+  // re-layout), the service keeps the bar for `rendered`. The form drops what it asked
+  // for once it no longer holds those bars, or the score moves for bars nobody wants.
+  describe('typed while the score is still being drawn', () => {
+    async function typedBeforeRender() {
+      const view = await renderForm();
+      view.engine.laidOut = false;
+      await fill(view, { first: '13', last: '15' });
+      expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+      view.engine.scrollToBar.mockClear();
+      return view;
+    }
+
+    function renders(view: View) {
+      view.engine.laidOut = true;
+      act(() => view.engine.fire('rendered', undefined));
+    }
+
+    it('the bars still held are shown once it has drawn', async () => {
+      const view = await typedBeforeRender();
+      await fill(view, { name: 'Fill' });
+      renders(view);
+      expect(view.engine.scrollToBar).toHaveBeenCalledTimes(1);
+      expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    });
+
+    it('a field cleared since: nothing moves', async () => {
+      const view = await typedBeforeRender();
+      await view.user.clear(view.lastBar());
+      expect(screen.getByTestId('loop-bar-count')).toHaveTextContent('');
+      view.engine.scrollToBar.mockClear();
+      renders(view);
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
+
+    it('other bars picked on the score since: nothing moves, a tapped bar stays under the finger', async () => {
+      const view = await typedBeforeRender();
+      act(() => view.engine.fire('barTapped', { barIndex: 2 }));
+      await waitFor(() => expect(view.firstBar()).toHaveValue('3'));
+      view.engine.scrollToBar.mockClear();
+      renders(view);
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
+
+    it('the form closed since: nothing moves', async () => {
+      const view = await typedBeforeRender();
+      view.unmount();
+      renders(view);
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
+
+    it('a bar someone else asked for since is still shown after the form closes', async () => {
+      const view = await typedBeforeRender();
+      act(() => void view.player.showBar(5));
+      view.engine.scrollToBar.mockClear();
+      view.unmount();
+      renders(view);
+      expect(view.engine.scrollToBar).toHaveBeenCalledTimes(1);
+      expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(4);
+    });
+  });
+
+  it('typing the name scrolls nowhere', async () => {
+    const view = await renderForm({ editing: chorus });
+    await fill(view, { name: ' again' });
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it.each(['playing', 'countingIn'] as const)(
+    'while %s the score is left where the music is',
+    async (status) => {
+      const view = await renderForm();
+      act(() => {
+        if (status === 'countingIn') view.player.setCountInBars(1);
+        view.player.play();
+        if (status === 'playing') view.engine.fire('stateChanged', { playing: true });
+      });
+      expect(view.player.getSnapshot().status).toBe(status);
+      view.engine.scrollToBar.mockClear();
+
+      await fill(view, { first: '13', last: '15' });
+
+      expect(screen.getByTestId('loop-bar-count')).toHaveTextContent('3 bars');
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('LoopEditorForm editing a loop', () => {

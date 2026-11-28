@@ -685,6 +685,75 @@ describe('every repeat over many passes', () => {
     expect(clicks.scheduled).toHaveLength(4);
   });
 
+  // 20 batch 4 Copilot review: a screen that sees `ready` between those two events can't tell
+  // this count-in from one the user started, so the snapshot says which it is.
+  describe('the snapshot says what a count-in is for', () => {
+    it('Play: a start, and nothing once it plays or is called off', () => {
+      const { engine, service } = setupCountIn();
+      expect(service.getSnapshot().countInCause).toBeNull();
+      service.play();
+      expect(service.getSnapshot()).toMatchObject({ status: 'countingIn', countInCause: 'start' });
+      vi.advanceTimersByTime(START_DELAY_MS + BAR_MS);
+      enginePlays(engine);
+      expect(service.getSnapshot()).toMatchObject({ status: 'playing', countInCause: null });
+
+      service.pause();
+      engine.fire('stateChanged', { playing: false });
+      service.play();
+      service.pause();
+      expect(service.getSnapshot()).toMatchObject({ status: 'ready', countInCause: null });
+    });
+
+    it('the end of a pass: a repeat, whichever of stopped and finished comes first', () => {
+      const finishedFirst = loopingBars5To8(EVERY_REPEAT);
+      engineFinishesPass(finishedFirst.engine, LOOP_START_TICK);
+      expect(finishedFirst.service.getSnapshot()).toMatchObject({
+        status: 'countingIn',
+        countInCause: 'repeat',
+      });
+
+      const stoppedFirst = loopingBars5To8(EVERY_REPEAT);
+      stoppedFirst.engine.fire('stateChanged', { playing: false });
+      // What a screen that renders between the two events sees.
+      expect(stoppedFirst.service.getSnapshot()).toMatchObject({
+        status: 'ready',
+        countInCause: null,
+      });
+      stoppedFirst.engine.fire('finished', undefined);
+      expect(stoppedFirst.service.getSnapshot()).toMatchObject({
+        status: 'countingIn',
+        countInCause: 'repeat',
+      });
+    });
+
+    it('a seek that restarts a count-in keeps what it was for', () => {
+      const repeat = loopingBars5To8(EVERY_REPEAT);
+      engineFinishesPass(repeat.engine, LOOP_START_TICK);
+      repeat.service.seekToBar(6);
+      expect(repeat.service.getSnapshot()).toMatchObject({
+        status: 'countingIn',
+        countInCause: 'repeat',
+      });
+
+      const start = setupCountIn();
+      start.service.play();
+      start.service.seekToBar(6);
+      expect(start.service.getSnapshot()).toMatchObject({
+        status: 'countingIn',
+        countInCause: 'start',
+      });
+    });
+
+    it('Pause in a repeat’s count-in, then Play: a start', () => {
+      const { engine, service } = loopingBars5To8(EVERY_REPEAT);
+      engineFinishesPass(engine, LOOP_START_TICK);
+      service.pause();
+      expect(service.getSnapshot().countInCause).toBeNull();
+      service.play();
+      expect(service.getSnapshot()).toMatchObject({ status: 'countingIn', countInCause: 'start' });
+    });
+  });
+
   it('a pause in the middle of a pass is a pause: no count-in until Play, which then counts in', () => {
     const { engine, service, clicks } = loopingBars5To8(EVERY_REPEAT);
     engine.fire('position', { tick: LOOP_START_TICK + TICKS_PER_BAR + 700 });

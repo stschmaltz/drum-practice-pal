@@ -106,6 +106,30 @@ export async function addSessions(
   if (inserted.error) throw inserted.error;
 }
 
+/**
+ * Puts loops on the user's one song, by the service role: for a spec that
+ * needs more loops than are worth saving one by one through the form (a list
+ * long enough to scroll). The page reads them when the song is opened next.
+ */
+export async function addLoops(
+  user: E2eUser,
+  loops: { name: string; firstBar: number; lastBar: number }[],
+) {
+  const song = await admin.from('songs').select('id').eq('user_id', user.id).single();
+  if (song.error) throw song.error;
+  const { error } = await admin.from('loops').insert(
+    loops.map((loop) => ({
+      id: crypto.randomUUID(),
+      user_id: user.id,
+      song_id: song.data.id,
+      name: loop.name,
+      start_bar: loop.firstBar,
+      end_bar: loop.lastBar,
+    })),
+  );
+  if (error) throw error;
+}
+
 /** The practice screen's speed in large type and its round nudges, each saved as made (Unit 16). */
 export const practiceSpeed = (page: Page) => page.getByTestId('practice-speed');
 export const nudge = (page: Page, which: 'Slower' | 'Faster') =>

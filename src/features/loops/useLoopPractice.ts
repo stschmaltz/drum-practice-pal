@@ -143,11 +143,12 @@ export function useLoopPractice(
   }, [player, barCount, playedStart, playedEnd]);
 
   const playLoop = useCallback(
-    (loop: Loop) => {
-      if (!player || barCount === null) return;
+    // False when it refused and did nothing: the caller then does nothing else either.
+    (loop: Loop): boolean => {
+      if (!player || barCount === null) return false;
       // The gate "Play loop" and the loop keys go by, asked of the player at the press.
-      if (!canPlay(player, player.getSnapshot())) return;
-      if (!isValidBarRange(loop.start_bar, loop.end_bar, barCount)) return;
+      if (!canPlay(player, player.getSnapshot())) return false;
+      if (!isValidBarRange(loop.start_bar, loop.end_bar, barCount)) return false;
       setActiveLoopId(loop.id);
       // All inside the tap, with nothing awaited: iOS only starts audio in the gesture.
       applyLoopRange(player, rangeOf(loop));
@@ -155,6 +156,7 @@ export function useLoopPractice(
       // would throw away a nudge that hasn't been saved, without a word.
       if (loop.id !== activeLoopId) player.setSpeed(loop.speed_ratio);
       player.play();
+      return true;
     },
     [player, barCount, activeLoopId],
   );

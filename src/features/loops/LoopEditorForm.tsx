@@ -2,7 +2,12 @@ import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
-import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
+import {
+  isLoaded,
+  isRunning,
+  type PlayerService,
+  type PlayerSnapshot,
+} from '@/features/player/PlayerService';
 import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
 import { pointerIsFine } from '@/lib/pointer';
@@ -117,9 +122,57 @@ export function LoopEditorForm({
     touched();
   };
 
+  // Typed bars may be anywhere in the song, so their first bar is brought on screen
+  // once they make a range (what the score then highlights). Only here: bars picked
+  // on the score come through the page, and a tapped bar must not move under the
+  // finger. Not while the song runs: the score is then where the music is.
+  //
+  // Typed before the sounds are in (the form opens from the score's load on), the bar
+  // is kept here and not handed to `showBar`, which would scroll to it whenever the
+  // sounds came, however much later, with the form holding other bars by then or gone.
+  //
+  // Typed with the sounds in but the notation not drawn yet (a re-layout), `showBar`
+  // keeps the bar for the render. That request is dropped once the form no longer
+  // holds those bars (a field cleared, other bars picked on the score) or has closed.
+  const typedBeforeSounds = useRef<{ startBar: number; endBar: number } | null>(null);
+  const shownBars = useRef<{ startBar: number; endBar: number; drop: () => void } | null>(null);
+  const dropShownBars = () => {
+    shownBars.current?.drop();
+    shownBars.current = null;
+  };
+  const showTypedBars = (bars: Partial<LoopBarFields>) => {
+    if (!player) return;
+    dropShownBars();
+    const { status } = player.getSnapshot();
+    if (isRunning(status)) return;
+    const typed = formBarRange({ ...values, ...bars }, barCount);
+    typedBeforeSounds.current = isLoaded(status) ? null : typed;
+    if (typed && isLoaded(status)) {
+      shownBars.current = { ...typed, drop: player.showBar(typed.startBar) };
+    }
+  };
+  useEffect(() => {
+    const shown = shownBars.current;
+    const stillHeld = shown?.startBar === range?.startBar && shown?.endBar === range?.endBar;
+    if (!stillHeld) dropShownBars();
+  });
+  useEffect(() => dropShownBars, []);
+  const soundsIn = isLoaded(snapshot.status);
+  useEffect(() => {
+    const typed = typedBeforeSounds.current;
+    typedBeforeSounds.current = null;
+    // Only the bars the form still holds: a tap on the score or a cleared field since
+    // has made them another range, or none.
+    const stillHeld = typed?.startBar === range?.startBar && typed?.endBar === range?.endBar;
+    if (soundsIn && typed && stillHeld) showTypedBars({});
+    // Only the sounds coming in: every other change is a keystroke, shown as it is typed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soundsIn]);
+
   const editBars = (bars: Partial<LoopBarFields>) => {
     if (saving) return;
     onBarsChange(bars);
+    showTypedBars(bars);
     touched();
   };
 

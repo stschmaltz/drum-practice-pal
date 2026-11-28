@@ -477,6 +477,17 @@ describe('picking bars on the score', () => {
     });
   });
 
+  it('bars picked by taps or a drag never scroll the score: the bar stays under the finger (13.27a)', async () => {
+    const { practice, tap, drag, engine, player } = await renderPractice();
+    act(() => void practice().openEditor(null));
+    tap(13);
+    tap(15);
+    drag(2, 4, true);
+    // The picks arrived.
+    expect(player.getSnapshot().highlight).toEqual({ startBar: 2, endBar: 4 });
+    expect(engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
   it('typing a bar ends a half-made tap selection, so the next tap starts again', async () => {
     const { practice, tap, fields } = await renderPractice();
     act(() => practice().openEditor(null));
