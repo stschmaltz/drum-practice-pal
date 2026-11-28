@@ -12,7 +12,7 @@
  */
 import { useCallback } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
+import { putOutboxEntry, type OutboxHold } from '@/features/offline/outbox';
 import { useSignedInUser } from '@/lib/auth';
 import { queuedWriteRetry } from '@/lib/network';
 import { randomUuid } from '@/lib/randomUuid';
@@ -92,8 +92,8 @@ function songPlayedOptions(queryClient: QueryClient, userId: string) {
       void queryClient.cancelQueries({ queryKey: songKeys.forUser(userId), exact: true });
       // Never back: a replayed, older time must not undo a newer one already shown.
       setCachedPlayedAt(queryClient, userId, songId, (current) => latest([current, playedAt]));
-      await queued;
-      return { queueId };
+      await queued.stored;
+      return { queued };
     },
     // What the database kept, unless a newer opening's time is showing (`playedAtAfterAnswer`).
     onSuccess: (kept: string | null, { songId, playedAt }: SongPlayed) => {
@@ -108,9 +108,9 @@ function songPlayedOptions(queryClient: QueryClient, userId: string) {
       _kept: string | null | undefined,
       _error: Error | null,
       _variables: SongPlayed,
-      context: { queueId: string } | undefined,
+      context: { queued: OutboxHold } | undefined,
     ) => {
-      if (context) void removeOutboxEntry(context.queueId);
+      if (context) void context.queued.release();
       // The list held its own refetches while this was pending (`useSongs`); once the last
       // such write has settled it is read again, so what the server kept is what shows.
       // 1 is this mutation, still counted as pending inside its own onSettled.
@@ -124,18 +124,33 @@ function songPlayedOptions(queryClient: QueryClient, userId: string) {
 /**
  * Sends the write from the mutation cache, with no component behind it: the
  * link out that calls it stays on the page, but the play screen that calls it
- * may be left before the answer comes. Never rejects: nobody is told.
+ * may be left before the answer comes. Nobody is told how it went.
  */
 export function markSongPlayedUnobserved(
   queryClient: QueryClient,
   userId: string,
   played: SongPlayed,
 ): void {
-  queryClient
+  void sendSongPlayedUnobserved(queryClient, userId, played);
+}
+
+/**
+ * The same, for a caller with something to do once the write has settled (the
+ * replay lets go of the outbox entry it took). Resolves either way.
+ */
+export function sendSongPlayedUnobserved(
+  queryClient: QueryClient,
+  userId: string,
+  played: SongPlayed,
+): Promise<void> {
+  return queryClient
     .getMutationCache()
     .build(queryClient, songPlayedOptions(queryClient, userId))
     .execute(played)
-    .catch(() => {});
+    .then(
+      () => {},
+      () => {},
+    );
 }
 
 /** `markPlayed(songId)`: a recording of the song was opened just now. */

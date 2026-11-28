@@ -1044,3 +1044,61 @@ describe('a session queued again while its last outbox removal is on its way (Un
     expect(logged().map((row) => row.id)).toEqual([id, id, id]);
   });
 });
+
+// Copilot review on #37: "Try again" pressed twice sends one session id twice at once. The
+// send answered first must leave the outbox row to the one still on its way, whichever of
+// the two that is, or a page closed then has nothing to send again.
+describe('two sends of one session at once (Unit 20, Copilot review)', () => {
+  const refused: FakeResult = { data: null, error: { message: 'nope', code: '23514' } };
+
+  /** A refused session, then "Try again" twice with both answers held: the first and second send. */
+  async function twoRetriesOnTheirWay() {
+    queryResult.mockResolvedValueOnce(refused);
+    const view = renderTracker();
+    view.playFor(40);
+    await waitFor(() => expect(view.tracker().unsaved).toHaveLength(1));
+    const id = view.tracker().unsaved[0]!.id;
+    await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+
+    const first = heldAnswer();
+    const second = heldAnswer();
+    queryResult.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    act(() => {
+      view.tracker().retryUnsaved();
+      view.tracker().retryUnsaved();
+    });
+    await waitFor(() => expect(logged()).toHaveLength(3));
+    expect((await outboxEntries(USER)).map((entry) => entry.id)).toEqual([id]);
+    return { view, id, first, second };
+  }
+
+  it.each([
+    { answeredFirst: 'first', stillOnItsWay: 'second' },
+    { answeredFirst: 'second', stillOnItsWay: 'first' },
+  ] as const)(
+    'the $answeredFirst refused leaves the row for the $stillOnItsWay, which no replay takes and which then lands',
+    async ({ answeredFirst, stillOnItsWay }) => {
+      const sends = await twoRetriesOnTheirWay();
+      const { view, id } = sends;
+
+      await act(async () => sends[answeredFirst].answer(refused));
+      await settle();
+      // Still on the device, for the send that has no answer yet.
+      expect((await outboxEntries(USER)).map((entry) => entry.id)).toEqual([id]);
+
+      // And still this page's: a replay mounted now leaves it to that send.
+      renderHook(() => useOutboxReplay(), {
+        wrapper: wrapperFor(view.queryClient, signedInAs(USER)),
+        reactStrictMode: true,
+      });
+      await settle();
+      expect(logged()).toHaveLength(3);
+
+      await act(async () => sends[stillOnItsWay].answer(ok));
+      await waitFor(() => expect(view.tracker().lastLogged?.id).toBe(id));
+      await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+      expect(view.tracker().unsaved).toEqual([]);
+      expect(logged().map((row) => row.id)).toEqual([id, id, id]);
+    },
+  );
+});
