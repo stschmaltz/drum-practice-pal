@@ -9,7 +9,6 @@ import {
   buttonClass,
   focusRing,
   ghostButtonClass,
-  lockableLinkClass,
   primaryButtonClass,
   sectionHeadingClass,
 } from '@/components/styles';
@@ -47,14 +46,14 @@ import {
 import { ConfirmDeleteLoop } from './ConfirmDeleteLoop';
 import { FinishPrompt } from './FinishPrompt';
 import { LoopEditorForm } from './LoopEditorForm';
-import { LoopSavedNote } from './LoopSavedNote';
+import { LoopSavedChoice } from './LoopSavedChoice';
 import { speedLabel } from './loopLabels';
 import { editorOnPanel } from './loopPanelContent';
 import { LoopSpeedControl } from './LoopSpeedControl';
 import { LoopStatusButton } from './LoopStatusButton';
 import { playLoopClosesPanel } from './useLoopPanelOpen';
 import type { useLoops } from './useLoops';
-import type { LoopPractice } from './useLoopPractice';
+import { hasPickedBars, type LoopPractice } from './useLoopPractice';
 import { useSpeedMovedSinceChosen } from './useSpeedMovedSinceChosen';
 
 interface LoopPanelProps {
@@ -206,10 +205,12 @@ function LoopPanelBody({
   // The form replaces the list, and with it the button that opened it; focus goes back there.
   const focusWhenReady = useFocusWhenReady();
   const formOpener = useRef<LoopFormOpener | null>(null);
-  // The loops saved by a form that stays for the next one: the last is named above the
-  // fields, and each makes the next form a new one (its own client id, an empty name).
+  // The loops saved by a form that stays for more: each makes the next form a new one (its
+  // own client id, an empty name).
   const [savedHere, setSavedHere] = useState<Loop[]>([]);
   const lastSaved = savedHere[savedHere.length - 1];
+  // The loop whose save the user hasn't answered yet: practise it now, or make another?
+  const [justSaved, setJustSaved] = useState<Loop | null>(null);
 
   const openForm = (loop: Loop | null) => {
     if (!practice.openEditor(loop)) return;
@@ -246,27 +247,32 @@ function LoopPanelBody({
     if (editor.loopId !== null && !editedLoop) {
       return <DeletedLoopNotice onBack={closeForm} />;
     }
-    const savedNow = editedLoop ? null : (lastSaved ?? null);
+    // A new loop was just saved by a form that stays for more: the choice it leaves takes
+    // the form's place until one is made. Bars picked on the score meanwhile are a choice
+    // too ("make another"): the form comes back holding them.
+    const choosing = editedLoop ? null : justSaved;
+    if (choosing && !hasPickedBars(editor)) {
+      return (
+        <LoopSavedChoice
+          saved={choosing}
+          practise={
+            <Link to={loopPracticePath(songId, choosing.id)} className={primaryButtonClass}>
+              <Icon name="play" />
+              Practise it now
+            </Link>
+          }
+          onAnother={() => setJustSaved(null)}
+          onDone={() => {
+            setJustSaved(null);
+            closeForm();
+            outcome?.onCancelled?.();
+          }}
+          doneLabel="Back to the song"
+        />
+      );
+    }
     return (
       <div className="flex flex-col">
-        {/* Outside the keyed form: one status region whose text changes at each save. */}
-        <LoopSavedNote saved={savedNow} count={savedHere.length}>
-          {savedNow && (
-            <Link
-              to={loopPracticePath(songId, savedNow.id)}
-              className={lockableLinkClass}
-              // Following it unmounts the form: while the next loop's save is on its way that
-              // would lose its draft, its retry id and its error. Locked, not removed: focus
-              // may be on it.
-              aria-disabled={editor.saving || undefined}
-              onClick={(event) => {
-                if (editor.saving) event.preventDefault();
-              }}
-            >
-              Practise it
-            </Link>
-          )}
-        </LoopSavedNote>
         <LoopEditorForm
           // A different loop is a different form: its typed name starts over.
           key={editor.loopId ?? `new-${savedHere.length}`}
@@ -288,6 +294,7 @@ function LoopPanelBody({
               // The form stays for the next loop: nothing is selected, so the whole song is
               // still there to pick bars from.
               setSavedHere((loops) => [...loops, saved]);
+              setJustSaved(saved);
               practice.openEditor(null);
               outcome.onCreated?.(saved);
               return;
@@ -300,7 +307,8 @@ function LoopPanelBody({
             closeForm();
             outcome?.onCancelled?.();
           }}
-          cancelLabel={savedNow ? 'Done' : undefined}
+          // Once a loop has been saved here there is nothing to cancel, only to finish.
+          cancelLabel={!editedLoop && lastSaved ? 'Done' : undefined}
         />
       </div>
     );

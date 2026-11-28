@@ -38,6 +38,15 @@ function withPickedBars(
   return { ...editor, bars: barFieldsOf(range), awaitingEnd };
 }
 
+/**
+ * Whether the open form has had a bar picked on the score or typed since it
+ * opened (a first tap that still waits for its other end counts). A new
+ * loop's form opens with none.
+ */
+export function hasPickedBars(editor: LoopEditor): boolean {
+  return editor.awaitingEnd || Object.values(editor.bars).some((bar) => bar !== undefined);
+}
+
 /** The form's bar fields: what the user touched over the saved loop's bars, or empty for a new loop. */
 export function editorBarFields(editor: LoopEditor, loop: Loop | null): LoopBarFields {
   return {

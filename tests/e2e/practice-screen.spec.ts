@@ -72,18 +72,35 @@ test('draws the loop alone; from the whole song a tap picks bars and Save as loo
   await saveSheet(page).getByLabel('Name').fill('Early');
   await saveSheet(page).getByRole('button', { name: 'Save as loop' }).click();
 
-  // The whole song stays for another loop; the note's button opens the one just saved.
-  await expect(saveSheet(page).getByTestId('loop-saved-note')).toContainText('Saved “Early”.');
+  // The sheet asks whether to practise the loop now or make another, the whole song still on
+  // show; "Make another loop" brings the empty form back, and "now" opens the one just saved.
+  const saved = saveSheet(page).getByRole('group', { name: 'Saved “Early”' });
+  await expect(saved).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Middle' })).toBeVisible();
-  await saveSheet(page).getByRole('button', { name: 'Practise it' }).click();
+  await saved.getByRole('button', { name: 'Make another loop' }).click();
+  await expect(saveSheet(page).getByLabel('Name')).toHaveValue('');
+  await saveSheet(page).getByLabel('First bar').fill('9');
+  await saveSheet(page).getByLabel('Last bar').fill('10');
+  await saveSheet(page).getByLabel('Name').fill('Late');
+  await saveSheet(page).getByRole('button', { name: 'Save as loop' }).click();
+  const savedLate = saveSheet(page).getByRole('group', { name: 'Saved “Late”' });
+  await expect(savedLate).toBeVisible();
+  await expect(savedLate.getByRole('button', { name: 'Back to Middle' })).toBeVisible();
+  // The three choices fit the sheet at every size, side by side or wrapped.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await savedLate.getByRole('button', { name: 'Practise it now' }).click();
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Early' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Late' })).toBeVisible();
   await expect(page).toHaveURL(/\/songs\/[^/]+\/loops\/[^/]+$/);
   await expect(saveSheet(page)).toHaveCount(0);
   await expect(wholeSong(page)).toHaveAccessibleName('Show whole song');
-  expect((await loopsOf(user)).map((loop) => loop.name).sort()).toEqual(['Early', 'Middle']);
+  expect((await loopsOf(user)).map((loop) => loop.name).sort()).toEqual([
+    'Early',
+    'Late',
+    'Middle',
+  ]);
   await expect.poll(() => drawnArea(page)).toBeLessThan(loopArea * 2);
-  await expect(status(page)).toContainText('Bar 3 of 16');
+  await expect(status(page)).toContainText('Bar 9 of 16');
 });
 
 test('the speed is set by 1 BPM, a typed BPM and a typed percent, each saved as made', async ({

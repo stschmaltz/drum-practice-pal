@@ -122,12 +122,6 @@ export const sectionHeadingClass = 'text-lg font-bold tracking-tight';
 export const linkClass = `inline-flex min-h-touch items-center rounded-sm font-medium text-brand underline underline-offset-4 hover:text-brand-hover ${focusRing}`;
 
 /**
- * A link or link-like button that is locked for a moment (`aria-disabled`, its
- * handler refusing the press) rather than taken away: focus may be on it.
- */
-export const lockableLinkClass = `${linkClass} aria-disabled:cursor-not-allowed aria-disabled:opacity-50`;
-
-/**
  * An icon at the start of a line of text, inline with it. Not a flex row: a
  * flex row makes each text node of `Couldn't save: {message}` its own item and
  * drops the spaces between them.

@@ -12,7 +12,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { LoadingLine } from '@/components/StatusMessages';
 import {
   linkClass,
-  lockableLinkClass,
+  primaryButtonClass,
   quietButtonClass,
   quietPressedButtonClass,
 } from '@/components/styles';
@@ -20,10 +20,14 @@ import { Icon } from '@/components/icons';
 import type { Song } from '@/features/library/songForm';
 import { FinishPrompt } from '@/features/loops/FinishPrompt';
 import { LoopEditorForm } from '@/features/loops/LoopEditorForm';
-import { LoopSavedNote } from '@/features/loops/LoopSavedNote';
+import { LoopSavedChoice } from '@/features/loops/LoopSavedChoice';
 import { barsLabel, shouldAskToFinish, type Loop } from '@/features/loops/loopForm';
 import { PracticeSpeed } from '@/features/loops/PracticeSpeed';
-import { useLoopPractice, type LoopPractice } from '@/features/loops/useLoopPractice';
+import {
+  hasPickedBars,
+  useLoopPractice,
+  type LoopPractice,
+} from '@/features/loops/useLoopPractice';
 import { useLoops } from '@/features/loops/useLoops';
 import { useSaveLoopSpeed } from '@/features/loops/useSaveLoopSpeed';
 import { useSpeedMovedSinceChosen } from '@/features/loops/useSpeedMovedSinceChosen';
@@ -380,6 +384,7 @@ function PracticePlayer({
           practice={practice}
           player={player}
           snapshot={snapshot}
+          currentLoopName={loop.name}
           onPractise={(saved) => {
             practice.closeEditor();
             // The loop and its saved speed, as a link to it would open it: the speed
@@ -436,20 +441,24 @@ function SaveAsLoopSheet({
   player,
   snapshot,
   onPractise,
+  currentLoopName,
 }: {
   songId: string;
   barCount: number;
   practice: LoopPractice;
   player: PlayerService | null;
   snapshot: PlayerSnapshot;
-  /** "Practise it" on the loop just saved. From the screen, which outlives the sheet. */
+  /** "Practise it now" on the loop just saved. From the screen, which outlives the sheet. */
   onPractise: (saved: Loop) => void;
+  /** The loop being practised, for the way back to it. */
+  currentLoopName: string;
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const sheetHeight = useHeightOf(sheetRef);
-  // The loops saved from this sheet, the last one named above its fields.
-  const [savedHere, setSavedHere] = useState<Loop[]>([]);
-  const lastSaved = savedHere[savedHere.length - 1];
+  // How many loops this sheet has saved: each makes the next form a new one.
+  const [savedCount, setSavedCount] = useState(0);
+  // The loop whose save the user hasn't answered yet: practise it now, or make another?
+  const [justSaved, setJustSaved] = useState<Loop | null>(null);
   const { editor } = practice;
   if (!editor) return null;
   return (
@@ -461,46 +470,52 @@ function SaveAsLoopSheet({
         data-testid="save-as-loop"
         className="fixed inset-x-0 bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 max-h-[60dvh] overflow-y-auto rounded-t-card border-t border-line bg-surface p-4 shadow-sheet md:right-gutter md:bottom-[env(safe-area-inset-bottom)] md:left-[calc(var(--spacing-sidebar)+var(--spacing-gutter))] md:border-x"
       >
-        {/* Outside the keyed form: one status region whose text changes at each save. */}
-        <LoopSavedNote saved={lastSaved ?? null} count={savedHere.length}>
-          {lastSaved && (
-            // A button, not a link: this screen switches loop in place, and its URL follows.
-            <button
-              type="button"
-              className={lockableLinkClass}
-              // Leaving unmounts the form: while the next loop's save is on its way that would
-              // lose its draft, its retry id and its error. Locked, not disabled: focus may be
-              // on it.
-              aria-disabled={editor.saving || undefined}
-              onClick={() => {
-                if (!editor.saving) onPractise(lastSaved);
-              }}
-            >
-              Practise it
-            </button>
-          )}
-        </LoopSavedNote>
-        <LoopEditorForm
-          // A new form for each loop saved: its own client id, an empty name.
-          key={savedHere.length}
-          layout="bar"
-          songId={songId}
-          barCount={barCount}
-          loop={null}
-          editor={editor}
-          player={player}
-          snapshot={snapshot}
-          onBarsChange={practice.setEditorBars}
-          onSavingChange={practice.setEditorSaving}
-          onSaved={(saved) => {
-            // The whole song stays, emptied for the next loop: several are made in one go,
-            // then practised (Shane, 2026-11-27). The loop being practised stays the loop.
-            setSavedHere((loops) => [...loops, saved]);
-            practice.openEditor(null);
-          }}
-          onCancel={practice.closeEditor}
-          cancelLabel={lastSaved ? 'Done' : undefined}
-        />
+        {justSaved && !hasPickedBars(editor) ? (
+          // A loop was just saved: the choice it leaves takes the form's place until one is
+          // made. Bars picked on the score meanwhile are "make another": the form comes back
+          // holding them.
+          <LoopSavedChoice
+            saved={justSaved}
+            practise={
+              // A button, not a link: this screen switches loop in place, and its URL follows.
+              <button
+                type="button"
+                className={primaryButtonClass}
+                onClick={() => onPractise(justSaved)}
+              >
+                <Icon name="play" />
+                Practise it now
+              </button>
+            }
+            onAnother={() => setJustSaved(null)}
+            onDone={practice.closeEditor}
+            doneLabel={`Back to ${currentLoopName}`}
+          />
+        ) : (
+          <LoopEditorForm
+            // A new form for each loop saved: its own client id, an empty name.
+            key={savedCount}
+            layout="bar"
+            songId={songId}
+            barCount={barCount}
+            loop={null}
+            editor={editor}
+            player={player}
+            snapshot={snapshot}
+            onBarsChange={practice.setEditorBars}
+            onSavingChange={practice.setEditorSaving}
+            onSaved={(saved) => {
+              // The whole song stays for more loops: several are made in one go, then
+              // practised (Shane, 2026-11-27). The loop being practised stays the loop.
+              setSavedCount((count) => count + 1);
+              setJustSaved(saved);
+              practice.openEditor(null);
+            }}
+            onCancel={practice.closeEditor}
+            // Once a loop has been saved here there is nothing to cancel, only to finish.
+            cancelLabel={savedCount > 0 ? 'Done' : undefined}
+          />
+        )}
       </div>
     </>
   );
