@@ -7,7 +7,7 @@ import {
 } from '@tanstack/react-query';
 import type { Song } from '@/features/library/songForm';
 import { songKeys } from '@/features/library/useSongs';
-import { putOutboxEntry, removeOutboxEntry } from '@/features/offline/outbox';
+import { putOutboxEntry, type OutboxHold } from '@/features/offline/outbox';
 import { sessionKeys } from '@/features/practice/sessionKeys';
 import type { PracticeSession } from '@/features/practice/sessions';
 import { useSignedInUser } from '@/lib/auth';
@@ -182,8 +182,8 @@ function cachedLoop(
 interface LoopEditContext {
   /** The loop as cached before the edit, for the rollback. */
   before: Loop | undefined;
-  /** Its outbox entry, taken out once the server has answered. */
-  queueId: string;
+  /** This send's hold on its outbox entry, let go once the server has answered. */
+  queued: OutboxHold;
 }
 
 /**
@@ -232,8 +232,8 @@ export function loopEditOptions(queryClient: QueryClient, userId: string, songId
       await queryClient.cancelQueries({ queryKey: loopKeys.forUser(userId) });
       const before = cachedLoop(queryClient, userId, songId, loopId);
       setCachedLoop(queryClient, userId, songId, loopId, (loop) => ({ ...loop, ...changes }));
-      await queued;
-      return { before, queueId };
+      await queued.stored;
+      return { before, queued };
     },
     // Only this loop's sent fields, not a snapshot of the whole list: other
     // loops may have been edited, deleted or added since onMutate.
@@ -265,7 +265,7 @@ export function loopEditOptions(queryClient: QueryClient, userId: string, songId
       _variables: LoopUpdate,
       context: LoopEditContext | undefined,
     ) => {
-      if (context) void removeOutboxEntry(context.queueId);
+      if (context) void context.queued.release();
       return invalidateWhenIdle(queryClient, userId);
     },
   };

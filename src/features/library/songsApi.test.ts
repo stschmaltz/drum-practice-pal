@@ -1,4 +1,4 @@
-import { FAILURE_COPY, UserFacingError } from '@/lib/errorCopy';
+import { FAILURE_COPY, failureKind, UserFacingError } from '@/lib/errorCopy';
 import { GP_FILE_MAX_BYTES, songFilePath } from '@/lib/schema';
 import {
   opArgs,
@@ -184,6 +184,31 @@ describe('uploadSong', () => {
         ['id', row.id],
         ['user_id', USER],
       ]);
+    });
+
+    // Unit 20: the client's reads no longer retry themselves. This look-up, made right
+    // after the connection dropped an answer, is the one read that still asks to.
+    it('to the insert: the look-up asks for postgrest-js’s own retries, and no other read does', async () => {
+      answerQueries(ok(null), dropped(), ok(savedRow));
+      await uploadSong(USER, gpFile());
+      const [duplicateCheck, , lookup] = queries();
+      expect(opArgs(lookup!, 'retry')).toEqual([true]);
+      expect(opArgs(duplicateCheck!, 'retry')).toBeUndefined();
+    });
+
+    // Unit 20 Test: the duplicate check is one of the reads that lost postgrest-js's
+    // retries. Lost, it stops the upload before anything exists, so trying again is safe.
+    it('to the duplicate check: fails as a lost connection with nothing stored, and the upload sent again goes through', async () => {
+      answerQueries(dropped());
+      const lost = uploadSong(USER, gpFile());
+      await expect(lost).rejects.toMatchObject({ message: 'TypeError: Failed to fetch' });
+      expect(failureKind(await lost.catch((error: unknown) => error))).toBe('network');
+      expect(queries()).toHaveLength(1);
+      expect(storageResult).not.toHaveBeenCalled();
+
+      answerQueries(ok(null), ok(savedRow));
+      expect(await uploadSong(USER, gpFile())).toMatchObject({ kind: 'uploaded' });
+      expect(storageCalls().map((call) => call.method)).toEqual(['upload']);
     });
 
     // Copilot review: an empty look-up can't prove the insert won't still

@@ -7,6 +7,7 @@ import {
   loopItem,
   loopNameField,
   loopPanel,
+  loopSheetHeader,
   newLoopButton,
   openLoopPanel,
   saveNewLoop,
@@ -200,26 +201,59 @@ test('focus stays in the shortcut list after a click on its heading, and the pag
   await expect(playButton(page)).toHaveText('Play');
 });
 
-test('Space after clicking Play loop pauses, rather than pressing the focused Restart loop', async ({
-  user,
-  page,
-}) => {
-  await openFixture(page, user, 'groove-120', 'Groove 120');
-  await chooseCountIn(page, 0);
-  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
-  await openLoopPanel(page);
-  await playLoopButton(page, 'Verse').click();
-  await expect(playButton(page)).toHaveText('Pause');
-  await recordStatuses(page);
-  // The press closed the sheet it is in; Space still plays or pauses wherever focus is.
+for (const by of ['a click', 'Enter'] as const) {
+  // 20 batch 4, 13.28a: the press closes the sheet the button is in, and focus was left on
+  // the hidden button (so on <body>, and a keyboard user began again from the top of the page).
+  test(`Play loop by ${by} closes the sheet and hands focus to its header: Space then pauses without opening it, and Tab goes on from there`, async ({
+    user,
+    page,
+  }, testInfo) => {
+    await openFixture(page, user, 'groove-120', 'Groove 120');
+    await chooseCountIn(page, 0);
+    await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+    await openLoopPanel(page);
+    if (by === 'Enter') {
+      await playLoopButton(page, 'Verse').focus();
+      await page.keyboard.press('Enter');
+    } else {
+      await playLoopButton(page, 'Verse').click();
+    }
+    await expect(playButton(page)).toHaveText('Pause');
+    await expect(loopSheetHeader(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(loopSheetHeader(page)).toBeFocused();
+    await recordStatuses(page);
 
-  await page.keyboard.press('Space');
+    // Space is play/pause wherever focus is: on the header it must not also press it.
+    await page.keyboard.press('Space');
 
-  await expect(playButton(page)).toHaveText('Play');
-  // Paused once and left so: Restart loop would have played again.
-  await page.waitForTimeout(500);
-  expect(await recordedStatuses(page)).toEqual(['playing', 'ready']);
-});
+    await expect(playButton(page)).toHaveText('Play');
+    // Paused once and left so, with the sheet still closed and focus where it was.
+    await page.waitForTimeout(500);
+    expect(await recordedStatuses(page)).toEqual(['playing', 'ready']);
+    await expect(loopSheetHeader(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(loopSheetHeader(page)).toBeFocused();
+
+    // Tab goes on from the header, past the closed sheet's hidden controls: to the tab bar on
+    // a phone; from 768 px the header is the page's last stop and Tab leaves the page.
+    await page.keyboard.press('Tab');
+    const next = await page.evaluate(() => ({
+      inSheet: document.activeElement?.closest('[data-testid="loop-panel"]') != null,
+      inTabBar: document.activeElement?.closest('nav[aria-label="Main"]') != null,
+      onBody: document.activeElement === document.body,
+    }));
+    expect(next.inSheet).toBe(false);
+    if (testInfo.project.name === 'phone') expect(next.inTabBar).toBe(true);
+    else expect(next.onBody).toBe(true);
+    // And back: the header is one stop from there, not a walk from the top of the page.
+    await page.keyboard.press('Shift+Tab');
+    await expect(loopSheetHeader(page)).toBeFocused();
+
+    // Enter on it is the way back in, to the loop that was played.
+    await page.keyboard.press('Enter');
+    await expect(loopSheetHeader(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(playLoopButton(page, 'Verse')).toBeVisible();
+  });
+}
 
 test('with a loop playing, the speed keys, M, D, S and C work it and playback never stops', async ({
   user,

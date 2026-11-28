@@ -31,7 +31,13 @@ import {
 import { useLoops } from '@/features/loops/useLoops';
 import { useSaveLoopSpeed } from '@/features/loops/useSaveLoopSpeed';
 import { useSpeedMovedSinceChosen } from '@/features/loops/useSpeedMovedSinceChosen';
-import { canPickBars, canPlayLoopPractice, type PlayGate } from '@/features/player/controlGates';
+import {
+  canPickBars,
+  canPlayLoopPractice,
+  canSetLoopPracticeSpeed,
+  type PlayGate,
+  type SpeedGate,
+} from '@/features/player/controlGates';
 import { PlayerControls, PlayPauseButton } from '@/features/player/PlayerControls';
 import type { PlayerOptions } from '@/features/player/playerOptions';
 import {
@@ -273,7 +279,19 @@ function PracticePlayer({
     (current, currentSnapshot) => canPlayLoopPractice(current, currentSnapshot, loopOpen),
     [loopOpen],
   );
-  const shortcuts = useSongShortcuts({ player, practice, loops: loops.data, playGate });
+  // And one for the speed's stepper and keys: a change before the loop is open would be
+  // played and then dropped, the loop opening at its saved speed over it.
+  const speedGate = useCallback<SpeedGate>(
+    (current, currentSnapshot) => canSetLoopPracticeSpeed(current, currentSnapshot, loopOpen),
+    [loopOpen],
+  );
+  const shortcuts = useSongShortcuts({
+    player,
+    practice,
+    loops: loops.data,
+    playGate,
+    speedGate,
+  });
   const running = isRunning(snapshot.status);
   useJamMode(
     player,
@@ -335,7 +353,7 @@ function PracticePlayer({
         {/* Play sits with the speed, in the middle: the two things pressed while practising
             are one reach apart, not a screen's width (Shane, 2026-11-27). */}
         <div className="col-span-2 row-start-2 flex items-center justify-self-center gap-4 lg:col-span-1 lg:col-start-2 lg:row-start-1 short:col-span-1 short:col-start-2 short:row-start-1">
-          <PracticeSpeed loop={loop} player={player} snapshot={snapshot} />
+          <PracticeSpeed loop={loop} player={player} snapshot={snapshot} gate={speedGate} />
           <span className="contents" {...PRACTICE_PLAY_ATTRIBUTES}>
             <PlayPauseButton player={player} snapshot={snapshot} round gate={playGate} />
           </span>

@@ -354,6 +354,47 @@ describe('UploadPanel when the save’s answer is lost', () => {
   });
 });
 
+// Unit 20 Test: the client's reads no longer send themselves again (13.14), so the
+// duplicate check before anything is stored fails on its one lost request.
+describe('UploadPanel when the duplicate check’s answer is lost', () => {
+  const dropped = (): FakeResult => fail('TypeError: Failed to fetch', '');
+  const isDuplicateCheck = (call: Parameters<typeof opArgs>[0]) =>
+    call.ops.some((op) => op.method === 'eq' && op.args[0] === 'file_hash');
+
+  it('says the server couldn’t be reached, having stored nothing, and the same file picked again uploads', async () => {
+    let lose = true;
+    queryResult.mockImplementation(async (call) => {
+      if (opArgs(call, 'insert')) return ok(row());
+      if (opArgs(call, 'range')) return ok([]);
+      if (isDuplicateCheck(call) && lose) {
+        lose = false;
+        return dropped();
+      }
+      return ok(null);
+    });
+    const user = renderPanel();
+    await user.upload(picker(), gpFile());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      "Couldn't upload groove.gp. The server couldn't be reached. Check the connection and try again.",
+    );
+    expect(alert).not.toHaveTextContent('may have been added');
+    expect(alert).not.toHaveTextContent('Failed to fetch');
+    // The check was the one request lost: sent once, and nothing after it.
+    expect(queryResult.mock.calls.filter(([call]) => isDuplicateCheck(call))).toHaveLength(1);
+    expect(storageMethods()).toEqual([]);
+    expect(inserts()).toHaveLength(0);
+    expect(picker()).toBeEnabled();
+
+    await user.upload(picker(), gpFile());
+    expect(await screen.findByText('Added “Groove”.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(storageMethods()).toEqual(['upload']);
+    expect(inserts()).toHaveLength(1);
+  });
+});
+
 describe('UploadPanel offline', () => {
   it('turns the picker off, says why, and refuses a dropped file', async () => {
     serve({});

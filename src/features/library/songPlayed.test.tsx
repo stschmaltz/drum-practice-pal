@@ -1,3 +1,4 @@
+import { AuthRetryableFetchError } from '@supabase/supabase-js';
 import { StrictMode, type ReactNode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { onlineManager, type QueryClient } from '@tanstack/react-query';
@@ -6,6 +7,8 @@ import { outboxEntries } from '@/features/offline/outbox';
 import { hasUnsentWrites, useHasUnsentWrites } from '@/features/offline/unsentWrites';
 import { useOutboxReplay } from '@/features/offline/useOutboxReplay';
 import {
+  FAKE_AUTH_STORAGE_KEY,
+  fakeSession,
   fakeSupabase,
   opArgs,
   queryResult,
@@ -409,5 +412,35 @@ describe('replaying a played time an earlier page left unsent', () => {
     await settle();
     expect(sentTimes()).toEqual([]);
     expect(await outboxEntries(USER)).toEqual([entry]);
+  });
+});
+
+// Unit 20 Test (13.23): a song with no tab and no loops has only this queued write.
+describe('marking a song played with no session in memory, one still stored', () => {
+  it('sends nothing as anon, keeps the time on show and on the device, and is sent once when the session is back', async () => {
+    serveSong();
+    localStorage.setItem(FAKE_AUTH_STORAGE_KEY, JSON.stringify(fakeSession(USER)));
+    fakeSupabase.auth.getSession.mockResolvedValueOnce({
+      data: { session: null },
+      error: new AuthRetryableFetchError('Failed to fetch', 0),
+    });
+    const { result, queryClient, cachedPlayedAt } = renderMark();
+    act(() => result.current.mark('a'));
+
+    await waitFor(() => expect(fakeSupabase.auth.getSession).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(sentTimes()).toEqual([]);
+    expect(cachedPlayedAt('a')).toBe(NOW);
+    expect(await outboxEntries(USER)).toMatchObject([{ kind: 'songPlayed', songId: 'a' }]);
+    expect(hasUnsentWrites(queryClient, USER)).toBe(true);
+    expect(result.current.unsent).toBe(true);
+
+    await waitFor(() => expect(sentTimes()).toEqual([NOW]), { timeout: 3000 });
+    await waitFor(() => expect(pendingPlays(queryClient)).toBe(0));
+    await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+    await waitFor(() => expect(result.current.unsent).toBe(false));
+    expect(cachedPlayedAt('a')).toBe(NOW);
+    await settle();
+    expect(sentTimes()).toHaveLength(1);
   });
 });

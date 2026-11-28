@@ -1,4 +1,10 @@
-import { canChangeOptions, canPlay, canPlayLoopPractice, canUseDrumToggles } from './controlGates';
+import {
+  canChangeOptions,
+  canPlay,
+  canPlayLoopPractice,
+  canSetLoopPracticeSpeed,
+  canUseDrumToggles,
+} from './controlGates';
 import { DEFAULT_PLAYER_OPTIONS } from './playerOptions';
 import { initialPlayerSnapshot, type PlayerService, type PlayerStatus } from './PlayerService';
 
@@ -65,5 +71,25 @@ describe('canPlayLoopPractice', () => {
 
   it('is false with no player', () => {
     expect(canPlayLoopPractice(null, snapshot('ready'), true)).toBe(false);
+  });
+});
+
+describe('canSetLoopPracticeSpeed', () => {
+  it.each<[PlayerStatus, boolean, boolean]>([
+    // Unit 20 Review: a speed set before the loop is open is dropped when the loop opens.
+    ['loading', false, false],
+    ['ready', false, false],
+    ['playing', false, false],
+    ['loading', true, true],
+    ['ready', true, true],
+    ['playing', true, true],
+    ['countingIn', true, true],
+    ['error', true, false],
+  ])('under %s with the loop open %s is %s', (status, loopOpen, can) => {
+    expect(canSetLoopPracticeSpeed(player, snapshot(status), loopOpen)).toBe(can);
+  });
+
+  it('is false with no player', () => {
+    expect(canSetLoopPracticeSpeed(null, snapshot('ready'), true)).toBe(false);
   });
 });

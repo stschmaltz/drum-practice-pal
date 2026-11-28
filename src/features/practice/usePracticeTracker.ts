@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { removeOutboxEntry } from '@/features/offline/outbox';
+import type { OutboxHold } from '@/features/offline/outbox';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { useAuth, useSignedInUser } from '@/lib/auth';
 import { isOnline } from '@/lib/network';
@@ -91,30 +91,36 @@ export function usePracticeTracker(
   // A keepalive's answer can arrive after the screen has gone (hidden, back, then another route).
   const screenGone = useRef(false);
 
-  /** Through the mutation, for a page that is staying. */
+  /**
+   * Through the mutation, for a page that is staying. `queued` is the hold of a caller
+   * that put the session in the outbox itself: kept until this send has its answer (the
+   * mutation takes a hold of its own a moment after it starts), then let go.
+   */
   const sendNow = useCallback(
-    (record: SessionRecord) => {
+    (record: SessionRecord, queued?: OutboxHold) => {
       setWaiting((records) => withRecord(records, record));
       // The promise, not mutate()'s callbacks: those only run for the latest call,
       // and two sessions can be on their way at once (a retry of several, say).
-      logSession(record).then(
-        (result) => {
-          setWaiting((records) => withoutRecord(records, record));
-          setUnsaved((records) => withoutRecord(records, record));
-          if (result === 'logged') setLastLogged(record);
-        },
-        () => {
-          setWaiting((records) => withoutRecord(records, record));
-          setUnsaved((records) => withRecord(records, record));
-        },
-      );
+      logSession(record)
+        .then(
+          (result) => {
+            setWaiting((records) => withoutRecord(records, record));
+            setUnsaved((records) => withoutRecord(records, record));
+            if (result === 'logged') setLastLogged(record);
+          },
+          () => {
+            setWaiting((records) => withoutRecord(records, record));
+            setUnsaved((records) => withRecord(records, record));
+          },
+        )
+        .finally(() => void queued?.release());
     },
     [logSession],
   );
 
   /** With `keepalive`, for a page that is hidden or going away. */
   const sendOnExit = useCallback(
-    (record: SessionRecord, token: string) => {
+    (record: SessionRecord, token: string, queued: OutboxHold) => {
       // Counted as on its way until its answer is dealt with (keepaliveSends.ts).
       const answered = startKeepaliveSend(userId);
       void logSessionOnExit(token, userId, record).then((result) => {
@@ -122,11 +128,15 @@ export function usePracticeTracker(
           // Only reached when the page lived on: a hidden tab that came back.
           if (result === 'failed') {
             // The hook's own mutation observer went with the screen; see `unobserved`.
-            if (screenGone.current) void logSessionUnobserved(queryClient, userId, record);
-            else sendNow(record);
+            // Either way the fallback takes over this send's hold on the outbox entry.
+            if (screenGone.current) {
+              void logSessionUnobserved(queryClient, userId, record).then(queued.release);
+            } else {
+              sendNow(record, queued);
+            }
             return;
           }
-          void removeOutboxEntry(record.id);
+          void queued.release();
           if (result === 'logged') {
             sessionLogged(queryClient, userId, record);
             setLastLogged(record);
@@ -147,16 +157,17 @@ export function usePracticeTracker(
     (record: SessionRecord, via: SendVia) => {
       // Kept on the device first, started here in the same task: a page going away may
       // run nothing after this handler, and the next start sends what it finds.
-      void queueSession(userId, record);
+      // Whichever way it goes, that send lets this hold go once it has its answer.
+      const queued = queueSession(userId, record);
       const token = accessToken.current;
       if (via === 'unobserved') {
-        void logSessionUnobserved(queryClient, userId, record);
+        void logSessionUnobserved(queryClient, userId, record).then(queued.release);
       } else if (via === 'keepalive' && token !== null && isOnline()) {
-        sendOnExit(record, token);
+        sendOnExit(record, token, queued);
       } else {
         // Also with no token to build a keepalive request with, and offline, where a
         // keepalive can only fail: the mutation waits for the connection instead.
-        sendNow(record);
+        sendNow(record, queued);
       }
     },
     [queryClient, sendNow, sendOnExit, userId],
