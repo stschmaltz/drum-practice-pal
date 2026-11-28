@@ -25,7 +25,7 @@ const TAB_OPTION: { value: PlaySource; label: string } = { value: 'tab', label: 
  * came for the loop form (`?new=1`, `?edit=`): that visit ends with the form.
  *
  * Opening a recording counts as playing the song (`last_played_at`), once per
- * source per visit, and only when its video can show.
+ * source per visit to a song, and only when its video can show.
  */
 export function useSongSources(songId: string) {
   const [params, setParams] = useSearchParams();
@@ -38,8 +38,10 @@ export function useSongSources(songId: string) {
   // tab that needs no network. Once the wait is over the read counts as not coming, which
   // is the tab with the request dropped from the URL, so the answer, if it comes after
   // all, offers the recording in the switch and never takes the tab from someone playing it.
+  // The wait is this song's: the screen can stay mounted from one song to the next (both
+  // rows on the device), and the last song's wait, long over, must not be the next one's.
   const gaveUpWaiting = useGaveUpWaiting(
-    !forLoopForm && isRecordingSource(requested) ? requested : null,
+    !forLoopForm && isRecordingSource(requested) ? `${songId}:${requested}` : null,
   );
 
   const choice: SourceChoice = forLoopForm
@@ -105,8 +107,10 @@ function sourceShown(choice: SourceChoice): PlaySource {
 function useMarkedPlayed(songId: string, choice: SourceChoice, shown: PlaySource) {
   const online = useOnline();
   const markPlayed = useMarkSongPlayed();
-  // Kept across StrictMode's second run of the effect, so one opening is one write.
-  const marked = useRef<PlaySource | null>(null);
+  // Kept across StrictMode's second run of the effect, so one opening is one write. It names
+  // the song as well as the source: the screen can stay mounted from one song to the next,
+  // and the same source of another song is another opening.
+  const marked = useRef<string | null>(null);
   const playing = choice.state === 'recording' && online ? choice.video.source : null;
   useEffect(() => {
     if (playing === null) {
@@ -114,8 +118,9 @@ function useMarkedPlayed(songId: string, choice: SourceChoice, shown: PlaySource
       if (shown === 'tab') marked.current = null;
       return;
     }
-    if (marked.current === playing) return;
-    marked.current = playing;
+    const opening = `${songId}:${playing}`;
+    if (marked.current === opening) return;
+    marked.current = opening;
     markPlayed(songId);
   }, [playing, shown, songId, markPlayed]);
 }

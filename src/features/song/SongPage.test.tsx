@@ -2960,6 +2960,96 @@ describe('SongPage recordings (Unit 14)', () => {
       });
     });
 
+    // Copilot review on #36: with both songs' rows on the device the screen stays mounted from
+    // one song to the next, so whatever it keeps per `?source=` has to be kept per song too.
+    describe('from one song straight to another on the same source', () => {
+      beforeEach(() =>
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true }),
+      );
+      afterEach(() => vi.useRealTimers());
+      const later = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+
+      const B_EMBED = 'https://www.youtube-nocookie.com/embed/bbbbbbbbbbb?playsinline=1&rel=0';
+      const originalOfB = videoLink('link-original-b', {
+        song_id: SONG_B,
+        url: 'https://www.youtube.com/watch?v=bbbbbbbbbbb',
+      });
+      const pathOf = (songId: string) => `/songs/${songId}/play?source=original`;
+
+      /**
+       * On song A's Original for longer than the wait, then Back to song B's, whose links
+       * read is held: `cachedLinksOfB` is what the device has of them (a list from before
+       * the link was saved, or nothing). Returns what lets the read answer.
+       */
+      async function fromSongAToSongB({ cachedLinksOfB }: { cachedLinksOfB?: SongLinkRow[] } = {}) {
+        const queryClient = testQueryClient();
+        queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+        queryClient.setQueryData(songKeys.detail(USER, SONG_B), songRow(SONG_B));
+        if (cachedLinksOfB) {
+          const key = songLinkKeys.forSong(USER, SONG_B);
+          queryClient.setQueryData(key, cachedLinksOfB);
+          await queryClient.invalidateQueries({ queryKey: key, refetchType: 'none' });
+        }
+        serve({ links: [original, originalOfB] });
+        renderRoutes(<Route path="/songs/:id/play" element={<SongPage />} />, {
+          path: pathOf(SONG_A),
+          before: [pathOf(SONG_B)],
+          queryClient,
+        });
+        expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+        await waitFor(() => expect(playedWrites()).toHaveLength(1));
+        later(FRESH_READ_WAIT_MS * 2);
+
+        const release = links.holdNext('select');
+        historyBack();
+        expect(
+          await screen.findByRole('heading', { level: 1, name: 'Tempo Change' }),
+        ).toBeVisible();
+        return release;
+      }
+
+      it("waits for the second song's recording until its answer, though the wait on the first is long over", async () => {
+        const release = await fromSongAToSongB({ cachedLinksOfB: [] });
+        await settle();
+        expect(screen.getByText('Loading the recording…')).toBeVisible();
+        expect(location()).toBe(pathOf(SONG_B));
+        later(FRESH_READ_WAIT_MS - 500);
+        await settle();
+        expect(screen.getByText('Loading the recording…')).toBeVisible();
+
+        release();
+
+        expect(await frameShown()).toHaveAttribute('src', B_EMBED);
+        expect(location()).toBe(pathOf(SONG_B));
+      });
+
+      it("gives up on the second song's recording only after that song's own wait", async () => {
+        await fromSongAToSongB();
+        later(FRESH_READ_WAIT_MS - 500);
+        await settle();
+        expect(screen.getByText('Loading the recording…')).toBeVisible();
+        expect(location()).toBe(pathOf(SONG_B));
+
+        later(500);
+
+        await waitFor(() => expect(location()).toBe(`/songs/${SONG_B}/play`));
+        expect(screen.queryByText('Loading the recording…')).not.toBeInTheDocument();
+        noFrame();
+      });
+
+      it('counts the second song as played too, once its recording shows', async () => {
+        const release = await fromSongAToSongB();
+        release();
+        expect(await frameShown()).toHaveAttribute('src', B_EMBED);
+
+        await waitFor(() => expect(playedWrites()).toHaveLength(2));
+        expect(playedWrites()[0]!.ops).toContainEqual({ method: 'eq', args: ['id', SONG_A] });
+        expect(playedWrites()[1]!.ops).toContainEqual({ method: 'eq', args: ['id', SONG_B] });
+        await settle();
+        expect(playedWrites()).toHaveLength(2);
+      });
+    });
+
     it('opens a link saved on another device since the list was cached', async () => {
       const queryClient = testQueryClient();
       queryClient.setQueryData(linksKey, []);
