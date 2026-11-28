@@ -606,6 +606,8 @@ describe('LoopPracticePage', () => {
         startTick: startOfBar(9),
         endTick: startOfBar(13),
       });
+      // Copilot review on #33: the button went with its sheet and focus fell to <body>.
+      await waitFor(() => expect(playButton()).toHaveFocus());
     });
 
     it('the whole song opened again after a save starts on the form, not on an old question', async () => {
@@ -635,6 +637,8 @@ describe('LoopPracticePage', () => {
       await user.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(wholeSong()).toHaveAccessibleName(SHOWS_LOOP);
       expect(engine.setVisibleBars).toHaveBeenLastCalledWith({ startBarIndex: 7, endBarIndex: 12 });
+      // The form went with its sheet: focus goes to Play, as from the sheet's other ways out.
+      await waitFor(() => expect(playButton()).toHaveFocus());
       await settle();
       expect(loops.sent('insert')).toEqual([]);
     });

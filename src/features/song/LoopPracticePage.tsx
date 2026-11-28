@@ -393,6 +393,11 @@ function PracticePlayer({
             // The button goes with its sheet: focus to Play, the next thing to press.
             focusWhenReady(findPracticePlay);
           }}
+          onBack={() => {
+            practice.closeEditor();
+            // Whatever was pressed (Back to the loop, Cancel, Done) goes with the sheet too.
+            focusWhenReady(findPracticePlay);
+          }}
         />
       )}
     </div>
@@ -441,6 +446,7 @@ function SaveAsLoopSheet({
   player,
   snapshot,
   onPractise,
+  onBack,
   currentLoopName,
 }: {
   songId: string;
@@ -450,6 +456,11 @@ function SaveAsLoopSheet({
   snapshot: PlayerSnapshot;
   /** "Practise it now" on the loop just saved. From the screen, which outlives the sheet. */
   onPractise: (saved: Loop) => void;
+  /**
+   * Back to the loop being practised, from the choice or from the form (Cancel, Done). From
+   * the screen too: the control pressed goes with the sheet, so the screen hands focus on.
+   */
+  onBack: () => void;
   /** The loop being practised, for the way back to it. */
   currentLoopName: string;
 }) {
@@ -488,7 +499,7 @@ function SaveAsLoopSheet({
               </button>
             }
             onAnother={() => setJustSaved(null)}
-            onDone={practice.closeEditor}
+            onDone={onBack}
             doneLabel={`Back to ${currentLoopName}`}
           />
         ) : (
@@ -511,7 +522,7 @@ function SaveAsLoopSheet({
               setJustSaved(saved);
               practice.openEditor(null);
             }}
-            onCancel={practice.closeEditor}
+            onCancel={onBack}
             // Once a loop has been saved here there is nothing to cancel, only to finish.
             cancelLabel={savedCount > 0 ? 'Done' : undefined}
           />

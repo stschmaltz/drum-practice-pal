@@ -64,8 +64,10 @@ export function LoopSavedChoice({
           <Icon name="plus" />
           Make another loop
         </button>
-        <button type="button" className={ghostButtonClass} onClick={onDone}>
-          {doneLabel}
+        {/* Its words can hold a loop's name, which can be one word of 100 characters: the
+            button is no wider than its row, and the name breaks inside it. */}
+        <button type="button" className={`${ghostButtonClass} max-w-full`} onClick={onDone}>
+          <span className="min-w-0 text-left wrap-anywhere">{doneLabel}</span>
         </button>
       </div>
     </div>
