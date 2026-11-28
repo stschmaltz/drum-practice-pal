@@ -131,6 +131,42 @@ describe('outbox', () => {
     expect([...first, ...second].map((entry) => entry.id).sort()).toEqual(['a', 'b']);
   });
 
+  it('never gives the replay an entry whose removal is still on its way (14.6)', async () => {
+    await putOutboxEntry(session('answered'));
+    // The replay's read is in flight when the answer arrives: it finds the row still there.
+    const taking = takeLeftoverOutboxEntries('u1');
+    const removing = removeOutboxEntry('answered');
+    expect(await taking).toEqual([]);
+    await removing;
+    expect(await outboxEntries('u1')).toEqual([]);
+  });
+
+  it('gives the replay nothing when it starts just after a removal does', async () => {
+    await putOutboxEntry(session('answered'));
+    const removing = removeOutboxEntry('answered');
+    const taking = takeLeftoverOutboxEntries('u1');
+    expect(await taking).toEqual([]);
+    await removing;
+  });
+
+  it('keeps an entry claimed when it is queued again while its last removal is on its way', async () => {
+    await putOutboxEntry(session('again'));
+    const removing = removeOutboxEntry('again');
+    const queuing = putOutboxEntry(session('again'));
+    await Promise.all([removing, queuing]);
+    expect((await outboxEntries('u1')).map((entry) => entry.id)).toEqual(['again']);
+    // This page is sending it again, so a replay started now must leave it alone.
+    expect(await takeLeftoverOutboxEntries('u1')).toEqual([]);
+  });
+
+  it('keeps an answered entry from the replay when its row could not be deleted', async () => {
+    await putOutboxEntry(session('stuck'));
+    const refuse = vi.spyOn(offlineDb.outbox, 'delete').mockRejectedValueOnce(new Error('quota'));
+    await removeOutboxEntry('stuck');
+    refuse.mockRestore();
+    expect(await takeLeftoverOutboxEntries('u1')).toEqual([]);
+  });
+
   it('is emptied by a sign-out, with a write begun before it kept out', async () => {
     await putOutboxEntry(session('a'));
     const late = putOutboxEntry(session('b'));

@@ -43,6 +43,20 @@ export function useOnline(): boolean {
 const subscribeToOnline = (onChange: () => void) => onlineManager.subscribe(onChange);
 
 /**
+ * A write that wasn't sent because supabase-js has no session to sign it with,
+ * though one is still stored: its refresh of an expired token failed for the
+ * connection (storedSession.ts). Sent anyway, the request would go out as
+ * `anon` and be refused with 42501, which reads as the server's refusal of the
+ * write. It is the connection's failure, so it counts as one below.
+ */
+export class SessionNotLoadedError extends Error {
+  constructor() {
+    super('The sign-in could not be refreshed without a connection.');
+    this.name = 'SessionNotLoadedError';
+  }
+}
+
+/**
  * Whether a request failed for want of a connection, not because the server
  * said no. fetch rejects with a TypeError ("Failed to fetch" in Chrome,
  * "NetworkError…" in Firefox, "Load failed" in Safari), and supabase-js turns
@@ -50,7 +64,7 @@ const subscribeToOnline = (onChange: () => void) => onlineManager.subscribe(onCh
  * Postgres code is empty. A server's refusal always carries a code.
  */
 export function isNetworkFailure(error: unknown): boolean {
-  if (error instanceof TypeError) return true;
+  if (error instanceof TypeError || error instanceof SessionNotLoadedError) return true;
   if (typeof error !== 'object' || error === null) return false;
   const { message, code } = error as { message?: unknown; code?: unknown };
   if (typeof code === 'string' && code !== '') return false;
@@ -76,8 +90,9 @@ export function isTokenRefusal(error: unknown): boolean {
 /**
  * `retry` for a queued write: try again for as long as the failure is the
  * connection's (TanStack Query pauses the retries while offline and carries
- * on when the connection is back) or the access token's, never after a
- * refusal of the write. A token refusal reaches the retries only when the
+ * on when the connection is back; a write held back for want of a session,
+ * `SessionNotLoadedError`, is one of those) or the access token's, never after
+ * a refusal of the write. A token refusal reaches the retries only when the
  * write's refresh couldn't reach the server; one the server won't refresh is
  * a `TokenRefusedError`, which is final.
  */

@@ -14,15 +14,26 @@
 import { liveQuery } from 'dexie';
 import { offlineDb, type OutboxEntry } from './offlineDb';
 
-/** Ids queued by this page, which the replay at start leaves alone: their own mutation is sending them. */
-const queuedHere = new Set<string>();
+/**
+ * Ids queued by this page, which the replay leaves alone: their own mutation
+ * is sending them, or has had its answer. Each holds the number of the claim
+ * that put it there, so a removal still deleting its row can tell that the id
+ * has been queued again since and is no longer its to forget.
+ */
+const queuedHere = new Map<string, number>();
+let claims = 0;
+
+function claim(id: string): void {
+  claims += 1;
+  queuedHere.set(id, claims);
+}
 
 /**
  * No generation check (offlineData.ts): that guards work which awaits
  * something before it writes, and this writes at once.
  */
 export async function putOutboxEntry(entry: OutboxEntry): Promise<void> {
-  queuedHere.add(entry.id);
+  claim(entry.id);
   try {
     await offlineDb.outbox.put(entry);
   } catch {
@@ -30,13 +41,21 @@ export async function putOutboxEntry(entry: OutboxEntry): Promise<void> {
   }
 }
 
+/**
+ * The id is forgotten only once its row is gone: forgotten first, a replay
+ * whose read found the row before the delete landed would take the entry and
+ * send an answered write again.
+ */
 export async function removeOutboxEntry(id: string): Promise<void> {
-  queuedHere.delete(id);
+  const claimed = queuedHere.get(id);
   try {
     await offlineDb.outbox.delete(id);
   } catch {
-    // Left behind, it is sent once more at the next start, which is harmless.
+    // The row is left behind, so the id stays claimed and this page never replays it.
+    // The next page to start sends it once more, which is harmless.
+    return;
   }
+  if (queuedHere.get(id) === claimed) queuedHere.delete(id);
 }
 
 /**
@@ -47,7 +66,7 @@ export async function removeOutboxEntry(id: string): Promise<void> {
  */
 export async function takeLeftoverOutboxEntries(userId: string): Promise<OutboxEntry[]> {
   const leftover = (await outboxEntries(userId)).filter((entry) => !queuedHere.has(entry.id));
-  for (const entry of leftover) queuedHere.add(entry.id);
+  for (const entry of leftover) claim(entry.id);
   return leftover;
 }
 

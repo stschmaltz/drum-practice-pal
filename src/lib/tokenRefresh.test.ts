@@ -1,5 +1,11 @@
 import { AuthApiError, AuthRetryableFetchError } from '@supabase/supabase-js';
-import { fakeSupabase, resetFakeSupabase } from '@/test/fakeSupabase';
+import {
+  FAKE_AUTH_STORAGE_KEY,
+  fakeSession,
+  fakeSupabase,
+  resetFakeSupabase,
+} from '@/test/fakeSupabase';
+import { failureKind } from './errorCopy';
 import { retryNetworkFailures } from './network';
 import { sendRefreshingToken } from './tokenRefresh';
 
@@ -84,5 +90,62 @@ describe('sendRefreshingToken (Copilot review: a token getSession still thinks i
     const dropped = new TypeError('Failed to fetch');
     const send = sendFailing(badSignature, dropped);
     await expect(sendRefreshingToken(send)).rejects.toBe(dropped);
+  });
+});
+
+describe('sendRefreshingToken with no session in memory (13.23: a write never goes out as anon)', () => {
+  /** supabase-js after a refresh that failed for the connection: nothing in memory, the session still stored. */
+  const noSession = {
+    data: { session: null },
+    error: new AuthRetryableFetchError('Failed to fetch', 0),
+  };
+  const storeSession = () =>
+    localStorage.setItem(FAKE_AUTH_STORAGE_KEY, JSON.stringify(fakeSession()));
+
+  it('a session still stored: nothing is sent, and the failure is one the retries wait on', async () => {
+    storeSession();
+    fakeSupabase.auth.getSession.mockResolvedValue(noSession);
+    const send = sendFailing();
+    const failure = await sendRefreshingToken(send).catch((error: unknown) => error);
+    expect(send).not.toHaveBeenCalled();
+    expect(retryNetworkFailures(1, failure)).toBe(true);
+    expect(failureKind(failure)).toBe('network');
+    expect(fakeSupabase.auth.refreshSession).not.toHaveBeenCalled();
+  });
+
+  it('asks again at every try, and sends once the session is back', async () => {
+    storeSession();
+    fakeSupabase.auth.getSession.mockResolvedValueOnce(noSession);
+    const send = sendFailing();
+    await expect(sendRefreshingToken(send)).rejects.toBeDefined();
+    await expect(sendRefreshingToken(send)).resolves.toBe('saved');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(fakeSupabase.auth.getSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('a session that could not be read at all is treated the same while one is stored', async () => {
+    storeSession();
+    fakeSupabase.auth.getSession.mockRejectedValue(new Error('lock'));
+    const send = sendFailing();
+    const failure = await sendRefreshingToken(send).catch((error: unknown) => error);
+    expect(send).not.toHaveBeenCalled();
+    expect(retryNetworkFailures(1, failure)).toBe(true);
+  });
+
+  it('no session stored either (signed out): the write goes to the server, whose refusal is final', async () => {
+    fakeSupabase.auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const send = sendFailing(refused);
+    const failure = await sendRefreshingToken(send).catch((error: unknown) => error);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(failure).toBe(refused);
+    expect(retryNetworkFailures(1, failure)).toBe(false);
+  });
+
+  it('asks for the session before the send, never after it', async () => {
+    const send = sendFailing();
+    await sendRefreshingToken(send);
+    expect(fakeSupabase.auth.getSession.mock.invocationCallOrder[0]!).toBeLessThan(
+      send.mock.invocationCallOrder[0]!,
+    );
   });
 });

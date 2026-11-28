@@ -1,3 +1,4 @@
+import { AuthRetryableFetchError } from '@supabase/supabase-js';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { IsRestoringProvider, onlineManager } from '@tanstack/react-query';
 import { loopKeys } from '@/features/loops/loopKeys';
@@ -6,6 +7,9 @@ import { useUpdateLoop } from '@/features/loops/useLoops';
 import type { SessionRecord } from '@/features/practice/sessionTracker';
 import { useLogSession } from '@/features/practice/useSessions';
 import {
+  FAKE_AUTH_STORAGE_KEY,
+  fakeSession,
+  fakeSupabase,
   opArgs,
   queryResult,
   resetFakeSupabase,
@@ -188,6 +192,57 @@ describe('loop edits, offline', () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(cached()?.speed_ratio).toBe(1);
     await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+  });
+});
+
+describe('queued writes with no session in memory (13.23)', () => {
+  /** supabase-js after a refresh that failed for the connection; the session is still in storage. */
+  function sessionLostOnce() {
+    localStorage.setItem(FAKE_AUTH_STORAGE_KEY, JSON.stringify(fakeSession(USER)));
+    fakeSupabase.auth.getSession.mockResolvedValueOnce({
+      data: { session: null },
+      error: new AuthRetryableFetchError('Failed to fetch', 0),
+    });
+  }
+
+  it('a session log is kept on the device, never sent as anon, and lands once when the session is back', async () => {
+    queryResult.mockResolvedValue(ok(null));
+    sessionLostOnce();
+    const { result } = renderHook(() => useLogSession(), {
+      wrapper: wrapperFor(testQueryClient()),
+    });
+    act(() => result.current.mutate(record('s1')));
+
+    await waitFor(() => expect(result.current.failureCount).toBe(1));
+    expect(result.current.isPending).toBe(true);
+    expect(sessionInserts()).toEqual([]);
+    expect((await outboxEntries(USER)).map((entry) => entry.id)).toEqual(['s1']);
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true), { timeout: 3000 });
+    expect(sessionInserts()).toEqual(['s1']);
+    await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+  });
+
+  it('a loop edit keeps its value on show and is sent once, not rolled back', async () => {
+    const loop = loopRow('a', { speed_ratio: 1 });
+    answerWith(loop);
+    sessionLostOnce();
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(loopKeys.forSong(USER, LOOP_SONG_ID), [loop]);
+    const speed = () =>
+      queryClient.getQueryData<Loop[]>(loopKeys.forSong(USER, LOOP_SONG_ID))?.[0]?.speed_ratio;
+    const { result } = renderHook(() => useUpdateLoop(LOOP_SONG_ID), {
+      wrapper: wrapperFor(queryClient),
+    });
+    act(() => result.current.mutate({ loopId: 'a', changes: { speed_ratio: 0.5 } }));
+
+    await waitFor(() => expect(result.current.failureCount).toBe(1));
+    expect(loopUpdates()).toEqual([]);
+    expect(speed()).toBe(0.5);
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true), { timeout: 3000 });
+    expect(loopUpdates()).toEqual([{ speed_ratio: 0.5 }]);
+    expect(speed()).toBe(0.5);
   });
 });
 

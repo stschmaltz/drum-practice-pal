@@ -90,6 +90,8 @@ export const fakeSupabase = {
     signOut: vi.fn<(args: unknown) => Promise<{ error: { message: string } | null }>>(),
     /** Answers `{ data: { session: null, user: null }, error: null }` unless scripted; script an AuthError for a refused or offline refresh. */
     refreshSession: vi.fn<() => Promise<{ data: unknown; error: Error | null }>>(),
+    /** Answers a signed-in session unless scripted; `{ data: { session: null }, error }` is supabase-js with no session in memory. */
+    getSession: vi.fn<() => Promise<{ data: { session: Session | null }; error: Error | null }>>(),
     onAuthStateChange: vi.fn((callback: AuthCallback) => {
       authListeners.push(callback);
       return {
@@ -158,4 +160,7 @@ export function resetFakeSupabase(): void {
   fakeSupabase.auth.refreshSession
     .mockReset()
     .mockResolvedValue({ data: { session: null, user: null }, error: null });
+  fakeSupabase.auth.getSession
+    .mockReset()
+    .mockResolvedValue({ data: { session: fakeSession() }, error: null });
 }
