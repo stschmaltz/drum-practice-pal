@@ -1320,105 +1320,112 @@ describe('SongPage loops', () => {
     expect(speedReadout()).toHaveTextContent('80%');
   });
 
-  // Shane, practising: several loops are made in one go, then practised. The overview's "New
-  // loop" used to jump to each new loop's practice screen, and he had to back out for the next.
-  it('"New loop" from the overview keeps the form for the next loop; Done goes back to the song', async () => {
+  /** Opens "New loop" from the overview (`?new=1`) and waits for its form. */
+  async function openNewLoopForm() {
     serve({ loops: [] });
     const user = renderSong(`${SONG_A}?new=1`);
-    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
+    const engine = await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
     await panel().findByRole('form');
-
-    await user.type(form().getByLabelText('Name'), 'Verse');
-    await user.type(form().getByLabelText('First bar'), '3');
-    await user.type(form().getByLabelText('Last bar'), '4');
+    return { user, engine };
+  }
+  async function saveNewLoop(
+    user: ReturnType<typeof renderSong>,
+    name: string,
+    firstBar: string,
+    lastBar: string,
+  ) {
+    await user.type(form().getByLabelText('Name'), name);
+    await user.type(form().getByLabelText('First bar'), firstBar);
+    await user.type(form().getByLabelText('Last bar'), lastBar);
     await user.click(form().getByRole('button', { name: 'Save loop' }));
+  }
+  /** The choice a save leaves in the form's place: practise it now, or make another? */
+  const savedChoice = (name: string) => panel().findByRole('group', { name: `Saved “${name}”` });
 
-    // Still here, on an empty form, under a note that names what it saved and links to it.
-    expect(await panel().findByText(/Saved “Verse”\./)).toBeInTheDocument();
-    expect(panel().getByTestId('loop-saved-note')).toHaveTextContent('Saved “Verse”.');
+  // Shane, practising: several loops are made in one go, then practised, and it has to be plain
+  // what a save did and what comes next ("right now it just sort of happens"). The overview's
+  // "New loop" once jumped to each new loop; then it only emptied its form under a quiet line.
+  it('a loop saved from the overview’s "New loop" asks "practise it now, or make another?", and takes focus', async () => {
+    const { user } = await openNewLoopForm();
+    await saveNewLoop(user, 'Verse', '3', '4');
+
+    const choice = await savedChoice('Verse');
+    expect(choice).toHaveTextContent('Bars 3 to 4');
+    // It replaced the form the press was in: focus is on it, not on <body>.
+    expect(choice).toHaveFocus();
+    expect(panel().queryByRole('form')).not.toBeInTheDocument();
+    // Still on the jam page: nothing happened that wasn't asked for.
     expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG_A}/play`);
-    expect(form().getByLabelText('Name')).toHaveValue('');
-    expect(form().getByLabelText('First bar')).toHaveValue('');
     const [first] = loops.sent('insert') as Loop[];
-    expect(panel().getByRole('link', { name: 'Practise it' })).toHaveAttribute(
+    expect(panel().getByRole('link', { name: 'Practise it now' })).toHaveAttribute(
       'href',
       `/songs/${SONG_A}/loops/${first?.id}`,
     );
+    expect(panel().getByRole('button', { name: 'Make another loop' })).toBeInTheDocument();
+    expect(panel().getByRole('button', { name: 'Back to the song' })).toBeInTheDocument();
+  });
 
-    // A second loop is its own row, not the first sent again.
-    await user.type(form().getByLabelText('Name'), 'Chorus');
-    await user.type(form().getByLabelText('First bar'), '9');
-    await user.type(form().getByLabelText('Last bar'), '12');
-    await user.click(form().getByRole('button', { name: 'Save loop' }));
-    expect(await panel().findByText(/Saved “Chorus”/)).toBeInTheDocument();
+  it('"Practise it now" goes to the new loop’s practice screen', async () => {
+    const { user } = await openNewLoopForm();
+    await saveNewLoop(user, 'Verse', '3', '4');
+    await savedChoice('Verse');
+    await user.click(panel().getByRole('link', { name: 'Practise it now' }));
+    expect(await screen.findByText('At loop practice')).toBeInTheDocument();
+    const [first] = loops.sent('insert') as Loop[];
+    expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG_A}/loops/${first?.id}`);
+  });
+
+  it('"Make another loop" brings back an empty form; the second loop is its own row, and Done goes back to the song', async () => {
+    const { user } = await openNewLoopForm();
+    await saveNewLoop(user, 'Verse', '3', '4');
+    await savedChoice('Verse');
+
+    await user.click(panel().getByRole('button', { name: 'Make another loop' }));
+    expect(form().getByLabelText('Name')).toHaveValue('');
+    expect(form().getByLabelText('First bar')).toHaveValue('');
+
+    await saveNewLoop(user, 'Chorus', '9', '12');
+    expect(await savedChoice('Chorus')).toHaveFocus();
     const sent = loops.sent('insert') as Loop[];
     expect(sent.map((loop) => loop.name)).toEqual(['Verse', 'Chorus']);
+    // A new id, not the first one sent again.
     expect(sent[0]?.id).not.toBe(sent[1]?.id);
 
+    // From the form after a save there is nothing to cancel, only to finish.
+    await user.click(panel().getByRole('button', { name: 'Make another loop' }));
     await user.click(form().getByRole('button', { name: 'Done' }));
     expect(await screen.findByText('At song overview')).toBeInTheDocument();
   });
 
-  // PR 31 review: a status mounted with its text is often not read out. One region, on the
-  // panel from the moment the form opens, whose text changes at each save.
-  it('says each save in one status region that is there, empty, before the first', async () => {
-    serve({ loops: [] });
-    const user = renderSong(`${SONG_A}?new=1`);
-    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
-    await panel().findByRole('form');
-    const note = panel().getByTestId('loop-saved-note');
-    expect(note).toHaveAttribute('role', 'status');
-    expect(note).toBeEmptyDOMElement();
-
-    await user.type(form().getByLabelText('Name'), 'Verse');
-    await user.type(form().getByLabelText('First bar'), '3');
-    await user.type(form().getByLabelText('Last bar'), '4');
-    await user.click(form().getByRole('button', { name: 'Save loop' }));
-
-    await waitFor(() => expect(note).toHaveTextContent('Saved “Verse”.'));
-    expect(form().getByLabelText('Name')).toHaveValue('');
-    expect(panel().getByTestId('loop-saved-note')).toBe(note);
+  it('"Back to the song" from the choice goes back to the song', async () => {
+    const { user } = await openNewLoopForm();
+    await saveNewLoop(user, 'Verse', '3', '4');
+    await savedChoice('Verse');
+    await user.click(panel().getByRole('button', { name: 'Back to the song' }));
+    expect(await screen.findByText('At song overview')).toBeInTheDocument();
   });
 
-  it('says nothing saved while a loop is being edited', async () => {
+  it('picking bars on the score while it asks is "make another": the form comes back holding them', async () => {
+    const { user, engine } = await openNewLoopForm();
+    await saveNewLoop(user, 'Verse', '3', '4');
+    await savedChoice('Verse');
+
+    act(() => engine.fire('barTapped', { barIndex: 8 }));
+    await panel().findByRole('form');
+    act(() => engine.fire('barTapped', { barIndex: 11 }));
+    expect(form().getByLabelText('First bar')).toHaveValue('9');
+    expect(form().getByLabelText('Last bar')).toHaveValue('12');
+    expect(form().getByLabelText('Name')).toHaveValue('');
+  });
+
+  it('asks nothing after an edit, or after a loop saved from the panel’s own "New loop"', async () => {
     const { user } = await openSong([acrossTheChange]);
     await panel().findByRole('button', { name: 'Play loop Across the change' });
-    await chooseFromMenu(user, panel(), 'Across the change', 'Edit');
-    await panel().findByRole('form');
-    expect(panel().getByTestId('loop-saved-note')).toBeEmptyDOMElement();
-  });
-
-  it('"Practise it" is locked while the next loop is saving: its form, draft and error stay', async () => {
-    serve({ loops: [] });
-    const user = renderSong(`${SONG_A}?new=1`);
-    await loadPlayer(0, { barTempos: TEMPO_CHANGE_BAR_TEMPOS });
-    await panel().findByRole('form');
-    await user.type(form().getByLabelText('Name'), 'Verse');
-    await user.type(form().getByLabelText('First bar'), '3');
-    await user.type(form().getByLabelText('Last bar'), '4');
-    await user.click(form().getByRole('button', { name: 'Save loop' }));
-    const practise = await panel().findByRole('link', { name: 'Practise it' });
-    expectUnlocked(practise);
-
-    const release = loops.holdNext('insert');
-    loops.failNext('insert', 'permission denied');
-    await user.type(form().getByLabelText('Name'), 'Chorus');
-    await user.type(form().getByLabelText('First bar'), '9');
-    await user.type(form().getByLabelText('Last bar'), '12');
-    await user.click(form().getByRole('button', { name: 'Save loop' }));
-    expect(await form().findByRole('button', { name: 'Saving…' })).toBeDisabled();
-    expectLocked(practise);
-    await user.click(practise);
-
-    // The press went nowhere: still the jam page, the form and its save.
-    await settle();
-    expect(screen.getByTestId('location')).toHaveTextContent(`/songs/${SONG_A}/play`);
-    expect(form().getByRole('button', { name: 'Saving…' })).toBeInTheDocument();
-
-    release();
-    expect(await form().findByText(/Couldn't save the loop\./)).toBeInTheDocument();
-    expect(form().getByLabelText('Name')).toHaveValue('Chorus');
-    expectUnlocked(panel().getByRole('link', { name: 'Practise it' }));
+    await user.click(panel().getByRole('button', { name: 'New loop' }));
+    await saveNewLoop(user, 'Verse', '3', '4');
+    // The new loop is the loop on the page, as before; no question.
+    await panel().findByRole('button', { name: /loop Verse/ });
+    expect(panel().queryByRole('group', { name: /^Saved/ })).not.toBeInTheDocument();
   });
 
   it('refuses a form it cannot save, saying why, and sends nothing', async () => {

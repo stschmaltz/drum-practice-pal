@@ -36,8 +36,8 @@ type DetailFields = Pick<LoopFormValues, 'name'>;
  * as loop" sheet, where the fields share a row and the button says what it
  * does there.
  *
- * Where the form stays for another loop after a save, its caller keys it (a
- * new form each time) and says what was saved in a `LoopSavedNote` outside it.
+ * Where more loops can follow a save, its caller shows `LoopSavedChoice` in
+ * the form's place and keys the form, so the one that comes back is new.
  */
 export function LoopEditorForm({
   songId,

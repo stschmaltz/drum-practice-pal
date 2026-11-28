@@ -144,7 +144,8 @@ export const linkClass = `inline-flex min-h-touch items-center rounded-sm font-m
 
 /**
  * A link or link-like button that is locked for a moment (`aria-disabled`, its
- * handler refusing the press) rather than taken away: focus may be on it.
+ * handler refusing the press) rather than taken away: focus may be on it. The
+ * recordings' links out use it (offline, or while a save is pending).
  */
 export const lockableLinkClass = `${linkClass} aria-disabled:cursor-not-allowed aria-disabled:opacity-50`;
 

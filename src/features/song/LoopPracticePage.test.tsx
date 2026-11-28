@@ -21,7 +21,6 @@ import {
   type StorageCall,
 } from '@/test/fakeSupabase';
 import { FakePlayerEngine, startOfBar, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
-import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { historyBack, renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
 import { LoopPracticePage } from './LoopPracticePage';
@@ -474,72 +473,6 @@ describe('LoopPracticePage', () => {
       });
     });
 
-    // Shane, practising: several loops are made in one go, then practised. A save no longer
-    // jumps to the new loop.
-    it('in the whole song, Save as loop keeps the view for the next loop and names the one saved', async () => {
-      const { user, engine } = await openChorus([`/songs/${SONG}`]);
-      await user.click(wholeSong());
-      engine.seek.mockClear();
-      tap(engine, 3);
-      // A first tap only starts a pick: nothing moves.
-      expect(engine.seek).not.toHaveBeenCalled();
-      tap(engine, 5);
-      expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('3');
-      expect(screen.getByRole('textbox', { name: 'Last bar' })).toHaveValue('5');
-
-      await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Intro');
-      await user.click(screen.getByRole('button', { name: 'Save as loop' }));
-
-      // Still the loop being practised, still the whole song, and an empty form.
-      expect(await screen.findByTestId('loop-saved-note')).toHaveTextContent('Saved “Intro”.');
-      expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeInTheDocument();
-      expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${CHORUS_ID}`);
-      expect(wholeSong()).toHaveAccessibleName(SHOWS_SONG);
-      expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('');
-      expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('');
-      expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
-
-      // A second loop is its own row: a new id, not the first one sent again.
-      tap(engine, 14);
-      tap(engine, 15);
-      await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Outro');
-      await user.click(screen.getByRole('button', { name: 'Save as loop' }));
-      expect(await screen.findByText(/Saved “Outro”/)).toBeInTheDocument();
-      const sent = loops.sent('insert') as Loop[];
-      expect(sent.map((loop) => loop.name)).toEqual(['Intro', 'Outro']);
-      expect(sent[0]).toMatchObject({ start_bar: 3, end_bar: 5, speed_ratio: 0.708333 });
-      expect(sent[0]?.id).not.toBe(sent[1]?.id);
-    });
-
-    it('"Practise it" in the saved note opens the loop just saved, replacing the URL', async () => {
-      const { user, engine } = await openChorus([`/songs/${SONG}`]);
-      await user.click(wholeSong());
-      tap(engine, 3);
-      tap(engine, 5);
-      await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Intro');
-      await user.click(screen.getByRole('button', { name: 'Save as loop' }));
-      await user.click(await screen.findByRole('button', { name: 'Practise it' }));
-
-      expect(await screen.findByRole('heading', { level: 1, name: 'Intro' })).toBeInTheDocument();
-      const [sent] = loops.sent('insert') as Loop[];
-      expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${sent?.id}`);
-      // The new loop plays, drawn with a bar either side; the form has gone.
-      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
-        startTick: startOfBar(3),
-        endTick: startOfBar(6),
-      });
-      await waitFor(() =>
-        expect(engine.setVisibleBars).toHaveBeenLastCalledWith({
-          startBarIndex: 1,
-          endBarIndex: 5,
-        }),
-      );
-      expect(screen.queryByRole('form', { name: 'New loop' })).not.toBeInTheDocument();
-
-      historyBack();
-      expect(await screen.findByText('At song overview')).toBeInTheDocument();
-    });
-
     /** In the whole song, picks the bars, names the loop and presses Save as loop. */
     async function saveAs(
       { user, engine }: Awaited<ReturnType<typeof openChorus>>,
@@ -552,107 +485,141 @@ describe('LoopPracticePage', () => {
       await user.type(screen.getByRole('textbox', { name: 'Name' }), name);
       await user.click(screen.getByRole('button', { name: 'Save as loop' }));
     }
-    const savedNote = () => screen.getByTestId('loop-saved-note');
+    /** The choice a save leaves in the form's place: practise it now, or make another? */
+    const savedChoice = (name: string) => screen.findByRole('group', { name: `Saved “${name}”` });
+    const practiseNow = () => screen.getByRole('button', { name: 'Practise it now' });
+    const makeAnother = () => screen.getByRole('button', { name: 'Make another loop' });
 
-    // PR 31 review: a status mounted with its text is often not read out. One region, on the
-    // page from the moment the sheet opens, whose text changes at each save.
-    it('says each save in one status region that is there, empty, before the first', async () => {
+    // Shane, practising: several loops are made in one go, then practised, and it has to be
+    // plain what a save did and what comes next ("right now it just sort of happens").
+    it('a save asks "practise it now, or make another?" in the form’s place, and takes focus', async () => {
+      const view = await openChorus([`/songs/${SONG}`]);
+      await view.user.click(wholeSong());
+      view.engine.seek.mockClear();
+      tap(view.engine, 3);
+      // A first tap only starts a pick: nothing moves.
+      expect(view.engine.seek).not.toHaveBeenCalled();
+      tap(view.engine, 5);
+      expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('3');
+      expect(screen.getByRole('textbox', { name: 'Last bar' })).toHaveValue('5');
+      await view.user.type(screen.getByRole('textbox', { name: 'Name' }), 'Intro');
+      await view.user.click(screen.getByRole('button', { name: 'Save as loop' }));
+
+      const choice = await savedChoice('Intro');
+      expect(choice).toHaveTextContent('Bars 3 to 5');
+      // It replaced the form the press was in: focus is on it, not on <body>.
+      expect(choice).toHaveFocus();
+      expect(screen.queryByRole('form', { name: 'New loop' })).not.toBeInTheDocument();
+      expect(practiseNow()).toBeInTheDocument();
+      expect(makeAnother()).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Back to Chorus fill' })).toBeInTheDocument();
+      // Nothing else moved: still the loop being practised, still the whole song.
+      expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeInTheDocument();
+      expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${CHORUS_ID}`);
+      expect(wholeSong()).toHaveAccessibleName(SHOWS_SONG);
+    });
+
+    it('"Make another loop" brings back an empty form, and the second loop is its own row', async () => {
       const view = await openChorus();
       await view.user.click(wholeSong());
-      const note = savedNote();
-      expect(note).toHaveAttribute('role', 'status');
-      expect(note).toBeEmptyDOMElement();
-
       await saveAs(view, 'Intro', 3, 5);
-      await waitFor(() => expect(note).toHaveTextContent('Saved “Intro”.'));
-      // The fields are a new form; the region is the one that was there.
+      await savedChoice('Intro');
+
+      await view.user.click(makeAnother());
       expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('');
-      expect(savedNote()).toBe(note);
+      expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('');
+      // A loop has been saved here: nothing to cancel, only to finish.
+      expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
 
       await saveAs(view, 'Outro', 14, 15);
-      await waitFor(() => expect(note).toHaveTextContent('Saved “Outro”.'));
-      expect(savedNote()).toBe(note);
+      expect(await savedChoice('Outro')).toHaveFocus();
+      const sent = loops.sent('insert') as Loop[];
+      expect(sent.map((loop) => loop.name)).toEqual(['Intro', 'Outro']);
+      expect(sent[0]).toMatchObject({ start_bar: 3, end_bar: 5, speed_ratio: 0.708333 });
+      // A new id, not the first one sent again.
+      expect(sent[0]?.id).not.toBe(sent[1]?.id);
     });
 
-    it('"Practise it" is locked while the next loop is saving, so its form and draft stay', async () => {
+    it('picking bars on the score while it asks is "make another": the form comes back holding them', async () => {
       const view = await openChorus();
       await view.user.click(wholeSong());
       await saveAs(view, 'Intro', 3, 5);
-      await waitFor(() => expect(savedNote()).toHaveTextContent('Saved “Intro”.'));
-      const practise = screen.getByRole('button', { name: 'Practise it' });
-      expectUnlocked(practise);
+      await savedChoice('Intro');
 
-      const release = loops.holdNext('insert');
-      await saveAs(view, 'Outro', 14, 15);
-      expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
-      expectLocked(practise);
-      await view.user.click(practise);
-
-      // Nothing was left: the same loop, the sheet and the save still on its way.
-      await settle();
-      expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Saving…' })).toBeInTheDocument();
-      expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Outro');
-
-      release();
-      await waitFor(() => expect(savedNote()).toHaveTextContent('Saved “Outro”.'));
-      expectUnlocked(screen.getByRole('button', { name: 'Practise it' }));
+      tap(view.engine, 14);
+      expect(await screen.findByRole('form', { name: 'New loop' })).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Saved “Intro”' })).not.toBeInTheDocument();
+      tap(view.engine, 15);
+      expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('14');
+      expect(screen.getByRole('textbox', { name: 'Last bar' })).toHaveValue('15');
+      expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('');
     });
 
-    it('a save that fails behind a locked "Practise it" keeps its draft and says so', async () => {
-      const view = await openChorus();
+    it('"Practise it now" opens the loop just saved at its saved speed, replaces the URL and hands focus to Play', async () => {
+      const view = await openChorus([`/songs/${SONG}`]);
       await view.user.click(wholeSong());
       await saveAs(view, 'Intro', 3, 5);
-      await waitFor(() => expect(savedNote()).toHaveTextContent('Saved “Intro”.'));
-
-      const release = loops.holdNext('insert');
-      loops.failNext('insert', 'permission denied');
-      await saveAs(view, 'Outro', 14, 15);
-      await screen.findByRole('button', { name: 'Saving…' });
-      await view.user.click(screen.getByRole('button', { name: 'Practise it' }));
-      release();
-
-      expect(await screen.findByText(/Couldn't save the loop\./)).toBeInTheDocument();
-      expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Outro');
-      expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeInTheDocument();
-    });
-
-    it('"Practise it" opens the saved loop at its saved speed and hands focus to Play', async () => {
-      const view = await openChorus();
-      await view.user.click(wholeSong());
-      await saveAs(view, 'Intro', 3, 5);
-      await waitFor(() => expect(savedNote()).toHaveTextContent('Saved “Intro”.'));
+      await savedChoice('Intro');
       // The loop being practised moves on to 76%; the one saved was saved at 71%.
       await view.user.click(screen.getByRole('button', { name: 'Faster by 5%' }));
       await waitFor(() => expect(speed()).toHaveTextContent('76%'));
 
-      await view.user.click(screen.getByRole('button', { name: 'Practise it' }));
+      await view.user.click(practiseNow());
 
       expect(await screen.findByRole('heading', { level: 1, name: 'Intro' })).toBeInTheDocument();
+      const [sent] = loops.sent('insert') as Loop[];
+      expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${sent?.id}`);
       await waitFor(() => expect(speed()).toHaveTextContent('71%'));
       expect(view.engine.setSpeed).toHaveBeenLastCalledWith(0.708333);
+      // The new loop plays, drawn with a bar either side; the sheet has gone.
+      expect(view.engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(3),
+        endTick: startOfBar(6),
+      });
+      await waitFor(() =>
+        expect(view.engine.setVisibleBars).toHaveBeenLastCalledWith({
+          startBarIndex: 1,
+          endBarIndex: 5,
+        }),
+      );
+      expect(screen.queryByRole('form', { name: 'New loop' })).not.toBeInTheDocument();
       // The button and its sheet have gone: focus is on Play, not on <body>.
       await waitFor(() => expect(playButton()).toHaveFocus());
       // Opening a loop at its own speed is no change of speed to save.
       await settle();
       expect(loops.sent('update')).toEqual([{ speed_ratio: 0.76 }]);
+
+      historyBack();
+      expect(await screen.findByText('At song overview')).toBeInTheDocument();
     });
 
-    it('"Done" after a save goes back to the loop being practised', async () => {
-      const { user, engine } = await openChorus();
-      await user.click(wholeSong());
-      tap(engine, 3);
-      tap(engine, 5);
-      await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Intro');
-      await user.click(screen.getByRole('button', { name: 'Save as loop' }));
-      await user.click(await screen.findByRole('button', { name: 'Done' }));
+    it('"Back to <the loop>" from the choice goes back to the loop being practised', async () => {
+      const view = await openChorus();
+      await view.user.click(wholeSong());
+      await saveAs(view, 'Intro', 3, 5);
+      await savedChoice('Intro');
+      await view.user.click(screen.getByRole('button', { name: 'Back to Chorus fill' }));
 
       expect(wholeSong()).toHaveAccessibleName(SHOWS_LOOP);
       expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeInTheDocument();
-      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+      expect(view.engine.setPlaybackRange).toHaveBeenLastCalledWith({
         startTick: startOfBar(9),
         endTick: startOfBar(13),
       });
+      // Copilot review on #33: the button went with its sheet and focus fell to <body>.
+      await waitFor(() => expect(playButton()).toHaveFocus());
+    });
+
+    it('the whole song opened again after a save starts on the form, not on an old question', async () => {
+      const view = await openChorus();
+      await view.user.click(wholeSong());
+      await saveAs(view, 'Intro', 3, 5);
+      await savedChoice('Intro');
+      await view.user.click(screen.getByRole('button', { name: 'Back to Chorus fill' }));
+
+      await view.user.click(wholeSong());
+      expect(await screen.findByRole('form', { name: 'New loop' })).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Saved “Intro”' })).not.toBeInTheDocument();
     });
 
     it('a mouse drag in the whole song picks the bars', async () => {
@@ -670,6 +637,8 @@ describe('LoopPracticePage', () => {
       await user.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(wholeSong()).toHaveAccessibleName(SHOWS_LOOP);
       expect(engine.setVisibleBars).toHaveBeenLastCalledWith({ startBarIndex: 7, endBarIndex: 12 });
+      // The form went with its sheet: focus goes to Play, as from the sheet's other ways out.
+      await waitFor(() => expect(playButton()).toHaveFocus());
       await settle();
       expect(loops.sent('insert')).toEqual([]);
     });
@@ -689,7 +658,7 @@ describe('LoopPracticePage', () => {
       expect(screen.getByRole('textbox', { name: 'First bar' })).toHaveValue('3');
 
       release();
-      expect(await screen.findByTestId('loop-saved-note')).toHaveTextContent('Saved “Intro”.');
+      expect(await savedChoice('Intro')).toBeInTheDocument();
       expect(loops.sent('insert')).toHaveLength(1);
     });
 
