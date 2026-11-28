@@ -214,6 +214,8 @@ function LoopPanelBody({
 
   const openForm = (loop: Loop | null) => {
     if (!practice.openEditor(loop)) return;
+    // A form opened by a press is that form: never an earlier save's question in its place.
+    setJustSaved(null);
     formOpener.current = loop ? { kind: 'edit', loopId: loop.id } : { kind: 'new' };
   };
   const closeForm = () => {
