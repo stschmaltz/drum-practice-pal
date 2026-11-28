@@ -173,6 +173,7 @@ Handoff notes written before the Visual design unit was added call the release u
 | 13  | Polish and release                          | all        |
 | 14  | Songs with recordings                       | 13         |
 | 15  | Play-along player, markers, recording loops | 14         |
+| 18  | Songs from a link alone                     | 14         |
 | 16  | Songs first and practice progress           | 13         |
 
 ### 00 Scaffold, conventions, CI, preview deploys
@@ -450,87 +451,85 @@ Shane's first pass after the MVP (branch `practice-feedback`): the score takes t
 
 ### 14 Songs with recordings
 
-**Next after Unit 16's PR** (Shane, 2026-11-27). Not built yet.
+Re-walked on 2026-11-27 against Unit 16's screens (Songs list at `/`, a song's overview at `/songs/:id` with no player, the whole song at `/songs/:id/play`, a loop's practice screen), with `/design`. Shane asked for it next: a YouTube player inside the app, Spotify links opening Spotify. The first draft of this unit also let a song be added from a link alone; that is now Unit 18, so this unit is worth using alone for the songs already in the app and touches no file column.
 
-**Goal:** any song can be played along to with the real recording, at any point in learning it, whether or not it has a tab. Written to `docs/product.md`.
+**Goal:** a song in the app can be played along to with the real recording, at any point in learning it, with its tab readable under the video. Written to `docs/product.md`.
 
 **For whom and when** (jobs 1, 4 and 5 there; job 2 is Unit 15):
 
-- A song heard yesterday: paste its link, play along badly today, find out what is in it. No tab, no loops, nothing finished first
-- A song being learned from a tab: hear the real thing, or a drumless version, between loops, and read the tab while it plays
-- A song already down: one or two taps from opening the app to playing it
+- A song being learned from its tab: between loops, hear the real thing, or a drumless version, and read the tab while it plays
+- A song already down: two taps from the Songs list to playing along with the recording
+- A sitting's first minutes: "what does this actually sound like" before any loop is made
 
-Nothing here waits for loops to be finished, and nothing needs a tab.
+Nothing here waits for loops to exist or be finished.
 
-**What the services allow** (from memory unless marked; Build checks each before relying on it)
+**What the services allow** (from memory unless marked; Build checks each before relying on it and writes what it found into its note)
 
-- YouTube embeds play inside the app, with YouTube's own controls: play, seek, and speed from 0.25x to 2x. `playsinline` keeps iOS out of fullscreen
-- Some videos refuse to be embedded, often a label's official upload (player errors 101 and 150). The app then offers "Open in YouTube" in place of the player, and says why
+- YouTube embeds play inside the app with YouTube's own controls: play, seek, and speed from 0.25x to 2x. `playsinline=1` keeps iOS out of fullscreen. The first Play has to be a tap on the video itself (YouTube's rule), so "taps to sound" always includes it
+- Some videos refuse to be embedded, often a label's official upload (the player shows its own "Video unavailable" card; error codes 101 and 150 are only visible through the IFrame API, which this unit does not load). So the app always shows "Open in YouTube" beside the video, not only after a failure it cannot see
 - Embeds can show ads, and on iOS they stop when the screen locks
-- Spotify can't be slowed, and its embed plays full tracks only for a browser logged into Spotify, otherwise a 30-second preview. So a Spotify link always opens Spotify (the app, on a phone). The app says so where the link is added: for slowing a song down, add a YouTube link
-- Neither works offline, and neither gives the app its audio, so drums out is a second link to a drumless version (YouTube has one for most songs). A tab's synth already does drums out with Mute drums
-- Title and artist from a pasted link: both services have an oEmbed endpoint that needs no key. Whether the browser may call them (CORS) is unchecked; if not, the title is typed
+- Spotify can't be slowed, and its embed plays full tracks only for a browser logged into Spotify. So a Spotify link always opens Spotify (the app, on a phone). The app says so where the link is added: for slowing a song down, add a YouTube link
+- Neither works offline, and neither gives the app its audio, so drums out is a second link to a drumless version. The tab's synth already does drums out with Mute drums
+- A pasted link's title is not fetched: the song already has its title and artist from the tab
 
 **Scope**
 
-- **A song is a title and artist plus any of: a tab, an Original recording, a Drumless recording, other links.** At least one of them when it is added
-  - "Add song" in the library takes a file as now, or a pasted link (title and artist filled from the link where possible, editable, otherwise typed)
-  - A tab can be added later to a song that began as a link, and a link to a song that began as a tab, from the song page
-  - `songs.file_path`, `file_hash`, `original_tempo` and `bar_count` become nullable, all set or all null. Every screen that reads them says what it shows without them
-- **Links:** one Original, one Drumless, any number of Other (a lesson, a drum cover)
-  - Accepted: YouTube (`watch?v=`, `youtu.be/`, `/shorts/`, `music.youtube.com`, a `t=` start kept), Spotify (`open.spotify.com/track/…`, `spotify:track:…`), and any other `https` URL as a plain link. Share-sheet tracking parameters are dropped. Anything else is refused with fixed copy
-  - Parsing is a pure module (`src/features/recordings/songLinks.ts`): provider, video or track id, canonical URL, label
-  - Adding, changing and removing a link is online only (the four parts in AGENTS.md)
-- **The song page has a source switch: Tab, Original, Drumless**, showing only what the song has (a `SegmentedControl`; none when there is one source). It opens on the source used last for that song on this device, and `?source=` picks one from a link
-  - **A YouTube source** shows the video in the page with YouTube's controls, in a box that stays on screen (sticky, small on a phone). The app's own Play, speed, metronome and count-in don't act on it and aren't shown as if they did
-  - **A Spotify or other source** shows a card with "Open in Spotify" (or the host's name) and the note about speed
-  - **With a tab, the score stays under the recording**, scrolled by hand, silent, so the part can be read while the real song plays. Switching source stops whichever was sounding. Loops and the loop panel stay as they are (they play the tab)
-  - **Without a tab** the page is the recording, the links, and a quiet "Add a tab" for later. No loop panel (loops on a recording are Unit 15)
-- **Play from anywhere:** a song's library card, and the home page, have a play-along button per recording it has ("Original", "Drumless")
-  - YouTube: opens the song page on that source (one tap, then the video's own Play, which YouTube requires)
-  - Spotify and other links: opens the link directly
-  - The home page gets a **Songs** tab (`?tab=songs`) beside Active and Finished: every song with a recording, most recently opened first. This is where a song with no loops lives
-- **Recently played:** opening a recording (the song page on a recording source, or a link out) counts as practising the song for the library's "recently practiced" sort and the Songs tab's order. It is a queued write of a timestamp. No session is logged and nothing asks what was played
+- **Links on a song:** one Original, one Drumless, any number of Other (a lesson, a drum cover)
+  - Accepted: YouTube (`watch?v=`, `youtu.be/`, `/shorts/`, `/live/`, `/embed/`, `music.youtube.com`, a `t=` or `start=` kept as the start time), Spotify (`open.spotify.com/track/…` with or without an `intl-xx` segment, `spotify:track:…`), and any other `https` URL as a plain link. Share-sheet tracking parameters (`si`, `feature`, `utm_*`, `pp`) are dropped. Anything else is refused with fixed copy, and so is a host that only looks like one (`youtube.com.evil.test`)
+  - Parsing is a pure module (`src/features/recordings/songLinks.ts`): provider, video or track id, start seconds, canonical URL, the label of its host ("YouTube", "Spotify", or the host name)
+  - Adding, changing and removing a link is online only (the four parts in AGENTS.md), on the song's overview
+- **The song's overview (`/songs/:id`) gains "Play along"** above the loops: one button per way of hearing the song that it has, in this order: "Tab" (today's "Play whole song"), "Original", "Drumless". Other links are a quiet list under them. With no links, a quiet "Add a recording" sits where the buttons would be; it never looks like something is missing
+  - "Original" / "Drumless" on a YouTube link opens the song's play screen on that source
+  - On a Spotify or other link the button is a link out (`target="_blank"`, `rel="noopener noreferrer"`), named for where it goes ("Original on Spotify")
+  - "Manage recordings" (in the header's More menu, and what "Add a recording" opens) is a small form in the page: a URL field per kind with what it was recognised as, the note about Spotify and speed, Save, and Remove per link
+- **The play screen (`/songs/:id/play`) gets a source switch: Tab, Original, Drumless**, showing only the YouTube sources the song has (a `SegmentedControl`; none when the song has no YouTube link). `?source=original|drumless` picks one from a link; otherwise it opens on Tab. The source is in the URL (`replace`), so Back goes to the song, not through the sources
+  - **On a recording source** the video sits in a box that stays on screen (sticky under the top bar; 16:9, full width on a phone up to a third of the window's height, a fixed 320 px wide box beside the header from 1024 px) with "Open in YouTube" under it. The score stays below, silent, scrolled by hand: the tab's player is paused and its Play, speed, metronome, count-in and loop panel are not shown as if they acted on the video. One line says so: "The video has its own controls. Switch to Tab for loops, speed and the metronome."
+  - Switching source stops whichever was sounding (the tab's player is paused; the video's iframe is unmounted)
+  - The embed is `https://www.youtube-nocookie.com/embed/<id>?playsinline=1&rel=0` plus `start=` when the link had one. No YouTube script or frame loads until a recording source is opened, and none on any other screen
+- **Recently played:** opening a recording (the play screen on a recording source, or a link out from the overview) sets `songs.last_played_at` to now, a queued write (the pattern in AGENTS.md, safe to send twice). The Songs list's "recently practised" order uses the later of a song's last practice and `last_played_at`. No session is logged and nothing asks what was played
 - **Data:**
-  - `song_links`: `id, user_id, song_id, kind ('original' | 'drumless' | 'other'), provider ('youtube' | 'spotify' | 'web'), url (https, at most 2048), created_at, updated_at`; partial unique index on `(song_id, kind)` where `kind <> 'other'`; references `songs (id, user_id)`, cascades; RLS and column grants per AGENTS.md
-  - `songs`: the four file columns nullable with an all-or-none check; `last_played_at`, client-writable only through a grant on that column
-  - The loops trigger that checks `end_bar` against `bar_count` refuses a loop on a song with no tab
-- The embed is `youtube-nocookie.com`. No YouTube script loads until a recording source is opened, and none on any other screen
+  - `song_links`: `id, user_id, song_id, kind ('original' | 'drumless' | 'other'), provider ('youtube' | 'spotify' | 'web'), url (https, at most 2048), created_at, updated_at`; a partial unique index on `(song_id, kind)` where `kind <> 'other'`; references `songs (id, user_id)`, cascades; RLS, revokes and column grants per AGENTS.md. Additive, so the live build keeps working
+  - `songs.last_played_at timestamptz null`, client-writable only through a column grant
+  - Types regenerated; `tests/db` covers RLS, the grants, the unique index, the https check and the cascade
+- Offline: the links are in the persisted cache, so the buttons show; a recording button says it needs a connection (`OfflineNote`) and the tab works as before
 
-**Walk-throughs** (taps from the app being open)
+**Walk-throughs** (taps from the app being open on Songs)
 
-- _New song, no tab:_ Library, Add song, paste link (title appears), Save: the song page opens on the video. Play. Four taps and a paste
-- _Song being learned, mid-practice:_ on the song page, Drumless in the source switch, Play on the video; the tab is still under it. Two taps. Back to Tab and a loop: two taps
-- _Song that is down:_ Home, Songs, "Drumless" on its card. For Spotify that is playing in three taps; for YouTube, a fourth on the video
-- _Offline at the jam space:_ recordings say they need a connection; the tab, its loops and everything from Unit 11 work as before. A link-only song says so plainly and offers nothing that would fail
-- _A video that refuses embedding:_ the box says the video can't be played here, with "Open in YouTube"
+- _A song being learned, between loops:_ song (1), "Drumless" (2), Play on the video (3). The tab is under it. Back to a loop: Back (1), the loop's play button (2)
+- _A song that is down, Spotify link:_ song (1), "Original on Spotify" (2): Spotify opens and plays
+- _First link on a song:_ song (1), "Add a recording" (2), paste, Save (3): the buttons appear
+- _No links at all (every song today):_ the overview looks as it does now, plus one quiet "Add a recording"
+- _Offline at the jam space:_ the tab and its loops work; recording buttons are off and say why
+- _A video that refuses embedding:_ YouTube's own card says so inside the box, and "Open in YouTube" is right under it
 
 **Acceptance:**
 
-- A song can be added from a link alone and from a file alone, and each can gain the other later
-- Every accepted URL form saves a normalised link; a hostile or malformed one is refused with fixed copy
-- An embeddable YouTube link plays in the song page at phone, tablet and desktop sizes, with the tab readable under it when there is one; a blocked one offers the way out
-- A song's recordings can be started from its library card and from the home page's Songs tab without visiting anything else first
-- No screen breaks or shows empty tab furniture for a song with no tab, and nothing about recordings depends on a loop's status
-- Tab songs behave exactly as before with no links added
+- Every accepted URL form saves a normalised link; a hostile or malformed one is refused with fixed copy and nothing is saved
+- An embeddable YouTube link plays in the play screen at phone, tablet and desktop sizes with the tab readable under it, and "Open in YouTube" is always there
+- A song's recordings start from its overview without visiting anything else first, and a Spotify link opens Spotify
+- No YouTube request is made until a recording source is opened (e2e asserts it)
+- A song with no links behaves exactly as before, and nothing about recordings depends on a loop's status
 
-**Test focus:** URL parsing as a table (real shapes, share-sheet parameters, `javascript:`, `data:`, look-alike hosts such as `youtube.com.evil.test`); RLS, grants, the all-or-none check and the loops trigger in `tests/db`; every screen that reads a song, given one with no tab; the source switch (what sounds stops, the last source remembered, `?source=`); online-only gates on link edits. e2e can't play YouTube in CI: stub the embed's host and assert the frame's URL and the fallback. **QA focus:** a link-only song through every screen; a phone in portrait with the video box and the score together; pasting from the YouTube and Spotify share sheets; an embed-blocked video; rotation with a video playing. **Human check:** at the kit, add a song from a YouTube link and play along; a drumless link; a Spotify link opening the app on the phone and coming back; reading the tab under the video on the tablet.
+**Test focus:** URL parsing as a table (real shapes, share-sheet parameters, `javascript:`, `data:`, `http:`, look-alike hosts, a 3000-character URL); RLS, grants, the unique index and the cascade in `tests/db`; the source switch (what was sounding stops, `?source=` with a kind the song lacks falls back to Tab, Back); online-only gates on link edits; the queued `last_played_at` write. e2e can't play YouTube in CI: route the embed's host to a stub page and assert the frame's URL, that no request to it is made on other screens, and the way out. **QA focus:** a phone in portrait with the video box and the score together, and on its side; pasting from the YouTube and Spotify share sheets; an embed-blocked video; rotation with a video playing; twenty links of kind Other; a very long URL. **Human check:** at the kit, add a YouTube link to a song and play along with the tab under it on the tablet; a drumless link; a Spotify link opening the app on the phone and coming back.
 
 **Not in this unit, and why**
 
-- No "Played it through" button and no run-through counts: the app can't see playback in Spotify, and a button that only exists to tell the app what happened is a chore (`docs/product.md`). Unit 15 logs what it can see
-- No prompt when a song's loops are finished. Recordings are always one tap away, so there is nothing to unlock
-- No app-drawn controls over the video (speed keys, pedal, Space). They need the IFrame Player API and are Unit 15; YouTube's own controls already cover play, seek and speed
+- A song from a link alone, with no tab: Unit 18. It changes four `songs` columns to nullable and every screen that reads them; this unit is useful without it for every song already in the app
+- No "Played it through" button and no run-through counts: the app can't see playback in Spotify, and a button that only tells the app what happened is a chore (`docs/product.md`)
+- No prompt when a song's loops are finished: recordings are always two taps away, so there is nothing to unlock
+- No app-drawn controls over the video (speed keys, pedal, Space), and no markers or loops on a recording: they need the IFrame Player API and are Unit 15
+- No play buttons on the Songs list's rows: Shane called the earlier, busier rows too cluttered. See the first open question
 
-**Open questions for Shane** (each with what I'd do)
+**Open questions for Shane** (each with what was built as the default)
 
-- _Where does the sound come from at the kit?_ If the phone is both the app and the speaker or earbuds, leaving for the Spotify app and coming back is fine. If you'd want the tab on screen while Spotify plays on the same phone, that works too (Spotify plays in the background); YouTube in the background does not. Recommendation: build as above and see
-- _Is "recently played" enough of a record for full-song practice,_ or do you want time played per song once the app can see it (Unit 15)? Recommendation: timestamp now, time later, never a manual log
-- _Should a song need a tab or a link at all?_ A bare title could be a to-learn list. Recommendation: require one for now
+- _Is two taps to a recording quick enough,_ or should a Songs row carry one small play-along button for the source used last? Default: rows stay clean, the overview has the buttons
+- _Should the video also be on a loop's practice screen,_ to hear the real passage before looping it? Default: no; the practice screen stays about the loop, and Unit 15's loops on a recording answer it properly
+- _Where does the sound come from at the kit?_ Spotify plays in the background under the tab on the same phone; YouTube in the background does not. Default: build as above and see
+- _Should the tab's cursor move along with the video?_ It needs the tab and the recording lined up (Unit 15's "Later"). Default: the score is scrolled by hand, and Mute all on the Tab source is the way to have a moving cursor over a recording playing elsewhere
 
 **Carried forward**
 
-- From 16 (built before this unit; docs/units/14-songs-first.md): the library is now the Songs list at `/` and the On the go home page is gone. "A song's library card" is a row of the Songs list, and "the home page's Songs tab" has no home page to go on: the Songs list is already every song, recently practised first. The song page is now an overview (`/songs/:id`, no player), with the tab at `/songs/:id/play` and each loop's practice screen at `/songs/:id/loops/:loopId`. Walk the scope against these screens again with `/design` before Build.
+None yet.
 
 ### 15 Play-along player, markers and loops on a recording
 
@@ -550,6 +549,22 @@ Nothing here waits for loops to be finished, and nothing needs a tab.
 **Carried forward**
 
 - From 16: loops are listed on a song's overview and counted on the Stats page, not on a home page; a loop on a recording joins them there, and its practice screen is the place to copy (`LoopPracticePage`).
+
+### 18 Songs from a link alone
+
+Split from Unit 14 when it was re-walked (2026-11-27). Planned in outline; detail it with `/design` after Unit 14 has been used.
+
+**Goal:** a song heard yesterday can be in the app today from a pasted link, with no tab, and played along to badly to find out what is in it (job 1 in `docs/product.md`, for "a song they only have as a link someone sent").
+
+- "Add a song" on the Songs list takes a file as now, or a pasted link with a title and artist (typed; filled from the link's oEmbed only if the browser may call it, which is unchecked)
+- `songs.file_path`, `file_hash`, `original_tempo` and `bar_count` become nullable, all set or all null. Every screen that reads them says what it shows without them: the Songs row, the overview (no "Tab" button, no "New loop", a quiet "Add a tab"), the play screen (the recording alone), Stats, the offline file store. The loops trigger that checks `end_bar` against `bar_count` refuses a loop on a song with no tab
+- A tab can be added later to a song that began as a link
+- A link-only song whose link is Spotify or another site has nothing to play in the app: its overview is the way out and "Add a tab", and says so plainly
+- Not additive for a build that assumes the columns are set: two releases (docs/release.md, section 2), or the nullable columns go out a release before anything writes a null
+
+**Carried forward**
+
+None yet.
 
 ### 16 Songs first and practice progress
 
