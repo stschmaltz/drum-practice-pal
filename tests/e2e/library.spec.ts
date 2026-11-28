@@ -385,3 +385,37 @@ test('on a cold start the upload is where it stays: no big drop box while the so
     await context.close();
   }
 });
+
+// 20 batch 8, Test (13.37b), the side effect pinned: a brand-new library, not yet known to
+// be empty, loads with the compact Upload and opens the big drop box once the read says
+// there are no songs. One change of layout, once, for the empty library only.
+test('a new, empty library loads with the compact Upload, then opens the big drop box once', async ({
+  user,
+  page,
+}) => {
+  const songsRead = /\/rest\/v1\/songs\?/;
+  const held: (() => void)[] = [];
+  await page.route(songsRead, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    await new Promise<void>((resolve) => held.push(resolve));
+    await route.fallback();
+  });
+  await signIn(page, user, '/library');
+
+  await expect(page.getByText('Loading your songs…')).toBeVisible();
+  await expect.poll(() => held.length).toBeGreaterThan(0);
+  const picker = page.locator('label').filter({ has: uploadInput(page) });
+  await expect(picker).toBeVisible();
+  await expect(page.getByText(/or drop a Guitar Pro file anywhere here/)).toBeVisible();
+  await expect(page.getByText(/or drop one here/)).toHaveCount(0);
+
+  await page.unroute(songsRead);
+  for (const release of held) release();
+  await expect(page.getByText('No songs yet.')).toBeVisible();
+  await expect(page.getByText(/or drop one here/)).toBeVisible();
+  await expect(page.getByText(/or drop a Guitar Pro file anywhere here/)).toHaveCount(0);
+  // The upload it opened is the working one: a file picked there is uploaded.
+  await upload(page, fixture('groove-120'));
+  await expect(page.getByRole('list').getByRole('link', { name: 'Groove 120' })).toBeVisible();
+  await expect(page.getByText(/or drop one here/)).toHaveCount(0);
+});

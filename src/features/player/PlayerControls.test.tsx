@@ -8,6 +8,7 @@ import {
   countInGroup,
   countInModeGroup,
 } from '@/test/countInControls';
+import { nextCountInBars } from '@/features/shortcuts/shortcuts';
 import { FakeClickOutput, FakePlayerEngine } from '@/test/fakePlayerEngine';
 import { PlayerControls, PlayPauseButton } from './PlayerControls';
 import { DEFAULT_PLAYER_OPTIONS, type PlayerOptions } from './playerOptions';
@@ -750,6 +751,58 @@ describe('PlayerControls count-in', () => {
       act(() => player.setCountInBars(0));
       expect(metronome()).toHaveFocus();
     });
+
+    // 20 batch 8, Test: C all the way round (Off, 1 bar, 2 bars, Off) from each of the
+    // count-in's controls in turn. Whatever comes and goes, focus is on a control of the bar.
+    const inBar = () => screen.getByRole('region', { name: 'Player controls' });
+    const bars = (name: string) => () => within(countInGroup()).getByRole('radio', { name });
+    const mode = (name: string) => () => modeRadio(name);
+    const withCountIn = (countInBars: 0 | 1 | 2, countInMode: 'start' | 'every_repeat') =>
+      ({ ...DEFAULT_PLAYER_OPTIONS, countInBars, countInMode }) as PlayerOptions;
+    it.each([
+      ['Off', 0, 'start', bars('Off')],
+      ['1 bar, from Off', 0, 'start', bars('1 bar')],
+      ['2 bars, from Off', 0, 'start', bars('2 bars')],
+      ['Off, from 1 bar', 1, 'start', bars('Off')],
+      ['1 bar', 1, 'start', bars('1 bar')],
+      ['2 bars', 2, 'every_repeat', bars('2 bars')],
+      ['At the start, from 1 bar', 1, 'start', mode('At the start')],
+      ['Every repeat (unchecked), from 1 bar', 1, 'start', mode('Every repeat')],
+      ['At the start (unchecked), from 2 bars', 2, 'every_repeat', mode('At the start')],
+      ['Every repeat, from 2 bars', 2, 'every_repeat', mode('Every repeat')],
+    ] as const)(
+      'C all the way round with focus on %s never drops focus to <body>',
+      (_, startBars, startMode, control) => {
+        const { player } = setup({ options: withCountIn(startBars, startMode) });
+        control().focus();
+        const seen: number[] = [];
+        for (let press = 0; press < 3; press++) {
+          act(() => player.setCountInBars(nextCountInBars(player.getSnapshot().countInBars)));
+          seen.push(player.getSnapshot().countInBars);
+          const focused = document.activeElement;
+          expect(focused).not.toBe(document.body);
+          expect(inBar()).toContainElement(focused as HTMLElement);
+          // A radio of the count-in still: the arrows go on from there.
+          expect(focused).toHaveAttribute('type', 'radio');
+        }
+        // The presses did go all the way round, through Off.
+        expect([...seen].sort()).toEqual([0, 1, 2]);
+        expect(player.getSnapshot().countInBars).toBe(startBars);
+      },
+    );
+
+    it('with focus on the mode, the count-in coming back leaves focus on the bars, and the arrows still choose', async () => {
+      const { player, user } = setup({ options: everyRepeat as PlayerOptions });
+      modeRadio('Every repeat').focus();
+      act(() => player.setCountInBars(0));
+      act(() => player.setCountInBars(1));
+      expect(within(countInGroup()).getByRole('radio', { name: 'Off' })).toHaveFocus();
+      // The mode is back as it was, unfocused: nothing was lost with the group.
+      expect(chosenCountInMode()).toBe('Every repeat');
+      await user.keyboard('{ArrowRight}');
+      expect(document.activeElement).not.toBe(document.body);
+      expect(countInGroup()).toContainElement(document.activeElement as HTMLElement);
+    });
   });
 
   it('the choice made in the bar is what the next Play counts', async () => {
@@ -992,6 +1045,70 @@ describe('PlayerControls folded', () => {
     fireEvent.change(speed(), { target: { value: '105' } });
     expect(player.getSnapshot().speedRatio).toBeCloseTo(1.05);
     expect(engine.restartCalls()).toBe(restarts);
+  });
+
+  // 20 batch 8, Test (13.37a): C acts with the bar folded too. Folded, the count-in isn't on
+  // the bar, so nothing of it can take focus away; shown again while playing, it is, and the
+  // hand-over is the count-in's own, not the fold toggle's.
+  describe('the count-in cycled while the bar can fold', () => {
+    const cycle = (player: PlayerService) =>
+      act(() => player.setCountInBars(nextCountInBars(player.getSnapshot().countInBars)));
+    const showControls = () => screen.getByRole('button', { name: 'Show controls' });
+
+    it.each([
+      ['the metronome', metronome],
+      ['the speed', speed],
+      ['Show controls', showControls],
+    ])('folded, C all the way round leaves focus on %s', (_, control) => {
+      const { player, fold } = setupFolded();
+      fold(true);
+      control().focus();
+      for (let press = 0; press < 3; press++) {
+        cycle(player);
+        expect(control()).toHaveFocus();
+      }
+      expect(player.getSnapshot().countInBars).toBe(0);
+    });
+
+    it('shown again while playing, the count-in turned off under a focused mode hands focus to the bars’ Off, not to the fold toggle', async () => {
+      const { player, fold, user } = setupFolded();
+      act(() => {
+        player.setCountInBars(2);
+        player.setCountInMode('every_repeat');
+      });
+      fold(true);
+      await user.click(showControls());
+      within(countInModeGroup()!).getByRole('radio', { name: 'Every repeat' }).focus();
+
+      cycle(player);
+
+      expect(player.getSnapshot().countInBars).toBe(0);
+      expect(countInModeGroup()).not.toBeInTheDocument();
+      expect(within(countInGroup()).getByRole('radio', { name: 'Off' })).toHaveFocus();
+    });
+
+    it('a count-in choice folded away with focus on it hands focus to Show controls, as any control does', () => {
+      const { player, fold } = setupFolded();
+      act(() => player.setCountInBars(2));
+      within(countInModeGroup()!).getByRole('radio', { name: 'Every repeat' }).focus();
+      fold(true);
+      expect(showControls()).toHaveFocus();
+      // And C from there, with nothing of the count-in on the bar, moves nothing.
+      cycle(player);
+      expect(showControls()).toHaveFocus();
+    });
+
+    it('the count-in turned off in the same render as the fold hands focus to Show controls', () => {
+      const { player, fold } = setupFolded();
+      act(() => player.setCountInBars(2));
+      within(countInModeGroup()!).getByRole('radio', { name: 'Every repeat' }).focus();
+      act(() => {
+        player.setCountInBars(0);
+        fold(true);
+      });
+      expect(document.activeElement).not.toBe(document.body);
+      expect(showControls()).toHaveFocus();
+    });
   });
 });
 

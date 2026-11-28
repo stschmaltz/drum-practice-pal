@@ -18,6 +18,7 @@ import {
   barNumber,
   chooseCountIn,
   chooseCountInMode,
+  controls,
   checkedCountIn,
   checkedCountInMode,
   countInModeGroup,
@@ -487,4 +488,90 @@ test('C cycling the count-in to Off under a focused "When to count in" hands foc
   await page.keyboard.press('ArrowRight');
   await expect(checkedCountIn(page)).toHaveValue('1');
   await expect(checkedCountInMode(page)).toHaveValue('every_repeat');
+});
+
+// 20 batch 8, Test (13.37a): C all the way round (Off, 1 bar, 2 bars, Off) with focus on
+// each of the count-in's controls in turn, then with the bar folded by playback and shown
+// again. Whatever the presses take off the bar, focus is on a control of the bar.
+test('C all the way round from each count-in control, folded and unfolded, never drops focus to <body>', async ({
+  user,
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  /** Where focus is: inside the controls bar, and which kind of control. */
+  const focusPlace = () =>
+    page.evaluate(() => {
+      const active = document.activeElement;
+      if (active === null || active === document.body) return 'body';
+      const inBar = active.closest('[aria-label="Player controls"]') !== null;
+      return `${inBar ? 'bar' : 'page'}:${active.getAttribute('type') ?? active.tagName.toLowerCase()}`;
+    });
+  /** Presses C until it has been through each of the three choices, reading focus after each. */
+  const allTheWayRound = async (what: string) => {
+    const seen = new Set<string>();
+    for (let press = 0; press < 3; press++) {
+      const before = await checkedCountIn(page).inputValue();
+      await page.keyboard.press('c');
+      await expect(checkedCountIn(page), what).not.toHaveValue(before);
+      seen.add(await checkedCountIn(page).inputValue());
+      expect(await focusPlace(), `${what}, after C to ${[...seen].pop()}`).toBe('bar:radio');
+    }
+    // The key did act each time: through Off and both lengths.
+    expect([...seen].sort(), what).toEqual(['0', '1', '2']);
+  };
+
+  // The bars' three choices, each from where it is the one chosen.
+  for (const bars of [0, 1, 2] as const) {
+    await chooseCountIn(page, bars);
+    await expect(checkedCountIn(page)).toBeFocused();
+    await allTheWayRound(`focus on the count-in's ${bars}`);
+  }
+  // The mode's two choices: Off takes their group off the bar under the focus.
+  for (const mode of ['start', 'every_repeat'] as const) {
+    await chooseCountIn(page, 1);
+    await chooseCountInMode(page, mode);
+    await expect(checkedCountInMode(page)).toBeFocused();
+    await allTheWayRound(`focus on "When to count in" (${mode})`);
+    await expect(checkedCountInMode(page)).toHaveValue(mode);
+  }
+
+  // Folded by playback: the count-in isn't on the bar, and C still cycles it.
+  await chooseCountIn(page, 0);
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  const showButton = controls(page).getByRole('button', { name: 'Show controls' });
+  await expect(showButton).toBeVisible();
+  await metronomeButton(page).focus();
+  for (const next of ['1', '2', '0']) {
+    await page.keyboard.press('c');
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as {
+                __drumPalPlayer?: { getSnapshot(): { countInBars: number } };
+              }
+            ).__drumPalPlayer?.getSnapshot().countInBars,
+        ),
+      )
+      .toBe(Number(next));
+    await expect(metronomeButton(page)).toBeFocused();
+  }
+
+  // Shown again while playing: the mode goes with Off, and focus goes to the bars' choice,
+  // not to the fold's toggle.
+  await showControls(page);
+  await chooseCountIn(page, 2);
+  await chooseCountInMode(page, 'every_repeat');
+  await expect(checkedCountInMode(page)).toBeFocused();
+  await page.keyboard.press('c');
+  await expect(checkedCountIn(page)).toHaveValue('0');
+  await expect(countInModeGroup(page)).toHaveCount(0);
+  await expect(checkedCountIn(page)).toBeFocused();
+  // Playback went on under all of it.
+  await expect(playButton(page)).toHaveText('Pause');
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Play');
 });

@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { onlineManager } from '@tanstack/react-query';
 import { restoredCacheIsStale } from '@/features/offline/queryPersister';
@@ -541,6 +541,189 @@ describe('LibraryPage layout (12 UX pass)', () => {
     release();
     await screen.findByText(/No songs yet/);
     expect(screen.getByText(/or drop one here/)).toBeInTheDocument();
+  });
+
+  // 20 batch 8, Test: every state but "known to be empty" draws the compact Upload, so the
+  // only change of layout left is the empty library's, once.
+  const bigBox = () => screen.queryByText(/or drop one here/);
+  const compactNote = () => screen.queryByText(/or drop a Guitar Pro file anywhere here/);
+  const picker = () => screen.getByLabelText('Upload a Guitar Pro file');
+  /** Holds the songs read until the returned function is called; other reads answer. */
+  function holdSongsRead() {
+    const serve = queryResult.getMockImplementation()!;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    queryResult.mockImplementation(async (call) => {
+      if (call.table === 'songs') await held;
+      return serve(call);
+    });
+    return () => release();
+  }
+
+  it('a new, empty library changes layout once: compact while loading, then the big drop box for good', async () => {
+    serveLibrary([]);
+    const release = holdSongsRead();
+    const { queryClient } = renderLibrary();
+    expect(screen.getByText('Loading your songs…')).toBeInTheDocument();
+    expect(bigBox()).not.toBeInTheDocument();
+    expect(compactNote()).toBeInTheDocument();
+
+    release();
+    await screen.findByText(/No songs yet/);
+    expect(bigBox()).toBeInTheDocument();
+    expect(compactNote()).not.toBeInTheDocument();
+
+    // A background read of the still-empty library is no second change.
+    await act(() => queryClient.invalidateQueries({ queryKey: songKeys.forUser('user-1') }));
+    await settle();
+    expect(bigBox()).toBeInTheDocument();
+    expect(screen.queryByText('Loading your songs…')).not.toBeInTheDocument();
+  });
+
+  it('an empty library read before on this device opens on the big drop box at once, and keeps it through the fresh read', async () => {
+    serveLibrary([]);
+    const release = holdSongsRead();
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(songKeys.forUser('user-1'), []);
+    restoredCacheIsStale(queryClient);
+    renderRoutes(<Route path="/library" element={<LibraryPage />} />, {
+      path: '/library',
+      queryClient,
+    });
+    expect(bigBox()).toBeInTheDocument();
+    // The fresh read is on its way under it, not skipped.
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: songKeys.all })).toBe(1));
+    expect(bigBox()).toBeInTheDocument();
+
+    release();
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: songKeys.all })).toBe(0));
+    expect(bigBox()).toBeInTheDocument();
+  });
+
+  it('a library with songs read before on this device opens compact at once, and stays so through the fresh read', async () => {
+    serveLibrary(library);
+    const release = holdSongsRead();
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(songKeys.forUser('user-1'), library);
+    restoredCacheIsStale(queryClient);
+    renderRoutes(<Route path="/library" element={<LibraryPage />} />, {
+      path: '/library',
+      queryClient,
+    });
+    expect(screen.getByRole('heading', { name: 'Your songs (3)' })).toBeInTheDocument();
+    expect(bigBox()).not.toBeInTheDocument();
+    const before = picker();
+    release();
+    await settle();
+    expect(bigBox()).not.toBeInTheDocument();
+    expect(picker()).toBe(before);
+  });
+
+  it('offline with nothing read on this device, the Upload is compact, off, and says why', async () => {
+    serveLibrary(library);
+    act(() => onlineManager.setOnline(false));
+    renderLibrary();
+    expect(await screen.findByText(/library hasn't been opened on this device yet/)).toBeVisible();
+    expect(bigBox()).not.toBeInTheDocument();
+    expect(compactNote()).toBeInTheDocument();
+    expect(picker()).toBeDisabled();
+    // The message that stands for the list is inside the drop zone, as the list will be.
+    expect(screen.getByTestId('drop-zone')).toContainElement(
+      screen.getByText(/library hasn't been opened on this device yet/),
+    );
+    const before = picker();
+
+    // Back online with songs: the same control, where it was.
+    act(() => onlineManager.setOnline(true));
+    expect(await screen.findByRole('heading', { name: 'Your songs (3)' })).toBeInTheDocument();
+    expect(bigBox()).not.toBeInTheDocument();
+    expect(picker()).toBe(before);
+    expect(picker()).toBeEnabled();
+  });
+
+  it('on a load error the Upload is compact, and stays so when Try again brings the songs', async () => {
+    serveLibrary(library);
+    const serve = queryResult.getMockImplementation()!;
+    let songsFailed = false;
+    queryResult.mockImplementation(async (call) => {
+      if (call.table !== 'songs' || songsFailed) return serve(call);
+      songsFailed = true;
+      return { data: null, error: { message: 'network down' } };
+    });
+    const { user } = renderLibrary();
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load your songs.");
+    expect(bigBox()).not.toBeInTheDocument();
+    expect(compactNote()).toBeInTheDocument();
+    const before = picker();
+    expect(before).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('heading', { name: 'Your songs (3)' })).toBeInTheDocument();
+    expect(bigBox()).not.toBeInTheDocument();
+    expect(picker()).toBe(before);
+  });
+
+  it('a load error on an empty library opens the big drop box only once Try again has read it', async () => {
+    serveLibrary([]);
+    const serve = queryResult.getMockImplementation()!;
+    let songsFailed = false;
+    queryResult.mockImplementation(async (call) => {
+      if (call.table !== 'songs' || songsFailed) return serve(call);
+      songsFailed = true;
+      return { data: null, error: { message: 'network down' } };
+    });
+    const { user } = renderLibrary();
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load your songs.");
+    expect(bigBox()).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await screen.findByText(/No songs yet/);
+    expect(bigBox()).toBeInTheDocument();
+  });
+
+  it('the compact Upload takes a pick while the songs are still loading', async () => {
+    serveLibrary(library);
+    const answerLibrary = queryResult.getMockImplementation()!;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    queryResult.mockImplementation(async (call) => {
+      // The upload's own look-up for a duplicate answers; the list's read is held.
+      if (call.ops.some((op) => op.method === 'eq' && op.args[0] === 'file_hash')) {
+        return { data: null, error: null };
+      }
+      if (call.table === 'songs' && !opArgs(call, 'insert')) await held;
+      return answerLibrary(call);
+    });
+    // The file's upload never answers, so the upload stays under way.
+    storageResult.mockImplementation(async (call) =>
+      call.method === 'upload' ? new Promise<FakeResult>(() => {}) : { data: {}, error: null },
+    );
+    const { user } = renderLibrary();
+    expect(screen.getByText('Loading your songs…')).toBeInTheDocument();
+    expect(picker()).toBeEnabled();
+
+    await user.upload(
+      picker(),
+      new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2])], 'new.gp'),
+    );
+
+    expect(await screen.findByText('Uploading new.gp…')).toBeInTheDocument();
+    // With the list still unread, and no big box drawn for it.
+    expect(screen.getByText('Loading your songs…')).toBeInTheDocument();
+    expect(bigBox()).not.toBeInTheDocument();
+    release();
+  });
+
+  it('a file dragged over the page while the songs load outlines the drop zone, not a big box', async () => {
+    serveLibrary(library);
+    const release = holdSongsRead();
+    renderLibrary();
+    const zone = screen.getByTestId('drop-zone');
+    expect(zone).toContainElement(screen.getByText('Loading your songs…'));
+    fireEvent.dragOver(zone, { dataTransfer: { types: ['Files'] } });
+    expect(await screen.findByText('Drop the file to upload it')).toBeInTheDocument();
+    expect(bigBox()).not.toBeInTheDocument();
+    release();
   });
 
   it('opens a song from anywhere on its card: one link stretched over it, with its More menu apart from it', async () => {

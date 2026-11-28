@@ -277,6 +277,122 @@ describe('SongOverviewPage', () => {
       await settle();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
+
+    // 20 batch 8, Test: what else can be on the page when the refusal lands.
+    /** "Mark finished" for Intro, held: seen among the mastered, refused when called. */
+    async function heldFinish() {
+      serve();
+      const user = renderOverview();
+      const refuse = loops.holdNext('update');
+      loops.failNext('update', 'nope');
+      await user.click(await screen.findByRole('button', { name: 'More actions for Intro' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Mark finished' }));
+      await waitFor(() => expect(more('Mastered loops', 'Intro')).toHaveFocus());
+      return { user, refuse };
+    }
+    const refusalSaid = () =>
+      waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent("Couldn't mark the loop finished."),
+      );
+
+    it('with focus fallen to <body> meanwhile, goes to the loop’s More button', async () => {
+      const { refuse } = await heldFinish();
+      (document.activeElement as HTMLElement).blur();
+      expect(document.body).toHaveFocus();
+      refuse();
+      await refusalSaid();
+      await waitFor(() => expect(more('Loops on the go', 'Intro')).toHaveFocus());
+    });
+
+    it('landing while the loop’s "Delete …?" question is up, takes the question away with the move and leaves focus on the loop’s More button', async () => {
+      const { user, refuse } = await heldFinish();
+      await user.click(more('Mastered loops', 'Intro'));
+      await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+      const question = await screen.findByRole('group', { name: 'Delete Intro' });
+      await waitFor(() => expect(question).toHaveFocus());
+      refuse();
+      await refusalSaid();
+      await waitFor(() => expect(more('Loops on the go', 'Intro')).toHaveFocus());
+      expect(screen.queryByRole('group', { name: 'Delete Intro' })).not.toBeInTheDocument();
+      expect(loops.sent('delete')).toEqual([]);
+    });
+
+    it('landing while another loop’s "Delete …?" question has focus, leaves it there', async () => {
+      const { user, refuse } = await heldFinish();
+      await user.click(more('Loops on the go', 'Chorus fill'));
+      await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+      const question = await screen.findByRole('group', { name: 'Delete Chorus fill' });
+      await waitFor(() => expect(question).toHaveFocus());
+      refuse();
+      await refusalSaid();
+      await settle();
+      expect(question).toHaveFocus();
+    });
+
+    it('landing while another loop’s menu is open, leaves focus in the menu', async () => {
+      const { user, refuse } = await heldFinish();
+      await user.click(more('Loops on the go', 'Chorus fill'));
+      const item = screen.getByRole('menuitem', { name: 'Edit' });
+      await waitFor(() => expect(item).toHaveFocus());
+      refuse();
+      await refusalSaid();
+      await settle();
+      expect(screen.getByRole('menuitem', { name: 'Edit' })).toHaveFocus();
+    });
+
+    it('Dismiss by keyboard: Enter on it leaves focus on the loop’s More button, never on <body>', async () => {
+      const user = await refusedFinish();
+      screen.getByRole('button', { name: /^Dismiss/ }).focus();
+      await user.keyboard('{Enter}');
+      await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+      expect(document.body).not.toHaveFocus();
+      expect(more('Loops on the go', 'Intro')).toHaveFocus();
+    });
+
+    it('a second loop refused meanwhile: each says so under its own row, and Dismiss takes one', async () => {
+      const user = await refusedFinish();
+      const refuse = loops.holdNext('update');
+      loops.failNext('update', 'nope');
+      await user.click(more('Mastered loops', 'Outro'));
+      await user.click(screen.getByRole('menuitem', { name: 'Reopen' }));
+      await waitFor(() => expect(more('Loops on the go', 'Outro')).toHaveFocus());
+      refuse();
+      await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
+      await waitFor(() => expect(more('Mastered loops', 'Outro')).toHaveFocus());
+
+      await user.click(screen.getByRole('button', { name: 'Dismiss the message about Intro' }));
+
+      await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(1));
+      expect(screen.getByRole('alert')).toHaveTextContent("Couldn't reopen the loop.");
+      expect(more('Loops on the go', 'Intro')).toHaveFocus();
+    });
+
+    // The page that asked has gone when the answer comes, to a screen with no status
+    // controls: nothing heard it. The message is the only sign the change did not hold.
+    it('refused after the page was left: said on coming back, with Dismiss, and without taking focus', async () => {
+      const { user, refuse } = await heldFinish();
+      await user.click(screen.getByRole('link', { name: 'Practise Chorus fill' }));
+      expect(await screen.findByText('At practice')).toBeInTheDocument();
+      // Past the tick in which leaving puts refusals away.
+      await settle();
+      refuse();
+      await waitFor(() =>
+        expect(client.getMutationCache().findAll({ status: 'error' })).toHaveLength(1),
+      );
+      historyBack();
+
+      await refusalSaid();
+      expect(
+        within(screen.getByRole('list', { name: 'Loops on the go' })).getByRole('alert'),
+      ).toBeInTheDocument();
+      await settle();
+      const focused = document.activeElement;
+      expect(focused === document.body || !focused?.closest('[data-item]')).toBe(true);
+
+      await user.click(screen.getByRole('button', { name: /^Dismiss/ }));
+      await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+      expect(more('Loops on the go', 'Intro')).toHaveFocus();
+    });
   });
 
   it('says so for a song with no loops', async () => {

@@ -10,7 +10,14 @@ import {
   rowsOf,
   textSpillingOutOf,
 } from './designPage';
-import { loopItem, loopPanel, openLoopPanel, saveNewLoop } from './loopsPage';
+import {
+  closeLoopPanel,
+  loopItem,
+  loopPanel,
+  loopSheetHeader,
+  openLoopPanel,
+  saveNewLoop,
+} from './loopsPage';
 import {
   controls,
   chooseCountIn,
@@ -24,9 +31,12 @@ import {
   backTo,
   loopsOf,
   navLink,
+  nudge,
   openLoopHistory,
+  openPractice,
   overviewItem,
   playFor,
+  practiceSpeed,
   visitSummary,
   shortSessions,
 } from './practicePage';
@@ -631,4 +641,201 @@ test('a refused status change: its message and Dismiss, in the loop panel and on
   await expect(overviewItem(page, 'on the go', 'Verse')).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect((await loopsOf(user)).map((loop) => loop.status)).toEqual(['active']);
+});
+
+// 20 batch 8, Test. Holds each write of a loop's status, then refuses it as a missing grant
+// is refused (a code, so no retry). Any other write of a loop (a speed saving itself) goes
+// through. The returned function lets the one held write be refused.
+async function refuseStatusWrites(page: Page): Promise<() => Promise<void>> {
+  const held: (() => void)[] = [];
+  await page.route('**/rest/v1/loops*', async (route) => {
+    const request = route.request();
+    if (request.method() !== 'PATCH' || !(request.postData() ?? '').includes('"status"')) {
+      return route.fallback();
+    }
+    await new Promise<void>((resolve) => held.push(resolve));
+    await route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify({ code: '42501', message: 'permission denied for table loops' }),
+    });
+  });
+  return async () => {
+    await expect.poll(() => held.length).toBe(1);
+    const refused = page.waitForResponse(
+      (response) => response.status() === 403 && response.request().method() === 'PATCH',
+    );
+    held.shift()?.();
+    await refused;
+  };
+}
+
+/** Where focus is: never `<body>` after any of this batch's changes. */
+const focusIsOnAControl = (page: Page) =>
+  page.evaluate(() => {
+    const active = document.activeElement;
+    return active !== null && active !== document.body && active.isConnected;
+  });
+
+/**
+ * A refusal's message and its "Dismiss", drawn inside `container`: nothing spills, Dismiss
+ * is a 44 px target that lies inside the container, and the two don't overlap.
+ */
+async function expectRefusalDrawnIn(container: Locator, where: string): Promise<void> {
+  const alert = container.getByRole('alert');
+  const dismiss = container.getByRole('button', { name: /^Dismiss/ });
+  await expect(alert, where).toBeVisible();
+  await expect(dismiss, where).toBeVisible();
+  expect(await textSpillingOutOf(container), `${where}: text spilling`).toEqual([]);
+  const [outer, message, button] = await Promise.all([
+    container.boundingBox(),
+    alert.boundingBox(),
+    dismiss.boundingBox(),
+  ]);
+  if (!outer || !message || !button) throw new Error(`${where}: nothing to measure`);
+  expect(button.height, `${where}: Dismiss's height`).toBeGreaterThanOrEqual(44);
+  expect(button.width, `${where}: Dismiss's width`).toBeGreaterThanOrEqual(44);
+  expect(button.x, `${where}: Dismiss's left edge`).toBeGreaterThanOrEqual(outer.x - 0.5);
+  expect(button.x + button.width, `${where}: Dismiss's right edge`).toBeLessThanOrEqual(
+    outer.x + outer.width + 0.5,
+  );
+  expect(message.x + message.width, `${where}: the message's right edge`).toBeLessThanOrEqual(
+    outer.x + outer.width + 0.5,
+  );
+  // Side by side or wrapped under: either way one doesn't lie over the other.
+  const apart =
+    button.x >= message.x + message.width - 0.5 || button.y >= message.y + message.height - 0.5;
+  expect(apart, `${where}: Dismiss lies over the message`).toBe(true);
+}
+
+// The narrowest phone: the message is three short sentences and Dismiss wraps under it.
+test('at 320 px a refused status change’s message and Dismiss fit the loop sheet and the song’s row, and Dismiss leaves focus on a control', async ({
+  user,
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'phone', 'about phone widths');
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await openLoopPanel(page);
+  const refuse = await refuseStatusWrites(page);
+
+  const item = loopItem(page, 'Verse');
+  const finish = item.getByRole('button', { name: 'Mark finished Verse' });
+  await finish.focus();
+  await page.keyboard.press('Enter');
+  await expect(loopPanel(page).getByRole('button', { name: 'Reopen Verse' })).toBeFocused();
+  await refuse();
+  await expect(item.getByRole('alert')).toContainText("Couldn't change the loop.");
+  await expect(finish).toBeFocused();
+  await expectRefusalDrawnIn(item, 'loop sheet at 320 px');
+  await expectWellDrawn(page, 'loop sheet at 320 px, refused status change');
+
+  // Dismiss by keyboard: it goes with the message, and focus is on the loop's button.
+  await item.getByRole('button', { name: /^Dismiss/ }).focus();
+  await page.keyboard.press('Enter');
+  await expect(item.getByRole('alert')).toHaveCount(0);
+  await expect(finish).toBeFocused();
+
+  // Refused while the sheet is closed: its buttons are hidden, and focus stays on the
+  // header that closed it. The message is there when the sheet is opened.
+  await finish.press('Enter');
+  await expect(loopPanel(page).getByRole('button', { name: 'Reopen Verse' })).toBeFocused();
+  const header = loopSheetHeader(page);
+  await closeLoopPanel(page);
+  await expect(header).toBeFocused();
+  await refuse();
+  // A frame or two for the page to draw the refusal it was just given.
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  );
+  await expect(header).toBeFocused();
+  await openLoopPanel(page);
+  await expect(item.getByRole('alert')).toContainText("Couldn't change the loop.");
+  await expect(header).toBeFocused();
+  await item.getByRole('button', { name: /^Dismiss/ }).click();
+  await expect(item.getByRole('alert')).toHaveCount(0);
+  expect(await focusIsOnAControl(page)).toBe(true);
+
+  // The song's page: the row is the page's width, the message under the loop's line.
+  await backTo(page, 'Groove 120').click();
+  const row = overviewItem(page, 'on the go', 'Verse');
+  const more = row.getByRole('button', { name: 'More actions for Verse' });
+  await more.click();
+  await page.getByRole('menuitem', { name: 'Mark finished' }).click();
+  await expect(
+    overviewItem(page, 'mastered', 'Verse').getByRole('button', { name: 'More actions for Verse' }),
+  ).toBeFocused();
+  await refuse();
+  await expect(row.getByRole('alert')).toContainText("Couldn't mark the loop finished.");
+  await expect(more).toBeFocused();
+  await expectRefusalDrawnIn(row, 'song overview at 320 px');
+  await expectWellDrawn(page, 'song overview at 320 px, refused status change');
+
+  await row.getByRole('button', { name: /^Dismiss/ }).click();
+  await expect(row.getByRole('alert')).toHaveCount(0);
+  await expect(row.getByRole('button', { name: /^Dismiss/ })).toHaveCount(0);
+  await expect(more).toBeFocused();
+  expect((await loopsOf(user)).map((loop) => loop.status)).toEqual(['active']);
+});
+
+// The third place a loop's status is changed: the practice screen's "Mark finished?" prompt.
+test('a refused Mark finished from the practice screen’s prompt: the prompt is back with the message and Dismiss, and focus is never on <body>', async ({
+  user,
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await backTo(page, 'Groove 120').click();
+  await openPractice(page, 'Verse');
+  // Worked back up to full speed, which is what the prompt asks about.
+  await nudge(page, 'Slower').click();
+  await expect(practiceSpeed(page)).toContainText('95%');
+  await nudge(page, 'Faster').click();
+  await expect(practiceSpeed(page)).toContainText('100%');
+  const prompt = page.getByTestId('finish-prompt');
+  await expect(prompt).toBeVisible();
+  const refuse = await refuseStatusWrites(page);
+
+  const finish = prompt.getByRole('button', { name: 'Mark finished' });
+  await finish.focus();
+  await page.keyboard.press('Enter');
+  // The loop is finished, for now: the prompt goes and focus goes on to Play.
+  await expect(prompt).toHaveCount(0);
+  await expect(playButton(page)).toBeFocused();
+  await refuse();
+
+  await expect(prompt).toContainText("Couldn't mark the loop finished.");
+  expect(await focusIsOnAControl(page)).toBe(true);
+  await expect(playButton(page)).toBeFocused();
+  await expectRefusalDrawnIn(prompt, 'practice prompt');
+  await expectWellDrawn(page, 'practice screen, refused Mark finished');
+  await expectFocusRings(page, 'practice screen, refused Mark finished');
+  if (test.info().project.name === 'phone') {
+    // The narrowest phone, for the prompt alone: at 320 px the practice band's speed and
+    // Play row is 334 px wide with or without a refusal (20 batch 8 Test, bug 2), so the
+    // page's own audit is taken at 390 px above.
+    await page.setViewportSize({ width: 320, height: 640 });
+    await expectRefusalDrawnIn(prompt, 'practice prompt at 320 px');
+    await page.setViewportSize({ width: 390, height: 844 });
+  }
+
+  await prompt.getByRole('button', { name: /^Dismiss/ }).click();
+  await expect(prompt.getByRole('alert')).toHaveCount(0);
+  await expect(prompt.getByRole('button', { name: /^Dismiss/ })).toHaveCount(0);
+  await expect(finish).toBeFocused();
+  expect((await loopsOf(user)).map((loop) => loop.status)).toEqual(['active']);
+
+  // Refused once more and left as it is: not said again under the loop on the song's page.
+  await page.keyboard.press('Enter');
+  await expect(prompt).toHaveCount(0);
+  await refuse();
+  await expect(prompt.getByRole('alert')).toBeVisible();
+  await backTo(page, 'Groove 120').click();
+  await expect(overviewItem(page, 'on the go', 'Verse')).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Dismiss/ })).toHaveCount(0);
+  await expect(page.getByText(/Couldn't (mark the loop finished|reopen the loop)/)).toHaveCount(0);
 });
