@@ -5,6 +5,7 @@
  */
 import { ratioToPercent } from '@/features/player/speed';
 import { dateOfDayKey, dayKeyOf, dayKeyOfIso, type DayKey } from '@/features/stats/days';
+import { COPY_LOCALE } from '@/lib/copyLocale';
 import type { Database } from '@/lib/database.types';
 import type { SessionRecord } from './sessionTracker';
 
@@ -86,9 +87,9 @@ export function durationLabel(totalSeconds: number): string {
   return `${rest} s`;
 }
 
-/** "1 pass" / "12 passes". */
+/** "1 pass" / "12 passes" / "1,100 passes": grouped as the Stats page writes the same count. */
 export function repeatsLabel(repeats: number): string {
-  return repeats === 1 ? '1 pass' : `${repeats} passes`;
+  return repeats === 1 ? '1 pass' : `${repeats.toLocaleString(COPY_LOCALE)} passes`;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -98,10 +99,12 @@ const startOfDay = (date: Date) =>
 
 /**
  * A date as a drummer would say it: "Today", "Yesterday", "3 days ago", then
- * the date itself ("12 Nov", with the year once it isn't this one). Days are
- * the device's calendar days. A time ahead of the clock reads as today.
+ * the date itself ("Nov 12", with the year once it isn't this one), in English
+ * like the words round it whatever the browser's locale (`COPY_LOCALE`; 20
+ * batch 9 Review: "Last practised 8. Juni"). Days are the device's calendar
+ * days. A time ahead of the clock reads as today. `locale` is for tests.
  */
-export function practiceDateLabel(iso: string, now: Date, locale?: string): string {
+export function practiceDateLabel(iso: string, now: Date, locale = COPY_LOCALE): string {
   const date = new Date(iso);
   const daysAgo = Math.round((startOfDay(now) - startOfDay(date)) / DAY_MS);
   if (daysAgo <= 0) return 'Today';
@@ -114,14 +117,14 @@ export function practiceDateLabel(iso: string, now: Date, locale?: string): stri
   });
 }
 
-/** "Last practised today", "Last practised 12 Nov", or "Not practised yet" for a loop with no session. */
-export function lastPracticedLabel(iso: string | null, now: Date, locale?: string): string {
+/** "Last practised today", "Last practised Nov 12", or "Not practised yet" for a loop with no session. */
+export function lastPracticedLabel(iso: string | null, now: Date, locale = COPY_LOCALE): string {
   if (iso === null) return 'Not practised yet';
   return `Last practised ${practiceDayInSentence(iso, now, locale)}`;
 }
 
 /** practiceDateLabel for the middle of a sentence: "today" and "yesterday", while a date keeps its capital. */
-export function practiceDayInSentence(iso: string, now: Date, locale?: string): string {
+export function practiceDayInSentence(iso: string, now: Date, locale = COPY_LOCALE): string {
   const day = practiceDateLabel(iso, now, locale);
   return day === 'Today' || day === 'Yesterday' ? day.toLowerCase() : day;
 }
@@ -170,7 +173,7 @@ export interface HistoryDay {
 export function historyDays(
   sessions: readonly PracticeSession[],
   now: Date,
-  locale?: string,
+  locale = COPY_LOCALE,
 ): HistoryDay[] {
   const today = dayKeyOf(now);
   const days = new Map<

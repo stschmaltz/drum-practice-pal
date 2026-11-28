@@ -266,6 +266,10 @@ Acceptance: after each of the four, `document.activeElement` is a control on the
 
 ### Batch 9. Stats copy and locale (M)
 
+**Done** (branch `le-9-stats-copy`; `docs/units/20-loose-ends.md`, Batch 9). What it chose to live with is in the plan's Accepted section as 20.9a and 20.9b, and 17.5d there is reworded with what was measured.
+
+As built, where it differs from the lines below: the locale is one constant for the whole app, `COPY_LOCALE` in `src/lib/copyLocale.ts`, and its Review took it to `practiceDateLabel` and `repeatsLabel` in `practice/sessions.ts` too (a loop's History, "Last practised …" in the loop panel and on the overview), so the files are no longer `src/features/stats/*` only; `useToday()` asks the day at most a minute apart, not only at midnight (a sleeping laptop's timer is late), and the Songs header's streak uses it; the map's box is scrolled to its end on mount and when it gains a week, and is a named tab stop; "under 358 px of page" is every window under 384 px, and 1024 px.
+
 - **17.3a, 17.5b** Dates are written in the browser's locale inside English sentences ("the week of 8. Juni", a doubled full stop). Fix: `'en'` for every date and weekday the Stats page writes (`dateLabels.ts`, `chartText.ts`, `DailyMinutesChart.tsx`, `PracticeHeatmap.tsx`). Test: `dateLabels.test.ts` under a German locale.
 - **17.5a** Some counts are grouped ("1,100" days) and some aren't ("1100 h", "1100-day streak"). Fix: every count through `statLabels.ts`'s one formatter, `'en'`. Test: `statLabels.test.ts`.
 - **17.3b** "Other" is a row of its own for a single sixth song. Fix: in `timeBySong`, list the sixth song by name when it is the only one left. Test: `songTime.test.ts`.
@@ -401,7 +405,7 @@ Done with the triage: the plan's lists cut down to the lines a batch closes (eac
 | 17.5a | Some counts are grouped and some never are                                  | 17 QA r1 1        | FIX    | `statLabels.ts` groups; hours and streak days don't go through it. Batch 9                                                                                  |
 | 17.5b | A locale's date ending in a full stop doubles the sentence's                | 17 QA r1          | FIX    | Goes with 17.3a. Batch 9                                                                                                                                    |
 | 17.5c | A capped "Other" bar looks equal to the top song's                          | 17 QA r1          | ACCEPT | `barShare` caps at the scale on purpose (17 QA issue 9); its minutes are written beside it                                                                  |
-| 17.5d | Under 358 px of page the charts' text is 9.3 px                             | 17 QA r1          | ACCEPT | Narrower than any phone the app is laid out for (the 320 px checks pass for layout)                                                                         |
+| 17.5d | Under 358 px of page the charts' text is 9.3 px                             | 17 QA r1          | ACCEPT | 9.3 px is a 320 px phone (10.5 px at 360, 11 px at 375; 20 batch 9 Review)                                                                                  |
 | 17.5e | Under 358 px a 26-week heatmap opens scrolled to its oldest week            | 17 QA r1          | FIX    | No scroll code in `PracticeHeatmap.tsx`. Batch 9                                                                                                            |
 
 ### Accepted, in one list
@@ -463,6 +467,5 @@ The table as it now stands in `docs/plan.md`:
 - **13.29, 13.31a, 13.31b, 13.33a, 13.33b** (scroll positions): read only. The code they describe is unchanged and the fixme test is still skipped; the pixel figures are the old notes'.
 - **13.12**: that alphaTab can never import a bar with a tempo or meter of 0 was not checked in alphaTab's source.
 - **13.14**: postgrest-js's `.retry(false)` is in the installed typings; that the client-level option does the same was not exercised.
-- **17.5d, 17.5e**: the under-358 px measurements are 17 QA's; not re-measured.
 - **Every Unit 14 item**: taken from the unit's own notes of 2026-11-27, with the code spot-checked (`RecordingBox.tsx`, `LinkOut.tsx`, `outbox.ts`, `seed.ts`), since the unit merged yesterday.
 - **13.06**: the wait was traced through `useRequestedLoop`, `lookUpPracticeLoop` and `canPlayLoopPractice`, not timed on a throttled connection. It applies when the cached list is older than 30 seconds and no loop write is pending (only then is the list read again on opening the screen); a list read in the last 30 seconds opens at once.

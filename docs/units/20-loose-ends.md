@@ -1313,3 +1313,240 @@ Two comments on PR #41, both on the fix for Review's finding 1, both confirmed w
 - `AGENTS.md` (the refusal rule: the caller is keyed by the song), `docs/review-checklist.md` (the row's new case: a clean-up on unmount is state kept per item).
 - No new async window: the leaving timer is the one already there, now also run on a change of song.
 - `npm run check`: green, 148 test files passed and 1 skipped, 5945 tests passed and 2 skipped. e2e not run: a key and two component tests.
+
+## Batch 9: Stats copy and locale
+
+### Build
+
+Items 17.3a, 17.3b, 17.4a, 17.4b, 17.5a, 17.5b, 17.5e. Fixes to what the Stats page writes; no new feature, no migration, nothing that deletes data.
+
+**Walk-through** (`docs/product.md`; the page only reads, so the question is whether a fix can be wrong for someone)
+
+- _Day one, one song, one session:_ one song's row, no "Other", no change lines; the dates are English as before in an English browser. The day-change redraw reads nothing and moves nothing the user set (period, an open chart).
+- _A piece missing:_ no songs or loops is the one empty state, untouched. Sessions whose loop isn't in the list (deleted elsewhere) are still plain "Other"; with exactly six songs beside them the sixth is named and "Other" holds only those sessions. A song with no tab or no recording is the same row as any other.
+- _Offline:_ every change is local: formatting, the device's clock, a scroll position. The offline and failed-read gates are as they were, except that a failed first read now gives its own reason.
+- No order forced, no chore added, nothing to tap.
+
+**What changed, per item**
+
+- **17.3a, 17.5b (dates in English, one full stop).** `statsLocale.ts` holds `STATS_LOCALE = 'en'`. `dateLabels.ts` defaults every date to it (`shortDate`, `weekdayDate`, `dateSpan`, `axisDates`; the `locale` argument stays for tests) and gained the three marks the charts wrote with their own module-level formatters: `narrowWeekday`, `shortMonth`, `dayOfMonth`. `chartText.ts` lost `narrowWeekdayFormat`; `DailyMinutesChart.tsx` and `PracticeHeatmap.tsx` lost theirs. No formatter in `src/features/stats/` is built with no locale named, and none is built when a module loads. English dates carry no full stop ("Jun 8", "Sat, Nov 14"), so the doubled one goes with the German date.
+- **17.5a (counts grouped).** `countLabel` defaults to `'en'` and is the one formatter of every whole number that can reach a thousand: `daysLabel` ("1,100 days"), `minutesLabel`'s hours ("1,100 h"), `barMinutesLabel`, the new `dayCountAdjective` ("On a 1,100-day streak."), the Songs header's `StreakBadge` number, `neglectedLabel`, the badges' progress lines (which wrote `toLocaleString('en')` by hand for passes only), "Show all N loops", and the speed chart's "over N practice days". `VisitSummary` (practice) calls `daysLabel`, so its streak line is grouped too without an edit.
+- **17.3b (a lone sixth song is named).** `timeBySong` lists `shown + 1` songs when exactly that many have time in the period; "Other" is then two songs or more, or none (sessions of unknown loops only, plain "Other"). `otherSongsLabel` is unchanged.
+- **17.4a (the right read's reason).** `StatsPage.tsx`: `failureCopy(sessions.isLoadingError ? sessions.error : loops.error)`. The alert is only drawn when one of the two is a loading error, so the other branch is always the loops read's.
+- **17.4b (today after midnight).** `useToday()` (`useToday.ts`) returns the clock at each render, as `new Date()` did, and draws its component again when the local day changes. `StatsPage`'s `Stats` uses it for `now`.
+- **17.5e (the map opens on its newest week).** `PracticeHeatmap`'s scroll box is scrolled to its end in a layout effect (`useScrolledToEnd`), on mount and when the number of weeks changes.
+
+**Files touched**
+
+- New: `src/features/stats/statsLocale.ts`, `useToday.ts`, `useToday.test.tsx`; `src/test/browserLocale.ts` (a test helper; see Decisions).
+- Changed in `src/features/stats/`: `dateLabels.ts`, `chartText.ts`, `statLabels.ts`, `songTime.ts`, `neglected.ts`, `badges.ts`, `StatsPage.tsx`, `DailyMinutesChart.tsx`, `PracticeHeatmap.tsx`, `PeriodTotals.tsx`, `StreakBadge.tsx`, `LoopProgressList.tsx`, `SpeedChart.tsx`, and the tests `dateLabels.test.ts`, `statLabels.test.ts`, `songTime.test.ts`, `neglected.test.ts`, `StatsPage.test.tsx`.
+- `tests/e2e/stats.spec.ts`: the seven-songs test's week now expects "Song F" by name, and a new test at 320 px.
+- `AGENTS.md`: one bullet under "Songs first, practice screen and stats".
+
+**Decisions**
+
+- **`'en'`, which is en-US.** Dates read "Nov 3" and "Sat, Nov 14", what Playwright's browser and `stats.spec.ts`'s `dateText` already had. The existing unit tests that pass `'en-GB'` are unchanged.
+- **Six songs and unknown-loop sessions are seven rows** (six names and plain "Other"). The other choice, "Other (1 song)" holding a song and the unknown time together, keeps the fault the item is about. It needs a loop missing from the list and exactly six songs.
+- **The sixth song is named whatever `shown` is** (`shown + 1` named when that is all there is), so the rule is the function's and not the page's.
+- **`useToday` is `useSyncExternalStore`, not state set in an effect.** The store's value is the local day key. React reads the snapshot again once subscribed, so a midnight between the render and the subscription is not missed (armed from an effect after it, the timer would aim at the midnight after and the page would be a day behind); StrictMode's second mount leaves one timer and one listener; nothing is set from an effect.
+- **The day is asked at most a minute apart** (`DAY_CHECK_MS`), not only at midnight. A laptop asleep overnight wakes with its timers where they were and no `visibilitychange`, and a clock put forward moves no timer; a single timer for midnight is then hours late. A check costs nothing: the component is drawn again only when the day key differs. Every wait is worked out from the clock as it is when the wait starts.
+- **`now` is still the clock at each render**, not the midnight the day began or a time held in state: totals compare a loop's `finished_at` and sessions against it, and a session that arrives by refetch must not be ahead of a `now` taken hours earlier.
+- **The map scrolls again only when its week count changes.** Any other render (a refetch, the day changing within a week, a period chosen) leaves the box where the reader put it.
+- **`barMinutesLabel` groups too** ("1,100" over a bar). A day needs 16 hours 40 minutes of practice to get there; one rule with no exception was worth more than the width.
+- **`src/test/browserLocale.ts` is outside `src/features/stats/`.** It is a test helper (`inBrowserLocale('de')`), beside `timeZone.ts`'s `inTimeZone`, which it mirrors; three stats test files use it. The batch's "files: `src/features/stats/*` only" is kept for app code.
+
+**Triage notes**
+
+- The Risk note's `practiceDateLabel`: nothing in `src/features/stats/` calls it, `lastPracticedLabel` or `practiceDayInSentence`, so there was no caller to pass `'en'` from. Nothing done.
+- **The same fault outside Stats, not fixed here (for the reviewer):** `practiceDateLabel` (`sessions.ts`) leaves its locale to the browser, and all three callers pass none: a loop's History (`historyDays` from `LoopHistory.tsx`), the loop panel and the song overview ("Last practised 8. Juni" in a German browser, in an English sentence, from the seventh day back). `durationLabel` and the History's passes were not checked for grouping.
+- 17.4a's line numbers in the triage (67, 124) were right.
+
+**Async windows and inputs**
+
+- _`useToday`'s wait for the next check (up to a minute, or to midnight)._ The timer fires on time: day key compared, redraw if it differs, armed again from the clock. Fires early (clock a moment behind the timer): no change, armed for the remainder. Clock set forward, or the machine slept: caught at the next check or the next `visibilitychange`, whichever is first. Clock set back: no change, and the next midnight is the real one; set back over midnight, the day goes back. `visibilitychange` (either way): check, clear the timer, arm again; never two timers. Unmount: timer cleared, listener removed; a `visibilitychange` or a timer after it does nothing. StrictMode: subscribe, unsubscribe, subscribe; one of each left.
+- _The redraw at a day change._ It is a render of `Stats` only: no read is started, the URL's period and `LoopProgressList`'s open chart and "Show all" are state that stays. A refetch in flight lands as on any render. The heatmap may gain or shift a week on a Monday; if its week count changes the box scrolls to the end again, otherwise it stays.
+- _The heatmap's layout effect._ Runs before paint, so there is no frame at the oldest week. Inputs after it: the reader scrolls the box (kept through every later render with the same week count); the window narrows after mount so the map starts to overflow (not handled, see Known gaps).
+- _The failed first read (17.4a)._ No new window; while the alert shows, either read may still settle. If the read that was a loading error succeeds on "Try again" and the other is one too, the alert stays with that one's reason.
+
+**Known gaps**
+
+- The Songs header's `StreakBadge` still takes `new Date()` at render. Left open over two midnights with no practice it shows a streak that has ended (over one, it is still right: a streak ends today or yesterday). `useToday()` would fix it in one line; it was left because the item names the Stats page, and it would put a timer under every test that renders the Songs list.
+- A window narrowed after the map was drawn (a 320 px phone turned from landscape to portrait on the Stats page) starts to overflow at scroll 0, the oldest week. On mount only, as the batch says.
+- The German page test in `StatsPage.test.tsx` cannot see a formatter built at module load (it would be built before the test's locale takes hold). There is none now; `dateLabels.test.ts` covers each function directly.
+- e2e ran in Chromium's en-US only. A Playwright run with `locale: 'de-DE'` would prove the acceptance line in a real browser; left to Test.
+
+**How to verify**
+
+- `npx vitest run src/features/stats`.
+- `E2E_PORT=4383 npx playwright test stats.spec.ts --project=phone --project=desktop`.
+- By hand: Chrome with German first in its languages (or DevTools, Sensors, locale `de-DE`), `/stats` as the seed user: "Best calendar week: …, the week of Nov 3." with one full stop, months over the map "Oct", "Nov", weekday letters M T W T F S S. A sixth song practised this week shows by name. DevTools at 320 px wide with 26 weeks of history: the map shows today's ring without scrolling. For midnight: set the machine's clock to 23:59 with the page open and wait, or change the date and switch tabs away and back.
+
+**Checks**
+
+`npm run check` green: 148 test files (147 passed, 1 skipped), 5,877 tests (5,875 passed, 2 skipped). e2e `stats.spec.ts`, phone and desktop, at `E2E_PORT=4383` (free before the run): 16 passed, no screenshot rewritten. The 320 px test was then run once with the scroll line taken out and failed (scroll 0 against 63). A preview server from the `le-8-focus` worktree was listening on 4383 by the end of that second run; it is another session's and was left alone, so that failing run may have been against its build, which also lacks the fix. Not run: tablet, `design.spec.ts` (no state it audits changed: a named song row and English dates are what it already measured), the full suite, `npm run test:db`.
+
+### Test
+
+No app code changed. 23 unit and component tests and 5 e2e tests added (each e2e on phone and desktop), all in existing files.
+
+**Per acceptance line**
+
+- _With the browser set to German, every sentence on the Stats page is English with one full stop; every count of 1,000 or more is grouped._
+  - `tests/e2e/stats.spec.ts`, "in a browser set to de-DE" and "… ar-EG" (`test.use({ locale })`): a throwaway user with 1,101 sessions written by the service role (`addYearsOfPractice`: an hour on each of the last 1,100 days, and a second loop practised once 1,099 days ago). The test first proves the browser is in that language ("8. Juni" and "1.100"; Arabic letters and digits), then runs the same oracles as the seed user's test (`expectTotals`, `expectSongTimes`, `expectWholePage`, whose expected strings now group through `countText`), opens the loop's chart (a table of all 1,100 days, so every month's name is on the page), and sweeps every text node, `aria-label` and `title` in `main`: no letter or digit outside ASCII, no month or weekday as German shortens it, no "8." day, no doubled full stop in a piece or where two meet, the seven sentences each ending in one full stop, no run of four digits but a year, no other thousands mark. Then the Songs header's streak ("1,100 days").
+  - `StatsPage.test.tsx`, "counts in a browser set to de / ar-EG": the 1,100-day page under `inBrowserLocale`, where the build's grouping test ran in English only (a German "1.100" has no run of four digits, so it would have passed it).
+- _Six songs show six names._ `songTime.test.ts`: a tie at fifth and sixth (both named, title order, whatever order the rows come in; all six level too); Week, Month and All time across 5 / 6 / 7 songs (five names, six names, five and "Other (2 songs)"); seven songs of which one has no time in the period. `StatsPage.test.tsx`, "where the time went, at the sixth song": the same three on the page through the Period choice, and Build's decision pinned: six songs plus sessions of a loop that is gone are **seven rows**, six names (six links, six song-coloured bars) and plain "Other" in the muted bar, adding up to the period's total.
+- _The page's "today" is right after midnight._ `StatsPage.test.tsx`, "left open past midnight" (clock faked only): "Show all" kept, the map's box the same element and not scrolled again when the day changes inside a week; a Monday midnight with 12 and with 26 weeks (the window moves on a week, same width, today's ring alone in the new column, not scrolled again) and one that adds a week (14 to 15: scrolled to the end again); the tab hidden before midnight and shown the next morning (yesterday's page until then, the period and the URL kept, nothing read), hidden after midnight; the clock put back over midnight; a session that arrives by refetch after midnight counted as today's. `useToday.test.tsx`: a change of time zone east (the day moves on at the next check, then at the new zone's midnight, not the old one's) and west (back a day when looked at), by assigning `process.env.TZ` inside the test; hidden on another day. Unmount and StrictMode were covered by Build and kill under mutation (below).
+- _The failed read's own reason (17.4a)._ `StatsPage.test.tsx`, 'and "Try again" is pressed': the sessions read failing alone; both failed and only the sessions come back (the alert moves to the loops read's reason, both were asked, and the next press asks only for the loops); both failed and only the loops come back (the sessions' reason stays); sessions cached with a failed refresh beside a loops read with nothing to show ("Try again" reads only the loops, and the page opens on the cached rows).
+- _`stats.spec.ts` passes at each size and at 320 px (17.5e)._ Three more e2e tests: at 320 px the box is reached by Tab and scrolled to the oldest week and back by the arrow keys, then back again by a finger (touch events through CDP in the phone project, a wheel in the desktop one), the window never scrolling sideways; widths from 360 to 1440 px (see note 1); and the window narrowed after mount, pinned (bug 1).
+
+**Checklist rows**
+
+- _Interleavings (the wait for the next check; the redraw)._ Every input Build listed has a test at hook level, and the redraw now has the page's own: period, open chart, "Show all", the map's scroll, a refetch landing after the day changed. _Effects run twice_ and _late events after unmount_: Build's two tests, killed by removing the listener.
+- _A refetch that fails over data._ The 17.4a cases above assert the sessions query is in `error` with its three rows before reading the alert.
+- _A copy of what the browser holds (the scroll position)._ "Not scrolled again" is asserted on every redraw that keeps the week count, in jsdom by counting writes to `scrollLeft`, in e2e by reading it. The one case the code doesn't cover is bug 1.
+- _Gates, round trips._ None in this batch: nothing is pressed that can refuse except "Try again", which is drawn only while a read has failed to load.
+
+**Each test fails without its code** (app code broken briefly, restored with `git checkout`)
+
+| Broken                                                | Fails                                                                                                                                                                                                                                               |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The scroll line in `useScrolledToEnd` removed         | 5 component tests; e2e at 4384, this worktree's build: Build's 320 px test (scroll 0 against 63), the keyboard and swipe test, the widths test (0 against 1 at 382 px), phone and desktop. The landscape-to-portrait pin still passes, as it should |
+| Its dependency list removed (scrolls on every render) | the four "not scrolled again" tests                                                                                                                                                                                                                 |
+| Its dependency list `[]` (mount only)                 | "a Monday midnight that adds a week"                                                                                                                                                                                                                |
+| `useSyncExternalStore` taken out of `useToday`        | 23, every midnight test of the hook and the page                                                                                                                                                                                                    |
+| The `visibilitychange` listener taken out             | 15, every test that looks at the page again, unmount and StrictMode                                                                                                                                                                                 |
+| `countLabel` left to the browser's locale             | 4 unit; e2e de-DE "1.100 h 10 min", ar-EG "١٬١٠٠ h 10 min"                                                                                                                                                                                          |
+| `countLabel` as `String(value)`                       | e2e "1100 h 10 min"                                                                                                                                                                                                                                 |
+| `dateLabels.ts` formatters with no locale             | 8 in `dateLabels.test.ts`; e2e "the week of 1. Juni." and "١ يونيو"                                                                                                                                                                                 |
+| `sessions.error ?? loops.error` (the old line)        | Build's cached-rows test and "asks again only for the read with nothing to show"                                                                                                                                                                    |
+| `loops.isLoadingError ? loops.error : sessions.error` | the three "both failed" tests                                                                                                                                                                                                                       |
+| `failureCopy(loops.error)`                            | those and "only the sessions read failed"                                                                                                                                                                                                           |
+| "Try again" reads both lists whatever failed          | the two tests that count reads                                                                                                                                                                                                                      |
+| `named = shown` in `timeBySong`                       | 11, every sixth-song test in both files                                                                                                                                                                                                             |
+
+**Bugs found**
+
+1. **The map narrowed after it was drawn opens on its oldest week** (Build's known gap, now pinned in e2e; low). Repro: 640 x 320 window, `/stats` with 26 weeks of history (the map fits), then 320 x 640: the box overflows by 63 px at scroll 0, today's ring off its right edge. Turning a 320 px phone on the Stats page is the only way there; on a 360 or 375 px phone the same turn leaves it 23 or 8 px short, with today still on show. Not fixed: scrolling to the end when the box starts to overflow needs a `ResizeObserver` and a rule for a reader who had already scrolled, more than a few lines. `stats.spec.ts`, "a 320 px phone turned from landscape to portrait…" asserts today's behaviour; its last three expectations turn round when this is fixed.
+2. **The page-level German date test in `StatsPage.test.tsx` can't fail when run with the rest of its file** (a test weakness, not an app bug). `dateLabels.ts` keeps each formatter for the life of the module, keyed by locale and shape; by the time "writes every date in English…" runs, earlier tests have built every one in English. With the formatter built on `undefined`, that test fails alone (`-t`) and passes in the full file. `dateLabels.test.ts` (8 failures) and the new e2e catch the fault, so nothing is uncovered. Left as it is; clearing the cache would need an export from the module for tests only.
+
+**Notes for the reviewer**
+
+1. **"Under 358 px of page" is a 390 px window.** The page's column is the window less two 16 px gutters, and a 26-week map needs 351 px. Measured: it fits from a 384 px window up, and scrolls in its box by 1 px at 382, 8 px at 375, 23 px at 360 and 63 px at 320; and again by 7 px at 1024 px, where the page turns to two columns and the map's is 344 px wide. So before this batch a 375 px iPhone (SE, mini) and every 360 px Android opened with the newest week cut, not only a 320 px phone; the fix covers all of them and the test pins each. It also means 17.5d ("under 358 px of page the charts' text is 9.3 px … narrower than any phone the app is laid out for", `docs/plan.md`) is about 360 and 375 px phones as well. Not touched here; plan.md is not this stage's to edit.
+2. The scroll box takes keyboard focus because Chromium makes a scroll box with nothing focusable in it a tab stop. Firefox does the same and Safari does not (from memory, neither was run), so a keyboard user there can't scroll the map (the week table behind it says the same to a screen reader). Not from this batch.
+3. `clockLabel` writes its hours ungrouped ("1000:00:00"). Nothing on the Stats page can reach it (a session is capped at 24 hours in the database).
+4. Not written: a page-level StrictMode or unmount test (the hook's cover it); the heatmap's scroll in jsdom beyond counting writes (jsdom lays nothing out).
+
+**Checks**
+
+- `npm run check` green: 148 test files (147 passed, 1 skipped), 5,900 tests (5,898 passed, 2 skipped).
+- `E2E_PORT=4384 npx playwright test stats.spec.ts --project=phone --project=desktop`: 26 passed. Port 4384 was free before each run and after it; every run built this worktree.
+- `E2E_PORT=4384 npx playwright test design.spec.ts --project=phone --project=desktop`: 23 passed, 3 skipped. No screenshot under `docs/units/*-shots/` rewritten.
+- Not run: tablet, the full suite, `npm run test:db`. Chromium only: Safari's and Firefox's own date and number formatting were not run.
+
+### Review
+
+Merged `origin/main` first (batches 1, 2, 4, 5 and Unit 19; batch 8 was not on it yet): no conflict. Unit 19's migration `20261201000000_song_link_bar_one.sql` was already applied on the shared local stack (`npx supabase migration list`), so nothing was run against the database.
+
+**Inventory** (what the batch's diff adds or changes that holds state or draws)
+
+- `useToday` (`useToday.ts`): a `useSyncExternalStore` over the local day key, with `watchDay`'s timer and `visibilitychange` listener. Used by `StatsPage`'s `Stats`, and since this stage by `StreakBadge`.
+- `PracticeHeatmap`'s `useScrolledToEnd`: a layout effect that writes `scrollLeft`, keyed on the number of weeks. Since this stage the box is also a named tab stop.
+- `dateLabels.ts`: a module-level cache of formatters, keyed by locale and shape.
+- `StatsPage`'s load alert: which read's error it names, and what "Try again" reads.
+- Pure: `countLabel` and its users (`statLabels.ts`, `badges.ts`, `neglected.ts`), `timeBySong`'s sixth song, the locale constant.
+- Tests and helpers: `src/test/browserLocale.ts`, `useToday.test.tsx`, the additions to `StatsPage.test.tsx`, `dateLabels.test.ts`, `statLabels.test.ts`, `songTime.test.ts`, `neglected.test.ts`, `tests/e2e/stats.spec.ts` (`addYearsOfPractice`, `everythingWritten`, `practiceMap`).
+- No mutation, no migration, no script.
+
+**Behaviour pass**
+
+- _`useToday`, interleavings._ The snapshot is a string (`dayKeyOf`), so it is stable between changes and React's check after subscribing can't loop; the hook returns a fresh `Date` at each render but the store's value is only the key. A render at 23:59:59.999 whose `new Date()` lands on the next day is drawn again by React's own re-read of the snapshot. `addDays` steps the calendar to the next local midnight, so a 23- or 25-hour day counts to the right instant (`msUntilNextCheck`'s Berlin test), and the wait is never 0 (at midnight itself the next one is a day off, capped at a minute), so the timer can't spin. A timer that fires early is armed again for the remainder; one that fires late, or a clock moved either way, is caught within a minute or at the next `visibilitychange`. Unsubscribing clears the timer and the listener; StrictMode leaves one of each. All of it has a test in `useToday.test.tsx`, each killed by Test's mutations. Nothing to fix.
+- _The heatmap's layout effect._ Runs before paint; writes only when the week count changes, so every other render leaves the reader's scroll alone (four tests count the writes). `box.current` is set by then (a ref on a plain element). A box that only starts to overflow later is the one case not covered: see 20.9a below.
+- _Gates._ "Try again" reads only the reads that failed to load, and the alert names the read with nothing to show; tested both ways round. Nothing else can refuse.
+- _Round trips._ None: the page only reads. `countLabel` formats for display and nothing parses it back.
+- _Validated paths, what is drawn._ Findings 1, 4 and 5.
+
+**Findings**
+
+1. **The same locale fault outside Stats** (`src/features/practice/sessions.ts:110`, `practiceDateLabel`; checklist: new row, "The reader's locale inside the app's own sentences"). Its three callers pass no locale: a loop's History (`historyDays`), `LoopPanel.tsx:625` and `SongOverviewPage.tsx:279` ("Last practised 8. Juni" in a German browser, from the seventh day back). **Fixed**, test first (`sessions.test.ts`, "with the browser set to German": '2. Nov.' against 'Nov 2' before the fix). The constant moved to a pure shared module, `src/lib/copyLocale.ts` (`COPY_LOCALE`), in place of `stats/statsLocale.ts`, so `practice/` doesn't take a copy rule from `stats/`; `practiceDateLabel`, `practiceDayInSentence`, `lastPracticedLabel` and `historyDays` default to it. Every other date or number written into copy was checked: `src/` has no other `toLocale*` or `Intl` call (grep), and `durationLabel`, `speedLabel`, the sitting summary and `clockLabel` build their text from template strings, which are the same in every locale.
+2. **A History row's passes were never grouped** (`sessions.ts:90`, `repeatsLabel`; 17.5a's class, outside Stats). A one-bar loop played for forty minutes is "1100 passes" in History beside "1,100" on the Stats page. **Fixed** in the same line of work: `repeatsLabel` groups on `COPY_LOCALE` (test: `[1100, '1,100 passes']`, failed first). The practice screen's sitting line uses the same function.
+3. **Test bug 2: the page-level German date test couldn't fail in its file** (`StatsPage.test.tsx`, "writes every date in English…"; checklist: new row, "A test that sees what an earlier test built"). **Fixed**: `dateLabels.ts` exports `forgetDateFormats()`, and the German describes in `StatsPage.test.tsx` and `dateLabels.test.ts` call it in `beforeEach`. Proved by building the formatter on `undefined` and running both whole files: 9 failures, the page test among them (it passed before).
+4. **The Songs header's streak read the clock once** (`StreakBadge.tsx:13`, Build's known gap; interleavings). **Fixed**: `useToday()`, called before the early return. Test first: `StatsPage.test.tsx`, "takes the Songs header’s streak away once it has ended, two midnights on" (failed with `new Date()`). The library's twelve test files stay green with the timer under them.
+5. **The map's scroll box was a tab stop only where the browser makes it one** (`PracticeHeatmap.tsx:55`; checklist: accessibility claims). **Fixed**: `tabIndex={0}`, `role="group"` named "Practice days map", and `focusRing`. Test first in "a practice-days map wider than its box" (failed without it); `design.spec.ts`'s focus audit passes with the new stop, and Test's keyboard e2e (Tab to the box, arrows scroll it) passes unchanged. It is a tab stop when the map fits too, where the arrows do nothing: one more Tab on wider screens, chosen over measuring the box.
+
+**What Build and Test logged, settled**
+
+- _The locale fault outside Stats:_ fixed (finding 1).
+- _Test bug 2:_ fixed (finding 3).
+- _Test bug 1, the map narrowed after it was drawn:_ **Accepted (20.9a)**, `docs/plan.md`. A fix that can't fight the reader has to follow the box's size and know whether it was at its end (a `ResizeObserver` and a scroll listener, with a stub of both for jsdom): more than the few lines the case is worth, for a 320 px phone turned on the Stats page. The e2e pin stays.
+- _`StreakBadge`:_ fixed (finding 4), so no Accepted line for it. **20.9b** is what the same search found and this stage did not change: "Last practised today" in the loop panel and on the overview, and "Today" in a loop's History, are worked out at render with no `useToday`. Accepted with its reason in the plan.
+- _Keyboard scrolling of the map:_ fixed (finding 5).
+- _17.5d in the plan:_ reworded with what was measured in this stage (below). It is about the charts' text, which is 9.3 px on a 320 px phone only (10.5 px at 360, 11 px at 375); the map's text never goes under 10 px, since the map scrolls instead, and 17.5e's fix covers every width where it does.
+
+**Rejected**
+
+- _`useToday` returns a new `Date` each render, so it is "unstable"._ The store's snapshot is the day key, which is what must be stable; the `Date` is the hook's return value, read once per render as `new Date()` was.
+- _The minute timer runs while the tab is hidden._ Browsers throttle it; a check is one string comparison. Stopping it while hidden would add a state for nothing.
+- _`countLabel` on a bar's minutes and on counts that can't reach a thousand._ One rule, as Build decided.
+- _`inBrowserLocale` swaps globals by hand._ It puts each back in `afterEach` and asserts in `beforeEach` that the switch took, so it can't leak or be vacuous.
+
+**Visual pass** (no QA stage ran for this batch; a throwaway spec with the e2e helpers, phone and desktop projects, a `de-DE` context that first proved `(1100).toLocaleString()` is "1.100"; not committed)
+
+- Stats page, German browser: "Best calendar week: 40 min over 1 day, the week of Nov 16." with one full stop, months "Jul" to "Nov" over the map.
+- A loop's History on the overview with days 10, 40, 200 and 400 days back: "Nov 18 · 40 min · 60% · 1,100 passes", "Oct 19 …", "May 12 …", "Oct 24, 2025 …"; the loop's line "Last practised Nov 18" (hidden under 640 px by design).
+- The map at 320 px: opens at its end (63 of 63 px; 23 of 23 at 360, 8 of 8 at 375), today's ring on show; focused by keyboard it draws the 2 px focus ring round the box, inside the page's gutter, and the arrows scroll it.
+- Text sizes measured there: the two-week chart's 9.3 px at 320, 10.5 px at 360, 11 px at 375; the map's 10 px at each.
+
+**Docs**
+
+- `docs/plan.md`: Unit 17's Carried forward is "None left" (17.3a, 17.3b, 17.4a, 17.4b, 17.5a, 17.5b, 17.5e deleted); batch 9 marked done in Unit 20's list; Accepted gains 20.9a and 20.9b and 17.5d is reworded.
+- `docs/loose-ends.md`: Batch 9 marked done with what differs as built; 17.5d's row reworded; the "could not verify" line for 17.5d and 17.5e deleted (both measured now).
+- `docs/review-checklist.md`: two rows, named in findings 1 and 3.
+- `AGENTS.md`: the batch's bullet now says the rule is the whole app's (`COPY_LOCALE` in `src/lib/`), names `forgetDateFormats`, `StreakBadge`'s `useToday` and the scroll box as a tab stop.
+
+**Open issues**
+
+None beyond the two Accepted lines.
+
+**Checks**
+
+- `npm run check` green: 156 test files (155 passed, 1 skipped), 6,397 tests (6,395 passed, 2 skipped).
+- `E2E_PORT=4384 npx playwright test stats.spec.ts design.spec.ts practice.spec.ts --project=phone --project=desktop`: 76 passed, 4 skipped. Port 4384 was free before and after; no screenshot under `docs/units/*-shots/` was rewritten.
+- Not run: tablet, the other specs, `npm run test:db` (nothing here touches Supabase). Chromium only.
+
+### Copilot review (PR #42)
+
+Two comments, both confirmed, and four failed CI jobs on f4d461b (the batch merged with main), which were two causes. None of it showed on the Windows laptop the batch was built on.
+
+**CI failures**
+
+- `check`: `useToday.test.tsx`, "west, back into yesterday: the day goes back when the page is looked at", expected `2026-11-26` and got `2026-11-27`. The test's home zone was `America/Edmonton`, and it expected Edmonton's midnight at 07:00 UTC (UTC-7). Alberta stopped putting its clocks back in 2026: tz data from 2026 has Edmonton on UTC-6 in November, midnight at 06:00 UTC. The laptop's Node 22.15.0 carries tz data 2025a (UTC-7), CI's Node 22.23.5 a newer one (checked on a Linux Node with 2026e: `GMT-06:00` for the test's instant). The app was right on both; the test was bound to one machine's tz data. Fix: the zone tests use fixed offsets (`Etc/GMT+7`, `Etc/GMT-9`, `UTC`), which have no rules to change. `TZ=UTC npm run check` passes too.
+- `e2e (2/6)`, `(4/6)`, `(6/6)`: the same two tests, once per project (phone, tablet, desktop): "on a 320 px phone a 26-week practice-days map opens on its newest week, today on show" and "on a 320 px phone the map scrolls back to its oldest week by keyboard and by a swipe, and the page never scrolls sideways", both at `expect(await sidewaysScroll(page)).toBeLessThanOrEqual(0)`, received 29, on every retry. Both tests are new in this batch and had only run on Windows. Cause, in the app: the tables behind the charts were `<table className="sr-only">`, and a table ignores `sr-only`'s 1 px width: it grows to its cells, on one line each (`nowrap`), so the "Practice days by week" table was 274 px of hidden width on Windows' fonts and reached 29 px past a 320 px window on CI's DejaVu Sans. Reproduced locally by forcing Verdana (27 px of sideways scroll before, 0 after, with letter spacing added). Fix: `ChartTable` (`src/features/stats/ChartTable.tsx`), the table inside an `sr-only` box, used by `DailyMinutesChart`, `PracticeHeatmap` and `SpeedChart`. Test: the first 320 px test now also asserts the cause, which no font decides: no `sr-only` element in `main` measures wider than its 1 px (`hiddenTextTakingRoom`); it failed first with the two tables at 183 and 274 px.
+
+**Comment A (`useToday.ts`): a zone change that keeps the date. Confirmed, in two parts.**
+
+- No redraw: the snapshot was the day key alone, so UTC to UTC-7 at 20:00 UTC on the 27th changed nothing, while a 02:00 UTC session had moved to the 26th.
+- Stale formatters: `dateLabels.ts` keeps its `Intl.DateTimeFormat`s, and one built with no `timeZone` keeps the zone the device had then. With the redraw fixed and this not, the date test still read "Nov 27".
+- Tests first (`useToday.test.tsx`, "to a zone where it is the same date": drawn again on a look and within a minute, once only; dates written in the new zone; `StatsPage.test.tsx`, the same on the page: the two-week table's "Today 10 min" becomes "Nov 26 10 min, Today 0 min", nothing read again). All failed before.
+- Fix: `useToday`'s snapshot is the day and the zone's name (not its offset: two zones an offset apart today can differ on the days sessions were played), and on every read it tells `dateLabels.ts` the zone (`keepDateFormatsIn`), which drops its formatters when it has changed. `practiceDateLabel` uses `toLocaleDateString` and keeps nothing.
+
+**Comment B (`stats.spec.ts`): "Jun 8" only from June 8 to December 31. Confirmed.**
+
+- The 1,100 days are counted back from the run, and `shortDate` gives a date in another year its year, so from January 1 to June 7 every June 8 reads "Jun 8, 2026" or earlier. Now any piece matching `/^Jun 8(, \d{4})?$/`.
+- The rest of the batch's tests, read for the same class (what they say on January 1, a Monday, a month end, a clock change): the German-browser component test builds its dates from the fixture's own with the app's year rule; the period fixtures (`daysAgo(1)`, `(20)`, `(100)`) sit inside rolling 7- and 30-day windows whatever the date; the 26-week map's 200 days are past its cap on any weekday; the Monday-midnight tests run on a faked clock. The only other one was the Edmonton test above.
+
+**Decisions**
+
+- The zone is read with `new Intl.DateTimeFormat().resolvedOptions().timeZone` on each snapshot read (each render and each check, a minute apart). Telling `dateLabels.ts` from the snapshot getter, not from the timer, covers a render that comes for another reason after the zone moved.
+- `sr-only` on a wrapper, not `display: block` on the table, which some screen readers take as no longer a table.
+
+**Files:** `useToday.ts`, `dateLabels.ts`, `ChartTable.tsx` (new), the three charts, `useToday.test.tsx`, `StatsPage.test.tsx`, `tests/e2e/stats.spec.ts`, `docs/review-checklist.md` (three rows: hidden from the eye, still in the layout; a redraw keyed on part of what the drawing depends on; an expectation that holds only on some dates or some machines), `AGENTS.md`.
+
+**Async windows and inputs:** none added. `useToday`'s check is the one there was (the timer and `visibilitychange`); it now also draws again for a zone change.
+
+**Known gaps**
+
+- The DST tables in `streak.test.ts`, `totals.test.ts`, `records.test.ts`, `loopProgress.test.ts` and `badges.test.ts` name places (`Europe/London`, `America/New_York`, `Australia/Sydney`) with 2026's change dates. They are about those places' rules and pass on both tz data versions today; if a place drops its clock change they fail, as they should, but not all of them first assert the 23- or 25-hour day they rely on.
+- `StatsPage.test.tsx`'s `today` fixture is 08:00 on the day of the run, which is ahead of the clock in a run before 08:00 local. From Unit 16, not this batch; not changed.
+- CI's fonts aren't on the laptop. A wide font was forced to reproduce the overflow; the proof on CI's own is the next run.
+
+**Verify:** `npm run check` and `TZ=UTC npm run check` green (6,512 tests). `E2E_PORT=4384 npx playwright test tests/e2e/stats.spec.ts`: phone and desktop green; the 320 px and locale tests at all three sizes with `--repeat-each=3`, 45 of 45.

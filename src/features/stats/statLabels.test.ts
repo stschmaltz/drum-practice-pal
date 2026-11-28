@@ -1,5 +1,6 @@
-import { expect, it } from 'vitest';
-import { barMinutesLabel, clockLabel, daysLabel, minutesLabel } from './statLabels';
+import { describe, expect, it } from 'vitest';
+import { inBrowserLocale } from '@/test/browserLocale';
+import { barMinutesLabel, clockLabel, countLabel, daysLabel, minutesLabel } from './statLabels';
 
 it('daysLabel', () => {
   expect(daysLabel(1)).toBe('1 day');
@@ -41,4 +42,35 @@ it.each([
 ])('barMinutesLabel(%i) is %s, agreeing with minutesLabel under an hour', (seconds, label) => {
   expect(barMinutesLabel(seconds)).toBe(label);
   if (seconds < 3600) expect(minutesLabel(seconds)).toBe(`${label} min`);
+});
+
+// Unit 20, batch 9 (17 QA round 1, issue 1): "1,100" days beside "1100 h" and a
+// "1100-day streak". Every count goes through `countLabel`, grouped as English is.
+describe('counts of a thousand or more', () => {
+  it.each([
+    [0, '0'],
+    [999, '999'],
+    [1000, '1,000'],
+    [1100, '1,100'],
+    [1234567, '1,234,567'],
+  ])('countLabel(%i) is %s', (value, label) => {
+    expect(countLabel(value)).toBe(label);
+  });
+
+  it('are grouped in days, hours and a bar’s minutes alike', () => {
+    expect(daysLabel(1100)).toBe('1,100 days');
+    expect(minutesLabel(1100 * 3600)).toBe('1,100 h');
+    expect(minutesLabel(1100 * 3600 + 5 * 60)).toBe('1,100 h 5 min');
+    expect(barMinutesLabel(1100 * 60)).toBe('1,100');
+  });
+
+  describe('with the browser set to German', () => {
+    inBrowserLocale('de');
+
+    it('are still grouped the English way, since the words around them are English', () => {
+      expect(countLabel(1100)).toBe('1,100');
+      expect(daysLabel(1100)).toBe('1,100 days');
+      expect(minutesLabel(1100 * 3600)).toBe('1,100 h');
+    });
+  });
 });

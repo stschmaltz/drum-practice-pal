@@ -57,16 +57,19 @@ async function choosePeriod(page: Page, label: 'Week' | 'Month' | 'All time') {
 
 // The expected numbers, from the rows -----------------------------------------
 
-/** A total of play time as the page writes it: "45 min", "2 h", "1 h 5 min"; "<1 min" under a minute. */
+/** A whole number as the page writes it, whatever the browser's language: "999", "1,100". */
+const countText = (count: number) => count.toLocaleString('en-US');
+
+/** A total of play time as the page writes it: "45 min", "2 h", "1 h 5 min", "1,100 h"; "<1 min" under a minute. */
 function minutesText(seconds: number): string {
   if (seconds > 0 && seconds < 60) return '<1 min';
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
   if (hours === 0) return `${minutes} min`;
-  return minutes % 60 === 0 ? `${hours} h` : `${hours} h ${minutes % 60} min`;
+  return minutes % 60 === 0 ? `${countText(hours)} h` : `${countText(hours)} h ${minutes % 60} min`;
 }
 
-const daysText = (days: number) => (days === 1 ? '1 day' : `${days} days`);
+const daysText = (days: number) => (days === 1 ? '1 day' : `${countText(days)} days`);
 
 /** Local midnight `days` before today (0: today's). */
 function midnight(daysBack: number): Date {
@@ -209,7 +212,7 @@ const TOTAL_NAMES = ['time', 'days', 'mastered'] as const;
 
 async function expectTotals(page: Page, expected: Totals) {
   await expect(page.getByTestId('total-time')).toHaveText(minutesText(expected.seconds));
-  await expect(page.getByTestId('total-days')).toHaveText(String(expected.days));
+  await expect(page.getByTestId('total-days')).toHaveText(countText(expected.days));
   await expect(page.getByTestId('total-mastered')).toHaveText(String(expected.mastered));
   // Three totals: "Loop passes" went in QA fix round 1.
   await expect(page.getByTestId('stats-totals').locator('dt')).toHaveCount(3);
@@ -425,7 +428,9 @@ async function expectNeglected(page: Page, sessions: Session[], loops: LoopRow[]
   for (const { loop, practised, days } of left) {
     const item = page.locator(`[data-testid="neglected-loop"][data-loop="${loop.id}"]`);
     await expect(item.getByTestId('neglected-when')).toHaveText(
-      practised ? `last practised ${days} days ago` : `not practised yet, saved ${days} days ago`,
+      practised
+        ? `last practised ${countText(days)} days ago`
+        : `not practised yet, saved ${countText(days)} days ago`,
     );
     await expect(item.getByText(loop.song.title, { exact: true })).toBeVisible();
     await expect(item.getByRole('link', { name: loop.name })).toHaveAttribute(
@@ -466,7 +471,7 @@ function earnedBadges(sessions: Session[], loops: LoopRow[]): string[] {
 async function expectWholePage(page: Page, sessions: Session[], loops: LoopRow[]) {
   const { current, longest } = streaks(sessions);
   await expect(page.getByTestId('streak-line')).toHaveText(
-    `${current > 0 ? `On a ${current}-day streak.` : 'No streak running.'} ${
+    `${current > 0 ? `On a ${countText(current)}-day streak.` : 'No streak running.'} ${
       current === longest ? 'Your longest yet.' : `Your longest is ${daysText(longest)}.`
     }`,
   );
@@ -751,6 +756,23 @@ function noonOf(daysBack: number): Date {
 const sidewaysScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
+/**
+ * Whatever is hidden from the eye but takes room in the page all the same: each `sr-only` element
+ * in `main` wider than its 1 px box. A `<table>` is: it grows to its cells whatever width it is
+ * given, and with `sr-only`'s `nowrap` that is every heading in a line, which only stays inside
+ * a 320 px window while the machine's font is narrow (20 batch 9, Copilot review: 29 px of
+ * sideways scroll on CI's Linux fonts, none on Windows'). A width, so no font decides it.
+ */
+const hiddenTextTakingRoom = (page: Page) =>
+  page.evaluate(() =>
+    Array.from(document.querySelectorAll('main .sr-only'))
+      .filter((element) => element.getBoundingClientRect().width > 1.5)
+      .map(
+        (element) =>
+          `${element.tagName.toLowerCase()} "${(element.textContent ?? '').slice(0, 30)}": ${Math.round(element.getBoundingClientRect().width)} px`,
+      ),
+  );
+
 // Plan, QA focus "one session ever": day one must not read as a failure.
 test('after one session ever, every section speaks from that session', async ({ page, user }) => {
   const loop = await addLoop(user, await addSong(user, 'First Song'), 'First Loop');
@@ -792,7 +814,7 @@ test('after one session ever, every section speaks from that session', async ({ 
   expect(await textSpillingOutOf(page.getByRole('main'))).toEqual([]);
 });
 
-test('seven songs and loops: five songs then Other, six loops then "Show all", one chart at a time', async ({
+test('seven songs and loops: five songs then Other (a lone sixth by name), six loops then "Show all", one chart at a time', async ({
   page,
   user,
 }) => {
@@ -836,9 +858,14 @@ test('seven songs and loops: five songs then Other, six loops then "Show all", o
     'Song C10 min',
     'Song D8 min',
     'Song E6 min',
-    'Other (1 song)4 min',
+    // One song past the fifth is named: "Other (1 song)" was a row that hid one name (20, batch 9).
+    'Song F4 min',
   ]);
-  await expect(page.getByRole('link', { name: /^Other/ })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Song F' })).toHaveAttribute(
+    'href',
+    `/songs/${songIds[5]}`,
+  );
+  await expect(page.getByTestId('song-time').filter({ hasText: /^Other/ })).toHaveCount(0);
 
   // Loop G was last practised seven days ago: named as left, with its song and a way to it.
   const left = page.getByTestId('neglected-loop');
@@ -1060,3 +1087,372 @@ test('a year of practice days on one loop draws a line with three days marked an
   await page.setViewportSize({ width: 390, height: 844 });
   await expectReadableChart('390 px');
 });
+
+// 17 QA round 1 (Unit 20, batch 9): a 26-week map is 351 px at its smallest, which under 358 px
+// of page scrolls in its own box, and it opened on its oldest week with today off the edge.
+test('on a 320 px phone a 26-week practice-days map opens on its newest week, today on show', async ({
+  page,
+  user,
+}) => {
+  const loop = await addLoop(user, await addSong(user, 'Old Song'), 'Old Loop');
+  // Practised today and 200 days ago: the map spans its longest, 26 weeks.
+  await addSession(user, loop, noonOf(200), 600, 0.6, 5);
+  await addSession(user, loop, midnight(0), 600, 0.7, 5);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await signIn(page, user, '/stats');
+  await expect(page.getByRole('heading', { name: 'Practice days Last 26 weeks' })).toBeVisible();
+
+  const map = page.getByTestId('practice-heatmap');
+  const box = map.locator('xpath=..');
+  const scroll = () =>
+    box.evaluate((element) => ({
+      left: element.scrollLeft,
+      furthest: element.scrollWidth - element.clientWidth,
+    }));
+  // The map is wider than its box here, or the test would prove nothing.
+  expect((await scroll()).furthest).toBeGreaterThan(20);
+  expect((await scroll()).left).toBeCloseTo((await scroll()).furthest, 0);
+
+  // Today's ring is inside the box, on screen; the page itself doesn't scroll sideways.
+  const boxEdges = (await box.boundingBox())!;
+  const todayEdges = (await map.getByTestId('heatmap-today').boundingBox())!;
+  expect(todayEdges.x).toBeGreaterThanOrEqual(boxEdges.x);
+  expect(todayEdges.x + todayEdges.width).toBeLessThanOrEqual(boxEdges.x + boxEdges.width + 0.5);
+  expect(await sidewaysScroll(page)).toBeLessThanOrEqual(0);
+  // Nor would it in a wider font: the tables behind the charts take no room.
+  await expect(page.getByRole('table')).toHaveCount(2);
+  expect(await hiddenTextTakingRoom(page)).toEqual([]);
+
+  // Scrolled back by the reader, it stays there when the page draws again (another period).
+  await box.evaluate((element) => {
+    element.scrollLeft = 0;
+  });
+  await choosePeriod(page, 'Month');
+  expect((await scroll()).left).toBe(0);
+});
+
+// Unit 20, batch 9 Test ---------------------------------------------------------
+
+/** A user whose practice-days map spans its longest, 26 weeks: practised today and 200 days ago. */
+async function addLongMap(user: E2eUser) {
+  const loop = await addLoop(user, await addSong(user, 'Old Song'), 'Old Loop');
+  await addSession(user, loop, noonOf(200), 600, 0.6, 5);
+  await addSession(user, loop, midnight(0), 600, 0.7, 5);
+}
+
+/** The map, the box it scrolls in, and where that box is scrolled to. */
+function practiceMap(page: Page) {
+  const map = page.getByTestId('practice-heatmap');
+  const box = map.locator('xpath=..');
+  return {
+    map,
+    box,
+    scroll: () =>
+      box.evaluate((element) => ({
+        left: element.scrollLeft,
+        furthest: element.scrollWidth - element.clientWidth,
+      })),
+    /** How far today's ring reaches past the box's right edge, in px: 0 or less when it is inside. */
+    todayPastEdge: async () => {
+      const boxEdges = (await box.boundingBox())!;
+      const todayEdges = (await map.getByTestId('heatmap-today').boundingBox())!;
+      return todayEdges.x + todayEdges.width - (boxEdges.x + boxEdges.width);
+    },
+    /** The first column's first day, from its square's tooltip, with its place in the window. */
+    oldestDayEdges: async () => {
+      const boxEdges = (await box.boundingBox())!;
+      const first = (await map.locator('rect:has(title)').first().boundingBox())!;
+      return { left: first.x - boxEdges.x, right: first.x + first.width - boxEdges.x };
+    },
+  };
+}
+
+test('on a 320 px phone the map scrolls back to its oldest week by keyboard and by a swipe, and the page never scrolls sideways', async ({
+  page,
+  user,
+  hasTouch,
+}) => {
+  await addLongMap(user);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await signIn(page, user, '/stats');
+  await expect(page.getByRole('heading', { name: 'Practice days Last 26 weeks' })).toBeVisible();
+  const { box, scroll, todayPastEdge, oldestDayEdges } = practiceMap(page);
+  const { furthest } = await scroll();
+  expect(furthest).toBeGreaterThan(20);
+  expect((await scroll()).left).toBeCloseTo(furthest, 0);
+  // The oldest week starts off the box's left edge.
+  expect((await oldestDayEdges()).left).toBeLessThan(0);
+
+  // By keyboard: Tab reaches the box (a scroll box with nothing focusable in it takes focus), the arrows scroll it.
+  let reached = false;
+  for (let presses = 0; presses < 80 && !reached; presses += 1) {
+    await page.keyboard.press('Tab');
+    reached = await box.evaluate((element) => element === document.activeElement);
+  }
+  expect(reached, 'Tab reaches the map’s scroll box').toBe(true);
+  for (let presses = 0; presses < 6; presses += 1) await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await scroll()).left).toBe(0);
+  expect((await oldestDayEdges()).left).toBeGreaterThanOrEqual(0);
+  // Today is now the part off the edge.
+  expect(await todayPastEdge()).toBeGreaterThan(0);
+  for (let presses = 0; presses < 6; presses += 1) await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await scroll()).left).toBeCloseTo(furthest, 0);
+  expect(await todayPastEdge()).toBeLessThanOrEqual(0.5);
+
+  // By a finger drawn to the right across the map (a wheel where the project has no touch).
+  const edges = (await box.boundingBox())!;
+  const start = { x: edges.x + 60, y: edges.y + edges.height / 2 };
+  if (hasTouch) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [start] });
+    for (let step = 1; step <= 10; step += 1) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: start.x + step * 15, y: start.y }],
+      });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  } else {
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.wheel(-300, 0);
+  }
+  await expect.poll(async () => (await scroll()).left).toBe(0);
+  expect((await oldestDayEdges()).left).toBeGreaterThanOrEqual(0);
+  expect(await sidewaysScroll(page)).toBeLessThanOrEqual(0);
+  expect(await page.evaluate(() => window.scrollX)).toBe(0);
+});
+
+// "Under 358 px of page" (17 QA round 1) is the page's column: the window less its two 16 px
+// gutters. A 26-week map is 351 px at its smallest, so it fits from a 383 px window on, and a
+// 390 px phone has 7 px to spare. On the 360 and 375 px phones it scrolls, by 23 and 8 px, and
+// again at 1024 px, where the page turns to two columns and the map's is 344 px.
+test('a 26-week map fits its box from a 390 px phone up; on 360 and 375 px phones, and in two columns at 1024 px, it opens on its newest week', async ({
+  page,
+  user,
+}) => {
+  await addLongMap(user);
+  await signIn(page, user, '/stats');
+  const { box, scroll, todayPastEdge, oldestDayEdges } = practiceMap(page);
+  /** A fresh page at that width, as a device of that size opens it. */
+  const openAt = async (width: number) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Practice days Last 26 weeks' })).toBeVisible();
+  };
+
+  for (const width of [384, 390, 767, 768, 1440]) {
+    await openAt(width);
+    const at = `${width} px`;
+    expect((await scroll()).furthest, at).toBeLessThanOrEqual(0);
+    expect((await scroll()).left, at).toBe(0);
+    expect(await todayPastEdge(), at).toBeLessThanOrEqual(0.5);
+    expect((await oldestDayEdges()).left, at).toBeGreaterThanOrEqual(0);
+    expect(await sidewaysScroll(page), at).toBeLessThanOrEqual(0);
+  }
+  await openAt(390);
+  expect((await box.boundingBox())!.width).toBe(358);
+
+  for (const width of [382, 375, 360, 1024]) {
+    await openAt(width);
+    const at = `${width} px`;
+    const { left, furthest } = await scroll();
+    expect(furthest, at).toBeGreaterThan(0);
+    expect(left, at).toBeCloseTo(furthest, 0);
+    expect(await todayPastEdge(), at).toBeLessThanOrEqual(0.5);
+    expect(await sidewaysScroll(page), at).toBeLessThanOrEqual(0);
+  }
+});
+
+// Known gap (20 batch 9 Build, logged under Test, bug 1): the map is scrolled to its end on
+// mount and when it gains a week, not when the window narrows under it. This pins what
+// happens today; when the gap is closed, the last three expectations turn round.
+test('a 320 px phone turned from landscape to portrait on the Stats page leaves the map on its oldest week', async ({
+  page,
+  user,
+}) => {
+  await addLongMap(user);
+  await page.setViewportSize({ width: 640, height: 320 });
+  await signIn(page, user, '/stats');
+  await expect(page.getByRole('heading', { name: 'Practice days Last 26 weeks' })).toBeVisible();
+  const { scroll, todayPastEdge } = practiceMap(page);
+  expect((await scroll()).furthest).toBeLessThanOrEqual(0);
+  expect(await todayPastEdge()).toBeLessThanOrEqual(0.5);
+
+  await page.setViewportSize({ width: 320, height: 640 });
+  await expect.poll(async () => (await scroll()).furthest).toBeGreaterThan(20);
+  expect((await scroll()).left).toBe(0);
+  expect(await todayPastEdge()).toBeGreaterThan(0);
+  // The other way needs nothing: turned back, the map fits again.
+  await page.setViewportSize({ width: 640, height: 320 });
+  await expect.poll(async () => (await scroll()).furthest).toBeLessThanOrEqual(0);
+  expect(await todayPastEdge()).toBeLessThanOrEqual(0.5);
+});
+
+/**
+ * Three years of practice by the service role: "Groove" for an hour on each
+ * of the last 1,100 days (at 60%, then 80% for the last 400), and "Left
+ * Behind" once, 1,099 days ago. Returns the rows as written, oldest first:
+ * more than one unranged read of the database gives back (`max_rows`).
+ */
+async function addYearsOfPractice(user: E2eUser): Promise<Session[]> {
+  const DAYS = 1100;
+  const songId = await addSong(user, 'Long Haul');
+  const groove = await addLoop(user, songId, 'Groove');
+  const left = await addLoop(user, songId, 'Left Behind');
+  const rows: Session[] = Array.from({ length: DAYS }, (_, daysBack) => ({
+    id: crypto.randomUUID(),
+    loop_id: groove,
+    // Today's at the day's first instant: never ahead of the clock.
+    started_at: (daysBack === 0 ? midnight(0) : noonOf(daysBack)).toISOString(),
+    duration_seconds: 3600,
+    speed_ratio: daysBack < 400 ? 0.8 : 0.6,
+    repeats: 0,
+  }));
+  rows.push({
+    id: crypto.randomUUID(),
+    loop_id: left,
+    started_at: noonOf(DAYS - 1).toISOString(),
+    duration_seconds: 600,
+    speed_ratio: 0.5,
+    repeats: 120,
+  });
+  for (let from = 0; from < rows.length; from += 500) {
+    const inserted = await admin
+      .from('practice_sessions')
+      .insert(rows.slice(from, from + 500).map((row) => ({ ...row, user_id: user.id })));
+    if (inserted.error) throw inserted.error;
+  }
+  return rows.sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at));
+}
+
+/** Everything the page writes: each piece of text by itself, and each name or tooltip given in an attribute. */
+const everythingWritten = (page: Page) =>
+  page.evaluate(() => {
+    // The page, not the shell round it (whose menu has the user's address).
+    const main = document.querySelector('main');
+    if (!main) throw new Error('no main');
+    const pieces: string[] = [];
+    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const text = walker.currentNode.textContent?.trim();
+      if (text) pieces.push(text);
+    }
+    for (const element of Array.from(main.querySelectorAll('[aria-label], [title]'))) {
+      for (const name of ['aria-label', 'title']) {
+        const value = element.getAttribute(name);
+        if (value) pieces.push(value);
+      }
+    }
+    return pieces;
+  });
+
+// 17 QA issue 4 and round 1 (Unit 20, batch 9): "…, the week of 8. Juni.." and "1100 h" beside
+// "1,100 days". The app's copy is English, so its dates and counts are too, whatever the browser's
+// language: German (its own months, a full stop after a day and a short month, "1.100") and
+// Egyptian Arabic (its own letters and digits).
+for (const { locale, june8, thousand } of [
+  { locale: 'de-DE', june8: '8. Juni', thousand: '1.100' },
+  { locale: 'ar-EG', june8: '٨ يونيو', thousand: '١٬١٠٠' },
+]) {
+  test.describe(`in a browser set to ${locale}`, () => {
+    test.use({ locale });
+
+    test('every sentence on the Stats page is English with one full stop, and every count from 1,000 is grouped', async ({
+      page,
+      user,
+    }) => {
+      const sessions = await addYearsOfPractice(user);
+      const loops = await loopsWithSongOf(user);
+      await signIn(page, user, '/stats');
+      // The browser really is in that language: left to it, a date and a count come out its way.
+      expect(
+        await page.evaluate(() => [
+          navigator.language,
+          new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long' }).format(
+            new Date(2026, 5, 8),
+          ),
+          (1100).toLocaleString(),
+        ]),
+      ).toEqual([locale, june8, thousand]);
+
+      // Every number and date, worked out from the rows as for any other user.
+      await choosePeriod(page, 'All time');
+      const totals = totalsBetween(sessions, loops, null, null);
+      expect(totals).toMatchObject({ seconds: 1100 * 3600 + 600, days: 1100 });
+      await expectTotals(page, totals);
+      await expect(page.getByTestId('total-time')).toHaveText('1,100 h 10 min');
+      await expect(page.getByTestId('total-days')).toHaveText('1,100');
+      await expectSongTimes(page, sessions, loops, null);
+      await expectWholePage(page, sessions, loops);
+      await expect(page.getByTestId('streak-line')).toHaveText(
+        'On a 1,100-day streak. Your longest yet.',
+      );
+      await expect(page.getByTestId('record-streak')).toHaveText('1,100 days');
+      await expect(page.getByTestId('neglected-when')).toHaveText('last practised 1,099 days ago');
+      await expect(page.getByText('120 of 1,000 passes')).toBeVisible();
+
+      // The loop's chart: a sentence with two dates, and a table of all 1,100 days (every month's name).
+      await page.getByRole('button', { name: 'Chart of Groove' }).click();
+      await expect(page.getByRole('img', { name: /^Speed of Groove/ })).toHaveAccessibleName(
+        `Speed of Groove over 1,100 practice days: from 60% on ${dateText(noonOf(1099))} to 80% on ${dateText(new Date())}.`,
+      );
+      const letters = await page
+        .getByTestId('daily-bar')
+        .evaluateAll((bars) =>
+          bars.map((bar) => Array.from(bar.querySelectorAll('text')).at(-2)?.textContent),
+        );
+      expect(letters).toHaveLength(14);
+      expect(letters.join('')).toMatch(/^[MTWFS]{14}$/);
+
+      const written = await everythingWritten(page);
+      // Not vacuous: the page, its 1,100-row table and the map's tooltips are all in it.
+      expect(written.length).toBeGreaterThan(3000);
+      // A June 8 among them, with its year when the run is before June 8 of its own
+      // (the rows are counted back from today, and a date in another year carries it).
+      expect(written.filter((piece) => /^Jun 8(, \d{4})?$/.test(piece)).length).toBeGreaterThan(0);
+      // No letter and no digit that isn't English's.
+      const foreign = written.filter((piece) =>
+        /[^\p{ASCII}]/u.test(piece.replace(/[–→·…’‘“”]/g, '')),
+      );
+      expect(foreign).toEqual([]);
+      // No month or weekday as German shortens them ("8. Juni", "Sa., 14. Nov."), no day written "8.".
+      const german = written.filter((piece) =>
+        /\b(Jan|Feb|Apr|Aug|Sept|Okt|Nov|Dez|Mo|Di|Mi|Do|Fr|Sa|So)\.|\b(Mai|Juni|Juli|Okt|Dez)\b|\b\d{1,2}\. /.test(
+          piece,
+        ),
+      );
+      expect(german).toEqual([]);
+      // One full stop at the end of a sentence, never two: in a piece, or where two pieces meet.
+      expect(written.filter((piece) => /\.\s*\./.test(piece))).toEqual([]);
+      expect(await page.getByRole('main').textContent()).not.toMatch(/\.\./);
+      const sentences = [
+        ...(await page
+          .getByRole('img')
+          .evaluateAll((images) => images.map((image) => image.getAttribute('aria-label') ?? ''))),
+        ...(await Promise.all(
+          ['streak-line', 'daily-summary', 'heatmap-days', 'heatmap-best-week'].map(async (id) =>
+            ((await page.getByTestId(id).textContent()) ?? '').trim(),
+          ),
+        )),
+      ];
+      // The two-week chart, the map and the loop's chart, and the four lines.
+      expect(sentences).toHaveLength(7);
+      for (const sentence of sentences) expect(sentence).toMatch(/[^.]\.$/);
+      // Every count from a thousand has its comma: no run of four digits but a year, and no other mark.
+      const ungrouped = written.filter((piece) =>
+        (piece.match(/\d{4,}/g) ?? []).some((digits) => !/^(19|20)\d\d$/.test(digits)),
+      );
+      expect(ungrouped).toEqual([]);
+      expect(written.filter((piece) => /\d[.\u00A0\u202F']\d{3}(?!\d)/.test(piece))).toEqual([]);
+
+      // The Songs header's streak is the same count, grouped the same way.
+      await navLink(page, 'Songs').click();
+      await expect(page.getByTestId('streak')).toHaveText('Practice streak: 1,100 days');
+      await expect(page.getByTestId('streak')).toHaveAttribute(
+        'title',
+        'Practice streak: 1,100 days',
+      );
+    });
+  });
+}

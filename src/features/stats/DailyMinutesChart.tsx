@@ -1,10 +1,9 @@
+import { ChartTable } from './ChartTable';
 import { barRects, niceCeiling } from './chartScale';
-import { chartTextClass, chartWidthClass, narrowWeekdayFormat } from './chartText';
-import { shortDate } from './dateLabels';
+import { chartTextClass, chartWidthClass } from './chartText';
+import { dayOfMonth, narrowWeekday, shortDate } from './dateLabels';
 import { barMinutesLabel, minutesLabel } from './statLabels';
 import { dailySummary, type PracticeDay } from './totals';
-
-const dayOfMonthFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric' });
 
 /** `valueHeight` is the room above the bars for each day's minutes; `labelHeight` holds the weekday and the date. */
 const BAR_CHART = { width: 280, height: 96, gap: 4, labelHeight: 26, valueHeight: 12 } as const;
@@ -70,7 +69,7 @@ export function DailyMinutesChart({ days, now }: { days: readonly PracticeDay[];
                 textAnchor="middle"
                 className={`${chartTextClass} ${tick}`}
               >
-                {narrowWeekdayFormat.format(day.date)}
+                {narrowWeekday(day.date)}
               </text>
               {/* The day of the month under it, so a bar can be put to a date. */}
               <text
@@ -79,7 +78,7 @@ export function DailyMinutesChart({ days, now }: { days: readonly PracticeDay[];
                 textAnchor="middle"
                 className={`${chartTextClass} tabular-nums ${tick}`}
               >
-                {dayOfMonthFormat.format(day.date)}
+                {dayOfMonth(day.date)}
               </text>
             </g>
           );
@@ -88,7 +87,7 @@ export function DailyMinutesChart({ days, now }: { days: readonly PracticeDay[];
       <figcaption className="text-sm text-ink-muted" data-testid="daily-summary">
         {minutesLabel(seconds)} over {practised} of the last {days.length} days.
       </figcaption>
-      <table className="sr-only">
+      <ChartTable>
         <caption>Minutes practised per day</caption>
         <thead>
           <tr>
@@ -104,7 +103,7 @@ export function DailyMinutesChart({ days, now }: { days: readonly PracticeDay[];
             </tr>
           ))}
         </tbody>
-      </table>
+      </ChartTable>
     </figure>
   );
 }

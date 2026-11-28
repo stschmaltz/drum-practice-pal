@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ratioToPercent } from '@/features/player/speed';
 import { dailySpeeds } from '@/features/stats/loopProgress';
+import { inBrowserLocale } from '@/test/browserLocale';
 import {
   durationLabel,
   historyDays,
@@ -120,6 +121,8 @@ describe('repeatsLabel', () => {
     [0, '0 passes'],
     [1, '1 pass'],
     [12, '12 passes'],
+    // Grouped from a thousand up, as the Stats page writes the same count (20 batch 9 Review).
+    [1100, '1,100 passes'],
   ])('%i reads "%s"', (repeats, label) => {
     expect(repeatsLabel(repeats)).toBe(label);
   });
@@ -175,6 +178,40 @@ describe('practiceDayInSentence and lastPracticedLabel', () => {
     expect(lastPracticedLabel(local(2026, 11, 2).toISOString(), now, 'en-GB')).toBe(
       'Last practised 2 Nov',
     );
+  });
+});
+
+// Unit 20, batch 9 Review: the Stats page's fault (17.3a) in the three places that say
+// when a loop was practised. "Last practised 2. Nov." is a German date in an English sentence.
+describe('with the browser set to German', () => {
+  inBrowserLocale('de');
+  const now = local(2026, 11, 23, 9, 0);
+  const aWhileBack = local(2026, 11, 2).toISOString();
+  const lastYear = local(2025, 12, 31).toISOString();
+
+  it('still writes a date from a week back in English, left to itself', () => {
+    expect(practiceDateLabel(aWhileBack, now)).toBe('Nov 2');
+    expect(practiceDateLabel(lastYear, now)).toBe('Dec 31, 2025');
+    expect(practiceDayInSentence(aWhileBack, now)).toBe('Nov 2');
+    expect(lastPracticedLabel(aWhileBack, now)).toBe('Last practised Nov 2');
+  });
+
+  it('labels a history’s older days in English, and groups its passes the English way', () => {
+    const days = historyDays(
+      [
+        {
+          id: 'old',
+          loop_id: 'loop-1',
+          started_at: aWhileBack,
+          duration_seconds: 2400,
+          speed_ratio: 0.8,
+          repeats: 1100,
+        },
+      ],
+      now,
+    );
+    expect(days.map((day) => day.label)).toEqual(['Nov 2']);
+    expect(repeatsLabel(days[0]!.repeats)).toBe('1,100 passes');
   });
 });
 

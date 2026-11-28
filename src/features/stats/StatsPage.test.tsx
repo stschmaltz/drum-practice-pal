@@ -1,14 +1,18 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { onlineManager } from '@tanstack/react-query';
+import { onlineManager, type QueryClient } from '@tanstack/react-query';
 import { Route } from 'react-router';
-import { queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
+import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
 import { sessionKeys } from '@/features/practice/sessionKeys';
 import { loopRow } from '@/test/loopTable';
-import { renderRoutes, settle } from '@/test/render';
+import { inBrowserLocale } from '@/test/browserLocale';
+import { inTimeZone } from '@/test/timeZone';
+import { renderRoutes, settle, testQueryClient } from '@/test/render';
 import { BADGES, badgeProgress } from './badges';
 import { BadgeSection } from './BadgeSection';
+import { forgetDateFormats } from './dateLabels';
 import { StatsPage } from './StatsPage';
+import { StreakBadge } from './StreakBadge';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -59,8 +63,11 @@ const chartButton = (loopName: string) =>
   screen.getByRole('button', { name: `Chart of ${loopName}` });
 
 /** The page as first rendered, nothing read yet, with the steps its tests repeat. */
-function renderStats(path = '/stats') {
-  const { queryClient } = renderRoutes(<Route path="/stats" element={<StatsPage />} />, { path });
+function renderStats(path = '/stats', cache?: QueryClient) {
+  const { queryClient } = renderRoutes(<Route path="/stats" element={<StatsPage />} />, {
+    path,
+    queryClient: cache,
+  });
   const user = userEvent.setup();
   return {
     user,
@@ -528,10 +535,10 @@ describe('StatsPage', () => {
     });
 
     it('give a smaller Other its own share of the longest song', async () => {
-      serve(manySongs([600, 500, 400, 300, 200, 150]));
+      serve(manySongs([600, 500, 400, 300, 200, 90, 60]));
       await openStats();
       const other = rows()[5]!;
-      expect(other).toHaveTextContent('Other (1 song)2 min');
+      expect(other).toHaveTextContent('Other (2 songs)2 min');
       expect(bar(other).style.width).toBe('25%');
     });
   });
@@ -846,7 +853,8 @@ describe('StatsPage, edges', () => {
       song: { id: `song-${index}`, title: `Song ${index}` },
     }));
 
-    it('names a single sixth song as "Other (1 song)"', async () => {
+    // Unit 20, batch 9 (17 QA): "Other (1 song)" was a row that hid one name.
+    it('names a single sixth song like the five before it, with its bar and its link', async () => {
       serve({
         sessions: sixSongs.map(({ loop }, index) =>
           session(daysAgo(1), (6 - index) * 120, 0.8, 1, loop),
@@ -860,9 +868,31 @@ describe('StatsPage, edges', () => {
         'Song 28 min',
         'Song 36 min',
         'Song 44 min',
-        'Other (1 song)2 min',
+        'Song 52 min',
       ]);
-      // "Other" is not a song: it goes nowhere.
+      const list = screen.getByRole('list', { name: 'Practice time by song' });
+      expect(within(list).queryByText(/^Other/)).not.toBeInTheDocument();
+      expect(within(list).getByRole('link', { name: 'Song 5' })).toHaveAttribute(
+        'href',
+        '/songs/song-5',
+      );
+      expect(within(list).getAllByTestId('song-bar')[5]).toHaveClass('bg-selected-line');
+    });
+
+    it('sums a sixth and a seventh song as Other, which is not a song and goes nowhere', async () => {
+      const seven = [
+        ...sixSongs,
+        { loop: '30000006-aaaa-4aaa-8aaa-aaaaaaaaaaaa', song: { id: 'song-6', title: 'Song 6' } },
+      ];
+      serve({
+        sessions: seven.map(({ loop }, index) =>
+          session(daysAgo(1), (7 - index) * 120, 0.8, 1, loop),
+        ),
+        loops: seven.map(({ loop, song }) => practiceLoop(loop, 'Loop', song)),
+      });
+      await openStats();
+      expect(songTimes()).toHaveLength(6);
+      expect(songTimes()[5]).toBe('Other (2 songs)6 min');
       expect(screen.queryByRole('link', { name: /^Other/ })).not.toBeInTheDocument();
     });
 
@@ -1267,6 +1297,730 @@ describe('StatsPage, after QA', () => {
         screen.queryByRole('heading', { name: 'Not practised lately' }),
       ).not.toBeInTheDocument();
       expect(screen.queryByTestId('neglected-loop')).not.toBeInTheDocument();
+    });
+  });
+});
+
+// Unit 20, batch 9: stats copy and locale.
+describe('StatsPage, copy and locale', () => {
+  const activeGroove = practiceLoop(LOOP, 'Groove', GROOVE_SONG);
+  const pageText = () => document.body.textContent ?? '';
+
+  // 17 QA issue 4 and round 1: "…, the week of 8. Juni.." in an English sentence.
+  describe('with the browser set to German', () => {
+    inBrowserLocale('de');
+    // The tests before this one built `dateLabels.ts`'s formatters in English; built again
+    // here, one that names no locale comes out German and fails (20 batch 9, Test bug 2).
+    beforeEach(forgetDateFormats);
+    const english = (date: Date, options: Intl.DateTimeFormatOptions) =>
+      new Intl.DateTimeFormat('en', options).format(date);
+    const yearIfNotThis = (date: Date): Intl.DateTimeFormatOptions =>
+      date.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' };
+    const short = (date: Date) =>
+      english(date, { day: 'numeric', month: 'short', ...yearIfNotThis(date) });
+    /** A month or a weekday as German shortens it: "8. Juni", "Sa., 14. Nov.". */
+    const GERMAN =
+      /Jan\.|Feb\.|März|Apr\.|Mai|Juni|Juli|Aug\.|Sept\.|Okt\.|Nov\.|Dez\.|Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\./;
+
+    it('writes every date in English, and ends each sentence in one full stop', async () => {
+      // Practice on two days of one earlier week, so there is a best week and a best day.
+      const earlier = new Date(daysAgo(40));
+      const monday = new Date(
+        earlier.getFullYear(),
+        earlier.getMonth(),
+        earlier.getDate() - ((earlier.getDay() + 6) % 7),
+        12,
+      );
+      const tuesday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 1, 12);
+      serve({
+        sessions: [
+          session(monday.toISOString(), 1800, 0.6),
+          session(tuesday.toISOString(), 2400, 0.7),
+          today,
+        ],
+        loops: [activeGroove],
+      });
+      const { toggleChart } = await openStats();
+
+      expect(text('heatmap-best-week')).toBe(
+        ` Best calendar week: 1 h 10 min over 2 days, the week of ${short(monday)}.`,
+      );
+      expect(text('record-day-when')).toBe(
+        english(tuesday, {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          ...yearIfNotThis(tuesday),
+        }),
+      );
+      expect(text('record-session-when')).toBe(`Groove, ${short(tuesday)}`);
+      const months = screen.getAllByTestId('heatmap-month').map((month) => month.textContent);
+      for (const month of months) expect(month).toMatch(/^[A-Z][a-z]{2}$/);
+      expect(months).toContain(english(new Date(), { month: 'short' }));
+      // The weekdays under the fourteen bars: German has a "D" (Dienstag, Donnerstag).
+      const letters = Array.from(
+        screen.getByTestId('daily-minutes-chart').querySelectorAll('[data-testid="daily-bar"]'),
+      ).map((bar) => Array.from(bar.querySelectorAll('text')).at(-2)?.textContent);
+      expect(letters).toHaveLength(14);
+      for (const letter of letters) expect(letter).toMatch(/^[MTWFS]$/);
+
+      await toggleChart('Groove');
+      expect(
+        screen.getByRole('img', { name: /^Speed of Groove over 3 practice days/ }),
+      ).toHaveAccessibleName(
+        `Speed of Groove over 3 practice days: from 60% on ${short(monday)} to 70% on ${short(new Date())}.`,
+      );
+      // Nowhere on the page: a doubled full stop, or a month or weekday as German writes it.
+      const written = [
+        pageText(),
+        ...screen.getAllByRole('img').map((img) => img.getAttribute('aria-label') ?? ''),
+      ];
+      for (const words of written) {
+        expect(words).not.toMatch(/\.\./);
+        expect(words).not.toMatch(GERMAN);
+      }
+    });
+  });
+
+  // 17 QA round 1, issue 1: "1,100" days beside "1100 h" and "On a 1100-day streak".
+  it('groups every count of a thousand or more: hours, days, the streak and its record', async () => {
+    const DAYS = 1100;
+    const everyDay = Array.from({ length: DAYS }, (_, index) => session(daysAgo(index), 3600, 0.8));
+    // More rows than one page of the read: answer each page with its own rows.
+    queryResult.mockImplementation(async (call) => {
+      if (call.table !== 'practice_sessions') return ok([activeGroove]);
+      const [from, to] = (opArgs(call, 'range') ?? [0, DAYS]) as [number, number];
+      return ok(everyDay.slice(from, to + 1));
+    });
+    const { toggleChart } = await openStats('/stats?range=all');
+    expect([text('total-time'), text('total-days')]).toEqual(['1,100 h', '1,100']);
+    expect(text('streak-line')).toBe('On a 1,100-day streak. Your longest yet.');
+    expect(text('record-streak')).toBe('1,100 days');
+    expect(within(progressRows()[0]!).getByTestId('loop-progress-time')).toHaveTextContent(
+      '1,100 h · 1,100 days',
+    );
+    await toggleChart('Groove');
+    expect(
+      screen.getByRole('img', { name: /^Speed of Groove over 1,100 practice days: / }),
+    ).toBeInTheDocument();
+    // No run of four digits is left in anything the page writes but a year. Each piece of
+    // text by itself: neighbours run together in `textContent` ("12" then "01").
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const pieces = screen.getAllByRole('img').map((img) => img.getAttribute('aria-label') ?? '');
+    while (walker.nextNode()) pieces.push(walker.currentNode.textContent ?? '');
+    expect(pieces.length).toBeGreaterThan(100);
+    const fourDigits = pieces.flatMap((piece) => piece.match(/\d{4,}/g) ?? []);
+    expect(fourDigits.filter((digits) => !/^(19|20)\d\d$/.test(digits))).toEqual([]);
+  });
+
+  // 17 Review: `sessions.error ?? loops.error` gave the sessions read's reason whichever failed to load.
+  describe('when a list fails to load', () => {
+    const lost: FakeResult = {
+      data: null,
+      error: { message: 'TypeError: Failed to fetch', code: '' },
+    };
+    const refused: FakeResult = {
+      data: null,
+      error: { message: 'permission denied for table loops', code: '42501' },
+    };
+    const NO_CONNECTION = "The server couldn't be reached. Check the connection and try again.";
+    const REFUSED = 'The server refused it. Try again, or reload the page.';
+
+    it('gives the reason of the read that failed to load, not of a refetch that failed over cached rows', async () => {
+      // The sessions are on the device from an earlier visit; their refresh has no connection.
+      const cache = testQueryClient();
+      cache.setQueryData(sessionKeys.every('user-1'), sessions);
+      queryResult.mockImplementation(async (call) =>
+        call.table === 'practice_sessions' ? lost : refused,
+      );
+      renderStats('/stats', cache);
+      const alert = await screen.findByRole('alert');
+      // Both reads have failed by now: the sessions' over its rows, the loops' with nothing to show.
+      await waitFor(() =>
+        expect(cache.getQueryState(sessionKeys.every('user-1'))).toMatchObject({
+          status: 'error',
+          fetchStatus: 'idle',
+        }),
+      );
+      expect(cache.getQueryState(sessionKeys.every('user-1'))?.data).toHaveLength(3);
+      await settle();
+      expect(alert).toHaveTextContent(`Couldn't load your stats. ${REFUSED}`);
+      expect(alert).not.toHaveTextContent(NO_CONNECTION);
+      expect(alert).not.toHaveTextContent(/permission denied/);
+    });
+
+    it('gives the loops read’s reason when only it failed', async () => {
+      queryResult.mockImplementation(async (call) =>
+        call.table === 'practice_sessions' ? ok(sessions) : lost,
+      );
+      renderStats();
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        `Couldn't load your stats. ${NO_CONNECTION}`,
+      );
+    });
+
+    it('gives the sessions read’s reason when both failed to load', async () => {
+      queryResult.mockImplementation(async (call) =>
+        call.table === 'practice_sessions' ? refused : lost,
+      );
+      renderStats();
+      const alert = await screen.findByRole('alert');
+      await waitFor(() => expect(alert).toHaveTextContent(`Couldn't load your stats. ${REFUSED}`));
+    });
+
+    // Unit 20, batch 9 Test: one read at a time, and "Try again" that mends only one.
+    describe('and "Try again" is pressed', () => {
+      let answers: { sessions: FakeResult; loops: FakeResult };
+      const reads = (table: string) =>
+        queryResult.mock.calls.filter(([call]) => call.table === table).length;
+      const tryAgain = (user: ReturnType<typeof userEvent.setup>) =>
+        user.click(screen.getByRole('button', { name: 'Try again' }));
+
+      beforeEach(() => {
+        queryResult.mockImplementation(async (call) =>
+          call.table === 'practice_sessions' ? answers.sessions : answers.loops,
+        );
+      });
+
+      it('gives the sessions read’s reason when only it failed', async () => {
+        answers = { sessions: refused, loops: ok(loops) };
+        renderStats();
+        const alert = await screen.findByRole('alert');
+        expect(alert).toHaveTextContent(`Couldn't load your stats. ${REFUSED}`);
+        expect(alert).not.toHaveTextContent(NO_CONNECTION);
+      });
+
+      it('moves to the loops read’s reason when both failed and only the sessions come back', async () => {
+        answers = { sessions: refused, loops: lost };
+        const { user } = renderStats();
+        const alert = await screen.findByRole('alert');
+        await waitFor(() => expect(alert).toHaveTextContent(REFUSED));
+        await waitFor(() => expect(reads('loops')).toBe(1));
+
+        answers = { sessions: ok(sessions), loops: lost };
+        await tryAgain(user);
+        // Both were asked again, and the one still failing speaks for itself.
+        await waitFor(() =>
+          expect(screen.getByRole('alert')).toHaveTextContent(
+            `Couldn't load your stats. ${NO_CONNECTION}`,
+          ),
+        );
+        expect([reads('practice_sessions'), reads('loops')]).toEqual([2, 2]);
+        expect(screen.getByRole('alert')).not.toHaveTextContent(REFUSED);
+        expect(screen.queryByTestId('stats-totals')).not.toBeInTheDocument();
+
+        // The next press asks only for what is still missing, and the page opens.
+        answers = { sessions: ok(sessions), loops: ok(loops) };
+        await tryAgain(user);
+        await screen.findByTestId('stats-totals');
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        await settle();
+        expect([reads('practice_sessions'), reads('loops')]).toEqual([2, 3]);
+      });
+
+      it('keeps the sessions read’s reason when both failed and only the loops come back', async () => {
+        answers = { sessions: refused, loops: lost };
+        const { user } = renderStats();
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(REFUSED));
+        await waitFor(() => expect(reads('loops')).toBe(1));
+
+        answers = { sessions: refused, loops: ok(loops) };
+        await tryAgain(user);
+        await waitFor(() => expect(reads('loops')).toBe(2));
+        await settle();
+        expect(screen.getByRole('alert')).toHaveTextContent(`Couldn't load your stats. ${REFUSED}`);
+        expect(screen.getByRole('alert')).not.toHaveTextContent(NO_CONNECTION);
+        expect(screen.queryByTestId('stats-totals')).not.toBeInTheDocument();
+      });
+
+      it('asks again only for the read with nothing to show, and opens on the cached rows of the other', async () => {
+        const cache = testQueryClient();
+        cache.setQueryData(sessionKeys.every('user-1'), sessions);
+        answers = { sessions: lost, loops: refused };
+        const { user } = renderStats('/stats', cache);
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(REFUSED));
+        await waitFor(() =>
+          expect(cache.getQueryState(sessionKeys.every('user-1'))).toMatchObject({
+            status: 'error',
+            fetchStatus: 'idle',
+          }),
+        );
+        const sessionReads = reads('practice_sessions');
+        expect(sessionReads).toBe(1);
+
+        answers = { sessions: lost, loops: ok(loops) };
+        await tryAgain(user);
+        await screen.findByTestId('stats-totals');
+        expect(text('total-time')).toBe('15 min');
+        await settle();
+        expect(reads('practice_sessions')).toBe(sessionReads);
+      });
+    });
+  });
+
+  // 17 Review: `new Date()` at render, and nothing drew the page again when the day changed.
+  describe('left open past midnight', () => {
+    const at = (day: number, hour: number, minute = 0) => new Date(2026, 10, day, hour, minute);
+    const dailyDays = () =>
+      Array.from(screen.getByTestId('daily-minutes-chart').querySelectorAll('[data-day]')).map(
+        (bar) => bar.getAttribute('data-day'),
+      );
+    const todayRow = () =>
+      within(screen.getByRole('table', { name: 'Minutes practised per day' })).getByRole('row', {
+        name: /^Today/,
+      }).textContent;
+    /** The page is looked at again: a phone unlocked, a tab come back to. */
+    const lookAgain = () => act(() => void document.dispatchEvent(new Event('visibilitychange')));
+
+    beforeEach(() => {
+      // Only the clock: TanStack Query and Testing Library keep real timers.
+      vi.useFakeTimers({ toFake: ['Date'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('moves "today" on when the page is looked at again the next day, and ends a streak the day after', async () => {
+      vi.setSystemTime(at(26, 23, 50));
+      serve({ sessions: [session(at(26, 20).toISOString(), 600, 0.7)], loops: [activeGroove] });
+      await openStats();
+      expect(dailyDays().at(-1)).toBe('2026-11-26');
+      expect(todayRow()).toBe('Today10 min');
+      expect(text('streak-line')).toBe('On a 1-day streak. Your longest yet.');
+      const reads = queryResult.mock.calls.length;
+
+      vi.setSystemTime(at(27, 0, 5));
+      lookAgain();
+      expect(dailyDays().at(-1)).toBe('2026-11-27');
+      expect(dailyDays()).toHaveLength(14);
+      expect(todayRow()).toBe('Today0 min');
+      // Yesterday's practice still holds the streak today.
+      expect(text('streak-line')).toBe('On a 1-day streak. Your longest yet.');
+      expect(
+        within(screen.getByTestId('practice-heatmap')).getAllByTestId('heatmap-today'),
+      ).toHaveLength(1);
+
+      vi.setSystemTime(at(28, 0, 5));
+      lookAgain();
+      expect(dailyDays().at(-1)).toBe('2026-11-28');
+      expect(text('streak-line')).toBe('No streak running. Your longest is 1 day.');
+      // Only drawn again: the day changing reads nothing.
+      expect(queryResult.mock.calls).toHaveLength(reads);
+    });
+
+    // 20 batch 9 Review: the Songs header's flame read the clock once, at its last render.
+    it('takes the Songs header’s streak away once it has ended, two midnights on', async () => {
+      vi.setSystemTime(at(26, 23, 50));
+      serve({ sessions: [session(at(26, 20).toISOString(), 600, 0.7)], loops: [activeGroove] });
+      renderRoutes(<Route path="/" element={<StreakBadge />} />, { path: '/' });
+      expect(await screen.findByTestId('streak')).toHaveTextContent('Practice streak: 1 day');
+      const reads = queryResult.mock.calls.length;
+
+      // Yesterday's practice still holds the streak.
+      vi.setSystemTime(at(27, 0, 5));
+      lookAgain();
+      expect(screen.getByTestId('streak')).toHaveTextContent('Practice streak: 1 day');
+      vi.setSystemTime(at(28, 0, 5));
+      lookAgain();
+      expect(screen.queryByTestId('streak')).not.toBeInTheDocument();
+      expect(queryResult.mock.calls).toHaveLength(reads);
+    });
+
+    it('keeps the period chosen and a chart left open when the day changes', async () => {
+      vi.setSystemTime(at(26, 23, 50));
+      serve({
+        sessions: [
+          session(at(26, 20).toISOString(), 600, 0.7),
+          session(at(20, 20).toISOString(), 600, 0.6),
+        ],
+        loops: [activeGroove],
+      });
+      const { choosePeriod, toggleChart } = await openStats();
+      await choosePeriod('Month');
+      await toggleChart('Groove');
+      vi.setSystemTime(at(27, 0, 5));
+      lookAgain();
+      expect(screen.getByRole('radio', { name: 'Month' })).toBeChecked();
+      expect(chartButton('Groove')).toHaveAttribute('aria-expanded', 'true');
+      expect(dailyDays().at(-1)).toBe('2026-11-27');
+    });
+
+    // Unit 20, batch 9 Test: what the reader set, and what the map does, when the day changes.
+    describe('with the map in a box it can scroll', () => {
+      let scrolledTo: number[];
+      const mapBox = () => screen.getByTestId('practice-heatmap').parentElement;
+      /** The map's oldest day, from its first square's tooltip ("Sep 14: 0 min"). */
+      const oldestDay = () =>
+        screen.getByTestId('practice-heatmap').querySelector('title')?.textContent?.split(':')[0];
+      const mapHeading = () => screen.getByRole('heading', { name: /^Practice days/ }).textContent;
+
+      beforeEach(() => {
+        scrolledTo = [];
+        vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(351);
+        vi.spyOn(Element.prototype, 'scrollLeft', 'set').mockImplementation((value: number) => {
+          scrolledTo.push(value);
+        });
+      });
+      afterEach(() => {
+        vi.restoreAllMocks();
+      });
+
+      it('keeps "Show all" and leaves the map where the reader scrolled it when the day changes inside a week', async () => {
+        // A Thursday.
+        vi.setSystemTime(at(26, 23, 50));
+        const ids = Array.from(
+          { length: 7 },
+          (_, index) => `5000000${index}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+        );
+        serve({
+          sessions: ids.map((id, index) =>
+            session(at(25 - index, 20).toISOString(), 120, 0.6, 1, id),
+          ),
+          loops: ids.map((id, index) => practiceLoop(id, `Loop ${index}`, GROOVE_SONG)),
+        });
+        const { user } = await openStats();
+        await user.click(screen.getByRole('button', { name: 'Show all 7 loops' }));
+        expect(progressRows()).toHaveLength(7);
+        const box = mapBox();
+        expect(scrolledTo).toEqual([351]);
+        expect(mapHeading()).toBe('Practice days Last 12 weeks');
+        const oldest = oldestDay();
+
+        vi.setSystemTime(at(27, 0, 5));
+        lookAgain();
+        // Drawn again for Friday...
+        expect(dailyDays().at(-1)).toBe('2026-11-27');
+        // ...with the whole list still open, and the same box, not scrolled again.
+        expect(progressRows()).toHaveLength(7);
+        expect(screen.getByRole('button', { name: 'Show fewer' })).toBeVisible();
+        expect(mapBox()).toBe(box);
+        expect(oldestDay()).toBe(oldest);
+        expect(scrolledTo).toEqual([351]);
+      });
+
+      it.each([
+        { history: 'two days', firstDaysBack: 1, weeks: 12 },
+        { history: 'most of a year', firstDaysBack: 300, weeks: 26 },
+      ])(
+        'on a Monday midnight with $history of practice the map moves on a week, as wide as it was, and is not scrolled again',
+        async ({ firstDaysBack, weeks }) => {
+          // A Sunday.
+          vi.setSystemTime(at(29, 23, 50));
+          serve({
+            sessions: [
+              session(at(29, 20).toISOString(), 600, 0.7),
+              session(at(29 - firstDaysBack, 20).toISOString(), 600, 0.6),
+            ],
+            loops: [activeGroove],
+          });
+          await openStats();
+          const map = () => screen.getByTestId('practice-heatmap');
+          const heading = `Practice days Last ${weeks} weeks`;
+          expect(mapHeading()).toBe(heading);
+          const oldest = oldestDay();
+          const viewBox = map().getAttribute('viewBox');
+          expect(map().querySelectorAll('title')).toHaveLength(weeks * 7);
+          expect(scrolledTo).toEqual([351]);
+
+          vi.setSystemTime(at(30, 0, 5));
+          lookAgain();
+          expect(dailyDays().at(-1)).toBe('2026-11-30');
+          expect(mapHeading()).toBe(heading);
+          // Its first column is now the week after.
+          expect(oldestDay()).not.toBe(oldest);
+          expect(map().getAttribute('viewBox')).toBe(viewBox);
+          // The new week has one day so far: Monday, ringed.
+          expect(within(map()).getAllByTestId('heatmap-today')).toHaveLength(1);
+          expect(map().querySelectorAll('title')).toHaveLength(weeks * 7 - 6);
+          expect(scrolledTo).toEqual([351]);
+        },
+      );
+
+      it('on a Monday midnight that adds a week to the map, opens it on the newest week again', async () => {
+        vi.setSystemTime(at(29, 23, 50));
+        serve({
+          // First practised 13 weeks before this one: 14 weeks on the map, 15 from Monday.
+          sessions: [
+            session(at(29, 20).toISOString(), 600, 0.7),
+            session(at(29 - 7 * 13, 20).toISOString(), 600, 0.6),
+          ],
+          loops: [activeGroove],
+        });
+        await openStats();
+        expect(mapHeading()).toBe('Practice days Last 14 weeks');
+        expect(scrolledTo).toEqual([351]);
+        const oldest = oldestDay();
+
+        vi.setSystemTime(at(30, 0, 5));
+        lookAgain();
+        expect(mapHeading()).toBe('Practice days Last 15 weeks');
+        // The same first week, one more column on the right: today's.
+        expect(oldestDay()).toBe(oldest);
+        expect(scrolledTo).toEqual([351, 351]);
+      });
+    });
+
+    describe('with the tab hidden', () => {
+      let visibility: DocumentVisibilityState;
+      const show = (state: DocumentVisibilityState) => {
+        visibility = state;
+        lookAgain();
+      };
+      beforeEach(() => {
+        visibility = 'visible';
+        Object.defineProperty(document, 'visibilityState', {
+          configurable: true,
+          get: () => visibility,
+        });
+      });
+      afterEach(() => {
+        // Back to jsdom's own, on the prototype.
+        Reflect.deleteProperty(document, 'visibilityState');
+      });
+
+      it('over midnight: yesterday’s page while nobody looks, today’s the moment it is shown', async () => {
+        vi.setSystemTime(at(26, 23, 50));
+        serve({ sessions: [session(at(26, 20).toISOString(), 600, 0.7)], loops: [activeGroove] });
+        const { choosePeriod } = await openStats();
+        await choosePeriod('All time');
+        const reads = queryResult.mock.calls.length;
+
+        vi.setSystemTime(at(26, 23, 55));
+        show('hidden');
+        expect(dailyDays().at(-1)).toBe('2026-11-26');
+        expect(todayRow()).toBe('Today10 min');
+
+        vi.setSystemTime(at(27, 7));
+        show('visible');
+        expect(dailyDays().at(-1)).toBe('2026-11-27');
+        expect(todayRow()).toBe('Today0 min');
+        expect(screen.getByRole('radio', { name: 'All time' })).toBeChecked();
+        expect(screen.getByTestId('location')).toHaveTextContent('/stats?range=all');
+        expect(queryResult.mock.calls).toHaveLength(reads);
+      });
+
+      it('hidden after midnight (the phone locked at five past): the day has moved on already when it is shown', async () => {
+        vi.setSystemTime(at(26, 23, 50));
+        serve({ sessions: [session(at(26, 20).toISOString(), 600, 0.7)], loops: [activeGroove] });
+        await openStats();
+        vi.setSystemTime(at(27, 0, 5));
+        show('hidden');
+        expect(dailyDays().at(-1)).toBe('2026-11-27');
+        show('visible');
+        expect(dailyDays().at(-1)).toBe('2026-11-27');
+        expect(dailyDays()).toHaveLength(14);
+      });
+    });
+
+    it('goes back a day when the clock is put back over midnight', async () => {
+      vi.setSystemTime(at(27, 0, 5));
+      serve({ sessions: [session(at(26, 20).toISOString(), 600, 0.7)], loops: [activeGroove] });
+      await openStats();
+      expect(dailyDays().at(-1)).toBe('2026-11-27');
+      expect(todayRow()).toBe('Today0 min');
+
+      vi.setSystemTime(at(26, 23, 0));
+      lookAgain();
+      expect(dailyDays().at(-1)).toBe('2026-11-26');
+      expect(todayRow()).toBe('Today10 min');
+      expect(
+        within(screen.getByTestId('practice-heatmap')).getAllByTestId('heatmap-today'),
+      ).toHaveLength(1);
+    });
+
+    it('takes a session that arrives after midnight as today’s, on the page drawn for the new day', async () => {
+      vi.setSystemTime(at(26, 23, 50));
+      serve({ sessions: [session(at(26, 20).toISOString(), 600, 0.7)], loops: [activeGroove] });
+      const { readAgain } = await openStats();
+      vi.setSystemTime(at(27, 0, 5));
+      lookAgain();
+      expect(todayRow()).toBe('Today0 min');
+      // Practised on another device at two minutes past.
+      serve({
+        sessions: [
+          session(at(26, 20).toISOString(), 600, 0.7),
+          session(at(27, 0, 2).toISOString(), 180, 0.7),
+        ],
+        loops: [activeGroove],
+      });
+      await readAgain();
+      await waitFor(() => expect(todayRow()).toBe('Today3 min'));
+      expect(text('streak-line')).toBe('On a 2-day streak. Your longest yet.');
+    });
+
+    // Copilot review on #42: the date stays, the zone moves which day a session was on.
+    describe('when the device changes to a zone where it is the same date', () => {
+      // Fixed offsets: a place's rules differ between one machine's tz data and another's.
+      inTimeZone('UTC');
+      afterEach(() => {
+        process.env.TZ = 'UTC';
+      });
+
+      it('counts each session on its day in the new zone, and dates it there', async () => {
+        // 20:00 UTC on the 27th, and 13:00 on the 27th at UTC-7.
+        vi.setSystemTime(new Date('2026-11-27T20:00:00Z'));
+        // 02:00 UTC on the 27th: today in UTC, yesterday evening at UTC-7.
+        serve({ sessions: [session('2026-11-27T02:00:00Z', 600, 0.7)], loops: [activeGroove] });
+        await openStats();
+        const dayRows = () =>
+          within(screen.getByRole('table', { name: 'Minutes practised per day' }))
+            .getAllByRole('row')
+            .slice(-2)
+            .map((row) => row.textContent);
+        expect(dailyDays().at(-1)).toBe('2026-11-27');
+        expect(dayRows()).toEqual(['Nov 260 min', 'Today10 min']);
+        const reads = queryResult.mock.calls.length;
+
+        process.env.TZ = 'Etc/GMT+7';
+        lookAgain();
+        expect(dailyDays().at(-1)).toBe('2026-11-27');
+        expect(dayRows()).toEqual(['Nov 2610 min', 'Today0 min']);
+        // Yesterday's practice still holds the streak.
+        expect(text('streak-line')).toBe('On a 1-day streak. Your longest yet.');
+        expect(queryResult.mock.calls).toHaveLength(reads);
+      });
+    });
+  });
+
+  // 17 QA round 1: under 358 px of page the map scrolls in its own box, and opened on its oldest week.
+  describe('a practice-days map wider than its box', () => {
+    let scrolledTo: number[];
+    beforeEach(() => {
+      scrolledTo = [];
+      // jsdom lays nothing out: every box is 0 wide. Give the map's box 351 px of content.
+      vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(351);
+      vi.spyOn(Element.prototype, 'scrollLeft', 'set').mockImplementation((value: number) => {
+        scrolledTo.push(value);
+      });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('opens scrolled to its newest week, and is left where the reader put it afterwards', async () => {
+      serve();
+      const { readAgain } = await openStats();
+      const box = screen.getByTestId('practice-heatmap').parentElement;
+      expect(box).toHaveClass('overflow-x-auto');
+      expect(scrolledTo).toEqual([351]);
+      // A tab stop with a name, so the arrow keys scroll it where the browser makes it none (Safari).
+      expect(screen.getByRole('group', { name: 'Practice days map' })).toBe(box);
+      expect(box).toHaveAttribute('tabindex', '0');
+
+      // Another device's session arrives: the page is drawn again, the box not moved.
+      serve({ sessions: [...sessions, session(daysAgo(2), 300, 0.7)], loops });
+      await readAgain();
+      await waitFor(() => expect(text('total-days')).toBe('3'));
+      expect(scrolledTo).toEqual([351]);
+    });
+  });
+  // Unit 20, batch 9 Test (17.3b): the sixth song on the page, across the periods and beside unknown loops.
+  describe('where the time went, at the sixth song', () => {
+    const songTimes = () =>
+      within(screen.getByRole('list', { name: 'Practice time by song' }))
+        .getAllByTestId('song-time')
+        .map((row) => row.textContent);
+    const seven = Array.from({ length: 7 }, (_, index) => ({
+      loop: `4000000${index}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+      song: { id: `song-${index}`, title: `Song ${index}` },
+    }));
+    const loopsOf = (songs: typeof seven) =>
+      songs.map(({ loop, song }) => practiceLoop(loop, 'Loop', song));
+    const firstFive = ['Song 012 min', 'Song 110 min', 'Song 28 min', 'Song 36 min', 'Song 44 min'];
+    /** Songs 0 to 4 yesterday, 12 minutes down to 4. */
+    const fiveYesterday = () =>
+      seven
+        .slice(0, 5)
+        .map(({ loop }, index) => session(daysAgo(1), (6 - index) * 120, 0.8, 1, loop));
+
+    it('goes from five names to six to five and Other as the period takes in a sixth and a seventh song', async () => {
+      serve({
+        sessions: [
+          ...fiveYesterday(),
+          session(daysAgo(20), 120, 0.8, 1, seven[5]!.loop),
+          session(daysAgo(100), 60, 0.8, 1, seven[6]!.loop),
+        ],
+        loops: loopsOf(seven),
+      });
+      const { choosePeriod } = await openStats();
+      expect(songTimes()).toEqual(firstFive);
+
+      await choosePeriod('Month');
+      expect(songTimes()).toEqual([...firstFive, 'Song 52 min']);
+
+      await choosePeriod('All time');
+      expect(songTimes()).toEqual([...firstFive, 'Other (2 songs)3 min']);
+
+      await choosePeriod('Week');
+      expect(songTimes()).toEqual(firstFive);
+    });
+
+    it('names both when the fifth and sixth tie, in title order', async () => {
+      const six = seven.slice(0, 6);
+      serve({
+        sessions: six.map(({ loop }, index) =>
+          session(daysAgo(1), index < 4 ? (6 - index) * 120 : 240, 0.8, 1, loop),
+        ),
+        // The loops come in the other order: the tie is cut by title, not by arrival.
+        loops: loopsOf(six).reverse(),
+      });
+      await openStats();
+      expect(songTimes()).toEqual([...firstFive, 'Song 54 min']);
+    });
+
+    // Build's decision, pinned: six names and the unknown time apart, not "Other (1 song)" holding both.
+    it('draws seven rows for six songs and sessions of a loop that is gone: six names, then plain Other', async () => {
+      const six = seven.slice(0, 6);
+      serve({
+        sessions: [
+          ...fiveYesterday(),
+          session(daysAgo(1), 120, 0.8, 1, six[5]!.loop),
+          session(daysAgo(1), 60, 0.8, 1, 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'),
+        ],
+        loops: loopsOf(six),
+      });
+      await openStats();
+      expect(songTimes()).toEqual([...firstFive, 'Song 52 min', 'Other1 min']);
+      const list = screen.getByRole('list', { name: 'Practice time by song' });
+      expect(within(list).getAllByRole('link')).toHaveLength(6);
+      const bars = within(list).getAllByTestId('song-bar');
+      expect(bars[5]).toHaveClass('bg-selected-line');
+      expect(bars[6]).toHaveClass('bg-ink-muted');
+      // The rows add up to the period's total: 42 minutes of songs and the one of the lost loop.
+      expect(text('total-time')).toBe('43 min');
+    });
+  });
+
+  // Unit 20, batch 9 Test (17.5a): grouped the English way where the browser would group, or write digits, its own.
+  describe.each(['de', 'ar-EG'])('counts in a browser set to %s', (locale) => {
+    inBrowserLocale(locale);
+
+    it('are grouped with a comma and written in Western digits', async () => {
+      // What this browser would have written, to prove the test could fail.
+      expect((1100).toLocaleString()).not.toBe('1,100');
+      const DAYS = 1100;
+      const everyDay = Array.from({ length: DAYS }, (_, index) =>
+        session(daysAgo(index), 3600, 0.8),
+      );
+      queryResult.mockImplementation(async (call) => {
+        if (call.table !== 'practice_sessions') return ok([activeGroove]);
+        const [from, to] = (opArgs(call, 'range') ?? [0, DAYS]) as [number, number];
+        return ok(everyDay.slice(from, to + 1));
+      });
+      const { toggleChart } = await openStats('/stats?range=all');
+      expect([text('total-time'), text('total-days')]).toEqual(['1,100 h', '1,100']);
+      expect(text('streak-line')).toBe('On a 1,100-day streak. Your longest yet.');
+      expect(text('record-streak')).toBe('1,100 days');
+      await toggleChart('Groove');
+      const written = [
+        pageText(),
+        ...screen.getAllByRole('img').map((img) => img.getAttribute('aria-label') ?? ''),
+        ...Array.from(document.querySelectorAll('[title]'), (each) => each.getAttribute('title')),
+      ].join('\n');
+      expect(written).toContain('over 1,100 practice days');
+      // No digit of another script, no German or Arabic thousands mark between digits.
+      expect(written).not.toMatch(/[\u0660-\u0669\u06F0-\u06F9\u0966-\u096F]/);
+      expect(written).not.toMatch(/\d[.\u066C\u00A0\u202F’']\d{3}(?!\d)/);
     });
   });
 });
