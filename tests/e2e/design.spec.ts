@@ -781,10 +781,13 @@ test('at 320 px a refused status change’s message and Dismiss fit the loop she
   expect((await loopsOf(user)).map((loop) => loop.status)).toEqual(['active']);
 });
 
-// 20 batch 8, Review (Test's bug 2): the practice band's speed and Play were 334 px wide side
-// by side, so a 320 px phone's page panned sideways with the row cut at both edges. Under
-// 334 px the two sit closer and the pill's ends are narrower; from 334 px nothing changed.
-test('the practice screen fits a 320 px phone, and its speed and Play row is as it was from 334 px', async ({
+// 20 batch 8, Review (Test's bug 2): the practice band's speed and Play were about 334 px wide
+// side by side, so a 320 px phone's page panned sideways with the row cut at both edges. Under
+// 360 px the two sit closer and the pill's ends are narrower; from 360 px nothing changed.
+// The row's width is its text's, so it differs by font: on CI it was 335 px, and a switch at
+// 334 px (the width measured locally) left a 334 px window a pixel too narrow there. The
+// widths between (334, 344, 359) are asserted to fit, whichever fonts drew them.
+test('the practice screen fits a 320 px phone, and its speed and Play row is as it was from 360 px', async ({
   user,
   page,
 }) => {
@@ -812,7 +815,7 @@ test('the practice screen fits a 320 px phone, and its speed and Play row is as 
       };
     });
 
-  for (const width of [320, 328]) {
+  for (const width of [320, 328, 334, 344, 359]) {
     await page.setViewportSize({ width, height: 640 });
     const narrow = await measure();
     if (!narrow) throw new Error('no speed and Play row to measure');
@@ -824,8 +827,8 @@ test('the practice screen fits a 320 px phone, and its speed and Play row is as 
     await expectWellDrawn(page, `practice at ${width} px`);
   }
 
-  // From the row's own width up it is as it was: the wider gap and ends, the page no wider.
-  for (const width of [334, 360, 390]) {
+  // From 360 px up it is as it was: the wider gap and ends, the page no wider.
+  for (const width of [360, 390]) {
     await page.setViewportSize({ width, height: 844 });
     const wide = await measure();
     expect(wide, `at ${width} px`).toMatchObject({

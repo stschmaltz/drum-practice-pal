@@ -852,10 +852,15 @@ describe('useSetLoopStatus', () => {
 // 20 batch 8 (13.21, 13.35c): a refused status change is a failed mutation the cache keeps.
 // The screen hears it as it happens, a control can put it away, and so does leaving.
 describe('refused status changes: dismissed, and heard by the screen', () => {
+  /** What the screen has on show: the loops it draws, and whether it is itself drawn. */
+  interface ScreenShows {
+    loopIds: string[];
+    isOnShow?: () => boolean;
+  }
   function renderScreen({
     queryClient = testQueryClient(),
     strict = false,
-    shows = {} as { loopId?: string; showing?: boolean },
+    shows = { loopIds: ['a', 'b'] } as ScreenShows,
   } = {}) {
     queryClient.setQueryData<Loop[]>(loopKeys.forSong('user-1', SONG), [
       loopRow('a'),
@@ -863,7 +868,7 @@ describe('refused status changes: dismissed, and heard by the screen', () => {
     ]);
     const heard: [string, string][] = [];
     const hooks = renderHook(
-      (shown: { loopId?: string; showing?: boolean }) => {
+      (shown: ScreenShows) => {
         useLoopStatusRefusals({
           ...shown,
           onRefused: (loopId, refused) => heard.push([loopId, refused]),
@@ -1018,7 +1023,7 @@ describe('refused status changes: dismissed, and heard by the screen', () => {
 
   // 20 batch 8, Review (Test's bug 1): a screen puts away what it showed, nothing more.
   it('leaving a screen that shows one loop’s status keeps another loop’s refusal for the screen that shows it', async () => {
-    const view = renderScreen({ shows: { loopId: 'a' } });
+    const view = renderScreen({ shows: { loopIds: ['a'] } });
     await bothRefused(view);
     // Heard for both, as before: only the putting away is the one loop's.
     expect(view.heard).toEqual([
@@ -1039,7 +1044,7 @@ describe('refused status changes: dismissed, and heard by the screen', () => {
   });
 
   it('leaving a screen that never had its refusals on show keeps them all', async () => {
-    const view = renderScreen({ shows: { showing: false } });
+    const view = renderScreen({ shows: { loopIds: [] } });
     await bothRefused(view);
 
     view.unmount();
@@ -1049,11 +1054,88 @@ describe('refused status changes: dismissed, and heard by the screen', () => {
   });
 
   it('a refusal that came while hidden and was then shown is put away on leaving', async () => {
-    const view = renderScreen({ shows: { showing: false } });
+    const view = renderScreen({ shows: { loopIds: [] } });
     await bothRefused(view);
-    view.rerender({ showing: true });
+    view.rerender({ loopIds: ['a', 'b'] });
     // Hidden again before leaving: it was seen, which is what counts.
-    view.rerender({ showing: false });
+    view.rerender({ loopIds: [] });
+
+    view.unmount();
+
+    await waitFor(() => expect(view.failed()).toEqual([]));
+  });
+
+  // Copilot on #41: "every loop's" is too many. A screen draws one song's loops, and the
+  // cache holds the refusals of every song's.
+  it('leaving a screen keeps the refusal of a loop it never drew (another song’s), which it could not have said', async () => {
+    const queryClient = testQueryClient();
+    // Song A's page: its loop's change is refused with no screen of song A up.
+    const songA = renderHook(() => useSetLoopStatus('song-a', 'elsewhere'), {
+      wrapper: wrapperFor(queryClient, signedInAs('user-1')),
+    });
+    queryClient.setQueryData<Loop[]>(loopKeys.forSong('user-1', 'song-a'), [loopRow('elsewhere')]);
+    refuseWrites();
+    act(() => void songA.result.current.setStatus('finished'));
+    await waitFor(() => expect(songA.result.current.error).not.toBeNull());
+    songA.unmount();
+
+    // Song B's page, up and left again, with a refusal of its own that it did show.
+    const view = renderScreen({ queryClient });
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.error).not.toBeNull());
+    const refusedLoops = () =>
+      queryClient
+        .getMutationCache()
+        .findAll({ status: 'error' })
+        .map((mutation) => (mutation.state.variables as { loopId: string }).loopId);
+    expect(refusedLoops()).toEqual(['elsewhere', 'a']);
+
+    view.unmount();
+
+    await waitFor(() => expect(refusedLoops()).toEqual(['elsewhere']));
+    await settle();
+    expect(refusedLoops()).toEqual(['elsewhere']);
+  });
+
+  it('a screen whose list has not loaded (no loops drawn) puts nothing away; once one is drawn, only that one’s', async () => {
+    const view = renderScreen({ shows: { loopIds: [] } });
+    await bothRefused(view);
+    // Only loop a is drawn in the end: b's is still not this screen's to put away.
+    view.rerender({ loopIds: ['a'] });
+
+    view.unmount();
+
+    await waitFor(() => expect(view.failed()).toHaveLength(1));
+    expect(
+      view.queryClient
+        .getMutationCache()
+        .findAll({ status: 'error' })
+        .map((mutation) => (mutation.state.variables as { loopId: string }).loopId),
+    ).toEqual(['b']);
+  });
+
+  // Copilot on #41: mounted is not drawn. The page can hide the screen that lists the loops
+  // (the loop sheet under a recording) without the screen's own state saying so.
+  it('a screen that lists the loops but is itself hidden when the refusal lands keeps it on leaving', async () => {
+    const view = renderScreen({ shows: { loopIds: ['a', 'b'], isOnShow: () => false } });
+    await bothRefused(view);
+
+    view.unmount();
+    await settle();
+
+    expect(view.failed()).toEqual([{ status: 'finished' }, { status: 'finished' }]);
+  });
+
+  it('a refusal that landed with the screen hidden is put away once the screen has been drawn with it', async () => {
+    let drawn = false;
+    const shows = { loopIds: ['a', 'b'], isOnShow: () => drawn };
+    const view = renderScreen({ shows });
+    await bothRefused(view);
+    // The page draws the screen again, which renders it; nothing of the screen's own changed.
+    drawn = true;
+    view.rerender({ ...shows });
+    drawn = false;
+    view.rerender({ ...shows });
 
     view.unmount();
 

@@ -157,8 +157,10 @@ function SongLoops({ song, loops }: { song: Song; loops: ReturnType<typeof useLo
   const focusWhenReady = useFocusWhenReady();
   // A refused "Mark finished" or "Reopen" moves the loop back to its list, away from the
   // focus that followed it: on to its "More" button there. Leaving the page puts away the
-  // refusals' messages, which it has all on show.
+  // refusals' messages of the loops it lists (none while the list is loading or failed:
+  // `data` is only there once rows are drawn), never another song's.
   useLoopStatusRefusals({
+    loopIds: (loops.data ?? []).map((loop) => loop.id),
     onRefused: (loopId, refused) => {
       const find = findStatusButtonAfterRefusal(loopId, refused);
       if (find) focusWhenReady(find);

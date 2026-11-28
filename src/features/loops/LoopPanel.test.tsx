@@ -33,17 +33,27 @@ function Panel({ player, startsOpen }: { player: PlayerService; startsOpen: bool
   const practice = useLoopPractice(player, snapshot, loops.data);
   useSaveLoopSpeed(LOOP_SONG_ID, practice.activeLoop, snapshot.speedRatio);
   const [open, setOpen] = useState(startsOpen);
+  // The song page's source switch: on a recording the panel is hidden, not unmounted, and
+  // keeps its `open`.
+  const [recording, setRecording] = useState(false);
   return (
-    <LoopPanel
-      songId={LOOP_SONG_ID}
-      player={player}
-      snapshot={snapshot}
-      practice={practice}
-      loops={loops}
-      open={open}
-      onOpenChange={setOpen}
-      bodyId={BODY_ID}
-    />
+    <>
+      <button type="button" onClick={() => setRecording((on) => !on)}>
+        {recording ? 'Tab' : 'Original'}
+      </button>
+      <div hidden={recording} className="contents">
+        <LoopPanel
+          songId={LOOP_SONG_ID}
+          player={player}
+          snapshot={snapshot}
+          practice={practice}
+          loops={loops}
+          open={open}
+          onOpenChange={setOpen}
+          bodyId={BODY_ID}
+        />
+      </div>
+    </>
   );
 }
 
@@ -2243,6 +2253,39 @@ describe('LoopPanel keeping focus', () => {
       await settle();
 
       expect(view.refusedStatusWrites()).toHaveLength(1);
+    });
+
+    // Copilot on #41: the song page hides the whole panel under a recording and keeps its
+    // `open`, so an open sheet can be one nobody sees.
+    it('refused with the page on a recording (the sheet open, but hidden) and the page left there: said on coming back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.user.click(screen.getByRole('button', { name: 'Original' }));
+      expect(screen.getByTestId('loop-panel')).not.toBeVisible();
+      refuse();
+      await refusalLanded(view);
+      await settle();
+
+      view.leave();
+      await settle();
+      expect(view.refusedStatusWrites()).toHaveLength(1);
+
+      const panel = view.comeBack();
+      expect(await panel.findByRole('alert')).toHaveTextContent("Couldn't mark the loop finished.");
+    });
+
+    it('refused with the page on a recording, then seen back on the tab: gone on coming back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.user.click(screen.getByRole('button', { name: 'Original' }));
+      refuse();
+      await refusalLanded(view);
+      await view.user.click(screen.getByRole('button', { name: 'Tab' }));
+      await alertUnder(view, 'Intro');
+      // On a recording again when the page is left: it was seen, which is what counts.
+      await view.user.click(screen.getByRole('button', { name: 'Original' }));
+
+      view.leave();
+
+      await waitFor(() => expect(view.refusedStatusWrites()).toHaveLength(0));
     });
 
     it('the page opened again in the same tick it was left: the message is put away all the same', async () => {

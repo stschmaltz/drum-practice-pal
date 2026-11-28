@@ -417,14 +417,21 @@ export function useSetLoopStatus(songId: string, loopId: string) {
 interface LoopStatusRefusalsScreen {
   /** Hears each status change the server refuses while the screen is up. */
   onRefused?: (loopId: string, refused: LoopStatus) => void;
-  /** The one loop whose refusals the screen says (the practice screen); every loop's without it. */
-  loopId?: string;
   /**
-   * Whether those refusals' messages are on show now: false while what draws
-   * them is closed or replaced (the loop sheet closed, the loop form over the
-   * list, no "Mark finished?" prompt).
+   * The loops whose refusals' messages the screen has on show now: the loops
+   * it draws a status control for, and none while what draws them is not there
+   * (its list loading or failed, the loop form over the list, no "Mark
+   * finished?" prompt). Never "every loop": the cache holds the refusals of
+   * other songs' loops too, which this screen can't say.
    */
-  showing?: boolean;
+  loopIds: readonly string[];
+  /**
+   * Whether the screen itself is drawn, asked after each render, for a screen
+   * that can be mounted and hidden by something outside it (the loop sheet,
+   * closed or under a recording: `isOnShow` in `src/lib/onShow.ts`). Without
+   * it the screen is taken as drawn.
+   */
+  isOnShow?: () => boolean;
 }
 
 /**
@@ -438,16 +445,18 @@ interface LoopStatusRefusalsScreen {
  *   refusal from before the screen opened is not heard, so nothing takes focus
  *   as a page opens.
  * - Leaving the screen puts away the message of every refusal it had on show
- *   (`loopId`, `showing`), so it isn't there again on coming back (until then
- *   it stays, up to the five minutes the mutation cache keeps a failed write).
- *   A refusal the screen never showed is kept: until a screen that says it has
- *   been opened, the message is the only sign that the change did not hold.
+ *   (`loopIds`, `isOnShow`), so it isn't there again on coming back (until
+ *   then it stays, up to the five minutes the mutation cache keeps a failed
+ *   write). A refusal the screen never showed is kept (another song's loop,
+ *   one that came while the screen was hidden or its list not yet read): until
+ *   a screen that says it has been opened, the message is the only sign that
+ *   the change did not hold.
  */
 export function useLoopStatusRefusals({
   onRefused,
-  loopId,
-  showing = true,
-}: LoopStatusRefusalsScreen = {}): void {
+  loopIds,
+  isOnShow,
+}: LoopStatusRefusalsScreen): void {
   const user = useSignedInUser();
   const queryClient = useQueryClient();
   const latestOnRefused = useRef(onRefused);
@@ -456,7 +465,7 @@ export function useLoopStatusRefusals({
   });
   // The hand-over waits for a render of the caller (`useFocusWhenReady`), and the loop may
   // have been drawn back in its place before the refusal is heard: this makes one.
-  const [heard, setHeard] = useState(0);
+  const [, setHeard] = useState(0);
   // The refusals this screen has had on show, for as long as it is up.
   const [shown] = useState(() => new WeakSet<object>());
   const leaving = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -482,13 +491,17 @@ export function useLoopStatusRefusals({
     };
   }, [queryClient, user.id, shown]);
 
-  // After the one above, so it has heard: as the screen opens, as a refusal lands, and as
-  // the messages come on show.
+  // After the one above, so it has heard. After every render, with no list of what it
+  // depends on: whether the screen is drawn is read from the page (`isOnShow`), and what
+  // hides it (a parent's `hidden`) changes nothing this hook is given. Each such change
+  // renders the caller, as do a refusal landing (`heard`) and its loops being drawn.
   useEffect(() => {
-    if (!showing) return;
-    const refusals = queryClient.getMutationCache().findAll(refusedStatusWrites(user.id, loopId));
-    for (const refusal of refusals) shown.add(refusal);
-  }, [queryClient, user.id, loopId, showing, heard, shown]);
+    if (loopIds.length === 0 || (isOnShow && !isOnShow())) return;
+    for (const refusal of queryClient.getMutationCache().findAll(refusedStatusWrites(user.id))) {
+      const loopId = statusWriteIn(refusal.state.variables)?.loopId;
+      if (loopId !== undefined && loopIds.includes(loopId)) shown.add(refusal);
+    }
+  });
 }
 
 /**

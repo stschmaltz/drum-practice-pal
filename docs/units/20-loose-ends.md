@@ -1260,3 +1260,47 @@ Nothing is carried forward: each open item is in Accepted, or is one of the two 
 - `npm run check`: green, 147 test files passed and 1 skipped, 5929 tests passed and 2 skipped (as before).
 - `E2E_PORT=4383 npx playwright test tests/e2e/design.spec.ts tests/e2e/shortcuts.spec.ts tests/e2e/library.spec.ts tests/e2e/practice.spec.ts tests/e2e/loops.spec.ts --project=phone --project=desktop`: 148 passed, 10 skipped by their own width conditions. With the two classes of finding 4 taken out and the app rebuilt, the 320 px test fails ("the page's width in a 320 px window": 327). The port was free before the run and the preview server stopped with it. No screenshot under `docs/units/*-shots/` was rewritten. No `db:reset`, no `db:seed`, nothing on port 54321.
 - By hand, for finding 1: with status writes refused slowly (Build's recipe), on the song's page "More", "Mark finished" on one loop, then at once the round Practise button of another. Back on the song's page the first loop is on the go again with "Couldn't mark the loop finished." and Dismiss under it.
+
+### Copilot review
+
+Two comments on PR #41, both on the fix for Review's finding 1, both confirmed with a failing test first; and one CI failure on the same head.
+
+**A. An open sheet nobody sees counted a refusal as shown** (`LoopPanel.tsx`; checklist 1, "Put away by a screen that never showed it", now extended). `SongPage.tsx` wraps the mounted `LoopPanel` in `<div hidden={recording}>` and keeps `loopPanel.open`, so `showing: open && form === null` stayed true on Original or Drumless: a "Mark finished" refused there was marked as shown and put away on leaving, and the overview had the loop back among the active ones with nothing to say why. `SongPage.tsx` is not this branch's to edit (Unit 19's PR #39 owns its recording parts), and needs no edit: the sheet now reads whether it is drawn from the page. `isOnShow(element)` (`src/lib/onShow.ts`, new, pure DOM: the element is connected and neither it nor an ancestor carries `hidden`) is asked of the sheet's body, whose own `hidden={!open}` makes the one question cover the closed sheet too; `LoopPanel` passes `isOnShow={() => isOnShow(bodyRef.current)}` to `LoopPanelBody` in place of `open`, and the hook asks it in its marking effect. Tests: `onShow.test.ts` (a table); `useLoops.test.tsx` ("a screen that lists the loops but is itself hidden when the refusal lands keeps it on leaving", "…is put away once the screen has been drawn with it"); `LoopPanel.test.tsx`, whose `Panel` harness now wraps the panel as the song page does, with a button that switches to a recording ("refused with the page on a recording (the sheet open, but hidden) and the page left there: said on coming back", and "…then seen back on the tab: gone on coming back").
+
+**B. A screen marked every loop's refusal as shown** (`useLoops.ts`). With no `loopId` the hook took every failed status write of the user's. A change to a loop of song A refused after A was left, then song B's overview opened and left: B marked A's refusal as shown and its clean-up removed it. The hook's options are now `{ onRefused, loopIds, isOnShow }`: `loopIds` is required, the loops the caller draws a status control for now, and only their refusals are marked and so put away. `SongLoops` and `LoopPanelBody` pass the ids of `loops.data` (undefined, so none, while the list is loading or its first read failed; the panel none under the loop form), the practice screen the active loop's while the prompt is up. `loopId` and `showing` are gone: an empty `loopIds` says both. This also closes Review's "left" case above, a refusal marked as shown while the list itself isn't drawn. Tests: `useLoops.test.tsx`, "leaving a screen keeps the refusal of a loop it never drew (another song's)…" and "a screen whose list has not loaded (no loops drawn) puts nothing away; once one is drawn, only that one's"; the older tests there say the same things in the new options.
+
+**Decisions**
+
+- The marking effect has no dependency list: what hides the sheet (a parent's attribute) is nothing the hook is given, so there is nothing to list that would re-run it. It returns before touching the cache when no loops are drawn or the screen is hidden, and otherwise reads the user's failed status writes (a handful at most). Every change of visibility renders the caller: the page's switch renders `SongPage` and with it the panel, and a refusal landing sets the hook's own `heard`.
+- `isOnShow` knows `hidden` only, not `inert` (the panel is inert behind the shortcut overlay, and still seen) and not a `display: none` from a class, which the app doesn't use to take mounted things away. Its comment says so.
+- `onRefused` still hears every refusal while the screen is up, another song's included (Review's "left" case for a replayed write): the finder then finds nothing. Unchanged.
+
+**Async windows and inputs** (the window is a status write on its way; what is new is in bold)
+
+- Refused with the list on show: marked, put away on leaving. As before.
+- Refused with the sheet closed, or under the loop form: not marked; marked when the list is next drawn with it. As before, now through `isOnShow` and `loopIds`.
+- **Refused with the page on a recording** (sheet open or closed): not marked; marked on the first render after the tab is back with the sheet open and the list up; kept if the page is left first.
+- **Refused for a loop the screen draws no row for** (another song's, or this song's before its list is read): never marked by this screen.
+- Left and opened again in one tick, StrictMode's double mount: as before (the leaving timer).
+
+**CI: `design.spec.ts:787` failed on the phone project** ("at 334 px": `pageWidth` 335, expected 334; three tries, so not a flake). The speed and Play row's width is its text's: two 44 px BPM steps round "120 BPM", wider than the pill's `min-w-28`. Locally that came to 334 px, and Review's finding 4 put the narrow layout's end at exactly 20.875rem and asserted a 334 px window had no sideways scroll. On CI's fonts the row is 335 px, so a 334 px window was a pixel too narrow, as a real phone's fonts could make it. Fixed in the CSS, not only the test: the narrow gap and ends now hold under 22.5rem (360 px), 25 px clear of the measured width (`PracticeSpeed.tsx`'s `endButtonClass`, `LoopPracticePage.tsx`'s row). The test asserts the page is the window's width, the row inside it and the ends still 44 px at 320, 328, 334, 344 and 359 px, and the full-size row (16 px gap, 56 px ends, page no wider) at 360 and 390 px. Checklist 6 has a new row, "A width measured on one machine, used as a boundary".
+
+**Files**
+
+- `src/lib/onShow.ts`, `src/lib/onShow.test.ts` (new)
+- `src/features/loops/useLoops.ts`, `useLoops.test.tsx`, `LoopPanel.tsx`, `LoopPanel.test.tsx`, `PracticeSpeed.tsx`
+- `src/features/song/SongOverviewPage.tsx`, `LoopPracticePage.tsx` (the hook's two other callers, and the row's breakpoint). `SongPage.tsx` untouched.
+- `tests/e2e/design.spec.ts`
+- `docs/review-checklist.md` (row 1 "Put away…" extended; row 6 new), `AGENTS.md` (the refusal rule's options)
+
+**Known gaps**
+
+- A refusal that lands in the same commit that hides the sheet is judged by the page as that commit left it (hidden), which is the safe side: kept.
+- The practice row can still be wider than its text allows for at 360 px and up if a font is more than 25 px wider than the ones measured; the page would pan by the excess.
+
+**How to verify**
+
+- `npm run check`: green, 148 test files passed and 1 skipped, 5943 tests passed and 2 skipped.
+- `E2E_PORT=4383 npx playwright test tests/e2e/design.spec.ts tests/e2e/practice.spec.ts tests/e2e/loops.spec.ts --project=phone --project=desktop`: 90 passed, 10 skipped by their own width conditions. The first run of this command, which also built and started the preview server, failed the 16 phone tests of `design.spec.ts` (the first 16 tests handed to the 16 workers, the login page among them) and passed the other 74; its errors were not kept. `design.spec.ts` on phone alone then passed 17 of 17, and the whole command again 90 of 90, so it is put down to the cold start, unproven.
+- `E2E_PORT=4383 npx playwright test tests/e2e/design.spec.ts -g "fits a 320 px phone" --project=phone --project=desktop --repeat-each=3`: 3 passed on phone, 3 skipped on desktop (the test is about phone widths).
+- By hand, for A: on a song with a tab and a recording, hold status writes (Batch 8 Build's recipe), open the loop sheet, "Mark finished" on a loop, switch to Original before the refusal, wait for it, then go back to the song's page: the loop is on the go again with "Couldn't mark the loop finished." under it.

@@ -317,7 +317,9 @@ function PracticePlayer({
   // A "Mark finished" refused here is said in the prompt; leaving puts that message away,
   // so it isn't under the loop on the song's page. Only what the prompt said: a refusal of
   // another loop's change, or one that came with no prompt up, is the song's page's to say.
-  useLoopStatusRefusals({ loopId: practice.activeLoop?.id, showing: askToFinish });
+  useLoopStatusRefusals({
+    loopIds: askToFinish && practice.activeLoop ? [practice.activeLoop.id] : [],
+  });
   const nothingToShow = snapshot.error === 'score' || snapshot.error === 'engine';
 
   return (
@@ -354,10 +356,11 @@ function PracticePlayer({
           </p>
         </div>
         {/* Play sits with the speed, in the middle: the two things pressed while practising
-            are one reach apart, not a screen's width (Shane, 2026-11-27). Under 334 px, the
-            row's own width, the two sit closer (and the pill's ends are narrower), so a
-            320 px phone has no sideways scroll. */}
-        <div className="col-span-2 row-start-2 flex items-center justify-self-center gap-4 max-[20.875rem]:gap-2 lg:col-span-1 lg:col-start-2 lg:row-start-1 short:col-span-1 short:col-start-2 short:row-start-1">
+            are one reach apart, not a screen's width (Shane, 2026-11-27). Under 360 px the
+            two sit closer (and the pill's ends are narrower, `endButtonClass`), so a 320 px
+            phone has no sideways scroll. The row is about 334 px at full size, by its text:
+            the switch is well above that, never at a width measured on one machine's fonts. */}
+        <div className="col-span-2 row-start-2 flex items-center justify-self-center gap-4 max-[22.5rem]:gap-2 lg:col-span-1 lg:col-start-2 lg:row-start-1 short:col-span-1 short:col-start-2 short:row-start-1">
           <PracticeSpeed loop={loop} player={player} snapshot={snapshot} gate={speedGate} />
           <span className="contents" {...PRACTICE_PLAY_ATTRIBUTES}>
             <PlayPauseButton player={player} snapshot={snapshot} round gate={playGate} />

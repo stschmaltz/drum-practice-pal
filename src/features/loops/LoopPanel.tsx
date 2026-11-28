@@ -54,6 +54,7 @@ import { editorOnPanel } from './loopPanelContent';
 import { LoopSpeedControl } from './LoopSpeedControl';
 import { LoopStatusButton } from './LoopStatusButton';
 import { countInClosesPanel, playLoopClosesPanel } from './useLoopPanelOpen';
+import { isOnShow } from '@/lib/onShow';
 import { useLoopStatusRefusals, type useLoops } from './useLoops';
 import { hasPickedBars, type LoopPractice } from './useLoopPractice';
 import { useSpeedMovedSinceChosen } from './useSpeedMovedSinceChosen';
@@ -197,7 +198,9 @@ export function LoopPanel({
         className="max-h-[45dvh] overflow-y-auto p-4 pt-1 md:max-h-[min(40dvh,30rem)]"
       >
         <LoopPanelBody
-          open={open}
+          // Read from the page, not from `open`: the song page hides the whole panel under a
+          // recording and keeps `open`, so an open sheet can be one nobody sees.
+          isOnShow={() => isOnShow(bodyRef.current)}
           songId={songId}
           player={player}
           snapshot={snapshot}
@@ -234,13 +237,15 @@ function showPlayingLoop(list: HTMLElement): void {
 
 type LoopPanelBodyProps = Pick<
   LoopPanelProps,
-  'open' | 'songId' | 'player' | 'snapshot' | 'practice' | 'loops' | 'outcome'
+  'songId' | 'player' | 'snapshot' | 'practice' | 'loops' | 'outcome'
 > & {
+  /** Whether the sheet's body is drawn now: open, and not hidden by the page. */
+  isOnShow: () => boolean;
   /** "Play loop" or "Restart loop" was pressed. Runs inside the tap: iOS only starts audio there. */
   onPlayLoop: (loop: Loop) => void;
 };
 
-type LoopListProps = Omit<LoopPanelBodyProps, 'open'> & {
+type LoopListProps = Omit<LoopPanelBodyProps, 'isOnShow'> & {
   onEdit: (loop: Loop) => void;
   /** A loop's status was changed from its item, which moves it to the other section. */
   onStatusSet: (loop: Loop, status: LoopStatus) => void;
@@ -252,7 +257,7 @@ type LoopListProps = Omit<LoopPanelBodyProps, 'open'> & {
 };
 
 function LoopPanelBody({
-  open,
+  isOnShow,
   songId,
   player,
   snapshot,
@@ -295,14 +300,16 @@ function LoopPanelBody({
   // Loops need the score: its bar count checks a range, and a loop can't play before it.
   const form = editorOnPanel(practice, snapshot);
   // And back again when the server refuses the change, which moves the loop back. Leaving
-  // the page puts away the refusals' messages that were on show: not one that came while
-  // the sheet was closed or the form was over the list, and was never seen.
+  // the page puts away the refusals' messages that were on show: those of the loops the
+  // list draws, and not one that came while the sheet was closed, hidden by the page (a
+  // recording on show) or under the form, and was never seen.
   useLoopStatusRefusals({
     onRefused: (loopId, refused) => {
       const find = findStatusButtonAfterRefusal(loopId, refused);
       if (find) focusWhenReady(find);
     },
-    showing: open && form === null,
+    loopIds: form === null ? (loops.data ?? []).map((loop) => loop.id) : [],
+    isOnShow,
   });
   // A deleted loop takes its buttons with it: focus goes to the next loop's Delete (the one
   // before, for the last loop listed), or to "New loop" when no loop is left.
