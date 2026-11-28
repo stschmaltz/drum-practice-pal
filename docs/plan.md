@@ -79,14 +79,14 @@ Four tables, all owned by `user_id` with row-level security. Files live in Stora
 
 **practice_sessions**
 
-| Field            | Type        | Notes                                                      |
-| ---------------- | ----------- | ---------------------------------------------------------- |
-| id               | uuid        | PK, generated client-side so offline writes are idempotent |
-| user_id, loop_id | uuid        | FKs; delete loop cascades                                  |
-| started_at       | timestamptz |                                                            |
-| duration_seconds | int         | Playback time only                                         |
-| speed_ratio      | numeric     | Speed at the end of the session                            |
-| repeats          | int         | Loop passes completed                                      |
+| Field            | Type        | Notes                                                            |
+| ---------------- | ----------- | ---------------------------------------------------------------- |
+| id               | uuid        | PK, generated client-side so offline writes are idempotent       |
+| user_id, loop_id | uuid        | FKs; delete loop cascades                                        |
+| started_at       | timestamptz |                                                                  |
+| duration_seconds | int         | Playback time only                                               |
+| speed_ratio      | numeric     | The speed most of the session was played at (the later on a tie) |
+| repeats          | int         | Loop passes completed                                            |
 
 **user_settings**
 
@@ -101,7 +101,7 @@ Four tables, all owned by `user_id` with row-level security. Files live in Stora
 **Rules**
 
 - Displayed BPM = `speed_ratio` x tempo at `start_bar` (jam mode uses the current bar). Editing BPM writes back a ratio.
-- A session is logged when loop playback stops after at least 30 seconds of play time (tunable constant).
+- A session is logged when loop playback stops after at least 30 seconds of play time (tunable constant), at the speed most of it was played at (the later on a tie), not the speed it ended on.
 - Reaching 100% prompts "Mark finished?"; it never finishes a loop automatically. A loop's speed is saved as it is played (no "Save speed").
 - A song is "in progress" when any of its loops is active; this is derived, not stored.
 
@@ -326,7 +326,7 @@ None left: every item was built in Unit 07 or is by ear, and those are rows of O
 **Goal:** remember what you practiced and what's on the go.
 
 - Session tracker: play time and loop passes; logs on stop after 30+ seconds or on leaving the page; updates `last_practiced_at`
-- Loop history: date, duration, speed
+- Loop history: one row per day practised, with the day's play time, the speed most of it was played at, and its passes (a row per session until Unit 20, batch 5)
 - Hitting target speed prompts "Mark finished?"
 - Finish and reopen loops; history kept
 - Home (On the go): active loops by last practiced, with song, current and target speed, last date; one tap into practice. Finished tab beside it
@@ -404,7 +404,6 @@ Every line here is closed by a batch of Unit 20, and carries its class, its id f
 - [FIX 13.01, batch 6] From 11: a 401 on a query still isn't treated as signed out (03 QA issue 3). Offline the token question is settled: supabase-js 2.119 never signs out for a refresh that only lacked a network, and an offline start opens on the stored session (`startingAuth`, `readStoredSession`).
 - [DECIDE D2: 13.05a, 13.05b, batch 6] From 11: a sign-out the server forces (a refused refresh) empties the device, outbox included, so practice not yet sent is lost. One by the user is off while offline and while a queued write is unanswered (11 Review), so on a connection that never answers (a captive portal reporting online) the user can't sign out until the write gives up or lands. Default (D2, option B): the outbox is kept across a forced sign-out and replayed when the same user signs in again, built without waiting; "Sign out anyway" with a warning discards unsent practice, so Shane is asked before it is built. (09 Review, 11 Build, 11 QA issue 3, 11 Review)
 - [FIX 13.10, batch 10] Files in Storage with no songs row are possible (failed rollbacks, deleted users, and since 13 Copilot review every upload whose insert answer was lost and whose look-up found no row: the file is kept, as the insert may still commit). Add a sweep script, or accept it. (02 QA, 04 Review, 13 Copilot review)
-- [DECIDE D4: 13.18b, batch 5] A stop logs a session each time, so one sitting with pauses is several rows in a loop's History (the practice screen's clock and the overview's summary already add a sitting up). Default built (D4, option B): History is one row per day. (09 Build)
 - [FIX 13.21, batch 8] A refused "Mark finished" or "Reopen" moves the loop back after focus has followed it to its new place, and focus falls to `<body>`. (10 Build; the shortcut announcements were done in 13 Build)
 - [FIX 13.26, batch 3] On a phone the tab (`/songs/:id/play`) opens scrolled 47 px sideways, clipping the clef. (06 QA, 12 Build)
 - [FIX 13.29, batch 3] From 12 Test (after QA fix round 2): a phone rotated to landscape during a count-in leaves the count-in number below the window (the score box at 284 to 518 px in a 390 px window, the window not scrolled): the score is brought on screen only once per start (`useScoreOnScreen` in `useJamMode.ts`), and the rotation's re-layout moves it after that. Bring the box on screen again after a width change while running, if it doesn't fight a user's own scroll. The same cause on a 320 px phone (640 x 320 landscape): turned to landscape, back, and to landscape again while playing, the window ends at the top with the beat cursor below it (box at 250 to 452 px). That rotation never crosses 768 px, so the fix watches the window's real width, not `useLayout`, which only changes at the breakpoint. (docs/units/12-visual-design.md, Test (after QA fix round 2), bug 1; QA (after QA fix round 2), issue 2)
@@ -699,7 +698,6 @@ Shane after using Unit 16's Stats page (2026-11-27): the idea is good, but the c
 
 **Carried forward**
 
-- [FIX 17.1, batch 5] A session stores only the speed it ended at (`sessionTracker`), so a session of ten minutes at 80% that ends on a nudge to 100% is still logged at 100%. The chart's per-day rule softens it; logging the speed with the most play time in the session would fix it at the source.
 - [FIX 17.3a, batch 9] From 17 Build (QA fix round 1): dates are written in the browser's locale inside English sentences ("the week of 8. Juni"; counts now follow the locale in a total and its change line alike, issue 4), where QA suggested `'en'` throughout. (docs/units/17-stats.md, Build (QA fix round 1))
 - [FIX 17.3b, batch 9] "Other" is still its own row for a single sixth song. (docs/units/17-stats.md, Build (QA fix round 1))
 - [FIX 17.4a, batch 9] From 17 Review: the Stats page's "Couldn't load your stats" takes its reason from the sessions read's error when there is one, also when it is the loops read that failed to load (`sessions.error ?? loops.error`, from Unit 16). (docs/units/17-stats.md, Review)
@@ -721,7 +719,7 @@ The triage is `docs/loose-ends.md` (2026-11-28): every Carried forward line chec
 2. Queued practice is never dropped: no write goes out as `anon`, and an outbox removal can't be replayed (13.23, 14.6). Done (docs/units/20-loose-ends.md, Batch 2)
 3. Tab page, the score stays put: at a logged session, a Pause during Play's scroll, a rotation, and with the clef on show on a phone (13.26, 13.29, 13.30, 13.31a); and when playback closes the loop sheet on a phone (20.4a, found in batch 4). It runs last
 4. Tab page, the loop sheet: starting playback with a count-in closes it so the number shows, focus and the playing loop are where they should be, typed bars come on screen (13.27a, 13.28a, 13.28b, 13.32). This is D1's default (keep the sheet and fix it), built. Done (docs/units/20-loose-ends.md, Batch 4); which count-ins close the sheet is D9
-5. Practice history: a session is logged at the speed most of it was played at (17.1), and History is a row per day (D4's default)
+5. Practice history: a session is logged at the speed most of it was played at (17.1), and History is a row per day (D4's default, built). Done (docs/units/20-loose-ends.md, Batch 5); what History says about a day with a try at full speed is D10
 6. Sign-in and sign-out: a refused token on a read recovers or goes to the login page (13.01), and unsent practice survives a forced sign-out (D2's default); "Sign out anyway", the other half of that default, discards unsent practice, so Shane is asked before it is built
 7. Recordings: a loaded video survives a dropped connection (D8's default), and `sandbox` on the frame once the Human check has tried it (14.2)
 8. Focus and small jumps: a refused status change, C to Off, the Songs list's cold start (13.21, 13.35c, 13.37a, 13.37b)
@@ -734,12 +732,13 @@ The triage is `docs/loose-ends.md` (2026-11-28): every Carried forward line chec
 - D1, whether the Tab page still plays loops. Default: keep the loop sheet and fix its faults (batch 4, built)
 - D2, unsent practice at a forced sign-out, and a Sign out that stays off (13.05a, 13.05b). Default: keep the outbox across a forced sign-out and offer "Sign out anyway" (batch 6; the second half is asked first, see below)
 - D3, time with the page hidden on a laptop (13.18a). Default: keep it as it is, a hidden page ends the session; nothing to build
-- D4, a loop's History by day (13.18b). Default: one row per day (batch 5)
+- D4, a loop's History by day (13.18b). Default: one row per day (batch 5, built)
 - D5, short stretches on several loops adding up (13.20). Default: keep the 30 seconds per stretch; nothing to build. Look again after the pedal check (Open human checks, row 10)
 - D6, the notation's size (13.36). Default: leave `NOTATION_SCALE` at 1; nothing to build. It waits on Shane reading a loop from the throne ("The look at the kit" row); raising it is a unit of its own
 - D7, the video beside the score on a phone on its side (14.1). Nothing is built until the "Recordings" row has been looked at; then a column beside the score only if one line of score isn't enough
 - D8, a playing video and a dropped connection (14.3). Default: a frame that has loaded is left alone (batch 7)
 - D9, which count-ins close the Tab page's loop sheet (from batch 4). Built: only the count-in that starts a run, and never while the loop form is open; a repeat's count-in is heard but not seen behind a sheet opened mid-loop. The other options are every count-in closing it, or a beat count in the sheet's header
+- D10, what History says about a day with a try at full speed (from batch 5). Built: one line under the History's total, the sentence the Stats page has under Loop progress ("Each day counts at the speed you spent the most time at…"). The other options are "mostly 80%" in each row, or the day's top speed beside it ("80%, up to 100%"), which needs the tracker to keep it
 
 Waits that stay, because only a real device can settle them: `sandbox` on the YouTube frame (14.2), D6 and D7.
 
@@ -777,6 +776,7 @@ Rewritten in the Unit 20 triage (2026-11-28) for the screens as they are now: th
 | 16, 17       | A week of practice with the songs-first flow: the speed stepper (±5%, ±1 BPM, typed), the overview's summary, and the Stats page read against what was really practised                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 19           | At the kit, a song with a YouTube link: line it up ("Bar 1 starts now" as the song comes in, and with the video paused on the downbeat) and play along on the tablet and on a phone in portrait. Whether a bar-by-bar mark is enough to read from and a turn a line early is early enough; whether a line-up by ear is always a little late (then a fixed reaction time comes off the press); how far a real recording drifts from its tab over a song and whether the nudges are enough                                                                                                                                                                       |
 | 19           | A real phone: "Type a time" brings up a keyboard with a colon and letters and no autocorrect bar in the way; with the video paused, a drag on YouTube's own bar moves the mark within a second; the first turn of the phone to its side mid-song keeps the bar being played on show. iPhone and iPad Safari (everything ran on Chromium): the player API in an iOS frame, Space from a Bluetooth keyboard. A video with an advert in it, if one turns up: does the mark hold still through it                                                                                                                                                                  |
+| 20           | **History by day.** After a real sitting that ends with a try at full speed, read the overview: the summary ("80% → 100%"), the loop's line (100%) and History's row for today (80%, with the line under the total saying a day counts at the speed most of it was played at). Does the 80% read as right, or as the 100% gone missing (D10)? Then with a week of rows on the phone, in the Tab page's loop sheet: can the speeds be read down the list at arm's length, though they don't line up and some rows wrap (20.5a)?                                                                                                                                 |
 
 ## Accepted
 
@@ -823,7 +823,7 @@ Real, known, and not worth fixing now, written down so nobody raises them again 
 
 - **13.31b** The loop sheet closed while the controls are folded makes the page too short for the Pause to scroll back, so the score moves by up to 32 px (12 QA after fix round 3, issue 1). Rare and small. Revisit if it is noticed at the kit.
 - **13.34a** "Mark finished?" sits in the playing loop's item, inside the sheet that "Play loop" closes on a phone, so the prompt for a loop opened already at full speed is behind the closed sheet (09 Build). Tab page only: the practice screen, where a loop is now practised, shows it under the score. Revisit if loops are still mostly finished from the Tab page.
-- **13.34c** A loop's History opens inline and makes a long item longer (09 Build). It shows ten rows, then "Show all", and gets shorter with a row per day (batch 5). Revisit if it is still long after that.
+- **13.34c** A loop's History opens inline and makes a long item longer (09 Build). It shows ten rows, then "Show all", and is a row per day since batch 5, with one line under its total saying how a day's speed is chosen (D10). Revisit if it is still long.
 - **13.35b** The sheet lists every loop of the song in one column with no grouping or paging (09 QA issue 6). A song with 30 loops was walked in 16 QA. Revisit at a song with far more.
 - **13.38a** On a phone with the sheet open and nothing playing, about 112 px of the score shows (08 QA issue 6). Only while a loop is being made or chosen. Revisit if picking bars under the sheet is too cramped at the kit (the "Making a loop" row of Open human checks).
 - **13.38b** A phone on its side with the sheet open leaves a 284 x 234 px score (08 QA). Same case, same reason, same check.
@@ -831,6 +831,13 @@ Real, known, and not worth fixing now, written down so nobody raises them again 
 - **20.4c** Correcting a typed bar number flashes the score to another bar and back: 12 to 13 by Backspace and "3" shows bar 12, bar 1, bar 13, each keystroke that makes a range scrolling at once (20 batch 4 QA issue 5). The eyes are on the field, on a phone the keyboard is over half the screen, and the last move is right. The cure is a short wait before scrolling, a timer in the form with its own cancel paths. Revisit if it is noticed with a phone's keyboard up (the "Making a loop" row of Open human checks).
 - **20.4d** Keyboard, a long list of loops: the first Tab from the reopened sheet's header goes to "New loop" at the top of the list, and the browser scrolls the list back there from the playing loop; the loop's speed is then many Tabs away (20 batch 4 QA issue 6). It is the browser bringing the focused control on show, which it must: stopping the scroll would leave focus on a button out of sight, and sending that Tab to the playing loop would change the sheet's Tab order. "Loop speed" in the controls bar opens the sheet with focus on the loop's speed. Revisit if anyone works a song with a dozen loops from the keyboard on the Tab page; then the header's next stop while a loop plays is that loop's item.
 - **20.4e** With the loop form open, Play with a count-in leaves the sheet open, so below 1024 px the number is behind it (what 13.32 was, for this case only). On purpose: taps on the score pick the form's bars for as long as it is open, and a sheet closed over the form hid that mode (20 batch 4 QA issue 3); a covered number is the lesser fault, and the clicks are heard. The same holds for a form cancelled or saved while it counts in: the sheet stays until the next start. Revisit if hearing a passage before saving it, with a count-in, is common on the Tab page; the practice screen's "Show whole song" form plays the picked bars and has no sheet.
+- **20.4f** "Play loop" for a saved loop that runs past the end of the loaded score is drawn enabled, and a press does nothing and says nothing (20 batch 4, Copilot review: `playLoop` refuses such a loop, and since that round the press no longer closes the sheet or moves focus either; the button's gate is still `canPlay` alone). Nobody found a way to reach it: the song's stored bar count, which the loop form and the database check a loop against, and the score loaded from the same file would have to disagree. Revisit if a loop is ever seen that the score lacks (a file replaced under a song, if that is ever built); then the button takes the action's own precondition and says why it is off.
+
+**A loop's History** (from Unit 20, batch 5; evidence in `docs/units/20-loose-ends.md`, Batch 5)
+
+- **20.5a** A History row is a run of text, not columns: the day and the time vary in width, so the speeds don't line up under one another at any size, the speed is in the same muted ink as the rest, and in the phone's loop sheet (332 px, where the BPM shows) rows that begin "N days ago" take two lines and the others one (20 batch 5 QA issue 2; `b5-390x844-sheet-history.png`, `b5-1440x900-overview-history.png`). Nothing is cut off or wrong, and the fix is a redesign of the row (a grid of day, time, speed, passes, the speed in `ink`), which wants real rows to judge it by. Revisit when Shane has read a week of his own rows on the phone (Open human checks, "History by day") and says the speeds can't be read down the list.
+- **20.5b** A session dated on a later day than the device's today is counted in History's "Today" row and on its own later day by the Stats page: for that loop History says "1 day" while its Stats row says "2 days" and its chart has a point on tomorrow, until tomorrow comes (20 batch 5 Test; `sessions.test.ts` pins the difference). It needs a device clock that was ahead when the session was logged (the server allows a day) or was put back since; time zones alone can't do it. Folding the day in Stats too means giving `dailySpeeds` the time and passing it through `loopProgress` and its callers, for a case nobody has seen. Revisit if a real History and its chart are ever seen to disagree; then Stats folds a day after today into today, as `historyDays` does.
+- **20.5c** The rule for a day's speed is written twice, in `historyDays` (`practice/sessions.ts`) and in the Stats chart's `dailySpeeds` (`stats/loopProgress.ts`), held together by a test that runs both over one table. Not shared on purpose: History also keeps the exact ratio played (for a typed BPM) and folds a day after today into today, and `dailySpeeds` does neither. Revisit if the rule changes (a third place needing it, or D10 answered with the day's top speed); then one function gives both.
 
 **Recordings**
 

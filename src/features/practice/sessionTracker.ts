@@ -11,12 +11,23 @@
  *   on, so three 15-second goes at a fill are one session.
  * - Leaving the loop (another loop, back to the whole song, the loop deleted,
  *   the page left) ends the session: it is logged if long enough, dropped if not.
+ * - A session's speed is the speed most of it was played at (the later one on
+ *   a tie), not the speed it ended on: ten minutes at 80% and a last minute's
+ *   try at 100% is practice at 80% (Unit 17).
  */
 import type { PlayerStatus } from '@/features/player/PlayerService';
+import { ratioToPercent } from '@/features/player/speed';
 import { SESSION_MAX_DURATION_SECONDS } from '@/lib/schema';
 
 /** Play time a session needs before it is worth logging. Tunable. */
 export const SESSION_MIN_PLAY_SECONDS = 30;
+
+/** Play time at one speed within a session. */
+export interface SpeedTime {
+  /** The ratio last played of those that show as this speed's percent. */
+  speedRatio: number;
+  playedMs: number;
+}
 
 /** A session under way: one loop, from the first moment it sounded. */
 export interface OpenSession {
@@ -27,11 +38,20 @@ export interface OpenSession {
   startedAt: number;
   /** Play time banked from stretches that have ended, in ms. */
   playedMs: number;
+  /**
+   * The banked play time by speed: one entry per speed as the app shows it (a
+   * whole percent), the speed played most recently last. Adds up to `playedMs`.
+   * Only speeds with play time are here: a stretch of no time adds none.
+   */
+  speedTimes: readonly SpeedTime[];
   /** When the stretch sounding now began; null while paused, counting in or hidden. */
   playingSince: number | null;
   /** Loop passes completed. */
   repeats: number;
-  /** The speed last seen while this loop was the one being practiced. */
+  /**
+   * The speed last seen while this loop was the one being practiced: what the
+   * stretch sounding now is played at, or the next one will be.
+   */
   speedRatio: number;
 }
 
@@ -84,27 +104,63 @@ export function playedMsAt(session: OpenSession, now: number): number {
   return session.playedMs + current;
 }
 
-function recordOf(session: OpenSession, playedMs: number, speedRatio: number): SessionRecord {
+/**
+ * The session with the stretch sounding now, if any, banked under the speed
+ * it was played at. Every change of speed and every stop goes through here,
+ * so a stretch is only ever at one speed.
+ *
+ * A stretch of no time (a speed set and changed or stopped in the same
+ * instant, or the clock set back under it) was not played: it ends, but it
+ * neither makes its speed the one played last nor replaces the ratio that was.
+ */
+function withStretchBanked(session: OpenSession, now: number): OpenSession {
+  if (session.playingSince === null) return session;
+  const stretchMs = Math.max(0, now - session.playingSince);
+  if (stretchMs === 0) return { ...session, playingSince: null };
+  const percent = ratioToPercent(session.speedRatio);
+  const isSameSpeed = (time: SpeedTime) => ratioToPercent(time.speedRatio) === percent;
+  const before = session.speedTimes.find(isSameSpeed)?.playedMs ?? 0;
+  return {
+    ...session,
+    playedMs: session.playedMs + stretchMs,
+    speedTimes: [
+      ...session.speedTimes.filter((time) => !isSameSpeed(time)),
+      { speedRatio: session.speedRatio, playedMs: before + stretchMs },
+    ],
+    playingSince: null,
+  };
+}
+
+/**
+ * The speed with the most banked play time; on a tie the one played later.
+ * Speeds are told apart as the app shows them, so 85 BPM typed twice (two
+ * ratios, both "71%") is one speed. Before anything is banked, the speed set.
+ */
+function mainSpeedRatio(session: OpenSession): number {
+  let main: SpeedTime | null = null;
+  for (const time of session.speedTimes) {
+    if (main === null || time.playedMs >= main.playedMs) main = time;
+  }
+  return main?.speedRatio ?? session.speedRatio;
+}
+
+/** A session with nothing still sounding (withStretchBanked), as the record to log. */
+function recordOf(session: OpenSession): SessionRecord {
+  const { playedMs } = session;
   return {
     id: session.id,
     loopId: session.loopId,
     startedAt: new Date(session.startedAt).toISOString(),
     // The database refuses longer; a clock that jumped ahead mid-session is the only way there.
     durationSeconds: Math.min(Math.round(playedMs / 1000), SESSION_MAX_DURATION_SECONDS),
-    speedRatio,
+    speedRatio: mainSpeedRatio(session),
     repeats: session.repeats,
   };
 }
 
-/** The session as a record if it has enough play time to be logged, else null. */
-function recordIfLongEnough(
-  session: OpenSession,
-  now: number,
-  speedRatio: number,
-  minPlayMs: number,
-): SessionRecord | null {
-  const playedMs = playedMsAt(session, now);
-  return playedMs >= minPlayMs ? recordOf(session, playedMs, speedRatio) : null;
+/** The session, nothing still sounding, as a record if it has enough play time to be logged, else null. */
+function recordIfLongEnough(session: OpenSession, minPlayMs: number): SessionRecord | null {
+  return session.playedMs >= minPlayMs ? recordOf(session) : null;
 }
 
 /** A session opens the moment a loop sounds; in jam mode, or before that moment, there is none. */
@@ -115,6 +171,7 @@ function sessionOpenedBy(input: TrackerInput, newId: () => string): TrackerState
     loopId: input.loopId,
     startedAt: input.now,
     playedMs: 0,
+    speedTimes: [],
     playingSince: input.now,
     repeats: 0,
     speedRatio: input.speedRatio,
@@ -133,42 +190,38 @@ export function observe(
   const minPlayMs = minPlaySeconds * 1000;
 
   if (state && state.loopId !== input.loopId) {
-    // Left the loop. Its own last speed, not the input's: "Play loop" on another
-    // loop sets that loop's saved speed in the same step.
-    const ended = recordIfLongEnough(state, input.now, state.speedRatio, minPlayMs);
+    // Left the loop. Only its own speeds count, never the input's: "Play loop"
+    // on another loop sets that loop's saved speed in the same step.
+    const ended = recordIfLongEnough(withStretchBanked(state, input.now), minPlayMs);
     return { state: sessionOpenedBy(input, newId), ended };
   }
   if (!state) return { state: sessionOpenedBy(input, newId), ended: null };
 
   if (input.phase === 'sounding') {
+    if (state.playingSince !== null && input.speedRatio === state.speedRatio) {
+      return { state, ended: null };
+    }
+    // A new stretch: after a pause or a count-in, or because the speed changed
+    // mid-play, which banks what was played at the old speed.
     return {
       state: {
-        ...state,
-        playingSince: state.playingSince ?? input.now,
+        ...withStretchBanked(state, input.now),
+        playingSince: input.now,
         speedRatio: input.speedRatio,
       },
       ended: null,
     };
   }
 
+  // The stretch that just ended, if one was running, was played at the speed
+  // the tracker had, whatever speed arrives with the stop.
+  const banked = withStretchBanked(state, input.now);
   // A stop is where a session is logged, once it is long enough. A count-in is
   // only a gap in it, and a session too short so far waits for more.
-  const ended =
-    input.phase === 'stopped'
-      ? recordIfLongEnough(state, input.now, input.speedRatio, minPlayMs)
-      : null;
+  const ended = input.phase === 'stopped' ? recordIfLongEnough(banked, minPlayMs) : null;
   if (ended) return { state: null, ended };
-  return {
-    state: {
-      ...state,
-      // Bank the stretch that just ended, if one was running.
-      playedMs: playedMsAt(state, input.now),
-      playingSince: null,
-      // A speed set while paused is the speed the next stretch plays at.
-      speedRatio: input.speedRatio,
-    },
-    ended: null,
-  };
+  // A speed set while paused is the speed the next stretch plays at.
+  return { state: { ...banked, speedRatio: input.speedRatio }, ended: null };
 }
 
 /** A loop pass ended (the player's `loopWrapped`). Nothing to count outside a session. */

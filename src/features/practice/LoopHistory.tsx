@@ -1,28 +1,29 @@
-import { useState } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { LoadingLine } from '@/components/StatusMessages';
-import { buttonClass } from '@/components/styles';
+import { buttonClass, focusRing } from '@/components/styles';
 import { speedLabel } from '@/features/loops/loopLabels';
 import { waitsForNetwork } from '@/lib/network';
+import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
+  DAY_SPEED_NOTE,
   durationLabel,
-  practiceDateLabel,
-  practiceTimeLabel,
+  historyDays,
   repeatsLabel,
-  sortSessions,
   totalPracticeSeconds,
-  type PracticeSession,
+  type HistoryDay,
 } from './sessions';
 import { SESSION_MIN_PLAY_SECONDS } from './sessionTracker';
 import { useLoopSessions } from './useSessions';
 
-/** Sessions on show before "Show all": a few weeks of regular practice. */
+/** Days on show before "Show all": a few weeks of regular practice. */
 export const HISTORY_PREVIEW_COUNT = 10;
 
 /**
- * One loop's practice history, newest first: when, for how long, at what
- * speed. Fetched when shown, so a list of loops costs nothing until a history
- * is opened.
+ * One loop's practice history, a row per day practised, newest first: the
+ * day, its play time, the speed most of it was played at and its passes
+ * (historyDays in sessions.ts). Fetched when shown, so a list of loops costs
+ * nothing until a history is opened.
  */
 export function LoopHistory({
   loopId,
@@ -36,6 +37,10 @@ export function LoopHistory({
 }) {
   const sessions = useLoopSessions(loopId);
   const [showAll, setShowAll] = useState(false);
+  // "Show all" leaves the page with its own press: focus goes on to the first day it
+  // brought on show, so a keyboard or screen reader carries on from there, not from <body>.
+  const firstNewDay = useRef<HTMLLIElement>(null);
+  const focusWhenReady = useFocusWhenReady();
 
   if (waitsForNetwork(sessions)) {
     return (
@@ -62,9 +67,8 @@ export function LoopHistory({
     );
   }
 
-  const sorted = sortSessions(sessions.data);
-  const shown = showAll ? sorted : sorted.slice(0, HISTORY_PREVIEW_COUNT);
-  const now = new Date();
+  const days = historyDays(sessions.data, new Date());
+  const shown = showAll ? days : days.slice(0, HISTORY_PREVIEW_COUNT);
 
   return (
     <section
@@ -72,17 +76,30 @@ export function LoopHistory({
       className="flex flex-col gap-2 rounded-control border border-line bg-surface p-3"
     >
       <p className="text-sm font-semibold text-ink-soft" data-testid="loop-history-summary">
-        {sorted.length === 1 ? '1 session' : `${sorted.length} sessions`} ·{' '}
-        {durationLabel(totalPracticeSeconds(sorted))} in all
+        {days.length === 1 ? '1 day' : `${days.length} days`} ·{' '}
+        {durationLabel(totalPracticeSeconds(sessions.data))} in all
       </p>
+      <p className="text-sm text-ink-muted">{DAY_SPEED_NOTE}</p>
       <ol className="flex flex-col divide-y divide-line">
-        {shown.map((session) => (
-          <HistoryItem key={session.id} session={session} tempo={tempo} now={now} />
+        {shown.map((day, index) => (
+          <HistoryItem
+            key={day.key}
+            day={day}
+            tempo={tempo}
+            focusRef={showAll && index === HISTORY_PREVIEW_COUNT ? firstNewDay : undefined}
+          />
         ))}
       </ol>
-      {sorted.length > shown.length && (
-        <button type="button" className={buttonClass} onClick={() => setShowAll(true)}>
-          Show all {sorted.length} sessions
+      {days.length > shown.length && (
+        <button
+          type="button"
+          className={buttonClass}
+          onClick={() => {
+            setShowAll(true);
+            focusWhenReady(() => firstNewDay.current);
+          }}
+        >
+          Show all {days.length} days
         </button>
       )}
     </section>
@@ -90,21 +107,25 @@ export function LoopHistory({
 }
 
 function HistoryItem({
-  session,
+  day,
   tempo,
-  now,
+  focusRef,
 }: {
-  session: PracticeSession;
+  day: HistoryDay;
   tempo: number | null;
-  now: Date;
+  /** Given to the one row that takes focus when "Show all" goes. */
+  focusRef?: RefObject<HTMLLIElement | null>;
 }) {
   return (
-    <li className="py-1.5 text-sm text-ink-muted tabular-nums">
-      <time dateTime={session.started_at}>
-        {practiceDateLabel(session.started_at, now)}, {practiceTimeLabel(session.started_at)}
-      </time>{' '}
-      · {durationLabel(session.duration_seconds)} · {speedLabel(session.speed_ratio, tempo)} ·{' '}
-      {repeatsLabel(session.repeats)}
+    <li
+      ref={focusRef}
+      tabIndex={focusRef ? -1 : undefined}
+      className={`py-1.5 text-sm text-ink-muted tabular-nums ${focusRing}`}
+    >
+      <time dateTime={day.key}>{day.label}</time> · {durationLabel(day.seconds)} ·{' '}
+      {speedLabel(day.speedRatio, tempo)} ·{' '}
+      {/* One piece, so a narrow row never leaves "passes" alone on a line (20 batch 5 QA). */}
+      <span className="whitespace-nowrap">{repeatsLabel(day.repeats)}</span>
     </li>
   );
 }
