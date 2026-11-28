@@ -138,6 +138,8 @@ Each is one Build session. Files listed are the ones the batch may change (their
 
 ### Batch 1. A slow connection never holds up Play (M)
 
+**Done** (branch `le-1-slow-connection`; `docs/units/20-loose-ends.md`, Batch 1). What it chose to live with is in the plan's Accepted section as 20.1a to 20.1d.
+
 - **13.06** A loop's practice screen opened on a connection that hangs keeps Play off until the loops read gives up. `useRequestedLoop` waits for a read since the page opened whenever the cached list is stale (over 30 s), and `canPlayLoopPractice` needs the loop open. Fix: cap the wait (about 2 s) in `useRequestedLoop`, then open from the cached list as it does offline; a later answer with another speed still lands through the list. Test: `LoopPracticePage.test.tsx` with `loops.holdNext('select')` and fake time: Play is enabled after the cap, and the held answer does not reopen or restart the loop.
 - **13.14, 13.16a** postgrest-js retries every failed GET three times (1, 2, 4 s) under TanStack Query's two retries, so "Loading loops…" lasts about 24 s with no connection and an upload's lost look-up about 33 s. Fix: turn postgrest's own retry off (the client option, or `.retry(false)` in each read; both are in the installed typings) and keep it only on `uploadSong`'s look-up by id. Test: a fake-timer test that a failed loops read shows its error within TanStack's own back-off (about 3 s); `songsApi.test.ts` keeps the look-up's behaviour.
 - **14.4b** `?source=` on a hanging connection shows "Loading the recording…" for as long as the links read retries. Shortened by the same change; cap it like 13.06 in `useSongSources.ts` (fall back to Tab, which needs no network).

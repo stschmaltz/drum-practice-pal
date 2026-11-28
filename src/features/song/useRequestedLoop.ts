@@ -21,7 +21,7 @@ export type RequestedLoopList = Pick<
  * loop is read again once. A read that fails, or can't start (offline), leaves
  * the cached list to go by.
  *
- * The wait has an end (`FRESH_READ_WAIT_MS` from the screen opening on this
+ * The wait has an end (`FRESH_READ_WAIT_MS` from the player opening on this
  * id): Play is off until the loop is open, and a connection that hangs must
  * not keep it off for a loop the device already has. The loop then opens from
  * the cached list, as it does offline. Only a loop the list has: one it lacks

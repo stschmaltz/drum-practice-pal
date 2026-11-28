@@ -1216,20 +1216,29 @@ describe('LoopPracticePage', () => {
       expect(loops.sent('update')).toEqual([{ speed_ratio: 0.95 }]);
     });
 
-    it('a nudge before the loop is open saves nothing to it', async () => {
-      const { user } = await openOnAHungRead();
-      const slower = screen.getByRole('button', { name: 'Slower by 5%' });
-      // The press is heard: the speed control works as soon as the score is in.
-      expect(slower).toBeEnabled();
-      await user.click(slower);
-      expect(speed()).toHaveTextContent('95%');
+    // Unit 20 Review: a nudge made before the loop was open was played and then dropped
+    // (nothing saved it, and the loop opened at its saved speed over it). The stepper and
+    // the speed keys wait for the loop, as Play does.
+    it('the speed stepper and the speed keys are off until the loop is open, so no nudge is played and then dropped', async () => {
+      const { user, engine } = await openOnAHungRead();
+      const stepper = within(screen.getByRole('group', { name: 'Loop speed' }));
+      for (const control of stepper.getAllByRole('button')) expect(control).toBeDisabled();
+      const speedsSet = engine.setSpeed.mock.calls.length;
+      await user.keyboard('{ArrowDown}');
+      await settle();
+      expect(speed()).toHaveTextContent('100%');
+      expect(engine.setSpeed).toHaveBeenCalledTimes(speedsSet);
 
       later(FRESH_READ_WAIT_MS);
       await waitFor(() => expect(playButton()).toBeEnabled());
-      await settle();
-      // Opened as a link opens it, at the loop's saved speed; the nudge was the player's alone.
+      for (const control of stepper.getAllByRole('button')) expect(control).toBeEnabled();
       expect(speed()).toHaveTextContent('100%');
       expect(loops.sent('update')).toEqual([]);
+
+      // The same key is heard once the loop is open, and what it sets is saved.
+      await user.keyboard('{ArrowDown}');
+      expect(speed()).toHaveTextContent('95%');
+      await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.95 }]));
     });
 
     it('Space plays nothing inside the wait, and plays the loop once the wait is over', async () => {
