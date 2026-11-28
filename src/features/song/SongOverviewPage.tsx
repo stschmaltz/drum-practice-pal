@@ -76,7 +76,17 @@ export function SongOverviewPage() {
   const [params] = useSearchParams();
   const redirect = legacyLoopRedirect(id, params);
   if (redirect) return <Navigate to={redirect} replace />;
-  return <SongGate songId={id}>{(song) => <SongOverview song={song} />}</SongGate>;
+  return (
+    <SongGate songId={id}>
+      {(song) => (
+        // Back or Forward between two songs whose rows are cached unmounts nothing by
+        // itself: the key makes each song's overview its own, so what was open on one (the
+        // recordings form, a delete question) isn't open on the next, and leaving one for
+        // another puts its refusals away as leaving for any other screen does.
+        <SongOverview key={song.id} song={song} />
+      )}
+    </SongGate>
+  );
 }
 
 function SongOverview({ song }: { song: Song }) {
