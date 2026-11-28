@@ -1,3 +1,4 @@
+import { ChartTable } from './ChartTable';
 import { barRects, niceCeiling } from './chartScale';
 import { chartTextClass, chartWidthClass } from './chartText';
 import { dayOfMonth, narrowWeekday, shortDate } from './dateLabels';
@@ -86,7 +87,7 @@ export function DailyMinutesChart({ days, now }: { days: readonly PracticeDay[];
       <figcaption className="text-sm text-ink-muted" data-testid="daily-summary">
         {minutesLabel(seconds)} over {practised} of the last {days.length} days.
       </figcaption>
-      <table className="sr-only">
+      <ChartTable>
         <caption>Minutes practised per day</caption>
         <thead>
           <tr>
@@ -102,7 +103,7 @@ export function DailyMinutesChart({ days, now }: { days: readonly PracticeDay[];
             </tr>
           ))}
         </tbody>
-      </table>
+      </ChartTable>
     </figure>
   );
 }

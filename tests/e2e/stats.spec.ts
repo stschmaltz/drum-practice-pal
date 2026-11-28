@@ -756,6 +756,23 @@ function noonOf(daysBack: number): Date {
 const sidewaysScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
+/**
+ * Whatever is hidden from the eye but takes room in the page all the same: each `sr-only` element
+ * in `main` wider than its 1 px box. A `<table>` is: it grows to its cells whatever width it is
+ * given, and with `sr-only`'s `nowrap` that is every heading in a line, which only stays inside
+ * a 320 px window while the machine's font is narrow (20 batch 9, Copilot review: 29 px of
+ * sideways scroll on CI's Linux fonts, none on Windows'). A width, so no font decides it.
+ */
+const hiddenTextTakingRoom = (page: Page) =>
+  page.evaluate(() =>
+    Array.from(document.querySelectorAll('main .sr-only'))
+      .filter((element) => element.getBoundingClientRect().width > 1.5)
+      .map(
+        (element) =>
+          `${element.tagName.toLowerCase()} "${(element.textContent ?? '').slice(0, 30)}": ${Math.round(element.getBoundingClientRect().width)} px`,
+      ),
+  );
+
 // Plan, QA focus "one session ever": day one must not read as a failure.
 test('after one session ever, every section speaks from that session', async ({ page, user }) => {
   const loop = await addLoop(user, await addSong(user, 'First Song'), 'First Loop');
@@ -1102,6 +1119,9 @@ test('on a 320 px phone a 26-week practice-days map opens on its newest week, to
   expect(todayEdges.x).toBeGreaterThanOrEqual(boxEdges.x);
   expect(todayEdges.x + todayEdges.width).toBeLessThanOrEqual(boxEdges.x + boxEdges.width + 0.5);
   expect(await sidewaysScroll(page)).toBeLessThanOrEqual(0);
+  // Nor would it in a wider font: the tables behind the charts take no room.
+  await expect(page.getByRole('table')).toHaveCount(2);
+  expect(await hiddenTextTakingRoom(page)).toEqual([]);
 
   // Scrolled back by the reader, it stays there when the page draws again (another period).
   await box.evaluate((element) => {
@@ -1388,7 +1408,9 @@ for (const { locale, june8, thousand } of [
       const written = await everythingWritten(page);
       // Not vacuous: the page, its 1,100-row table and the map's tooltips are all in it.
       expect(written.length).toBeGreaterThan(3000);
-      expect(written).toContain('Jun 8');
+      // A June 8 among them, with its year when the run is before June 8 of its own
+      // (the rows are counted back from today, and a date in another year carries it).
+      expect(written.filter((piece) => /^Jun 8(, \d{4})?$/.test(piece)).length).toBeGreaterThan(0);
       // No letter and no digit that isn't English's.
       const foreign = written.filter((piece) =>
         /[^\p{ASCII}]/u.test(piece.replace(/[–→·…’‘“”]/g, '')),

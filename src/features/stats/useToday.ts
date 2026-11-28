@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { keepDateFormatsIn } from './dateLabels';
 import { addDays, dayKeyOf, type DayKey } from './days';
 
 /**
@@ -16,11 +17,28 @@ export function msUntilNextCheck(now: Date): number {
   return Math.min(addDays(now, 1).getTime() - now.getTime(), DAY_CHECK_MS);
 }
 
-const currentDay = (): DayKey => dayKeyOf(new Date());
+/** The device's time zone by name ("America/Edmonton"), as it is set now. */
+const deviceTimeZone = (): string => new Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /**
- * Tells `onCheck` whenever the local day may have changed: at each midnight,
- * each minute between, and when the page is shown again (a phone unlocked, a
+ * What a redraw is keyed on: the local day, and the zone it is a day of. The
+ * zone too, because a change of zone can leave today's date as it was and
+ * still move sessions from one day to another (at 20:00 UTC on the 27th, UTC
+ * to UTC-7 keeps the 27th and takes a 02:00 UTC session back to the 26th), so
+ * totals and streaks counted before it are wrong after (Copilot review on
+ * #42). By name, not by offset: two zones an offset apart today can differ on
+ * the days sessions were played. A string, so it is equal while nothing moved.
+ */
+function currentDay(): `${DayKey}@${string}` {
+  const zone = deviceTimeZone();
+  // Before the redraw this asks for, and before any other render reads it.
+  keepDateFormatsIn(zone);
+  return `${dayKeyOf(new Date())}@${zone}`;
+}
+
+/**
+ * Tells `onCheck` whenever the local day or the time zone may have changed: at
+ * each midnight, each minute between, and when the page is shown again (a phone unlocked, a
  * tab come back to). Every wait is worked out from the clock as it is then,
  * never from when the last timer was meant to fire, so one that comes early
  * or late, or a clock set forward or back, only moves the next check.
@@ -50,7 +68,8 @@ function watchDay(onCheck: () => void): () => void {
 /**
  * The time now, for a screen that counts in local days ("today", this week, a
  * streak): the component is drawn again when the day changes, so a page left
- * open past midnight doesn't go on showing yesterday's today (17 Review).
+ * open past midnight doesn't go on showing yesterday's today (17 Review), and
+ * when the device's time zone does, which changes what day each session was on.
  * Each render gets the clock as it is, as `new Date()` at render did.
  *
  * The day is an external store (`useSyncExternalStore`), not state set from

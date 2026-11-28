@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 import { focusRing } from '@/components/styles';
+import { ChartTable } from './ChartTable';
 import { narrowWeekday, shortDate, shortMonth } from './dateLabels';
 import {
   heatmapLine,
@@ -229,7 +230,7 @@ function Legend() {
 /** A row a week, not a row a day (17 QA issue 3): the days' own minutes are a hover away. */
 function WeeksTable({ weeks, now }: { weeks: HeatmapWeeks; now: Date }) {
   return (
-    <table className="sr-only">
+    <ChartTable>
       <caption>Practice days by week</caption>
       <thead>
         <tr>
@@ -247,6 +248,6 @@ function WeeksTable({ weeks, now }: { weeks: HeatmapWeeks; now: Date }) {
           </tr>
         ))}
       </tbody>
-    </table>
+    </ChartTable>
   );
 }

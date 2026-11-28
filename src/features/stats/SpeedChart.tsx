@@ -1,3 +1,4 @@
+import { ChartTable } from './ChartTable';
 import { linePoints, pathOf, speedAxis, type Point } from './chartScale';
 import { CHART_FONT, chartTextClass, chartWidthClass } from './chartText';
 import { axisDates, shortDate } from './dateLabels';
@@ -299,7 +300,7 @@ export function SpeedChart({
           </text>
         ))}
       </svg>
-      <table className="sr-only">
+      <ChartTable>
         <caption>Speed of {loopName} on each practice day</caption>
         <thead>
           <tr>
@@ -317,7 +318,7 @@ export function SpeedChart({
             </tr>
           ))}
         </tbody>
-      </table>
+      </ChartTable>
     </figure>
   );
 }

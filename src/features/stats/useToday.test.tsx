@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { hoursInLocalDay, inTimeZone } from '@/test/timeZone';
+import { shortDate } from './dateLabels';
 import { dayKeyOf } from './days';
 import { DAY_CHECK_MS, msUntilNextCheck, useToday } from './useToday';
 
@@ -143,12 +144,16 @@ describe('useToday', () => {
 
   // Unit 20, batch 9 Test: the clock stays, the zone moves (a flight landed, the device set to another zone).
   describe('when the device changes time zone', () => {
-    const HOME = 'America/Edmonton';
-    inTimeZone(HOME);
+    // Fixed offsets, not places: a place's rules change with the machine's tz data (Alberta
+    // stopped putting its clocks back in 2026, so "America/Edmonton" was UTC-7 on a laptop with
+    // 2025's data and UTC-6 in CI, and its midnight an hour apart). POSIX signs: GMT+7 is UTC-7.
+    const WEST = 'Etc/GMT+7';
+    const EAST = 'Etc/GMT-9';
+    inTimeZone(WEST);
     afterEach(() => {
-      process.env.TZ = HOME;
+      process.env.TZ = WEST;
     });
-    // 02:00 UTC on the 27th: 19:00 on the 26th in Edmonton, 11:00 on the 27th in Tokyo.
+    // 02:00 UTC on the 27th: 19:00 on the 26th at UTC-7, 11:00 on the 27th at UTC+9.
     const instant = new Date('2026-11-27T02:00:00Z');
 
     it('east, into tomorrow: the day moves on at the next check, then at the new zone’s midnight', () => {
@@ -156,14 +161,14 @@ describe('useToday', () => {
       const today = renderToday();
       expect(today.day()).toBe('2026-11-26');
 
-      process.env.TZ = 'Asia/Tokyo';
+      process.env.TZ = EAST;
       pass(59_000);
       expect(today.renders()).toBe(1);
       pass(1000);
       expect(today.day()).toBe('2026-11-27');
       expect(today.renders()).toBe(2);
 
-      // Tokyo's midnight is 15:00 UTC, not Edmonton's 07:00.
+      // The east's midnight is 15:00 UTC, not the west's 07:00.
       vi.setSystemTime(new Date('2026-11-27T07:00:30Z'));
       pass(MINUTE);
       expect(today.day()).toBe('2026-11-27');
@@ -178,21 +183,77 @@ describe('useToday', () => {
     });
 
     it('west, back into yesterday: the day goes back when the page is looked at', () => {
-      process.env.TZ = 'Asia/Tokyo';
+      process.env.TZ = EAST;
       vi.setSystemTime(instant);
       const today = renderToday();
       expect(today.day()).toBe('2026-11-27');
 
-      process.env.TZ = HOME;
+      process.env.TZ = WEST;
       lookAgain();
       expect(today.day()).toBe('2026-11-26');
-      // And on again at Edmonton's midnight, 07:00 UTC.
+      // And on again at the west's midnight, 07:00 UTC.
       vi.setSystemTime(new Date('2026-11-27T06:58:00Z'));
       pass(MINUTE);
       pass(59_000);
       expect(today.day()).toBe('2026-11-26');
       pass(1000);
       expect(today.day()).toBe('2026-11-27');
+    });
+
+    // Copilot review on #42: the date can stay while the zone moves what a day is.
+    describe('to a zone where it is the same date', () => {
+      // 20:00 UTC on the 27th is 13:00 on the 27th at UTC-7: one date in both.
+      const afternoon = new Date('2026-11-27T20:00:00Z');
+      /** A session at 02:00 UTC on the 27th: that day in UTC, the evening of the 26th at UTC-7. */
+      const session = new Date('2026-11-27T02:00:00Z');
+      /** The hook's render, with the day the session falls on as that render saw it. */
+      function renderSessionDay() {
+        let renders = 0;
+        const view = renderHook(() => {
+          renders += 1;
+          return { today: dayKeyOf(useToday()), session: dayKeyOf(new Date(session)) };
+        });
+        return { seen: () => view.result.current, renders: () => renders };
+      }
+
+      it('draws again when the page is looked at, so each session is counted on its day there', () => {
+        process.env.TZ = 'UTC';
+        vi.setSystemTime(afternoon);
+        const view = renderSessionDay();
+        expect(view.seen()).toEqual({ today: '2026-11-27', session: '2026-11-27' });
+
+        process.env.TZ = WEST;
+        lookAgain();
+        expect(view.seen()).toEqual({ today: '2026-11-27', session: '2026-11-26' });
+        expect(view.renders()).toBe(2);
+        // Once for the change, not at every check after it.
+        lookAgain();
+        pass(MINUTE);
+        expect(view.renders()).toBe(2);
+      });
+
+      it('draws again within a minute with the page left as it is', () => {
+        process.env.TZ = 'UTC';
+        vi.setSystemTime(afternoon);
+        const view = renderSessionDay();
+        process.env.TZ = WEST;
+        pass(59_000);
+        expect(view.renders()).toBe(1);
+        pass(1000);
+        expect(view.seen().session).toBe('2026-11-26');
+        expect(view.renders()).toBe(2);
+      });
+
+      it('writes its dates in the new zone, not with formatters kept from the old one', () => {
+        process.env.TZ = 'UTC';
+        vi.setSystemTime(afternoon);
+        const view = renderHook(() => shortDate(session, useToday()));
+        expect(view.result.current).toBe('Nov 27');
+
+        process.env.TZ = WEST;
+        lookAgain();
+        expect(view.result.current).toBe('Nov 26');
+      });
     });
   });
 

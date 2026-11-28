@@ -6,6 +6,7 @@ import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/
 import { sessionKeys } from '@/features/practice/sessionKeys';
 import { loopRow } from '@/test/loopTable';
 import { inBrowserLocale } from '@/test/browserLocale';
+import { inTimeZone } from '@/test/timeZone';
 import { renderRoutes, settle, testQueryClient } from '@/test/render';
 import { BADGES, badgeProgress } from './badges';
 import { BadgeSection } from './BadgeSection';
@@ -1845,6 +1846,39 @@ describe('StatsPage, copy and locale', () => {
       await readAgain();
       await waitFor(() => expect(todayRow()).toBe('Today3 min'));
       expect(text('streak-line')).toBe('On a 2-day streak. Your longest yet.');
+    });
+
+    // Copilot review on #42: the date stays, the zone moves which day a session was on.
+    describe('when the device changes to a zone where it is the same date', () => {
+      // Fixed offsets: a place's rules differ between one machine's tz data and another's.
+      inTimeZone('UTC');
+      afterEach(() => {
+        process.env.TZ = 'UTC';
+      });
+
+      it('counts each session on its day in the new zone, and dates it there', async () => {
+        // 20:00 UTC on the 27th, and 13:00 on the 27th at UTC-7.
+        vi.setSystemTime(new Date('2026-11-27T20:00:00Z'));
+        // 02:00 UTC on the 27th: today in UTC, yesterday evening at UTC-7.
+        serve({ sessions: [session('2026-11-27T02:00:00Z', 600, 0.7)], loops: [activeGroove] });
+        await openStats();
+        const dayRows = () =>
+          within(screen.getByRole('table', { name: 'Minutes practised per day' }))
+            .getAllByRole('row')
+            .slice(-2)
+            .map((row) => row.textContent);
+        expect(dailyDays().at(-1)).toBe('2026-11-27');
+        expect(dayRows()).toEqual(['Nov 260 min', 'Today10 min']);
+        const reads = queryResult.mock.calls.length;
+
+        process.env.TZ = 'Etc/GMT+7';
+        lookAgain();
+        expect(dailyDays().at(-1)).toBe('2026-11-27');
+        expect(dayRows()).toEqual(['Nov 2610 min', 'Today0 min']);
+        // Yesterday's practice still holds the streak.
+        expect(text('streak-line')).toBe('On a 1-day streak. Your longest yet.');
+        expect(queryResult.mock.calls).toHaveLength(reads);
+      });
     });
   });
 

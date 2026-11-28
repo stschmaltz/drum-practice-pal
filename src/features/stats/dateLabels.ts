@@ -23,6 +23,23 @@ export function forgetDateFormats(): void {
   formats.clear();
 }
 
+/** The zone the kept formatters were built in; null until `useToday` first says. */
+let formatsZone: string | null = null;
+
+/**
+ * Says which time zone the device is in, dropping the kept formatters when it
+ * isn't the one they were built in: a formatter keeps the zone the device had
+ * when it was made, and after a change would go on writing the old zone's
+ * dates (Copilot review on #42). Reading the zone at each date written would
+ * cost what keeping formatters saves, so the one reader of it, `useToday`,
+ * says here on every render and check, before anything under it writes a date.
+ */
+export function keepDateFormatsIn(zone: string): void {
+  if (zone === formatsZone) return;
+  formatsZone = zone;
+  formats.clear();
+}
+
 function formatOf(
   locale: string,
   shape: string,

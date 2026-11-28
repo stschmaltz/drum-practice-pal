@@ -1512,3 +1512,41 @@ None beyond the two Accepted lines.
 - `npm run check` green: 156 test files (155 passed, 1 skipped), 6,397 tests (6,395 passed, 2 skipped).
 - `E2E_PORT=4384 npx playwright test stats.spec.ts design.spec.ts practice.spec.ts --project=phone --project=desktop`: 76 passed, 4 skipped. Port 4384 was free before and after; no screenshot under `docs/units/*-shots/` was rewritten.
 - Not run: tablet, the other specs, `npm run test:db` (nothing here touches Supabase). Chromium only.
+
+### Copilot review (PR #42)
+
+Two comments, both confirmed, and four failed CI jobs on f4d461b (the batch merged with main), which were two causes. None of it showed on the Windows laptop the batch was built on.
+
+**CI failures**
+
+- `check`: `useToday.test.tsx`, "west, back into yesterday: the day goes back when the page is looked at", expected `2026-11-26` and got `2026-11-27`. The test's home zone was `America/Edmonton`, and it expected Edmonton's midnight at 07:00 UTC (UTC-7). Alberta stopped putting its clocks back in 2026: tz data from 2026 has Edmonton on UTC-6 in November, midnight at 06:00 UTC. The laptop's Node 22.15.0 carries tz data 2025a (UTC-7), CI's Node 22.23.5 a newer one (checked on a Linux Node with 2026e: `GMT-06:00` for the test's instant). The app was right on both; the test was bound to one machine's tz data. Fix: the zone tests use fixed offsets (`Etc/GMT+7`, `Etc/GMT-9`, `UTC`), which have no rules to change. `TZ=UTC npm run check` passes too.
+- `e2e (2/6)`, `(4/6)`, `(6/6)`: the same two tests, once per project (phone, tablet, desktop): "on a 320 px phone a 26-week practice-days map opens on its newest week, today on show" and "on a 320 px phone the map scrolls back to its oldest week by keyboard and by a swipe, and the page never scrolls sideways", both at `expect(await sidewaysScroll(page)).toBeLessThanOrEqual(0)`, received 29, on every retry. Both tests are new in this batch and had only run on Windows. Cause, in the app: the tables behind the charts were `<table className="sr-only">`, and a table ignores `sr-only`'s 1 px width: it grows to its cells, on one line each (`nowrap`), so the "Practice days by week" table was 274 px of hidden width on Windows' fonts and reached 29 px past a 320 px window on CI's DejaVu Sans. Reproduced locally by forcing Verdana (27 px of sideways scroll before, 0 after, with letter spacing added). Fix: `ChartTable` (`src/features/stats/ChartTable.tsx`), the table inside an `sr-only` box, used by `DailyMinutesChart`, `PracticeHeatmap` and `SpeedChart`. Test: the first 320 px test now also asserts the cause, which no font decides: no `sr-only` element in `main` measures wider than its 1 px (`hiddenTextTakingRoom`); it failed first with the two tables at 183 and 274 px.
+
+**Comment A (`useToday.ts`): a zone change that keeps the date. Confirmed, in two parts.**
+
+- No redraw: the snapshot was the day key alone, so UTC to UTC-7 at 20:00 UTC on the 27th changed nothing, while a 02:00 UTC session had moved to the 26th.
+- Stale formatters: `dateLabels.ts` keeps its `Intl.DateTimeFormat`s, and one built with no `timeZone` keeps the zone the device had then. With the redraw fixed and this not, the date test still read "Nov 27".
+- Tests first (`useToday.test.tsx`, "to a zone where it is the same date": drawn again on a look and within a minute, once only; dates written in the new zone; `StatsPage.test.tsx`, the same on the page: the two-week table's "Today 10 min" becomes "Nov 26 10 min, Today 0 min", nothing read again). All failed before.
+- Fix: `useToday`'s snapshot is the day and the zone's name (not its offset: two zones an offset apart today can differ on the days sessions were played), and on every read it tells `dateLabels.ts` the zone (`keepDateFormatsIn`), which drops its formatters when it has changed. `practiceDateLabel` uses `toLocaleDateString` and keeps nothing.
+
+**Comment B (`stats.spec.ts`): "Jun 8" only from June 8 to December 31. Confirmed.**
+
+- The 1,100 days are counted back from the run, and `shortDate` gives a date in another year its year, so from January 1 to June 7 every June 8 reads "Jun 8, 2026" or earlier. Now any piece matching `/^Jun 8(, \d{4})?$/`.
+- The rest of the batch's tests, read for the same class (what they say on January 1, a Monday, a month end, a clock change): the German-browser component test builds its dates from the fixture's own with the app's year rule; the period fixtures (`daysAgo(1)`, `(20)`, `(100)`) sit inside rolling 7- and 30-day windows whatever the date; the 26-week map's 200 days are past its cap on any weekday; the Monday-midnight tests run on a faked clock. The only other one was the Edmonton test above.
+
+**Decisions**
+
+- The zone is read with `new Intl.DateTimeFormat().resolvedOptions().timeZone` on each snapshot read (each render and each check, a minute apart). Telling `dateLabels.ts` from the snapshot getter, not from the timer, covers a render that comes for another reason after the zone moved.
+- `sr-only` on a wrapper, not `display: block` on the table, which some screen readers take as no longer a table.
+
+**Files:** `useToday.ts`, `dateLabels.ts`, `ChartTable.tsx` (new), the three charts, `useToday.test.tsx`, `StatsPage.test.tsx`, `tests/e2e/stats.spec.ts`, `docs/review-checklist.md` (three rows: hidden from the eye, still in the layout; a redraw keyed on part of what the drawing depends on; an expectation that holds only on some dates or some machines), `AGENTS.md`.
+
+**Async windows and inputs:** none added. `useToday`'s check is the one there was (the timer and `visibilitychange`); it now also draws again for a zone change.
+
+**Known gaps**
+
+- The DST tables in `streak.test.ts`, `totals.test.ts`, `records.test.ts`, `loopProgress.test.ts` and `badges.test.ts` name places (`Europe/London`, `America/New_York`, `Australia/Sydney`) with 2026's change dates. They are about those places' rules and pass on both tz data versions today; if a place drops its clock change they fail, as they should, but not all of them first assert the 23- or 25-hour day they rely on.
+- `StatsPage.test.tsx`'s `today` fixture is 08:00 on the day of the run, which is ahead of the clock in a run before 08:00 local. From Unit 16, not this batch; not changed.
+- CI's fonts aren't on the laptop. A wide font was forced to reproduce the overflow; the proof on CI's own is the next run.
+
+**Verify:** `npm run check` and `TZ=UTC npm run check` green (6,512 tests). `E2E_PORT=4384 npx playwright test tests/e2e/stats.spec.ts`: phone and desktop green; the 320 px and locale tests at all three sizes with `--repeat-each=3`, 45 of 45.
