@@ -25,21 +25,33 @@ export function currentStreak(sessions: readonly Dated[], now: Date): number {
   return count;
 }
 
-/** The longest run of practice days there has ever been. */
-export function longestStreak(sessions: readonly Dated[]): number {
+export interface StreakRun {
+  days: number;
+  /** Its first and last day. */
+  start: DayKey;
+  end: DayKey;
+}
+
+/**
+ * The longest run of practice days there has ever been, with when it was;
+ * null with no sessions. Of two runs as long, the earlier: a record stands
+ * until it is beaten.
+ */
+export function longestStreakRun(sessions: readonly Dated[]): StreakRun | null {
   const days = [...practiceDayKeys(sessions)].sort();
-  let longest = 0;
-  let run = 0;
-  let previous: DayKey | null = null;
+  let longest: StreakRun | null = null;
+  let run: StreakRun | null = null;
   for (const day of days) {
-    run = previous !== null && nextDayKey(previous) === day ? run + 1 : 1;
-    longest = Math.max(longest, run);
-    previous = day;
+    run =
+      run !== null && nextDayKey(run.end) === day
+        ? { days: run.days + 1, start: run.start, end: day }
+        : { days: 1, start: day, end: day };
+    if (longest === null || run.days > longest.days) longest = run;
   }
   return longest;
 }
 
-/** "1 day" / "12 days". */
-export function daysLabel(days: number): string {
-  return days === 1 ? '1 day' : `${days} days`;
+/** How many days the longest run of practice days lasted. */
+export function longestStreak(sessions: readonly Dated[]): number {
+  return longestStreakRun(sessions)?.days ?? 0;
 }

@@ -40,7 +40,7 @@ import { repeatsLabel } from '@/features/practice/sessions';
 import { usePracticeTracker } from '@/features/practice/usePracticeTracker';
 import { useSittingRecorder } from '@/features/practice/useVisitSittings';
 import { ShortcutOverlay } from '@/features/shortcuts/ShortcutOverlay';
-import { clockLabel } from '@/features/stats/totals';
+import { clockLabel } from '@/features/stats/statLabels';
 import { waitsForNetwork } from '@/lib/network';
 import { loopPracticePath, songPath } from '@/lib/routes';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
