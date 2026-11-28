@@ -22,9 +22,10 @@ import { ratioToPercent } from '@/features/player/speed';
 import { bpmAtSpeed } from '@/features/player/tempo';
 import { usePlayer } from '@/features/player/usePlayer';
 import { usePracticeTracker } from '@/features/practice/usePracticeTracker';
+import { useSittingRecorder } from '@/features/practice/useVisitSittings';
 import { ShortcutOverlay } from '@/features/shortcuts/ShortcutOverlay';
 import { isUuid } from '@/lib/randomUuid';
-import { EDIT_LOOP_PARAM, loopPracticePath, NEW_LOOP_PARAM, songPath } from '@/lib/routes';
+import { EDIT_LOOP_PARAM, NEW_LOOP_PARAM, songPath } from '@/lib/routes';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
   fullBleedBarClass,
@@ -133,8 +134,9 @@ function useLinkedLoopForm(
   if (!linked) return undefined;
   const backToSong = () => void navigate(songPath(songId), { replace: true });
   return {
-    // Replaced, so Back from the practice screen goes to the song, not to the form.
-    onCreated: (loop) => void navigate(loopPracticePath(songId, loop.id), { replace: true }),
+    // "New loop" from the song: the form stays for the next loop, and "Done" (or the note's
+    // link to the loop just saved) is the way on. Only an edit goes straight back.
+    keepsAdding: linked.kind === 'new',
     onEdited: backToSong,
     onCancelled: backToSong,
   };
@@ -168,6 +170,8 @@ function SongPlayer({
   const loops = useLoops(songId);
   const practice = useLoopPractice(player, snapshot, loops.data);
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
+  // A loop practised from the panel is summed up on the song's overview like any other.
+  useSittingRecorder(songId, practice.activeLoop, tracker.sitting);
   // Every change of the playing loop's speed is saved as it is made (no "Save speed").
   useSaveLoopSpeed(songId, practice.activeLoop, snapshot.speedRatio);
   const linkedForm = useLinkedLoopForm(songId, snapshot, practice, loops.data);

@@ -4,11 +4,14 @@ import 'fake-indexeddb/auto';
 import { onlineManager } from '@tanstack/react-query';
 import { resetUpdateWaiting } from '@/features/offline/appUpdate';
 import { clearOfflineData } from '@/features/offline/offlineData';
+import { clearVisitSittings } from '@/features/practice/visitSittings';
 
 // Each test starts online, with nothing stored on the "device" by the one before.
 afterEach(async () => {
   onlineManager.setOnline(true);
   resetUpdateWaiting();
+  // The visit's sittings are module state: no test starts with another's practice.
+  clearVisitSittings();
   await clearOfflineData();
 });
 

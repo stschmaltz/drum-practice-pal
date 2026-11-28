@@ -25,7 +25,7 @@ import {
   openLoopHistory,
   overviewItem,
   playFor,
-  sessionComplete,
+  visitSummary,
   shortSessions,
 } from './practicePage';
 
@@ -125,12 +125,13 @@ test('the library, the song page with its loops, and the home page with a loop',
   await expectWellDrawn(page, 'practice');
   await expectFocusRings(page, 'practice');
 
-  // A short session, summed up in the sheet at the foot of the window (16 QA issue 4).
+  // A short session, summed up on the song's overview on the way out.
   await playButton(page).click();
   await playFor(page, 3_000);
-  await expect(sessionComplete(page)).toBeVisible();
-  await expectWellDrawn(page, 'practice, session complete');
-  await sessionComplete(page).getByRole('button', { name: 'Keep going' }).click();
+  await backTo(page, 'Groove 120').click();
+  await expect(visitSummary(page)).toContainText('Streak: 1 day');
+  await expectWellDrawn(page, 'song overview, practice summary');
+  await expectFocusRings(page, 'song overview, practice summary');
 
   await navLink(page, 'Stats').click();
   await expect(page.getByRole('heading', { name: 'Badges' })).toBeVisible();
@@ -209,9 +210,9 @@ test('the controls bar fits a phone in three rows, and spills nowhere at 320 px'
     const region = await controls(page).boundingBox();
     if (!region) throw new Error('No controls bar');
     const boxes = await controlBoxes(page);
-    // Back to start, Metronome, Mute drums, Drums only, Speed, volume, and the count-in's
-    // Off / 1 bar / 2 bars (its mode shows only once a count-in is chosen).
-    expect(boxes, `${width} px: controls on show`).toHaveLength(9);
+    // Back to start, Metronome, Mute drums, Drums only, Mute all, Speed, volume, and the
+    // count-in's Off / 1 bar / 2 bars (its mode shows only once a count-in is chosen).
+    expect(boxes, `${width} px: controls on show`).toHaveLength(10);
     if (width >= 360) {
       expect(rowsOf(boxes), `${width} px: rows of ${JSON.stringify(boxes)}`).toBeLessThanOrEqual(3);
     }

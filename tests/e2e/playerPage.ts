@@ -220,23 +220,31 @@ const COUNT_IN_LABELS = { 0: 'Off', 1: '1 bar', 2: '2 bars' } as const;
 const COUNT_IN_MODE_LABELS = { start: 'At the start', every_repeat: 'Every repeat' } as const;
 
 /**
- * Brings a control to the middle of the window before a click. Playwright
- * scrolls a target only just into view, which on a phone can be under the
- * sticky Play bar or the loop sheet's header: the click then never lands
- * (two phone cases of loop-scroll.spec.ts timed out on it in CI).
+ * Chooses a segment by clicking its radio input directly, with no pointer
+ * hit-test. On a phone the option can sit between two fixed layers, the
+ * sticky Play bar above and the open loop sheet's header below, and
+ * Playwright's click, intercepted by each in turn, retried until it timed out
+ * (two phone cases of loop-scroll.spec.ts in CI). The specs that use these
+ * helpers are not about whether a tap lands on the option: they are about
+ * what the count-in then does. That a segment can be tapped (its size, its
+ * label, nothing spilling) is design.spec.ts's.
  */
-async function clearOfStickyBars(target: Locator): Promise<void> {
-  await target.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+async function chooseSegment(group: Locator, label: string): Promise<void> {
+  const radio = group
+    .locator('label')
+    .filter({ hasText: new RegExp(`^${label}$`) })
+    .locator('input[type="radio"]');
+  await expect(radio).toBeEnabled();
+  // Focus first, as a real click on the option does: specs that go on with the arrow keys
+  // (shortcuts.spec.ts) expect the chosen option to hold it.
+  await radio.focus();
+  await radio.dispatchEvent('click');
 }
 
 /** Chooses the count-in's bars in the controls bar, opening the bar first if playback folded it. */
 export async function chooseCountIn(page: Page, bars: 0 | 1 | 2): Promise<void> {
   await showControls(page);
-  const option = countInGroup(page)
-    .locator('label')
-    .filter({ hasText: new RegExp(`^${COUNT_IN_LABELS[bars]}$`) });
-  await clearOfStickyBars(option);
-  await option.click();
+  await chooseSegment(countInGroup(page), COUNT_IN_LABELS[bars]);
   await expect(checkedCountIn(page)).toHaveValue(String(bars));
 }
 
@@ -246,11 +254,7 @@ export async function chooseCountInMode(
   mode: keyof typeof COUNT_IN_MODE_LABELS,
 ): Promise<void> {
   await showControls(page);
-  const option = countInModeGroup(page)
-    .locator('label')
-    .filter({ hasText: new RegExp(`^${COUNT_IN_MODE_LABELS[mode]}$`) });
-  await clearOfStickyBars(option);
-  await option.click();
+  await chooseSegment(countInModeGroup(page), COUNT_IN_MODE_LABELS[mode]);
   await expect(checkedCountInMode(page)).toHaveValue(mode);
 }
 

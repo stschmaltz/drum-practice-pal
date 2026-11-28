@@ -37,11 +37,21 @@ export async function loopsOf(user: E2eUser) {
   return data;
 }
 
-/** The practice screen's speed in large type, its round nudges (each saved as made) and Session complete (Unit 16). */
+/** The practice screen's speed in large type and its round nudges, each saved as made (Unit 16). */
 export const practiceSpeed = (page: Page) => page.getByTestId('practice-speed');
 export const nudge = (page: Page, which: 'Slower' | 'Faster') =>
   page.getByRole('button', { name: `${which} by 5%` });
-export const sessionComplete = (page: Page) => page.getByTestId('session-complete');
+/** The practice screen's line of the sitting so far: bars, play time, passes. */
+export const practiceProgress = (page: Page) => page.getByTestId('practice-progress');
+/**
+ * The song overview's summary of what was practised in this visit: a line per
+ * loop, the streak, badges earned, and Dismiss. Nothing is shown while
+ * practising (the Session complete sheet is gone: Shane, 2026-11-27).
+ */
+export const visitSummary = (page: Page) => page.getByTestId('visit-summary');
+/** Anything of the sheet that used to come up at a pause: there must be none. */
+export const sessionCompleteLeftovers = (page: Page) =>
+  page.getByText(/Session complete|Keep going/);
 
 /** From a song's overview, a loop's round play button: its practice screen, ready for Play. */
 export async function openPractice(page: Page, loopName: string): Promise<void> {

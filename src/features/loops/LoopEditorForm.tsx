@@ -34,6 +34,9 @@ type DetailFields = Pick<LoopFormValues, 'name'>;
  * `layout`: `panel` in the loop panel; `bar` for the practice screen's "Save
  * as loop" sheet, where the fields share a row and the button says what it
  * does there.
+ *
+ * Where the form stays for another loop after a save, its caller keys it (a
+ * new form each time) and says what was saved in a `LoopSavedNote` outside it.
  */
 export function LoopEditorForm({
   songId,
@@ -47,6 +50,7 @@ export function LoopEditorForm({
   onSaved,
   onCancel,
   layout = 'panel',
+  cancelLabel = 'Cancel',
 }: {
   songId: string;
   barCount: number;
@@ -61,6 +65,8 @@ export function LoopEditorForm({
   onSaved: (saved: Loop) => void;
   onCancel: () => void;
   layout?: 'panel' | 'bar';
+  /** The second button's words: "Done" once a loop has been saved and the form stayed. */
+  cancelLabel?: string;
 }) {
   const inBar = layout === 'bar';
   const create = useCreateLoop(songId);
@@ -205,7 +211,7 @@ export function LoopEditorForm({
           {saving ? 'Saving…' : inBar ? 'Save as loop' : 'Save loop'}
         </button>
         <button type="button" className={buttonClass} disabled={saving} onClick={onCancel}>
-          Cancel
+          {cancelLabel}
         </button>
       </div>
       {!online && (

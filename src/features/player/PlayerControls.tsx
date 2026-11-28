@@ -194,6 +194,18 @@ export function PlayerControls({
             Drums only
           </ToggleButton>
         )}
+        {/* Every track silent, the cursor still moving: for reading the tab along with the
+            real recording playing somewhere else. Works without a drum track too. */}
+        {!folded && (
+          <ToggleButton
+            icon="muted"
+            pressed={snapshot.allMuted}
+            disabled={optionsDisabled}
+            onChange={(allMuted) => player?.setAllMuted(allMuted)}
+          >
+            Mute all
+          </ToggleButton>
+        )}
       </div>
 
       {/* Speed takes the larger share; on the narrowest phones the volume wraps under it. */}
@@ -470,7 +482,7 @@ function MetronomeVoiceControls({ player, snapshot }: PlayerViewProps) {
  * others over their switches without changing them, and says so.
  */
 function TrackMixer({ player, snapshot }: PlayerViewProps) {
-  const { tracks, drumsOnly } = snapshot;
+  const { tracks, drumsOnly, allMuted } = snapshot;
   // One track has nothing to mix: Mute drums, or the song itself, covers it.
   if (tracks.length < 2) return null;
   const onCount = tracks.filter((track) => !track.muted).length;
@@ -503,7 +515,10 @@ function TrackMixer({ player, snapshot }: PlayerViewProps) {
             </button>
           ))}
         </div>
-        {drumsOnly && tracks.some((track) => !track.drums) && (
+        {allMuted && (
+          <p className="text-ink-soft">Mute all is on: every track is silent until it's off.</p>
+        )}
+        {!allMuted && drumsOnly && tracks.some((track) => !track.drums) && (
           <p className="text-ink-soft">
             Drums only is on: the other tracks are silent until it's off.
           </p>

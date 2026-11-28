@@ -109,7 +109,7 @@ export function SessionNotice({
 }: {
   tracker: PracticeTracker;
   loops: readonly Loop[] | undefined;
-  /** False where the Session complete summary says it instead (the practice screen). */
+  /** False on the practice screen, where a pause shows nothing: the song's overview sums up. */
   showLogged?: boolean;
 }) {
   const { lastLogged, unsaved, waiting, retryUnsaved } = tracker;

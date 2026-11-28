@@ -116,6 +116,13 @@ export interface PlayerSnapshot extends PlayerOptions {
    * Never on together with `drumsMuted`, and always off when a song opens.
    */
   drumsOnly: boolean;
+  /**
+   * Every track is silenced, drums included, to read the tab along with the
+   * real recording playing somewhere else. Over the other mutes without
+   * changing them, so off brings back what was there. The metronome is its own
+   * switch. Always off when a song opens.
+   */
+  allMuted: boolean;
   range: BarRange | null;
   looping: boolean;
   /** The bars marked on the score: a drawing only, set by the screen (see setHighlight). */
@@ -192,6 +199,7 @@ export function initialPlayerSnapshot(
     barTempo: null,
     hasDrumTrack: drumTrackIndex !== null,
     drumsOnly: false,
+    allMuted: false,
     range: null,
     looping: false,
     highlight: null,
@@ -592,6 +600,17 @@ export class PlayerService {
     this.applyEveryTrackMute();
   }
 
+  /**
+   * Silences every track, or lets them sound again as they were: Mute drums,
+   * Drums only and each track's own switch keep what they are set to
+   * underneath, and can be changed meanwhile. Live, like the other options.
+   */
+  setAllMuted(allMuted: boolean): void {
+    if (this.disposed || allMuted === this.snapshot.allMuted) return;
+    this.update({ allMuted });
+    this.applyEveryTrackMute();
+  }
+
   setLayout(layout: LayoutChoice): void {
     if (this.disposed) return;
     this.engine.setLayout(layout);
@@ -924,7 +943,7 @@ export class PlayerService {
    * silenced before one would otherwise stay silent.
    */
   private applyMutes(): void {
-    if (this.snapshot.drumsOnly || this.engineHoldsDrumsOnly) this.applyEveryTrackMute();
+    if (this.overridesTrackMutes() || this.engineHoldsDrumsOnly) this.applyEveryTrackMute();
     else for (const trackIndex of this.mutedTracks.keys()) this.applyTrackMute(trackIndex);
   }
 
@@ -934,7 +953,12 @@ export class PlayerService {
     for (let trackIndex = 0; trackIndex < this.trackNames.length; trackIndex++) {
       this.applyTrackMute(trackIndex);
     }
-    this.engineHoldsDrumsOnly = this.snapshot.drumsOnly;
+    this.engineHoldsDrumsOnly = this.overridesTrackMutes();
+  }
+
+  /** Drums only or Mute all: tracks with no mute on record are silenced too. */
+  private overridesTrackMutes(): boolean {
+    return this.snapshot.drumsOnly || this.snapshot.allMuted;
   }
 
   /** Tracks the loaded score doesn't have yet are skipped; applyMutes sends them once it does. */
@@ -968,6 +992,7 @@ export class PlayerService {
 
   /** What the engine should have for a track: Drums only wins over the mute on record. */
   private isTrackSilenced(trackIndex: number): boolean {
+    if (this.snapshot.allMuted) return true;
     if (this.snapshot.drumsOnly) return trackIndex !== this.drumTrackIndex;
     return this.mutedTracks.get(trackIndex) ?? false;
   }

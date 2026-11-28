@@ -11,11 +11,11 @@ import { logSessionOnExit } from './sessionsApi';
 import {
   countRepeat,
   observe,
-  playedMsAt,
   trackerPhase,
   type SessionRecord,
   type TrackerState,
 } from './sessionTracker';
+import { sittingProgress, tallySitting, type SittingProgress, type SittingTally } from './sittings';
 import {
   logSessionUnobserved,
   queueSession,
@@ -40,19 +40,6 @@ interface Departure {
 
 const STAYING: Departure = { leaving: false, via: 'mutation' };
 
-/** A session logged while the screen stayed: what the Session complete summary shows. */
-export interface CompletedSession {
-  record: SessionRecord;
-  /** The speed the session began at; the record has the speed it ended at. */
-  startSpeedRatio: number;
-}
-
-/** The open session so far, for a live line on the screen. */
-export interface SessionProgress {
-  playedSeconds: number;
-  repeats: number;
-}
-
 /**
  * Logs loop practice for the song page: feeds the player's status, the loop
  * being practiced and the speed to the session tracker (sessionTracker.ts has
@@ -69,6 +56,10 @@ export interface SessionProgress {
  *   connection (`waiting`) rather than failing, and a keepalive isn't tried.
  * - A send the server refused is kept (`unsaved`) for `retryUnsaved`. Sending
  *   a session again is safe: its id is the row's.
+ *
+ * It also keeps the sitting on the loop that is open (sittings.ts): every
+ * session since the loop was opened, added up. `sitting()` reads it; nothing
+ * is said when a session is logged (no Session complete: Shane, 2026-11-27).
  */
 export function usePracticeTracker(
   player: PlayerService | null,
@@ -85,11 +76,8 @@ export function usePracticeTracker(
   const [unsaved, setUnsaved] = useState<SessionRecord[]>([]);
   // Sent through the mutation and not answered yet: offline, these are waiting for the connection.
   const [waiting, setWaiting] = useState<SessionRecord[]>([]);
-  const [completed, setCompleted] = useState<CompletedSession | null>(null);
-  // Each session's speed when it opened, by id: the tracker keeps only the latest.
-  const startSpeeds = useRef(new Map<string, number>());
-  // Sessions that ended while the screen stayed: only these, once logged, are summed up.
-  const endedOnScreen = useRef(new Set<string>());
+  // The sitting on the loop open now, less the session still open in `tracker`.
+  const sittingTally = useRef<SittingTally | null>(null);
 
   const { status, speedRatio } = snapshot;
   const userId = user.id;
@@ -114,13 +102,6 @@ export function usePracticeTracker(
           setWaiting((records) => withoutRecord(records, record));
           setUnsaved((records) => withoutRecord(records, record));
           if (result === 'logged') setLastLogged(record);
-          if (result === 'logged' && endedOnScreen.current.delete(record.id)) {
-            setCompleted({
-              record,
-              startSpeedRatio: startSpeeds.current.get(record.id) ?? record.speedRatio,
-            });
-          }
-          startSpeeds.current.delete(record.id);
         },
         () => {
           setWaiting((records) => withoutRecord(records, record));
@@ -185,29 +166,28 @@ export function usePracticeTracker(
   const sync = useCallback(
     ({ leaving, via }: Departure) => {
       const hidden = document.visibilityState === 'hidden';
+      const now = Date.now();
       const step = observe(
         tracker.current,
         {
-          now: Date.now(),
+          now,
           loopId: leaving ? null : latest.current.loopId,
           phase: trackerPhase(latest.current.status, hidden),
           speedRatio: latest.current.speedRatio,
         },
         { newId: randomUuid, minPlaySeconds: sessionMinPlaySeconds() },
       );
-      const opened = step.state && step.state.id !== tracker.current?.id ? step.state : null;
-      if (opened) startSpeeds.current.set(opened.id, opened.speedRatio);
-      // Dropped as too short: nothing will be summed up for it.
-      const left = tracker.current;
-      if (left && left.id !== step.state?.id && left.id !== step.ended?.id) {
-        startSpeeds.current.delete(left.id);
-      }
       tracker.current = step.state;
+      // The loop really open, also as the page is left: a page that comes back from the
+      // back/forward cache carries its sitting on, though its session ended.
+      sittingTally.current = tallySitting(
+        sittingTally.current,
+        { now, loopId: latest.current.loopId, speedRatio: latest.current.speedRatio },
+        step.ended,
+      );
       if (!step.ended) return;
       // A hidden page may never run another line, so nothing sent from it can wait for an answer.
-      const sendVia = hidden ? 'keepalive' : via;
-      if (sendVia === 'mutation' && !leaving) endedOnScreen.current.add(step.ended.id);
-      send(step.ended, sendVia);
+      send(step.ended, hidden ? 'keepalive' : via);
     },
     [send],
   );
@@ -260,26 +240,22 @@ export function usePracticeTracker(
     for (const record of unsaved) sendNow(record);
   }, [sendNow, unsaved]);
 
-  /** The session open now, read at the call: a screen that shows it re-renders on a timer. */
-  const progress = useCallback((): SessionProgress | null => {
-    const open = tracker.current;
-    if (!open) return null;
-    return {
-      playedSeconds: Math.floor(playedMsAt(open, Date.now()) / 1000),
-      repeats: open.repeats,
-    };
-  }, []);
-
-  const dismissCompleted = useCallback(() => setCompleted(null), []);
+  /**
+   * The sitting on the loop open now, read at the call: a screen that shows it
+   * re-renders on a timer. Null in jam mode and before the loop has been heard of.
+   */
+  const sitting = useCallback(
+    (): SittingProgress | null =>
+      sittingProgress(sittingTally.current, tracker.current, Date.now()),
+    [],
+  );
 
   return {
     lastLogged,
     unsaved,
     waiting,
     retryUnsaved,
-    completed,
-    dismissCompleted,
-    progress,
+    sitting,
   };
 }
 
