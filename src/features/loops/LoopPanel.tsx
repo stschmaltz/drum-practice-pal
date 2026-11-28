@@ -90,12 +90,10 @@ export interface LoopFormOutcome {
 }
 
 /**
- * The song's loops: a bottom sheet below 1024 px, so on a phone and a tablet
- * in portrait (fixed at the foot of the window, its header always on show and
- * opening the rest), a column beside the score from 1024 px (shown or hidden
- * by the page's own toggle). The width rule is `loopPanelLayout.ts`, which is
- * the CSS's `lg`. One component and one `open` state for both; only the
- * classes differ.
+ * The song's loops: a sheet over the score at every size, fixed at the foot of
+ * the window, its header always on show and opening the rest (full width on a
+ * phone, the content column on a tablet, the bottom-right corner from 1024 px).
+ * One component and one `open` state; only the classes differ by width.
  */
 export function LoopPanel({
   songId,
@@ -124,21 +122,26 @@ export function LoopPanel({
   };
 
   const playLoop = (loop: Loop) => {
-    const closes = playLoopClosesPanel(snapshot.status);
-    // First, with nothing before it: iOS only starts audio inside the tap.
+    // Asked of the player at the press, as `practice.playLoop` asks: a press it refuses
+    // (the sounds failed since the last render) closes nothing and moves no focus.
+    const now = player?.getSnapshot() ?? snapshot;
+    const closes = canPlay(player, now) && playLoopClosesPanel(now.status);
+    // First, with nothing awaited before it: iOS only starts audio inside the tap.
     practice.playLoop(loop);
     if (closes) closeForPlayback();
   };
 
   // A count-in started from outside the sheet (Play in the page's bar, Space, a
   // pedal) closes it too. Each status is looked at once, as it arrives, so a sheet
-  // opened during the count-in is left open.
+  // opened during the count-in is left open. So is one showing the loop form: the
+  // score's taps pick its bars while it is open, which the form must be seen to say.
   const { status } = snapshot;
+  const formOpen = practice.editor !== null;
   const statusBefore = useRef(status);
   useEffect(() => {
     const before = statusBefore.current;
     statusBefore.current = status;
-    if (open && countInClosesPanel(before, status)) closeForPlayback();
+    if (open && countInClosesPanel(before, status, { formOpen })) closeForPlayback();
     // Only a change of status closes the sheet: opening it is never undone here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);

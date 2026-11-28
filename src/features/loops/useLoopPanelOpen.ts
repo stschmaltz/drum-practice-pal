@@ -21,9 +21,18 @@ export function playLoopClosesPanel(status: PlayerStatus): boolean {
  * comes was opened while the loop played, for its speed, and closing it at
  * every pass would take that control from under the finger; one opened during
  * a count-in stays for the same reason.
+ *
+ * Never while the loop form is open: taps on the score then pick the form's
+ * bars instead of seeking, and a sheet closed over the form leaves that mode
+ * with nothing on show to say so (20 batch 4 QA, issue 3). A covered number
+ * is the lesser fault.
  */
-export function countInClosesPanel(before: PlayerStatus, now: PlayerStatus): boolean {
-  return now === 'countingIn' && !isRunning(before);
+export function countInClosesPanel(
+  before: PlayerStatus,
+  now: PlayerStatus,
+  { formOpen }: { formOpen: boolean },
+): boolean {
+  return !formOpen && now === 'countingIn' && !isRunning(before);
 }
 
 /**

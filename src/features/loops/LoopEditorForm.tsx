@@ -3,6 +3,7 @@ import { ErrorAlert } from '@/components/ErrorAlert';
 import { OfflineNote } from '@/components/OfflineNote';
 import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/components/styles';
 import {
+  isLoaded,
   isRunning,
   type PlayerService,
   type PlayerSnapshot,
@@ -125,11 +126,30 @@ export function LoopEditorForm({
   // once they make a range (what the score then highlights). Only here: bars picked
   // on the score come through the page, and a tapped bar must not move under the
   // finger. Not while the song runs: the score is then where the music is.
+  //
+  // Typed before the sounds are in (the form opens from the score's load on), the bar
+  // is kept here and not handed to `showBar`, which would scroll to it whenever the
+  // sounds came, however much later, with the form holding other bars by then or gone.
+  const typedBeforeSounds = useRef<{ startBar: number; endBar: number } | null>(null);
   const showTypedBars = (bars: Partial<LoopBarFields>) => {
-    if (!player || isRunning(player.getSnapshot().status)) return;
+    if (!player) return;
+    const { status } = player.getSnapshot();
+    if (isRunning(status)) return;
     const typed = formBarRange({ ...values, ...bars }, barCount);
-    if (typed) player.showBar(typed.startBar);
+    typedBeforeSounds.current = isLoaded(status) ? null : typed;
+    if (typed && isLoaded(status)) player.showBar(typed.startBar);
   };
+  const soundsIn = isLoaded(snapshot.status);
+  useEffect(() => {
+    const typed = typedBeforeSounds.current;
+    typedBeforeSounds.current = null;
+    // Only the bars the form still holds: a tap on the score or a cleared field since
+    // has made them another range, or none.
+    const stillHeld = typed?.startBar === range?.startBar && typed?.endBar === range?.endBar;
+    if (soundsIn && typed && stillHeld) showTypedBars({});
+    // Only the sounds coming in: every other change is a keystroke, shown as it is typed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soundsIn]);
 
   const editBars = (bars: Partial<LoopBarFields>) => {
     if (saving) return;

@@ -586,17 +586,42 @@ describe('LoopPanel and a count-in started from outside it (13.32)', () => {
     expect(view.header()).toHaveTextContent('Loop: Typed');
   });
 
-  it('Play with a count-in closes it with the loop form open too, and the form is there when reopened', async () => {
+  // 20 batch 4 QA issue 3: the form's bars are picked by taps on the score for as long as it
+  // is open, so a sheet closed over it left a mode nobody could see.
+  it('Play with a count-in leaves the sheet open while the loop form is open, with focus where it was', async () => {
     const view = renderPanel();
     act(() => view.player.setCountInBars(2));
     await typeNewLoop(view, { first: '3', last: '4', name: 'Half typed' });
+    const name = view.panel.getByLabelText('Name');
+    expect(name).toHaveFocus();
 
+    pressPlay(view);
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    await settle();
+
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(name).toBeVisible();
+    expect(name).toHaveFocus();
+    // Through the downbeat too.
+    view.enginePlays();
+    await settle();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('once the form is cancelled, the next start with a count-in closes the sheet again', async () => {
+    const view = renderPanel();
+    act(() => view.player.setCountInBars(1));
+    await typeNewLoop(view, { first: '3', last: '4', name: 'Half typed' });
+    pressPlay(view);
+    await settle();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    view.pause();
+
+    await view.press('Cancel');
+    await view.panel.findByRole('button', { name: 'New loop' });
     pressPlay(view);
 
     await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
-    await view.user.click(view.header());
-    expect(view.panel.getByLabelText('Name')).toHaveValue('Half typed');
-    expect(view.panel.getByLabelText('First bar')).toHaveValue('3');
   });
 
   it('Play with no count-in leaves the sheet as it is: there is no number to hide', async () => {
@@ -713,13 +738,17 @@ describe('LoopPanel and a count-in started from outside it (13.32)', () => {
     await view.user.click(view.header());
     const outside = document.createElement('button');
     document.body.append(outside);
-    outside.focus();
+    try {
+      outside.focus();
 
-    pressPlay(view);
+      pressPlay(view);
 
-    await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
-    expect(outside).toHaveFocus();
-    outside.remove();
+      await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+      expect(outside).toHaveFocus();
+    } finally {
+      // Not React's to clean up: a failed expectation must not leave it for the next test.
+      outside.remove();
+    }
   });
 });
 
@@ -744,10 +773,9 @@ describe('LoopPanel focus after Play loop closes the sheet (13.28a)', () => {
     expect(view.item('Late').getByText('Now looping')).toBeVisible();
   });
 
-  // 20 batch 4 Build, Known gaps, pinned as it is (Test, bug 2). The checklist's "side effects
-  // of a refused action" says none of this should happen; when `practice.playLoop` reports
-  // whether it acted, the last three expectations flip: open, focus on the button, no change.
-  it('a Play loop the player refuses at the press starts nothing, yet the sheet closes and focus moves to its header', async () => {
+  // 20 batch 4 Test, bug 2, fixed in Review: the checklist's "side effects of a refused
+  // action". The handler asks the gate `practice.playLoop` goes by, of the player, at the press.
+  it('a Play loop the player refuses at the press starts nothing, closes nothing and moves no focus', async () => {
     const view = renderPanel();
     const play = await view.panel.findByRole('button', { name: 'Play loop Late' });
     await waitFor(() => expect(play).toBeEnabled());
@@ -765,9 +793,8 @@ describe('LoopPanel focus after Play loop closes the sheet (13.28a)', () => {
     expect(view.engine.play).not.toHaveBeenCalled();
     expect(view.panel.queryByTestId('active-loop')).not.toBeInTheDocument();
     expect(play).toBeDisabled();
-    // And still:
-    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
-    expect(view.header()).toHaveFocus();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(view.header()).not.toHaveFocus();
     expect(view.header()).toHaveTextContent('Loops (2)');
   });
 

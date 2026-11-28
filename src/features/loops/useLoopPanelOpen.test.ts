@@ -32,7 +32,17 @@ describe('countInClosesPanel', () => {
     ['countingIn', 'ready', false],
     ['loading', 'ready', false],
   ])('from %s to %s: %s', (before, now, closes) => {
-    expect(countInClosesPanel(before, now)).toBe(closes);
+    expect(countInClosesPanel(before, now, { formOpen: false })).toBe(closes);
+  });
+
+  // 20 batch 4 QA issue 3: closed over the form, the sheet hid a mode. Taps on the score
+  // went on picking the form's bars, with nothing on show to say so.
+  it.each<[PlayerStatus, PlayerStatus]>([
+    ['ready', 'countingIn'],
+    ['playing', 'countingIn'],
+    ['countingIn', 'playing'],
+  ])('never while the loop form is open (from %s to %s)', (before, now) => {
+    expect(countInClosesPanel(before, now, { formOpen: true })).toBe(false);
   });
 });
 

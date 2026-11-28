@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { COMMON_TIME } from '@/features/player/countIn';
 import type { PlayerService } from '@/features/player/PlayerService';
 import { LOOP_NAME_MAX_LENGTH } from '@/lib/schema';
 import { opArgs, queryResult, resetFakeSupabase } from '@/test/fakeSupabase';
+import { straightBars, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
 import { stubPointer } from '@/test/mediaQueries';
@@ -70,22 +72,43 @@ interface FormOptions {
   initialEditor?: Partial<LoopEditor>;
   /** The speed playing when the form opens. */
   speedRatio?: number;
+  /** The score is in and drawn, its sounds are not: the form opens, Play is still off. */
+  soundsLoading?: boolean;
 }
 
-async function renderForm({ loops, editing, initialEditor, speedRatio }: FormOptions = {}) {
+async function renderForm({
+  loops,
+  editing,
+  initialEditor,
+  speedRatio,
+  soundsLoading = false,
+}: FormOptions = {}) {
   const table = serveLoopTable(loops ?? (editing ? [editing] : []));
-  const { engine, player } = loopPlayer();
+  const { engine, player } = loopPlayer({ loaded: !soundsLoading });
+  if (soundsLoading) {
+    engine.fire('scoreLoaded', {
+      barCount: 16,
+      trackNames: ['Drums'],
+      barTempos: [...TEMPO_CHANGE_BAR_TEMPOS],
+      barMeters: Array.from({ length: 16 }, () => COMMON_TIME),
+    });
+    engine.fire('ticksReady', { bars: [...straightBars(16)] });
+  }
   if (speedRatio !== undefined) player.setSpeed(speedRatio);
   const queryClient = testQueryClient();
-  render(<Form player={player} loopId={editing?.id ?? null} initialEditor={initialEditor} />, {
-    wrapper: wrapperFor(queryClient),
-  });
+  const { unmount } = render(
+    <Form player={player} loopId={editing?.id ?? null} initialEditor={initialEditor} />,
+    { wrapper: wrapperFor(queryClient) },
+  );
   const form = within(await screen.findByRole('form'));
   return {
     user: userEvent.setup(),
     table,
     engine,
     player,
+    unmount,
+    /** The sounds come in: the player is ready. */
+    soundsLoad: () => act(() => engine.fire('readyForPlayback', undefined)),
     queryClient,
     form,
     firstBar: () => form.getByLabelText('First bar'),
@@ -480,6 +503,45 @@ describe('LoopEditorForm bringing typed bars on screen (13.27a)', () => {
     await settle();
 
     expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  // The service keeps a bar asked for before the sounds are in and scrolls to it when they
+  // come, however much later; by then the form may hold other bars, or be gone.
+  describe('typed before the sounds are in', () => {
+    it('nothing moves until they are, and then the first bar is shown', async () => {
+      const view = await renderForm({ soundsLoading: true });
+      await fill(view, { first: '13', last: '15' });
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+
+      view.soundsLoad();
+
+      expect(view.engine.scrollToBar).toHaveBeenCalledTimes(1);
+      expect(view.engine.scrollToBar).toHaveBeenLastCalledWith(12);
+    });
+
+    it('bars no longer a range when the sounds come in are not scrolled to', async () => {
+      const view = await renderForm({ soundsLoading: true });
+      await fill(view, { first: '13', last: '15' });
+      await view.user.clear(view.lastBar());
+      expect(screen.getByTestId('loop-bar-count')).toHaveTextContent('');
+
+      view.soundsLoad();
+      await settle();
+
+      expect(view.player.getSnapshot().status).toBe('ready');
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
+
+    it('a form closed before the sounds come in scrolls nothing when they do', async () => {
+      const view = await renderForm({ soundsLoading: true });
+      await fill(view, { first: '13', last: '15' });
+      view.unmount();
+
+      view.soundsLoad();
+
+      expect(view.player.getSnapshot().status).toBe('ready');
+      expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+    });
   });
 
   it('typing the name scrolls nowhere', async () => {

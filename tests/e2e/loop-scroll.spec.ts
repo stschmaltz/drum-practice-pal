@@ -1133,11 +1133,16 @@ test('bars typed while the song counts in or plays leave the score where the mus
   await newLoopButton(page).click();
   await expect(loopForm(page)).toBeVisible();
 
-  // Play closes the sheet over the form (13.32); opened again during the count-in, it stays.
+  // With the form open a count-in leaves the sheet open (20 batch 4 QA issue 3): taps on the
+  // score pick the form's bars for as long as it is open, so it is never hidden by Play.
   await playButton(page).click();
   await expect(status(page)).toHaveText('Bar 1 of 16 · Counting in…');
-  await expect(loopPanelToggle(page)).toHaveAttribute('aria-expanded', 'false');
-  await openLoopPanel(page);
+  await page.waitForTimeout(SHEET_CLOSED_BY_MS * 2);
+  expect(await sheetAndBarsNow(page)).toMatchObject({
+    status: 'countingIn',
+    sheetExpanded: 'true',
+  });
+  await expect(loopForm(page)).toBeVisible();
   await firstBarField(page).fill('13');
   await lastBarField(page).fill('14');
   // The bars are highlighted, out of sight, and it still counts in: read in one instant.
