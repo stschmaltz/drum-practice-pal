@@ -1,5 +1,6 @@
 /// <reference lib="dom" />
 import { expect, signIn, test } from './auth';
+import { textSpillingOutOf } from './designPage';
 import {
   commit,
   playLoopButton,
@@ -25,6 +26,7 @@ import {
   windowScrollSettled,
 } from './playerPage';
 import {
+  addSessions,
   backTo,
   loopsOf,
   navLink,
@@ -80,11 +82,9 @@ test('a minute of loop practice is logged as one session with its speed and dura
 
   // The loop's history shows it, and the home page says it was practiced today.
   const history = await openLoopHistory(page, 'Bars five to six');
-  await expect(history.getByTestId('loop-history-summary')).toContainText('1 session');
+  await expect(history.getByTestId('loop-history-summary')).toContainText('1 day');
   await expect(history.getByRole('listitem')).toHaveCount(1);
-  await expect(history.getByRole('listitem')).toContainText(
-    /Today, .* · 1 min.* · 85% \(102 BPM\)/,
-  );
+  await expect(history.getByRole('listitem')).toContainText(/^Today · 1 min.* · 85% \(102 BPM\)/);
 
   // A second stop logs nothing more.
   await page.waitForTimeout(1_000);
@@ -439,7 +439,7 @@ test('a session whose answer is lost is sent again by itself and logged once', a
 
   // And the loop's history lists it once.
   const history = await openLoopHistory(page, 'Flaky');
-  await expect(history.getByTestId('loop-history-summary')).toContainText('1 session');
+  await expect(history.getByTestId('loop-history-summary')).toContainText('1 day');
   await expect(history.getByRole('listitem')).toHaveCount(1);
 });
 
@@ -518,4 +518,149 @@ test('with a count-in before every repeat, a sitting is one session of play time
   // Two passes and a second of the third, about 9 s; the three count-ins, about 6 s, are left out.
   expect(session!.duration_seconds).toBeGreaterThanOrEqual(7);
   expect(session!.duration_seconds).toBeLessThanOrEqual(wallSeconds - 4);
+});
+
+// Unit 20, batch 5 (D4): a loop's History is one row per day, over sessions
+// stored one per stop as before. Older days are written by the service role.
+
+/** Local midnight `daysBack` days before today, plus hours and minutes. */
+function dayAt(daysBack: number, hour = 0, minute = 0): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack, hour, minute);
+}
+
+test('a loop’s History is a row per day: today’s sessions together, ten days then the rest, and today’s row grows', async ({
+  page,
+  user,
+}) => {
+  test.setTimeout(90_000);
+  await shortSessions(page, 2);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 1, lastBar: 2 });
+  await saveLoopSpeed(page, 80);
+  await addSessions(user, 'Verse', [
+    // One sitting across midnight: begun last night, carried on today with two pauses
+    // and a try at full speed. Today's start at the day's first minute, so it is never
+    // ahead of the clock, whenever this runs.
+    { startedAt: dayAt(1, 23, 50), seconds: 400, speedRatio: 0.7, repeats: 15 },
+    { startedAt: dayAt(0, 0, 0), seconds: 180, speedRatio: 0.8, repeats: 20 },
+    { startedAt: new Date(dayAt(0).getTime() + 1_000), seconds: 60, speedRatio: 0.8, repeats: 7 },
+    { startedAt: new Date(dayAt(0).getTime() + 2_000), seconds: 40, speedRatio: 1, repeats: 2 },
+    // Eleven older days, one five-minute session each.
+    ...Array.from({ length: 11 }, (_, i) => ({
+      startedAt: dayAt(i + 3, 12),
+      seconds: 300,
+      speedRatio: 0.6,
+      repeats: 30,
+    })),
+  ]);
+  await sessionCount(user).toBe(15);
+
+  const history = await openLoopHistory(page, 'Verse');
+  const rows = history.getByRole('listitem');
+  const todayRows = rows.filter({ hasText: /^Today/ });
+  // 15 sessions on 13 days; 280 + 400 + 11 x 300 seconds.
+  await expect(history.getByTestId('loop-history-summary')).toHaveText(
+    '13 days · 1 h 6 min in all',
+  );
+  await expect(rows).toHaveCount(10);
+  // Today's three sessions are one row at the speed most of it was played at, not the try's.
+  await expect(rows.nth(0)).toHaveText('Today · 4 min 40 s · 80% (96 BPM) · 29 passes');
+  // Last night's part of the sitting is yesterday's.
+  await expect(rows.nth(1)).toHaveText('Yesterday · 6 min 40 s · 70% (84 BPM) · 15 passes');
+  await expect(rows.nth(2)).toHaveText('3 days ago · 5 min · 60% (72 BPM) · 30 passes');
+  await expect(todayRows).toHaveCount(1);
+  // A row is a day: none says a time of day.
+  expect((await rows.allTextContents()).filter((row) => /\d:\d\d/.test(row))).toEqual([]);
+  expect(await textSpillingOutOf(history)).toEqual([]);
+
+  // The rule a day's speed follows is said where the 80% is read (D10).
+  await expect(history).toContainText('Each day counts at the speed you spent the most time at');
+
+  // "Show all" by the keyboard: the button goes, and focus goes on to the first day it added.
+  await history.getByRole('button', { name: 'Show all 13 days' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(rows).toHaveCount(13);
+  await expect(rows.nth(10)).toBeFocused();
+  await expect(history.getByRole('button')).toHaveCount(0);
+  expect(await textSpillingOutOf(history)).toEqual([]);
+
+  // With the history open, practise: the session joins today's row.
+  await playButton(page).click();
+  await playFor(page, 6_000);
+  await sessionCount(user).toBe(16);
+  const logged = (await sessionsOf(user)).at(-1)!;
+  expect(logged).toMatchObject({ speed_ratio: 0.8 });
+  await openLoopPanel(page);
+  await expect(todayRows).toHaveCount(1);
+  await expect(rows.nth(0)).toHaveText(
+    `Today · ${durationText(280 + logged.duration_seconds)} · 80% (96 BPM) · ${29 + logged.repeats} passes`,
+  );
+  await expect(rows).toHaveCount(13);
+  await expect(history.getByTestId('loop-history-summary')).toContainText('13 days · 1 h 6 min');
+  // And after the list has been read again from the server: still one row for today.
+  await page.waitForTimeout(1_500);
+  await expect(todayRows).toHaveCount(1);
+  await expect(rows).toHaveCount(13);
+});
+
+/** Seconds as a History row writes them: "45 s", "4 min 46 s", "5 min". */
+function durationText(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes === 0) return `${rest} s`;
+  return rest === 0 ? `${minutes} min` : `${minutes} min ${rest} s`;
+}
+
+// Unit 20, batch 5 (17.1): what each place says of one sitting. The session and
+// the History say the speed most of it was played at; the overview's summary
+// says where the speed started and where it was left; the loop keeps the speed left at.
+test('a sitting mostly at 80% with a last try at 100% is logged at 80%, summed up as 80% → 100%', async ({
+  page,
+  user,
+}) => {
+  test.setTimeout(90_000);
+  await shortSessions(page, 2);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Fill', firstBar: 3, lastBar: 4 });
+  await saveLoopSpeed(page, 80);
+  await backTo(page, 'Groove 120').click();
+  await openPractice(page, 'Fill');
+  await expect(practiceSpeed(page)).toHaveText('80%');
+
+  await playButton(page).click();
+  await expect(playButton(page)).toHaveText('Pause');
+  await page.waitForTimeout(8_000);
+  // The try: four nudges up to full speed, still playing, and a couple of seconds at it.
+  for (let i = 0; i < 4; i++) await nudge(page, 'Faster').click();
+  await expect(practiceSpeed(page)).toHaveText('100%');
+  await playFor(page, 2_000);
+
+  await sessionCount(user).toBe(1);
+  const [session] = await sessionsOf(user);
+  expect(session).toMatchObject({ speed_ratio: 0.8 });
+  expect(session!.duration_seconds).toBeGreaterThanOrEqual(10);
+  // The loop itself is saved where it was left.
+  await expect
+    .poll(async () => (await loopsOf(user)).find((loop) => loop.name === 'Fill')?.speed_ratio)
+    .toBe(1);
+
+  await backTo(page, 'Groove 120').click();
+  await expect(visitSummary(page).getByRole('listitem')).toHaveText([/^Fill: 1\d s, 80% → 100%$/]);
+  const item = overviewItem(page, 'on the go', 'Fill');
+  await expect(item).toContainText('Bars 3 to 4 · 100%');
+
+  // Its history on the overview, where no tempo is known: the percent alone, and 80%.
+  await item.getByRole('button', { name: 'More actions for Fill' }).click();
+  await page.getByRole('menuitem', { name: 'Show history' }).click();
+  const history = page.getByRole('region', { name: 'History of Fill' });
+  await expect(history.getByTestId('loop-history-summary')).toHaveText(
+    `1 day · ${durationText(session!.duration_seconds)} in all`,
+  );
+  await expect(history.getByRole('listitem')).toHaveText([
+    `Today · ${durationText(session!.duration_seconds)} · 80% · ${
+      session!.repeats === 1 ? '1 pass' : `${session!.repeats} passes`
+    }`,
+  ]);
+  expect(await textSpillingOutOf(history)).toEqual([]);
 });
