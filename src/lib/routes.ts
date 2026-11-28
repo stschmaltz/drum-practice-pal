@@ -14,6 +14,13 @@ export const songPath = (songId: string) => `/songs/${songId}`;
 /** Jam mode: the whole song in the player. */
 export const songPlayPath = (songId: string) => `${songPath(songId)}/play`;
 
+/** The query parameter that opens the play screen on one of the song's recordings (Unit 14). */
+export const SOURCE_PARAM = 'source';
+
+/** The play screen with a recording's video over the tab: `source` is 'original' or 'drumless'. */
+export const songSourcePath = (songId: string, source: string) =>
+  `${songPlayPath(songId)}?${SOURCE_PARAM}=${source}`;
+
 /** The query parameters the jam page reads to open the loop form for a new loop or an edit. */
 export const NEW_LOOP_PARAM = 'new';
 export const EDIT_LOOP_PARAM = 'edit';

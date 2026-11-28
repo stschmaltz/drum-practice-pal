@@ -371,7 +371,7 @@ test('offline, a loop opens from the home page and every control that needs the 
 
   // Back to the whole song, where the loop panel is.
   await backTo(page, 'Groove 120').click();
-  await page.getByRole('link', { name: 'Play whole song' }).click();
+  await page.getByRole('link', { name: 'Tab', exact: true }).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
 
   // Loops can't be created or deleted offline.

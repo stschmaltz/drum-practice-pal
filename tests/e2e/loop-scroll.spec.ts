@@ -721,7 +721,7 @@ for (const turned of [false, true]) {
       await openFixture(page, user, 'groove-120', 'Groove 120');
       if (link === 'Edit') await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
       await backTo(page, 'Groove 120').click();
-      await expect(page.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Tab', exact: true })).toBeVisible();
 
       if (link === 'New loop') {
         await page.getByRole('link', { name: 'New loop' }).click();

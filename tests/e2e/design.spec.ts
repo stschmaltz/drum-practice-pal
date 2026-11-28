@@ -29,6 +29,19 @@ import {
   visitSummary,
   shortSessions,
 } from './practicePage';
+import {
+  addRecordingButton,
+  linkField,
+  openNewSongOverview,
+  openRecordingsForm,
+  playAlong,
+  recordingFrame,
+  recordingLink,
+  recordingsForm,
+  saveRecordingsButton,
+  stubServices,
+  WATCH_URL,
+} from './recordingsPage';
 
 // Unit 12: what the visual design promises, measured on every screen at the
 // phone, tablet and desktop sizes. Behaviour is the other specs' subject; they
@@ -322,6 +335,56 @@ test('the shortcut overlay opens with its title on screen on a landscape phone',
   await expect(dialog.getByRole('term').first()).toBeInViewport();
   // The rest is a scroll away inside the dialog, not off the page.
   expect(await dialog.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+});
+
+test('a song’s recordings: the overview’s buttons and form, and the play screen on a video', async ({
+  user,
+  page,
+  context,
+}) => {
+  test.setTimeout(90_000);
+  await stubServices(context);
+  await openNewSongOverview(page, user);
+  await expect(addRecordingButton(page)).toBeVisible();
+  await expectWellDrawn(page, 'overview, no recordings');
+  await expectFocusRings(page, 'overview, no recordings');
+
+  // The form, with a refused link's message, a recognised one, and an other link being added.
+  await openRecordingsForm(page, 'Groove 120');
+  await linkField(page, 'Original').fill(WATCH_URL);
+  await linkField(page, 'Drumless').fill('javascript:alert(1)');
+  await recordingsForm(page).getByRole('button', { name: 'Add another link' }).click();
+  await saveRecordingsButton(page).click();
+  await expect(recordingsForm(page).getByRole('alert')).toBeVisible();
+  await expectWellDrawn(page, 'recordings form');
+  await expectFocusRings(page, 'recordings form');
+
+  // A host and an address as long as they come, with nowhere to break.
+  const longHost = `${'drumlessons'.repeat(5)}.example.com`;
+  const longUrl = `https://example.com/${'cover'.repeat(380)}`;
+  await linkField(page, 'Drumless').fill(`https://${longHost}/drumless`);
+  await linkField(page, 'Other link 1').fill(longUrl);
+  await expect(recordingsForm(page)).toContainText(`Link to ${longHost}.`);
+  expect(await textSpillingOutOf(recordingsForm(page)), 'recordings form').toEqual([]);
+  await saveRecordingsButton(page).click();
+  await expect(recordingsForm(page)).toHaveCount(0);
+
+  await expect(
+    playAlong(page).getByRole('link', { name: `Drumless on ${longHost}` }),
+  ).toBeVisible();
+  await expect(playAlong(page).getByRole('list', { name: 'Other links' })).toBeVisible();
+  await expectWellDrawn(page, 'overview, with recordings');
+  await expectFocusRings(page, 'overview, with recordings');
+  expect(await textSpillingOutOf(playAlong(page)), 'play along').toEqual([]);
+  expect((await auditScreen(page)).overflow).toEqual([]);
+
+  await recordingLink(page, 'Original').click();
+  await expect(recordingFrame(page)).toBeVisible();
+  await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
+  await expectWellDrawn(page, 'play screen, on a recording');
+  const throughLabel = await expectFocusRings(page, 'play screen, on a recording');
+  // The source switch's radios are hidden inside their labels, which draw the ring.
+  expect(throughLabel.join(' ')).toContain('Original');
 });
 
 test('a long unbroken loop name wraps inside the loop panel and on the home page', async ({

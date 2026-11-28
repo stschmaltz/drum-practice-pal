@@ -37,19 +37,23 @@ export function searchSongs<T extends Pick<Song, 'id' | 'title' | 'artist'>>(
   });
 }
 
-const time = (timestamp: string | null) => (timestamp ? Date.parse(timestamp) : -Infinity);
+const time = (timestamp: string | null | undefined) =>
+  timestamp ? Date.parse(timestamp) : -Infinity;
+
+/** When the song was last worked on: a loop practised, or a recording opened (Unit 14), whichever is later. */
+const lastActive = (song: Pick<LibrarySong, 'last_practiced_at' | 'last_played_at'>) =>
+  Math.max(time(song.last_practiced_at), time(song.last_played_at));
 
 /**
- * "practiced": most recently practiced first, never-practiced songs after,
- * newest upload first among those. "added": newest upload first.
+ * "practiced": most recently practiced or played along to first, songs with
+ * neither after, newest upload first among those. "added": newest upload first.
  */
-export function sortSongs<T extends Pick<LibrarySong, 'created_at' | 'last_practiced_at' | 'id'>>(
-  songs: readonly T[],
-  sort: LibrarySort,
-): T[] {
+export function sortSongs<
+  T extends Pick<LibrarySong, 'created_at' | 'last_practiced_at' | 'last_played_at' | 'id'>,
+>(songs: readonly T[], sort: LibrarySort): T[] {
   return [...songs].sort((a, b) => {
     if (sort === 'practiced') {
-      const byPractice = time(b.last_practiced_at) - time(a.last_practiced_at);
+      const byPractice = lastActive(b) - lastActive(a);
       // NaN when neither was practiced (-Infinity minus -Infinity): fall through.
       if (byPractice !== 0 && !Number.isNaN(byPractice)) return byPractice;
     }

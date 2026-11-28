@@ -8,16 +8,19 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
+
 import userEvent from '@testing-library/user-event';
 import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { Link, Outlet, Route } from 'react-router';
-import type { Song } from '@/features/library/songForm';
+import type { LibrarySong, Song } from '@/features/library/songForm';
 import { songKeys } from '@/features/library/useSongs';
 import type { Loop } from '@/features/loops/loopForm';
 import { offlineDb } from '@/features/offline/offlineDb';
 import type { EngineMount } from '@/features/player/playerEngine';
 import { COUNT_IN_BARS_LABELS, COUNT_IN_MODE_SHORT_LABELS } from '@/features/player/countInLabels';
 import { PLAYER_ERROR_MESSAGES } from '@/features/player/playerMessages';
+import type { SongLinkRow } from '@/features/recordings/songLinkForm';
+import { songLinkKeys } from '@/features/recordings/songLinkKeys';
 import type { Settings } from '@/features/settings/settingsForm';
 import { songFilePath } from '@/lib/schema';
 import {
@@ -42,9 +45,26 @@ import {
   countInGroup,
   countInModeGroup,
 } from '@/test/countInControls';
+import {
+  EMBED_URL,
+  linkRow,
+  linkTable,
+  playedWrites,
+  spotifyLink,
+  videoLink,
+  WATCH_URL,
+  type LinkTable,
+} from '@/test/linkTable';
 import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
-import { renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
+import {
+  historyBack,
+  historyForward,
+  renderRoutes,
+  RouteMarker,
+  settle,
+  testQueryClient,
+} from '@/test/render';
 import { readVisitSittings } from '@/features/practice/visitSittings';
 import { SongPage } from './SongPage';
 
@@ -116,6 +136,8 @@ const loopOfSongA = (id: string, overrides: Partial<Loop> = {}): Loop =>
 
 /** The loops table as the fake client serves it; tests read it to see what was sent. */
 let loops: LoopTable = loopTable();
+/** The song's links (Unit 14), likewise. */
+let links: LinkTable = linkTable();
 
 /**
  * Answers song, settings and loop queries; `songs` maps an id to its row, or
@@ -125,11 +147,24 @@ function serve({
   songs = { [SONG_A]: songRow(SONG_A), [SONG_B]: songRow(SONG_B) } as Record<string, Song | null>,
   settings = ok(settingsRow),
   loops: savedLoops = [],
-}: { songs?: Record<string, Song | null>; settings?: FakeResult; loops?: Loop[] } = {}) {
+  links: savedLinks = [],
+}: {
+  songs?: Record<string, Song | null>;
+  settings?: FakeResult;
+  loops?: Loop[];
+  links?: SongLinkRow[];
+} = {}) {
   loops = loopTable(savedLoops);
+  links = linkTable(savedLinks);
   queryResult.mockImplementation(async (call) => {
     if (call.table === 'user_settings') return settings;
     if (call.table === 'loops') return loops.answer(call);
+    if (call.table === 'song_links') return links.answer(call);
+    // "A recording was opened" (Unit 14): the database answers with the time it kept.
+    const played = opArgs(call, 'update')?.[0] as { last_played_at?: string } | undefined;
+    if (call.table === 'songs' && played?.last_played_at) {
+      return ok({ last_played_at: played.last_played_at });
+    }
     const id = call.ops.find((op) => op.method === 'eq' && op.args[0] === 'id')?.args[1];
     return ok(songs[id as string] ?? null);
   });
@@ -2512,6 +2547,953 @@ describe('SongPage controls while playing (12 UX pass)', () => {
       expect(await screen.findByText('At library')).toBeInTheDocument();
       expect(screen.queryByTestId('controls-slot')).not.toBeInTheDocument();
       expect(document.querySelector('[style*="margin-bottom"]')).toBeNull();
+    });
+  });
+});
+
+describe('SongPage recordings (Unit 14)', () => {
+  const original = videoLink();
+  const drumlessVideo = videoLink('link-drumless', {
+    kind: 'drumless',
+    url: 'https://www.youtube.com/watch?v=aaaaaaaaaaa&t=30s',
+  });
+  const DRUMLESS_EMBED =
+    'https://www.youtube-nocookie.com/embed/aaaaaaaaaaa?playsinline=1&rel=0&start=30';
+  const verse = loopOfSongA('verse', { name: 'Verse', start_bar: 5, end_bar: 8, speed_ratio: 0.8 });
+
+  const linksKey = songLinkKeys.forSong(USER, SONG_A);
+  const sources = () => screen.getByRole('radiogroup', { name: 'Play along with' });
+  const noSources = () =>
+    expect(screen.queryByRole('radiogroup', { name: 'Play along with' })).not.toBeInTheDocument();
+  const source = (name: string) => within(sources()).getByRole('radio', { name });
+  const frame = () => screen.getByTestId('recording-frame');
+  /** The frame, once it is on the page. */
+  const frameShown = () => screen.findByTestId('recording-frame');
+  const noFrame = () => expect(screen.queryByTestId('recording-frame')).not.toBeInTheDocument();
+  /** Presses a source in the switch, once the switch has it. */
+  const choose = async (user: ReturnType<typeof userEvent.setup>, name: string) =>
+    user.click(await screen.findByRole('radio', { name }));
+  const location = () => screen.getByTestId('location').textContent;
+  /** Nothing of the tab's player is offered: no Play, no controls bar, no readout, no loop panel. */
+  const expectNoTabControls = () => {
+    expect(screen.queryByRole('button', { name: /^(Play|Pause)$/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('jam-bar')).not.toBeInTheDocument();
+    expect(screen.queryByRole('slider', { name: 'Speed' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Metronome' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Player controls' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Shortcuts' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('player-status')).not.toBeInTheDocument();
+    expect(screen.getByTestId('loop-panel')).not.toBeVisible();
+  };
+
+  /** The play screen at `query`, with History before it when given. Returns once the engine has its score. */
+  async function openSong({
+    links: savedLinks = [original],
+    loops: savedLoops = [verse],
+    query = '',
+    before,
+    queryClient,
+    ready = true,
+  }: {
+    links?: SongLinkRow[];
+    loops?: Loop[];
+    query?: string;
+    before?: string[];
+    queryClient?: QueryClient;
+    /** False to leave alphaTab still loading. */
+    ready?: boolean;
+  } = {}) {
+    serve({ loops: savedLoops, links: savedLinks });
+    renderRoutes(
+      <>
+        <Route path="/songs/:id/play" element={<SongPage />} />
+        <Route path="/songs/:id" element={<RouteMarker name="song overview" />} />
+      </>,
+      { path: `/songs/${SONG_A}/play${query}`, before, queryClient },
+    );
+    const user = userEvent.setup();
+    await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+    const engine = engines[0]!;
+    if (ready) act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+    return { user, engine };
+  }
+
+  describe('the source switch', () => {
+    it('isn’t there for a song with no links, and nothing of YouTube’s is on the page', async () => {
+      await openSong({ links: [] });
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await settle();
+      noSources();
+      noFrame();
+      expect(document.querySelector('iframe')).toBeNull();
+      expect(playedWrites()).toEqual([]);
+    });
+
+    it('isn’t there for a song whose only links leave the app', async () => {
+      await openSong({ links: [spotifyLink('s', { kind: 'original' }), linkRow('lesson')] });
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await settle();
+      noSources();
+    });
+
+    it('offers Tab and each YouTube source the song has, opening on Tab with no frame', async () => {
+      await openSong({ links: [drumlessVideo, original, linkRow('lesson', { url: WATCH_URL })] });
+      await waitFor(() =>
+        expect(
+          within(sources())
+            .getAllByRole('radio')
+            .map((radio) => radio.parentElement?.textContent),
+        ).toEqual(['Tab', 'Original', 'Drumless']),
+      );
+      expect(source('Tab')).toBeChecked();
+      noFrame();
+      expect(playButton()).toBeEnabled();
+      expect(playedWrites()).toEqual([]);
+    });
+
+    it('a Spotify Drumless beside a YouTube Original isn’t a source', async () => {
+      await openSong({ links: [original, spotifyLink()] });
+      await waitFor(() => expect(within(sources()).getAllByRole('radio')).toHaveLength(2));
+      expect(within(sources()).queryByRole('radio', { name: 'Drumless' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('on a recording', () => {
+    it('shows the video in YouTube’s no-cookie player, with the way out under it and the score below', async () => {
+      const { user } = await openSong();
+      await choose(user, 'Original');
+
+      expect(frame()).toHaveAttribute('src', EMBED_URL);
+      expect(frame().tagName).toBe('IFRAME');
+      expect(frame()).toHaveAttribute(
+        'title',
+        'Original recording of Groove 120 (YouTube video player)',
+      );
+      expect(frame()).toHaveAttribute(
+        'allow',
+        'accelerometer; encrypted-media; picture-in-picture; fullscreen',
+      );
+      expect(frame()).toHaveAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+      expect(frame()).toHaveAttribute('allowfullscreen');
+      // No script of YouTube's: the frame is all there is.
+      expect(document.querySelector('script[src*="youtube"]')).toBeNull();
+
+      const out = screen.getByRole('link', { name: /^Open in YouTube/ });
+      expect(out).toHaveAttribute('href', WATCH_URL);
+      expect(out).toHaveAttribute('target', '_blank');
+      expect(out).toHaveAttribute('rel', 'noopener noreferrer');
+      expect(screen.getByTestId('recording-note')).toHaveTextContent(
+        'The video has its own controls. Switch to Tab for loops, speed and the metronome.',
+      );
+      expect(screen.getByTestId('score-viewport')).toBeVisible();
+      expectNoTabControls();
+      expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
+    });
+
+    it('stops the tab that was sounding, and Tab brings its controls back without starting it', async () => {
+      const { user, engine } = await openSong();
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      expect(playButton()).toHaveTextContent('Pause');
+
+      await choose(user, 'Original');
+      await waitFor(() => expect(engine.pause).toHaveBeenCalled());
+      act(() => engine.fire('stateChanged', { playing: false }));
+      expect(frame()).toBeInTheDocument();
+      expectNoTabControls();
+
+      const plays = engine.play.mock.calls.length;
+      await choose(user, 'Tab');
+      noFrame();
+      expect(playButton()).toHaveTextContent('Play');
+      expect(screen.getByRole('slider', { name: 'Speed' })).toBeInTheDocument();
+      expect(screen.getByTestId('loop-panel')).toBeVisible();
+      expect(engine.play.mock.calls).toHaveLength(plays);
+      expect(location()).toBe(`/songs/${SONG_A}/play`);
+    });
+
+    it('calls a count-in off when the source changes under it', async () => {
+      serve({ settings: ok({ ...settingsRow, count_in_bars: 1 }), links: [original] });
+      const user = renderSong(SONG_A);
+      const engine = await loadPlayer();
+      await user.click(playButton());
+      expect(status()).toHaveTextContent('Counting in…');
+
+      await choose(user, 'Original');
+      expect(frame()).toBeInTheDocument();
+      await choose(user, 'Tab');
+      await waitFor(() => expect(playButton()).toHaveTextContent('Play'));
+      expect(status()).not.toHaveTextContent('Counting in');
+      await settle();
+      expect(engine.play).not.toHaveBeenCalled();
+    });
+
+    it('switching from one video to the other replaces the frame, so the first stops', async () => {
+      const { user } = await openSong({ links: [original, drumlessVideo] });
+      await choose(user, 'Original');
+      const first = frame();
+
+      await choose(user, 'Drumless');
+      expect(frame()).not.toBe(first);
+      expect(first).not.toBeInTheDocument();
+      expect(frame()).toHaveAttribute('src', DRUMLESS_EMBED);
+      expect(frame()).toHaveAttribute(
+        'title',
+        'Drumless recording of Groove 120 (YouTube video player)',
+      );
+      expect(screen.getByRole('link', { name: /^Open in YouTube/ })).toHaveAttribute(
+        'href',
+        drumlessVideo.url,
+      );
+      expect(screen.getAllByTestId('recording-frame')).toHaveLength(1);
+    });
+
+    it('leaves the keys to the browser: Space and the pedal keys start and move nothing', async () => {
+      const { user, engine } = await openSong();
+      await choose(user, 'Original');
+      (document.activeElement as HTMLElement).blur();
+
+      for (const key of [' ', 'm', 'd', 's', 'c', 'ArrowUp', 'PageDown', '?']) {
+        // Not cancelled: the page took nothing.
+        expect(fireEvent.keyDown(document.body, { key })).toBe(true);
+      }
+      expect(engine.play).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
+
+      // Back on the tab every key is the page's again, with the options as they were.
+      await choose(user, 'Tab');
+      expect(screen.getByRole('slider', { name: 'Speed' })).toHaveValue('100');
+      expect(screen.getByRole('button', { name: 'Metronome' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      (document.activeElement as HTMLElement).blur();
+      expect(fireEvent.keyDown(document.body, { key: ' ' })).toBe(false);
+      expect(engine.play).toHaveBeenCalledTimes(1);
+    });
+
+    it('a tap or a drag on the score moves nothing and opens no form', async () => {
+      const { user, engine } = await openSong();
+      await choose(user, 'Original');
+
+      act(() => engine.fire('barTapped', { barIndex: 11 }));
+      act(() => engine.fire('barsDragged', { fromBarIndex: 2, toBarIndex: 5, done: true }));
+      expect(engine.seek).not.toHaveBeenCalled();
+
+      await choose(user, 'Tab');
+      expect(status()).toHaveTextContent('Bar 1 of 16');
+      expect(screen.queryByRole('form')).not.toBeInTheDocument();
+      // The same tap now seeks: it was the source that held it.
+      act(() => engine.fire('barTapped', { barIndex: 11 }));
+      expect(status()).toHaveTextContent('Bar 12 of 16');
+    });
+
+    it('puts an open loop form away', async () => {
+      const { user } = await openSong();
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      const panel = within(screen.getByTestId('loop-panel'));
+      await user.click(await panel.findByRole('button', { name: 'New loop' }));
+      expect(panel.getByRole('form')).toBeInTheDocument();
+
+      await choose(user, 'Original');
+      await waitFor(() => expect(panel.queryByRole('form')).not.toBeInTheDocument());
+      await choose(user, 'Tab');
+      expect(panel.queryByRole('form')).not.toBeInTheDocument();
+    });
+
+    it('keeps the video when the tab’s file can’t be downloaded', async () => {
+      serve({ links: [original] });
+      storageResult.mockResolvedValue(fail('Object not found'));
+      renderSong(`${SONG_A}?source=original`);
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        "Couldn't download this song's file.",
+      );
+    });
+  });
+
+  describe('?source=', () => {
+    it('opens on the recording, with no Play to start the tab under it, before the player is ready', async () => {
+      await openSong({ query: '?source=original', ready: false });
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+      expect(source('Original')).toBeChecked();
+      expectNoTabControls();
+    });
+
+    it('falls back to Tab for a kind the song has no video for, and takes it out of the address', async () => {
+      await openSong({ query: '?source=drumless', links: [original, spotifyLink()] });
+      await waitFor(() => expect(location()).toBe(`/songs/${SONG_A}/play`));
+      noFrame();
+      expect(source('Tab')).toBeChecked();
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      expect(playedWrites()).toEqual([]);
+    });
+
+    it.each(['bogus', 'tab', 'other', 'javascript:alert(1)'])(
+      'is the tab for ?source=%s',
+      async (value) => {
+        await openSong({ query: `?source=${encodeURIComponent(value)}` });
+        await waitFor(() => expect(playButton()).toBeEnabled());
+        await screen.findByRole('radiogroup', { name: 'Play along with' });
+        noFrame();
+        expect(source('Tab')).toBeChecked();
+      },
+    );
+
+    it('waits for the links to be read, then shows the recording, never the tab’s controls first', async () => {
+      serve({ links: [original] });
+      const release = links.holdNext('select');
+      renderSong(`${SONG_A}?source=original`);
+      expect(await screen.findByText('Loading the recording…')).toBeVisible();
+      await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+      act(() => engines[0]!.finishLoading({ barCount: 16, trackCount: 3 }));
+      expect(screen.queryByRole('button', { name: /^(Play|Pause)$/ })).not.toBeInTheDocument();
+      noFrame();
+
+      release();
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+    });
+
+    it('opens a link saved on another device since the list was cached', async () => {
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(linksKey, []);
+      await queryClient.invalidateQueries({
+        queryKey: linksKey,
+        refetchType: 'none',
+      });
+      await openSong({ query: '?source=original', queryClient });
+      expect(await frameShown()).toBeInTheDocument();
+      expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
+    });
+
+    it('once it has settled on Tab, a link saved later doesn’t take the tab away from someone playing it', async () => {
+      const queryClient = testQueryClient();
+      const { user, engine } = await openSong({
+        query: '?source=original',
+        links: [],
+        queryClient,
+      });
+      await waitFor(() => expect(location()).toBe(`/songs/${SONG_A}/play`));
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+
+      links.setRows([original]);
+      await act(() => queryClient.invalidateQueries({ queryKey: linksKey }));
+      // The switch appears, as an offer; the source stays the tab, still playing.
+      expect(await screen.findByRole('radio', { name: 'Original' })).not.toBeChecked();
+      noFrame();
+      expect(playButton()).toHaveTextContent('Pause');
+      expect(engine.pause).not.toHaveBeenCalled();
+    });
+
+    it('opens on the tab when the links can’t be read, offline or failing', async () => {
+      serve({ links: [original] });
+      links.failNext('select', { message: 'TypeError: Failed to fetch', code: '' });
+      renderSong(`${SONG_A}?source=original`);
+      await loadPlayer();
+      noFrame();
+      noSources();
+    });
+
+    it('isn’t read on a visit that came for the loop form', async () => {
+      await openSong({ query: '?new=1&source=original' });
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      expect(await within(screen.getByTestId('loop-panel')).findByRole('form')).toBeInTheDocument();
+      await settle();
+      noFrame();
+      noSources();
+    });
+  });
+
+  describe('Back', () => {
+    it('goes to the song, not through the sources that were looked at', async () => {
+      const { user } = await openSong({
+        links: [original, drumlessVideo],
+        before: [`/songs/${SONG_A}`],
+      });
+      await choose(user, 'Original');
+      await choose(user, 'Drumless');
+      await choose(user, 'Tab');
+      await choose(user, 'Drumless');
+      expect(location()).toBe(`/songs/${SONG_A}/play?source=drumless`);
+
+      historyBack();
+      expect(await screen.findByText('At song overview')).toBeVisible();
+      noFrame();
+    });
+
+    it('from a recording the overview opened goes back to the overview', async () => {
+      await openSong({ query: '?source=original', before: [`/songs/${SONG_A}`] });
+      await frameShown();
+      historyBack();
+      expect(await screen.findByText('At song overview')).toBeVisible();
+    });
+  });
+
+  describe('counts as playing the song', () => {
+    it('writes the time once per opening of a source, not at each render or on the tab', async () => {
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-27T18:30:00Z') });
+      try {
+        const { user } = await openSong({ links: [original, drumlessVideo] });
+        await screen.findByRole('radiogroup', { name: 'Play along with' });
+        await settle();
+        expect(playedWrites()).toEqual([]);
+
+        await choose(user, 'Original');
+        await waitFor(() => expect(playedWrites()).toHaveLength(1));
+        expect(opArgs(playedWrites()[0]!, 'update')).toEqual([
+          { last_played_at: '2026-11-27T18:30:00.000Z' },
+        ]);
+        expect(playedWrites()[0]!.ops).toContainEqual({ method: 'eq', args: ['id', SONG_A] });
+        expect(playedWrites()[0]!.ops).toContainEqual({ method: 'eq', args: ['user_id', USER] });
+        await settle();
+        expect(playedWrites()).toHaveLength(1);
+
+        await choose(user, 'Drumless');
+        await waitFor(() => expect(playedWrites()).toHaveLength(2));
+        await choose(user, 'Tab');
+        await settle();
+        expect(playedWrites()).toHaveLength(2);
+        await waitFor(async () => expect(await offlineDb.outbox.count()).toBe(0));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('moves the song up the cached Songs list at once', async () => {
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(songKeys.forUser(USER), [
+        { ...songRow(SONG_A), last_practiced_at: null },
+        { ...songRow(SONG_B), last_practiced_at: null, last_played_at: '2026-11-01T00:00:00Z' },
+      ]);
+      await openSong({ query: '?source=original', queryClient });
+      await waitFor(() =>
+        expect(
+          queryClient
+            .getQueryData<LibrarySong[]>(songKeys.forUser(USER))
+            ?.find((song) => song.id === SONG_A)?.last_played_at,
+        ).toEqual(expect.any(String)),
+      );
+    });
+  });
+
+  describe('offline', () => {
+    it('shows no frame and says why, writes nothing, and the tab under it still reads', async () => {
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+      queryClient.setQueryData(linksKey, [original]);
+      queryClient.setQueryData(['settings', USER], settingsRow);
+      await offlineDb.songFiles.put({
+        userId: USER,
+        songId: SONG_A,
+        bytes: new Uint8Array(fileBytes(SONG_A)),
+      });
+      act(() => onlineManager.setOnline(false));
+      await openSong({ query: '?source=original', queryClient });
+
+      expect(
+        await screen.findByText("You're offline. The video needs a connection."),
+      ).toBeVisible();
+      noFrame();
+      expect(document.querySelector('iframe')).toBeNull();
+      expect(screen.getByTestId('score-viewport')).toBeVisible();
+      await settle();
+      expect(playedWrites()).toEqual([]);
+      expect(await offlineDb.outbox.count()).toBe(0);
+
+      // The connection comes back: the frame loads, and that is the opening that counts.
+      act(() => onlineManager.setOnline(true));
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+      await waitFor(() => expect(playedWrites()).toHaveLength(1));
+    });
+  });
+
+  // 14 QA fix round 1.
+  describe('the score under a recording on a phone (QA issue 2)', () => {
+    // jsdom has no matchMedia, so the layout goes by the window's width.
+    beforeEach(() => vi.stubGlobal('innerWidth', 390));
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('is drawn as a page, lines down the screen, and goes back to one line on Tab, without a restart', async () => {
+      const { user, engine } = await openSong();
+      expect(engine.mount?.layout).toBe('horizontal');
+      const restarts = engine.restartCalls();
+
+      await choose(user, 'Original');
+      await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('page'));
+      expect(frame()).toBeInTheDocument();
+
+      await choose(user, 'Tab');
+      await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('horizontal'));
+      // Redrawn only: nothing was stopped, started or loaded again.
+      expect(engine.restartCalls()).toBe(restarts);
+      expect(engine.loadScore).toHaveBeenCalledTimes(1);
+      expect(engine.play).not.toHaveBeenCalled();
+    });
+
+    it('opens as a page when the screen opens on the recording', async () => {
+      const { engine } = await openSong({ query: '?source=original' });
+      expect(engine.mount?.layout).toBe('page');
+      expect(engine.setLayout).not.toHaveBeenCalledWith('horizontal');
+    });
+
+    it('back on Tab, brings the bar the paused player is at back on show in its one line', async () => {
+      const { user, engine } = await openSong();
+      // Paused at bar 9, as after playing that far.
+      act(() => engine.fire('position', { tick: startOfBar(9) }));
+      await choose(user, 'Original');
+      await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('page'));
+      engine.scrollToBar.mockClear();
+
+      await choose(user, 'Tab');
+      await waitFor(() => expect(engine.scrollToBar).toHaveBeenLastCalledWith(8));
+      // After the layout was asked for, so the scroll is to the bar's place in the new drawing.
+      expect(engine.scrollToBar.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+        engine.setLayout.mock.invocationCallOrder.at(-1)!,
+      );
+      expect(engine.seek).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('offline on a recording, the way out (QA issue 9)', () => {
+    it('locks Open in YouTube with the note beside it, refuses a press, and is heard again once back', async () => {
+      await openSong({ query: '?source=original' });
+      await frameShown();
+      const out = screen.getByRole('link', { name: /^Open in YouTube/ });
+      expectUnlocked(out);
+      expect(fireEvent.click(out)).toBe(true);
+
+      // Pressed before the link has caught up with the connection going: refused all the same.
+      let allowed = true;
+      act(() => {
+        onlineManager.setOnline(false);
+        allowed = fireEvent.click(out);
+      });
+      expect(allowed).toBe(false);
+      expectLocked(screen.getByRole('link', { name: /^Open in YouTube/ }));
+      expect(screen.getByText("You're offline. The video needs a connection.")).toBeVisible();
+      expect(fireEvent.click(screen.getByRole('link', { name: /^Open in YouTube/ }))).toBe(false);
+
+      act(() => onlineManager.setOnline(true));
+      const back = screen.getByRole('link', { name: /^Open in YouTube/ });
+      expectUnlocked(back);
+      expect(fireEvent.click(back)).toBe(true);
+    });
+  });
+
+  // 14 Test: the checklist's rows for the source switch, and the cases the plan's Test focus names.
+  describe('?source= for a link that is no video (14 Test)', () => {
+    it.each<[string, SongLinkRow]>([
+      ['a Spotify track', spotifyLink('s', { kind: 'original' })],
+      ['some other site', linkRow('w', { kind: 'original', url: 'https://example.com/the-song' })],
+      [
+        'a YouTube channel, which names no video',
+        linkRow('c', { kind: 'original', url: 'https://www.youtube.com/@somedrummer' }),
+      ],
+      [
+        'a row that says YouTube over an address the parser refuses',
+        linkRow('r', {
+          kind: 'original',
+          provider: 'youtube',
+          url: `http://www.youtube.com/watch?v=dQw4w9WgXcQ`,
+        }),
+      ],
+      [
+        'a row that says YouTube over a look-alike host',
+        linkRow('l', {
+          kind: 'original',
+          provider: 'youtube',
+          url: `https://youtube.com.evil.test/embed/dQw4w9WgXcQ`,
+        }),
+      ],
+    ])('is the tab when the song’s Original is %s', async (_name, row) => {
+      await openSong({ query: '?source=original', links: [row, drumlessVideo] });
+      await waitFor(() => expect(location()).toBe(`/songs/${SONG_A}/play`));
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      noFrame();
+      expect(document.querySelector('iframe')).toBeNull();
+      // The Drumless video is still offered; the Original that isn't one never is.
+      expect(source('Tab')).toBeChecked();
+      expect(within(sources()).queryByRole('radio', { name: 'Original' })).not.toBeInTheDocument();
+      await settle();
+      expect(playedWrites()).toEqual([]);
+    });
+  });
+
+  describe('Back and Forward (14 Test)', () => {
+    it('Forward after Back opens the recording again; the sources in between were never entries', async () => {
+      await openSong({ query: '?source=original', before: [`/songs/${SONG_A}`] });
+      await frameShown();
+      historyBack();
+      expect(await screen.findByText('At song overview')).toBeVisible();
+      noFrame();
+
+      historyForward();
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+      expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
+      expect(source('Original')).toBeChecked();
+      expectNoTabControls();
+    });
+
+    it('Forward comes back to the source the screen was left on, the tab included', async () => {
+      const { user } = await openSong({
+        query: '?source=original',
+        before: [`/songs/${SONG_A}`],
+        links: [original, drumlessVideo],
+      });
+      await frameShown();
+      await choose(user, 'Drumless');
+      await choose(user, 'Tab');
+      historyBack();
+      expect(await screen.findByText('At song overview')).toBeVisible();
+
+      historyForward();
+      await waitFor(() => expect(location()).toBe(`/songs/${SONG_A}/play`));
+      await screen.findByRole('radiogroup', { name: 'Play along with' });
+      expect(source('Tab')).toBeChecked();
+      noFrame();
+      // And nothing further forward: the three sources were one entry.
+      historyForward();
+      await settle();
+      expect(location()).toBe(`/songs/${SONG_A}/play`);
+    });
+  });
+
+  describe('with a loop on the go (14 Test)', () => {
+    const panel = () => within(screen.getByTestId('loop-panel'));
+    const sessionsSent = () =>
+      queryResult.mock.calls
+        .map(([call]) => call)
+        .filter((call) => call.table === 'practice_sessions')
+        .map((call) => opArgs(call, 'upsert')?.[0] as Record<string, unknown>);
+
+    it('a recording stops the loop that was playing and leaves it set up: back on Tab it is the same loop at its speed', async () => {
+      const { user, engine } = await openSong();
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.click(await panel().findByRole('button', { name: 'Play loop Verse' }));
+      act(() => engine.fire('stateChanged', { playing: true }));
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Verse');
+      const rangeSets = engine.setPlaybackRange.mock.calls.length;
+
+      await choose(user, 'Original');
+      await waitFor(() => expect(engine.pause).toHaveBeenCalled());
+      act(() => engine.fire('stateChanged', { playing: false }));
+      expect(frame()).toBeInTheDocument();
+      expectNoTabControls();
+
+      await choose(user, 'Tab');
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Verse');
+      expect(screen.getByTestId('jam-speed')).toHaveTextContent('80%');
+      expect(playButton()).toHaveTextContent('Play');
+      // The loop's range was never taken off or set again, and its speed never written.
+      expect(engine.setPlaybackRange.mock.calls).toHaveLength(rangeSets);
+      await settle();
+      expect(loops.sent('update')).toEqual([]);
+      // Play carries on with the loop.
+      const plays = engine.play.mock.calls.length;
+      await user.click(playButton());
+      expect(engine.play.mock.calls).toHaveLength(plays + 1);
+      expect(screen.getByTestId('active-loop')).toHaveTextContent('Verse');
+    });
+
+    it('time on a recording is not loop practice: the session ends at the switch, and none is logged for the video', async () => {
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-27T18:00:00Z') });
+      try {
+        const { user, engine } = await openSong();
+        await waitFor(() => expect(playButton()).toBeEnabled());
+        await user.click(await panel().findByRole('button', { name: 'Play loop Verse' }));
+        act(() => engine.fire('stateChanged', { playing: true }));
+        vi.setSystemTime(Date.now() + 40_000);
+
+        await choose(user, 'Original');
+        await waitFor(() => expect(engine.pause).toHaveBeenCalled());
+        act(() => engine.fire('stateChanged', { playing: false }));
+        await waitFor(() =>
+          expect(sessionsSent()).toEqual([
+            expect.objectContaining({ loop_id: 'verse', duration_seconds: 40, speed_ratio: 0.8 }),
+          ]),
+        );
+
+        // Ten minutes of the video, then back.
+        vi.setSystemTime(Date.now() + 600_000);
+        await choose(user, 'Tab');
+        await settle();
+        expect(sessionsSent()).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a loop save still on its way when a recording is chosen lands, and the loop is in the list on Tab', async () => {
+      const { user } = await openSong({ loops: [] });
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.click(await panel().findByRole('button', { name: 'New loop' }));
+      const form = within(panel().getByRole('form'));
+      await user.type(form.getByLabelText('Name'), 'Bridge');
+      await user.type(form.getByLabelText('First bar'), '3');
+      await user.type(form.getByLabelText('Last bar'), '4');
+      const release = loops.holdNext('insert');
+      await user.click(form.getByRole('button', { name: 'Save loop' }));
+
+      await choose(user, 'Original');
+      expect(frame()).toBeInTheDocument();
+      // Its form is kept, out of sight, for the answer.
+      expect(screen.getByTestId('loop-panel')).not.toBeVisible();
+      expect(panel().getByRole('form')).toBeInTheDocument();
+
+      release();
+      await waitFor(() => expect(loops.sent('insert')).toHaveLength(1));
+      await waitFor(() => expect(panel().queryByRole('form')).not.toBeInTheDocument());
+      await choose(user, 'Tab');
+      expect(await screen.findByTestId('active-loop')).toHaveTextContent('Bridge');
+      expect(panel().queryByRole('form')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('events that arrive after the switch (14 Test)', () => {
+    it('a Play the engine reports only after a recording was chosen ends stopped, and its late end restarts nothing', async () => {
+      const { user, engine } = await openSong();
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.click(playButton());
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      await choose(user, 'Original');
+
+      // The worker's answers, in the order the engine was told: playing, then stopped.
+      act(() => engine.fire('stateChanged', { playing: true }));
+      await waitFor(() => expect(engine.pause).toHaveBeenCalled());
+      // The last word to the engine is the pause.
+      expect(engine.pause.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+        engine.play.mock.invocationCallOrder.at(-1)!,
+      );
+      act(() => engine.fire('stateChanged', { playing: false }));
+      act(() => engine.fire('finished', undefined));
+      await settle();
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      expectNoTabControls();
+
+      await choose(user, 'Tab');
+      expect(playButton()).toHaveTextContent('Play');
+      expect(engine.play).toHaveBeenCalledTimes(1);
+    });
+
+    it('the sounds coming in after a recording was chosen start nothing and offer no Play', async () => {
+      const { engine } = await openSong({ query: '?source=original', ready: false });
+      await frameShown();
+      act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
+      await settle();
+      expectNoTabControls();
+      expect(engine.play).not.toHaveBeenCalled();
+      expect(screen.getAllByTestId('recording-frame')).toHaveLength(1);
+    });
+  });
+
+  describe('the links read again while on a recording (14 Test)', () => {
+    it('a link removed on another device puts the screen back on the tab, stopped, with the address saying so', async () => {
+      const queryClient = testQueryClient();
+      const { engine } = await openSong({ query: '?source=original', queryClient });
+      await frameShown();
+
+      links.setRows([]);
+      await act(() => queryClient.invalidateQueries({ queryKey: linksKey }));
+      await waitFor(() => expect(location()).toBe(`/songs/${SONG_A}/play`));
+      noFrame();
+      noSources();
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      expect(playButton()).toHaveTextContent('Play');
+      expect(engine.play).not.toHaveBeenCalled();
+    });
+
+    it('a link pointed at another video is a new frame, and not another opening', async () => {
+      const queryClient = testQueryClient();
+      await openSong({ query: '?source=original', queryClient });
+      const first = await frameShown();
+      await waitFor(() => expect(playedWrites()).toHaveLength(1));
+
+      links.setRows([{ ...original, url: drumlessVideo.url }]);
+      await act(() => queryClient.invalidateQueries({ queryKey: linksKey }));
+      await waitFor(() => expect(frame()).toHaveAttribute('src', DRUMLESS_EMBED));
+      expect(first).not.toBeInTheDocument();
+      expect(screen.getAllByTestId('recording-frame')).toHaveLength(1);
+      expect(screen.getByRole('link', { name: /^Open in YouTube/ })).toHaveAttribute(
+        'href',
+        drumlessVideo.url,
+      );
+      expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
+      await settle();
+      expect(playedWrites()).toHaveLength(1);
+    });
+
+    it('a read that fails over the links keeps the very frame that is playing', async () => {
+      const queryClient = testQueryClient();
+      await openSong({ query: '?source=original', queryClient });
+      const first = await frameShown();
+
+      links.failNext('select', { message: 'TypeError: Failed to fetch', code: '' });
+      await act(() => queryClient.invalidateQueries({ queryKey: linksKey }));
+      await waitFor(() => expect(queryClient.getQueryState(linksKey)?.status).toBe('error'));
+      expect(queryClient.getQueryData(linksKey)).toHaveLength(1);
+      // The same element: a frame made anew would start the video from the top.
+      expect(frame()).toBe(first);
+      expect(source('Original')).toBeChecked();
+      expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
+    });
+
+    it('an unchanged list read again keeps the very frame too', async () => {
+      const queryClient = testQueryClient();
+      await openSong({ query: '?source=original', queryClient });
+      const first = await frameShown();
+      const reads = () => queryResult.mock.calls.filter(([c]) => c.table === 'song_links').length;
+      const before = reads();
+      await act(() => queryClient.invalidateQueries({ queryKey: linksKey }));
+      await waitFor(() => expect(reads()).toBeGreaterThan(before));
+      await settle();
+      expect(frame()).toBe(first);
+      expect(playedWrites()).toHaveLength(1);
+    });
+  });
+
+  describe('the connection going and coming back (14 Test)', () => {
+    it('on a recording: the frame goes, the note says why, and back online it is one opening, not two', async () => {
+      await openSong({ query: '?source=original' });
+      await frameShown();
+      await waitFor(() => expect(playedWrites()).toHaveLength(1));
+
+      act(() => onlineManager.setOnline(false));
+      expect(
+        await screen.findByText("You're offline. The video needs a connection."),
+      ).toBeVisible();
+      noFrame();
+      expect(source('Original')).toBeChecked();
+      // The way out is a link the browser would fail on, but the tab is one press away.
+      expect(source('Tab')).toBeEnabled();
+
+      act(() => onlineManager.setOnline(true));
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+      await settle();
+      expect(playedWrites()).toHaveLength(1);
+      expect(await offlineDb.outbox.count()).toBe(0);
+    });
+
+    it('offline with the links never read, ?source= is the tab, which plays; a link read later is only offered', async () => {
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+      queryClient.setQueryData(['settings', USER], settingsRow);
+      await offlineDb.songFiles.put({
+        userId: USER,
+        songId: SONG_A,
+        bytes: new Uint8Array(fileBytes(SONG_A)),
+      });
+      act(() => onlineManager.setOnline(false));
+      const { user, engine } = await openSong({ query: '?source=original', queryClient });
+
+      await waitFor(() => expect(location()).toBe(`/songs/${SONG_A}/play`));
+      noFrame();
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.click(playButton());
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      act(() => engine.fire('stateChanged', { playing: true }));
+
+      act(() => onlineManager.setOnline(true));
+      expect(await screen.findByRole('radio', { name: 'Original' })).not.toBeChecked();
+      await settle();
+      noFrame();
+      expect(playButton()).toHaveTextContent('Pause');
+      expect(engine.pause).not.toHaveBeenCalled();
+      expect(playedWrites()).toEqual([]);
+    });
+  });
+
+  describe('under StrictMode (14 Test)', () => {
+    // At the root, as main.tsx has it: StrictMode further down doesn't run a mount's effects twice.
+    beforeEach(() => configure({ reactStrictMode: true }));
+    afterEach(() => configure({ reactStrictMode: false }));
+
+    function renderStrict(query: string, savedLinks: SongLinkRow[]) {
+      serve({ loops: [verse], links: savedLinks });
+      // The song and its links are cached, as they are coming from the overview: the screen
+      // then mounts already on its source, and it is the mount whose effects run twice.
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
+      queryClient.setQueryData(linksKey, savedLinks);
+      renderRoutes(<Route path="/songs/:id/play" element={<SongPage />} />, {
+        path: `/songs/${SONG_A}/play${query}`,
+        queryClient,
+      });
+      return userEvent.setup();
+    }
+
+    it('one opening is one frame and one write, and each source opened after it one more', async () => {
+      const user = renderStrict('?source=original', [original, drumlessVideo]);
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
+      await waitFor(() => expect(playedWrites()).toHaveLength(1));
+      await waitFor(async () => expect(await offlineDb.outbox.count()).toBe(0));
+      await settle();
+      expect(playedWrites()).toHaveLength(1);
+      expect(screen.getAllByTestId('recording-frame')).toHaveLength(1);
+      expect(document.querySelectorAll('iframe')).toHaveLength(1);
+
+      await choose(user, 'Drumless');
+      await waitFor(() => expect(playedWrites()).toHaveLength(2));
+      expect(screen.getAllByTestId('recording-frame')).toHaveLength(1);
+      await choose(user, 'Tab');
+      await settle();
+      expect(playedWrites()).toHaveLength(2);
+      noFrame();
+      await choose(user, 'Original');
+      await waitFor(() => expect(playedWrites()).toHaveLength(3));
+      await waitFor(async () => expect(await offlineDb.outbox.count()).toBe(0));
+      await settle();
+      expect(playedWrites()).toHaveLength(3);
+    });
+
+    it('a source the song lacks is dropped from the address, and the tab is what shows', async () => {
+      renderStrict('?source=drumless', [spotifyLink()]);
+      await waitFor(() => expect(location()).toBe(`/songs/${SONG_A}/play`));
+      await settle();
+      noFrame();
+      noSources();
+      expect(playedWrites()).toEqual([]);
+    });
+  });
+
+  // QA (after fix round 1) issue 1: the tab's bar and beat cursor stand still under a video and
+  // read as a playhead. The score box says it is only read (`score-read-only`, which index.css
+  // draws no cursor for; recordings.spec.ts measures the cursor itself), and nothing else changes.
+  describe('the tab’s cursor under a recording (14 Review)', () => {
+    const scoreBox = () => screen.getByTestId('score-viewport');
+
+    it('isn’t drawn on a recording and is back on Tab, with the player left as it was', async () => {
+      const { user, engine } = await openSong();
+      act(() => engine.fire('position', { tick: startOfBar(9) }));
+      expect(scoreBox()).toHaveClass('jam-score');
+      expect(scoreBox()).not.toHaveClass('score-read-only');
+      const restarts = engine.restartCalls();
+
+      await choose(user, 'Original');
+      await frameShown();
+      expect(scoreBox()).toHaveClass('jam-score', 'score-read-only');
+
+      await choose(user, 'Tab');
+      await waitFor(() => expect(scoreBox()).not.toHaveClass('score-read-only'));
+      // A drawing change only: the bar is kept, and nothing was stopped, started, moved or loaded.
+      expect(await screen.findByTestId('player-status')).toHaveTextContent('Bar 9 of 16');
+      expect(engine.restartCalls()).toBe(restarts);
+      expect(engine.loadScore).toHaveBeenCalledTimes(1);
+      expect(engine.seek).not.toHaveBeenCalled();
+    });
+
+    it('isn’t drawn while the links are still read for the source the screen opened on', async () => {
+      serve({ links: [original] });
+      const release = links.holdNext('select');
+      renderSong(`${SONG_A}?source=original`);
+      expect(await screen.findByText('Loading the recording…')).toBeVisible();
+      await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+      expect(scoreBox()).toHaveClass('score-read-only');
+      release();
+      await frameShown();
+      expect(scoreBox()).toHaveClass('score-read-only');
     });
   });
 });

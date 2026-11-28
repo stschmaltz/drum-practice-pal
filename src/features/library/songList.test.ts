@@ -72,6 +72,39 @@ describe('sortSongs', () => {
     expect(ids('added')).toEqual(['b', 'a', 'c', 'd']);
   });
 
+  describe('a recording opened (Unit 14)', () => {
+    const order = (songs: Parameters<typeof sortSongs>[0]) =>
+      sortSongs(songs, 'practiced').map((s) => s.id);
+
+    it('practiced: a song played along to counts from when its recording was opened', () => {
+      const played = { ...never1, last_played_at: '2026-11-20T12:00:00Z' };
+      // After the practice on the 21st, before the one at midnight on the 20th.
+      expect(order([played, old, never2, recent])).toEqual(['d', 'a', 'c', 'b']);
+    });
+
+    it('practiced: the later of a song’s practice and its playing is what counts', () => {
+      const playedSince = { ...old, last_played_at: '2026-11-25T00:00:00Z' };
+      const playedBefore = { ...recent, last_played_at: '2026-11-01T00:00:00Z' };
+      expect(order([playedBefore, playedSince, never1])).toEqual(['c', 'd', 'a']);
+    });
+
+    it('practiced: a list cached before the column, or a song just uploaded, has no time and is never played', () => {
+      const cachedBefore = { ...never2 };
+      const neverPlayed = { ...never1, last_played_at: null };
+      expect(order([neverPlayed, cachedBefore, old])).toEqual(['c', 'b', 'a']);
+    });
+
+    it('added: playing a recording changes nothing', () => {
+      const played = { ...never1, last_played_at: '2026-11-26T00:00:00Z' };
+      expect(sortSongs([played, old, never2, recent], 'added').map((s) => s.id)).toEqual([
+        'b',
+        'a',
+        'c',
+        'd',
+      ]);
+    });
+  });
+
   it('breaks ties by id and leaves the input alone', () => {
     const twinA = song({ id: 'x2' });
     const twinB = song({ id: 'x1' });

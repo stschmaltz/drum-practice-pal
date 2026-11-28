@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { Icon } from '@/components/icons';
-import { ghostButtonClass } from '@/components/styles';
+import { Icon } from './icons';
+import { ghostButtonAtEdgeClass } from './styles';
 
 /**
  * Under a list that shows only its first few: one button whose words change
@@ -22,7 +22,7 @@ export function ExpandButton({
   return (
     <button
       type="button"
-      className={`${ghostButtonClass} -ml-4 self-start`}
+      className={`${ghostButtonAtEdgeClass} self-start`}
       aria-expanded={expanded}
       aria-controls={controls}
       onClick={onToggle}

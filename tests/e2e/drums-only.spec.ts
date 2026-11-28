@@ -213,7 +213,7 @@ test('drums only is off again when the song is opened again, with nothing muted'
 
   // Back to the song and in again, without a page load: a new player in the same tab.
   await page.goBack();
-  await page.getByRole('link', { name: 'Play whole song' }).click();
+  await page.getByRole('link', { name: 'Tab', exact: true }).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
 
   await expect(drumsOnlyButton(page)).toHaveAttribute('aria-pressed', 'false');

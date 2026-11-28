@@ -99,6 +99,48 @@ export type Database = {
           },
         ];
       };
+      song_links: {
+        Row: {
+          created_at: string;
+          id: string;
+          kind: Database['public']['Enums']['song_link_kind'];
+          provider: Database['public']['Enums']['song_link_provider'];
+          song_id: string;
+          updated_at: string;
+          url: string;
+          user_id: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          created_at?: string;
+          id?: string;
+          kind: Database['public']['Enums']['song_link_kind'];
+          provider: Database['public']['Enums']['song_link_provider'];
+          song_id: string;
+          updated_at?: string;
+          url: string;
+          user_id?: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          kind?: Database['public']['Enums']['song_link_kind'];
+          provider?: Database['public']['Enums']['song_link_provider'];
+          song_id?: string;
+          updated_at?: string;
+          url?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'song_links_song_fkey';
+            columns: ['song_id', 'user_id'];
+            isOneToOne: false;
+            referencedRelation: 'songs';
+            referencedColumns: ['id', 'user_id'];
+          },
+        ];
+      };
       songs: {
         Row: {
           artist: string;
@@ -108,6 +150,7 @@ export type Database = {
           file_hash: string;
           file_path: string;
           id: string;
+          last_played_at: string | null;
           original_tempo: number;
           title: string;
           updated_at: string;
@@ -122,6 +165,7 @@ export type Database = {
           file_hash: string;
           file_path: string;
           id?: string;
+          last_played_at?: string | null;
           original_tempo: number;
           title: string;
           updated_at?: string;
@@ -135,6 +179,7 @@ export type Database = {
           file_hash?: string;
           file_path?: string;
           id?: string;
+          last_played_at?: string | null;
           original_tempo?: number;
           title?: string;
           updated_at?: string;
@@ -206,6 +251,8 @@ export type Database = {
         | 'claves'
         | 'woodblock_high'
         | 'woodblock_low';
+      song_link_kind: 'original' | 'drumless' | 'other';
+      song_link_provider: 'youtube' | 'spotify' | 'web';
     };
     CompositeTypes: {
       [_ in never]: never;
@@ -328,6 +375,8 @@ export const Constants = {
         'woodblock_high',
         'woodblock_low',
       ],
+      song_link_kind: ['original', 'drumless', 'other'],
+      song_link_provider: ['youtube', 'spotify', 'web'],
     },
   },
 } as const;

@@ -3,7 +3,7 @@ import { Icon } from '@/components/icons';
 import { ProgressBar } from '@/components/ProgressMarks';
 import { smallHeadingClass } from '@/components/styles';
 import { nextUpBadges, type BadgeProgress } from './badges';
-import { ExpandButton } from './ExpandButton';
+import { ExpandButton } from '@/components/ExpandButton';
 
 /**
  * Badges without the wall (Unit 17): the earned ones in a line, then "Next

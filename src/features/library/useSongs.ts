@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { loopKeys } from '@/features/loops/loopKeys';
 import type { PracticeLoop } from '@/features/loops/practiceList';
 import { loadSongFile, removeStoredSongFile } from '@/features/offline/songFileStore';
+import { songLinkKeys } from '@/features/recordings/songLinkKeys';
 import { sessionKeys } from '@/features/practice/sessionKeys';
 import { useSignedInUser } from '@/lib/auth';
 import {
@@ -21,6 +22,8 @@ export const songKeys = {
   forUser: (userId: string) => [...songKeys.all, userId] as const,
   /** Shared by every mutation that writes this user's songs; see invalidateWhenIdle. */
   writes: (userId: string) => [...songKeys.forUser(userId), 'write'] as const,
+  /** The queued "a recording was opened" writes (songPlayed.ts): a key of their own, so they hold up no song edit. */
+  plays: (userId: string) => [...songKeys.forUser(userId), 'played'] as const,
   detail: (userId: string, songId: string) =>
     [...songKeys.forUser(userId), 'detail', songId] as const,
 };
@@ -47,9 +50,19 @@ function invalidateWhenIdle(queryClient: QueryClient, userId: string) {
 
 export function useSongs() {
   const user = useSignedInUser();
+  const queryClient = useQueryClient();
+  // Not by itself (focus, reconnect, a screen mounting the list) while a "recording opened"
+  // write is pending: between its retries the write is pending but not paused, and the read
+  // would put the old `last_played_at` back over the optimistic one. The write reads the
+  // list again once the last one settles (songPlayed.ts), as the loops' queued edits do.
+  const whenNoPlayPending = () =>
+    queryClient.isMutating({ mutationKey: songKeys.plays(user.id) }) === 0;
   return useQuery({
     queryKey: songKeys.forUser(user.id),
     queryFn: () => fetchSongs(user.id),
+    refetchOnWindowFocus: whenNoPlayPending,
+    refetchOnReconnect: whenNoPlayPending,
+    refetchOnMount: whenNoPlayPending,
   });
 }
 
@@ -190,6 +203,8 @@ export function useDeleteSong() {
       void removeStoredSongFile(user.id, songId);
       // Its loops went with it (cascade); a cached list would outlive them.
       queryClient.removeQueries({ queryKey: loopKeys.forSong(user.id, songId) });
+      // Its links too.
+      queryClient.removeQueries({ queryKey: songLinkKeys.forSong(user.id, songId) });
       queryClient.setQueryData<PracticeLoop[]>(loopKeys.practice(user.id), (loops) =>
         loops?.filter((loop) => loop.song_id !== songId),
       );

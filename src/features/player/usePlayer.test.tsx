@@ -12,15 +12,18 @@ const bytes = new Uint8Array([7]);
 function Harness({
   createEngine,
   initialVisibleBars,
+  readAlong,
 }: {
   createEngine: EngineFactory;
   initialVisibleBars?: BarRange;
+  readAlong?: boolean;
 }) {
   const { scoreRef, scrollRef, player, snapshot } = usePlayer({
     fileBytes: bytes,
     drumTrackIndex: 0,
     initialOptions: { ...DEFAULT_PLAYER_OPTIONS, drumsMuted: true },
     initialVisibleBars,
+    readAlong,
     createEngine,
   });
   return (
@@ -257,6 +260,46 @@ describe('usePlayer layout', () => {
     await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('page'));
 
     expect(engine.restartCalls()).toBe(restartsBefore);
+  });
+
+  // 14 QA issue 2: under a recording the score is read by hand, so a phone gets lines that
+  // wrap down the page, not the one line the tab's player scrolls sideways.
+  it('mounts in page layout below 768 px when the score is only read along to', async () => {
+    fakeMatchMedia(false);
+    const engine = new FakePlayerEngine();
+    render(<Harness createEngine={fakeEngineFactory(engine)} readAlong />);
+    await screen.findByText('player yes');
+    expect(engine.mount?.layout).toBe('page');
+  });
+
+  it('goes to page layout and back live as reading along starts and ends, without restarting', async () => {
+    fakeMatchMedia(false);
+    const engine = new FakePlayerEngine();
+    const view = render(<Harness createEngine={fakeEngineFactory(engine)} />);
+    await screen.findByText('player yes');
+    expect(engine.mount?.layout).toBe('horizontal');
+    act(() => engine.finishLoading());
+    const restartsBefore = engine.restartCalls();
+
+    view.rerender(<Harness createEngine={fakeEngineFactory(engine)} readAlong />);
+    await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('page'));
+    // Back on the tab: the layout for the width again.
+    view.rerender(<Harness createEngine={fakeEngineFactory(engine)} />);
+    await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('horizontal'));
+
+    expect(engine.restartCalls()).toBe(restartsBefore);
+    expect(engine.loadScore).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays in page layout from 768 px whether or not the score is read along to', async () => {
+    fakeMatchMedia(true);
+    const engine = new FakePlayerEngine();
+    const view = render(<Harness createEngine={fakeEngineFactory(engine)} readAlong />);
+    await screen.findByText('player yes');
+    expect(engine.mount?.layout).toBe('page');
+    view.rerender(<Harness createEngine={fakeEngineFactory(engine)} />);
+    await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('page'));
+    expect(engine.setLayout).not.toHaveBeenCalledWith('horizontal');
   });
 });
 

@@ -6,6 +6,7 @@ import { LOOP_NAME_MAX_LENGTH } from '@/lib/schema';
 import { resetFakeSupabase } from '@/test/fakeSupabase';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
+import { stubPointer } from '@/test/mediaQueries';
 import { testQueryClient, wrapperFor } from '@/test/render';
 import type { Loop } from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';
@@ -152,7 +153,7 @@ describe('LoopEditorForm for a new loop', () => {
   });
 
   it('offers a drag only where there is a mouse to drag with', async () => {
-    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(pointer: fine)' }));
+    stubPointer(true);
     const view = await renderForm();
     expect(view.hint()).toHaveTextContent('Or drag across the bars.');
   });

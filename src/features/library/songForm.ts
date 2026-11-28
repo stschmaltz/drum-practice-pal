@@ -22,7 +22,8 @@ export const SONG_FIELDS = [
 export const SONG_SELECT =
   'id, title, artist, original_tempo, bar_count, drum_track_index, created_at';
 // The newest last_practiced_at per song is enough for sorting; see fetchSongs.
-export const LIBRARY_SELECT = `${SONG_SELECT}, loops(last_practiced_at)` as const;
+// last_played_at (Unit 14) is when one of the song's recordings was last opened.
+export const LIBRARY_SELECT = `${SONG_SELECT}, last_played_at, loops(last_practiced_at)` as const;
 
 export type SongField = (typeof SONG_FIELDS)[number];
 export type Song = Pick<SongRow, SongField>;
@@ -30,16 +31,26 @@ export type Song = Pick<SongRow, SongField>;
 /** A library entry: the song plus when any of its loops was last practiced. */
 export interface LibrarySong extends Song {
   last_practiced_at: string | null;
+  /**
+   * When one of the song's recordings was last opened (Unit 14). Missing on a
+   * song just uploaded and on a list cached by a build from before the
+   * column; both mean never.
+   */
+  last_played_at?: string | null;
 }
 
 export function toLibrarySong(
-  row: Song & { loops: readonly { last_practiced_at: string | null }[] },
+  row: Song & {
+    last_played_at?: string | null;
+    loops: readonly { last_practiced_at: string | null }[];
+  },
 ): LibrarySong {
   const { loops, ...song } = row;
   return { ...song, last_practiced_at: latest(loops.map((loop) => loop.last_practiced_at)) };
 }
 
-function latest(timestamps: readonly (string | null)[]): string | null {
+/** The latest of the given times; null when there is none. */
+export function latest(timestamps: readonly (string | null | undefined)[]): string | null {
   let newest: string | null = null;
   for (const timestamp of timestamps) {
     if (timestamp && (newest === null || Date.parse(timestamp) > Date.parse(newest))) {

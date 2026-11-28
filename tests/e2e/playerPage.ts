@@ -39,24 +39,31 @@ export const viewport = (page: Page) => page.getByTestId('score-viewport');
 export async function openSongOverview(page: Page, title: string) {
   await page.getByRole('main').getByRole('list').getByRole('link', { name: title }).click();
   await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+  // On every overview, from its first drawing.
+  await expect(page.getByRole('link', { name: 'New loop' })).toBeVisible();
 }
 
 /**
- * From the songs list (`/`), the song's overview and then "Play whole song":
- * jam mode, where the earlier units' specs run (Unit 16 put it a level down).
+ * From the songs list (`/`), the song's overview and then "Tab" under Play
+ * along (what "Play whole song" was before Unit 14): jam mode, where the
+ * earlier units' specs run (Unit 16 put it a level down).
  */
 export async function openSongPlayer(page: Page, title: string) {
   await openSongOverview(page, title);
-  await page.getByRole('link', { name: 'Play whole song' }).click();
+  await page.getByRole('link', { name: 'Tab', exact: true }).click();
   await expect(page).toHaveURL(/\/songs\/[^/]+\/play$/);
+}
+
+/** On the songs list: uploads a fixture and waits until the list says it was added. */
+export async function uploadFixture(page: Page, name: string, title: string): Promise<void> {
+  await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture(name));
+  await expect(page.getByRole('status').filter({ hasText: `Added “${title}”.` })).toBeVisible();
 }
 
 /** Uploads a fixture on the songs list and opens it in jam mode (`/songs/:id/play`). */
 export async function openFixture(page: Page, user: E2eUser, name: string, title: string) {
   await signIn(page, user, '/');
-  await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture(name));
-  await expect(page.getByRole('status').filter({ hasText: `Added “${title}”.` })).toBeVisible();
+  await uploadFixture(page, name, title);
   await openSongPlayer(page, title);
   await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
   // Enabled once the score, MIDI and soundfont are all in.

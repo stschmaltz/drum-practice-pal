@@ -68,6 +68,13 @@ export const primaryButtonClass = `${buttonBase} border border-transparent bg-br
 /** A quieter button for actions beside a primary one: no fill until hovered. */
 export const ghostButtonClass = `${buttonBase} text-ink-soft hover:bg-raised hover:text-ink ${dimmedWhenOff}`;
 
+/**
+ * A ghost button that starts a row or stands alone under a list ("New loop",
+ * "Show all 9 loops"): pulled left by its own padding, so its icon lines up
+ * with the text above it rather than sitting a padding's width in.
+ */
+export const ghostButtonAtEdgeClass = `${ghostButtonClass} -ml-4`;
+
 const quietBase = `${buttonShape} min-h-touch gap-1.5 px-3 py-2 text-sm`;
 
 /** A list item's secondary actions (Edit, History, Delete): ghost, smaller text, still 44 px tall. */
@@ -134,6 +141,13 @@ export const nameLinkClass = `inline-flex min-h-touch max-w-full min-w-touch ite
 
 /** A link to another page, on a line of its own (every use so far): a 44 px target like a button. */
 export const linkClass = `inline-flex min-h-touch items-center rounded-sm font-medium text-brand underline underline-offset-4 hover:text-brand-hover ${focusRing}`;
+
+/**
+ * A link or link-like button that is locked for a moment (`aria-disabled`, its
+ * handler refusing the press) rather than taken away: focus may be on it. The
+ * recordings' links out use it (offline, or while a save is pending).
+ */
+export const lockableLinkClass = `${linkClass} aria-disabled:cursor-not-allowed aria-disabled:opacity-50`;
 
 /**
  * An icon at the start of a line of text, inline with it. Not a flex row: a

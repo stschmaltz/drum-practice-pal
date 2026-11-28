@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { PageHeader } from '@/components/PageHeader';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import type { Song } from '@/features/library/songForm';
 import type { Loop } from '@/features/loops/loopForm';
 import { findLoopSpeed } from '@/features/loops/loopFocus';
@@ -23,9 +24,10 @@ import { bpmAtSpeed } from '@/features/player/tempo';
 import { usePlayer } from '@/features/player/usePlayer';
 import { usePracticeTracker } from '@/features/practice/usePracticeTracker';
 import { useSittingRecorder } from '@/features/practice/useVisitSittings';
+import { RecordingBox } from '@/features/recordings/RecordingBox';
+import { RECORDING_NOTE, type VideoSource } from '@/features/recordings/songLinks';
 import { ShortcutOverlay } from '@/features/shortcuts/ShortcutOverlay';
-import { isUuid } from '@/lib/randomUuid';
-import { EDIT_LOOP_PARAM, NEW_LOOP_PARAM, songPath } from '@/lib/routes';
+import { songPath } from '@/lib/routes';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
   fullBleedBarClass,
@@ -34,17 +36,20 @@ import {
   SessionNotice,
   ShortcutsButton,
 } from './playerScreen';
+import { linkedLoopFormOf } from './linkedLoopForm';
 import { useHeightOf } from './useHeightOf';
 import { SongFileGate } from './SongFileGate';
 import { BackLink, SongGate } from './SongGate';
 import { useControlsFold } from './useControlsFold';
 import { useJamMode } from './useJamMode';
 import { announcementText, useSongShortcuts } from './useSongShortcuts';
+import { useSongSources } from './useSongSources';
 import { useStaysOnScreen } from './useStaysOnScreen';
+import { useTabSetAside } from './useTabSetAside';
 
 /**
- * /songs/:id/play, "Play whole song". Lazy-loaded from App.tsx with the
- * player. Jam mode (Unit 06): the whole song with a following cursor, tap a
+ * /songs/:id/play, the whole song ("Tab" under the overview's Play along).
+ * Lazy-loaded from App.tsx with the player. Jam mode (Unit 06): the whole song with a following cursor, tap a
  * bar to go there, and the speed and BPM at the current bar, with the
  * count-in (Unit 07) counted over the score. Loops (Unit 08) are a sheet over it: a
  * saved bar range plays on repeat at its saved speed, and while the loop form
@@ -56,6 +61,15 @@ import { useStaysOnScreen } from './useStaysOnScreen';
  * loop, and its save goes on to that loop's practice screen; `?edit=<id>`
  * (a loop's Edit on the overview) opens it on that loop, and its save or
  * Cancel goes back to the song (Unit 16).
+ *
+ * A song with a YouTube link for its Original or Drumless recording (Unit 14)
+ * has a source switch: Tab, Original, Drumless. `?source=original|drumless`
+ * opens on one. On a recording the video sits in a box that stays on screen,
+ * with the score under it, silent and scrolled by hand: the tab's player is
+ * paused, and its Play, speed, metronome, count-in, mixer, loop panel and
+ * keys are not offered, since none of them acts on the video. The score is
+ * then in page layout at every width (`readAlong`), so a phone shows lines
+ * down the page that scroll with the window under the video.
  */
 export function SongPage() {
   const { id = '' } = useParams();
@@ -63,10 +77,27 @@ export function SongPage() {
 }
 
 function SongScreen({ song }: { song: Song }) {
+  const sources = useSongSources(song.id);
+  const recording = sources.choice.state !== 'tab';
   return (
     <div className="flex flex-col gap-4">
       <BackLink to={songPath(song.id)}>{song.title}</BackLink>
       <PageHeader title={song.title}>{song.artist || null}</PageHeader>
+      {sources.options.length > 1 && (
+        <SegmentedControl
+          label="Play along with"
+          className="self-start"
+          options={sources.options}
+          value={sources.shown}
+          onChange={sources.choose}
+        />
+      )}
+      {sources.choice.state !== 'tab' && (
+        <RecordingBar
+          songTitle={song.title}
+          video={sources.choice.state === 'recording' ? sources.choice.video : null}
+        />
+      )}
       <SongFileGate song={song}>
         {({ fileBytes, initialOptions }) => (
           <SongPlayer
@@ -77,6 +108,7 @@ function SongScreen({ song }: { song: Song }) {
             fileBytes={fileBytes}
             drumTrackIndex={song.drum_track_index}
             initialOptions={initialOptions}
+            recording={recording}
           />
         )}
       </SongFileGate>
@@ -84,13 +116,31 @@ function SongScreen({ song }: { song: Song }) {
   );
 }
 
-/** The loop form a link asked for: a new loop, or an edit of one. */
-type LinkedLoopForm = { kind: 'new' } | { kind: 'edit'; loopId: string };
+/**
+ * One row from 1024 px, and in a phone on its side, where the video's 200 px
+ * are already half the window: the note and the way out go beside the video,
+ * not under it.
+ */
+const recordingBarClass = `sticky top-0 ${fullBleedBarClass} flex flex-col gap-1 pb-1 pt-[max(0.5rem,env(safe-area-inset-top))] lg:flex-row-reverse lg:items-start lg:justify-between lg:gap-6 lg:pb-3 sideways:flex-row-reverse sideways:items-start sideways:justify-between sideways:gap-4 sideways:pt-[max(0.25rem,env(safe-area-inset-top))]`;
 
-function linkedLoopFormOf(params: URLSearchParams): LinkedLoopForm | null {
-  if (params.get(NEW_LOOP_PARAM) !== null) return { kind: 'new' };
-  const loopId = params.get(EDIT_LOOP_PARAM);
-  return loopId !== null && isUuid(loopId) ? { kind: 'edit', loopId } : null;
+/**
+ * The recording the screen is on: its video in a bar that sticks like the jam
+ * bar it stands in for, so it stays on screen over the score, and the note
+ * that says why the tab's controls aren't there. `video` null while the links
+ * are still read for the source the screen was opened on.
+ */
+function RecordingBar({ songTitle, video }: { songTitle: string; video: VideoSource | null }) {
+  return (
+    <>
+      <div data-testid="recording-bar" className={recordingBarClass}>
+        <RecordingBox songTitle={songTitle} video={video} />
+      </div>
+      {/* From 1024 px, and in a phone on its side, the same words sit in the bar, beside the video (RecordingBox). */}
+      <p className="text-sm text-ink-muted lg:hidden sideways:hidden" data-testid="recording-note">
+        {RECORDING_NOTE}
+      </p>
+    </>
+  );
 }
 
 /**
@@ -147,16 +197,25 @@ function SongPlayer({
   fileBytes,
   drumTrackIndex,
   initialOptions,
+  recording,
 }: {
   songId: string;
   fileBytes: Uint8Array;
   drumTrackIndex: number | null;
   initialOptions: PlayerOptions;
+  /**
+   * The page is on a recording (Unit 14): the score is only read, under the
+   * video. The player is paused and stays so: no Play, no controls, no keys,
+   * no taps or drags on the score, no loop panel.
+   */
+  recording: boolean;
 }) {
   const { scoreRef, scrollRef, player, snapshot } = usePlayer({
     fileBytes,
     drumTrackIndex,
     initialOptions,
+    // Under a recording the score is read by hand: lines down the page at every width.
+    readAlong: recording,
   });
   const stickyBarRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
@@ -168,14 +227,14 @@ function SongPlayer({
   // What the window can't scroll back is held as room under the controls.
   useStaysOnScreen(scrollRef, controlsRef, fold.folded);
   const loops = useLoops(songId);
-  const practice = useLoopPractice(player, snapshot, loops.data);
+  const practice = useLoopPractice(player, snapshot, loops.data, { dragOpensForm: !recording });
   const tracker = usePracticeTracker(player, snapshot, practice.activeLoop?.id ?? null);
   // A loop practised from the panel is summed up on the song's overview like any other.
   useSittingRecorder(songId, practice.activeLoop, tracker.sitting);
   // Every change of the playing loop's speed is saved as it is made (no "Save speed").
   useSaveLoopSpeed(songId, practice.activeLoop, snapshot.speedRatio);
   const linkedForm = useLinkedLoopForm(songId, snapshot, practice, loops.data);
-  const shortcuts = useSongShortcuts({ player, practice, loops: loops.data });
+  const shortcuts = useSongShortcuts({ player, practice, loops: loops.data, off: recording });
   const loopPanel = useLoopPanelOpen();
   const { setOpen: setLoopPanelOpen } = loopPanel;
   const pickingBars = practice.editor !== null;
@@ -184,19 +243,27 @@ function SongPlayer({
     if (pickingBars) setLoopPanelOpen(true);
   }, [pickingBars, setLoopPanelOpen]);
 
+  // On a recording the tab is stopped and an idle loop form put away.
+  useTabSetAside(player, snapshot, practice, recording);
+
   useJamMode(
     player,
     { scrollRef, stickyBarRef, stickyControlsRef: controlsRef },
     {
-      seekOnTap: !pickingBars,
+      seekOnTap: !pickingBars && !recording,
       // The count-in counter sits over the score, so the score comes on screen for it too. Keyed on
       // the fold rather than on running, so Hide controls brings it back as well: the user had
       // scrolled up to that button, and in phone landscape kept still the score was off the window.
       // Picking bars waits for the panel to be open: the open sheet's room at the page's end is
       // what lets the window scroll the score up above it (16 QA issue 1: a form opened by
       // `?new=1` opens the sheet in the next render, and a scroll before that went nowhere).
-      scoreOnScreen:
-        pickingBars && loopPanel.open ? 'picking-bars' : fold.folded ? 'playing' : null,
+      scoreOnScreen: recording
+        ? null
+        : pickingBars && loopPanel.open
+          ? 'picking-bars'
+          : fold.folded
+            ? 'playing'
+            : null,
     },
   );
   // A soundfont failure still leaves readable notation; these leave an empty white box.
@@ -222,11 +289,15 @@ function SongPlayer({
     // score box is one line of music, so the page alone is too short to bring it clear.
     <div
       className={`flex flex-col gap-3 ${
-        loopPanel.open ? 'pb-[calc(45dvh+4rem)] md:pb-[calc(min(40dvh,30rem)+4rem)]' : 'pb-12'
+        loopPanel.open && !recording
+          ? 'pb-[calc(45dvh+4rem)] md:pb-[calc(min(40dvh,30rem)+4rem)]'
+          : 'pb-12'
       }`}
       style={{ '--jam-bar-height': `${stickyBarHeight}px` } as CSSProperties}
     >
-      <JamBar ref={stickyBarRef} player={player} snapshot={snapshot} tempo={readoutTempo} />
+      {!recording && (
+        <JamBar ref={stickyBarRef} player={player} snapshot={snapshot} tempo={readoutTempo} />
+      )}
       {/* Folded while playing, the controls are a strip that sticks under the sticky bar. */}
       <div
         ref={controlsRef}
@@ -236,19 +307,26 @@ function SongPlayer({
           fold.folded ? `sticky top-(--jam-bar-height) -mt-3 ${fullBleedBarClass}` : undefined
         }
       >
-        <PlayerControls
-          player={player}
-          snapshot={snapshot}
-          showPlayButton={false}
-          fold={fold}
-          // Only while the panel has the loop's speed on it: the loop form takes its place.
-          onShowLoopSpeed={panelShowsLoopSpeed(practice, snapshot) ? showLoopSpeed : null}
-        />
+        {!recording && (
+          <PlayerControls
+            player={player}
+            snapshot={snapshot}
+            showPlayButton={false}
+            fold={fold}
+            // Only while the panel has the loop's speed on it: the loop form takes its place.
+            onShowLoopSpeed={panelShowsLoopSpeed(practice, snapshot) ? showLoopSpeed : null}
+          />
+        )}
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <PlayerStatusLine snapshot={snapshot} />
-        <ShortcutsButton onOpen={shortcuts.openHelp} />
-      </div>
+      {recording ? (
+        // Where the tab's playback is says nothing about the video; a score that failed still does.
+        snapshot.status === 'error' && <PlayerStatusLine snapshot={snapshot} />
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <PlayerStatusLine snapshot={snapshot} />
+          <ShortcutsButton onOpen={shortcuts.openHelp} />
+        </div>
+      )}
       <SessionNotice tracker={tracker} loops={loops.data} />
       {/* The score has the page's whole width; the loop sheet lies over it when open. */}
       <ScoreBox
@@ -256,18 +334,23 @@ function SongPlayer({
         scoreRef={scoreRef}
         snapshot={snapshot}
         hidden={nothingToShow}
+        // Under a video the tab's cursor would stand still and read as a playhead.
+        readOnly={recording}
       />
-      <LoopPanel
-        songId={songId}
-        player={player}
-        snapshot={snapshot}
-        practice={practice}
-        loops={loops}
-        open={loopPanel.open}
-        onOpenChange={setLoopPanelOpen}
-        bodyId={loopPanel.bodyId}
-        outcome={linkedForm}
-      />
+      {/* Hidden on a recording, not unmounted: a loop save still on its way keeps its form. */}
+      <div hidden={recording} className="contents">
+        <LoopPanel
+          songId={songId}
+          player={player}
+          snapshot={snapshot}
+          practice={practice}
+          loops={loops}
+          open={loopPanel.open}
+          onOpenChange={setLoopPanelOpen}
+          bodyId={loopPanel.bodyId}
+          outcome={linkedForm}
+        />
+      </div>
       <ShortcutOverlay open={shortcuts.helpOpen} onClose={shortcuts.closeHelp} />
       {/* On the page from the start: a live region added with its text is often not read. */}
       <p role="status" className="sr-only" data-testid="shortcut-announcement">

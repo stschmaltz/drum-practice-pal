@@ -31,6 +31,13 @@ interface SongShortcutInputs {
   loops: readonly Loop[] | undefined;
   /** Space's gate, the same one the screen's Play/Pause button takes (`canPlay` unless given). */
   playGate?: PlayGate;
+  /**
+   * True while the screen offers none of what the keys work (the play screen
+   * on a recording, Unit 14): every key is left to the browser, so Space
+   * can't start the tab under a video and a pedal can't switch a loop nobody
+   * can see. YouTube's own keys work while its frame has focus.
+   */
+  off?: boolean;
 }
 
 /**
@@ -46,6 +53,7 @@ export function useSongShortcuts({
   practice,
   loops,
   playGate = canPlay,
+  off = false,
 }: SongShortcutInputs) {
   const [helpOpen, setHelpOpen] = useState(false);
   // What the last key changed, for a live region: the control it changed may be folded
@@ -55,9 +63,9 @@ export function useSongShortcuts({
   const closeHelp = useCallback(() => setHelpOpen(false), []);
 
   // Read by the listener at each press, so it is installed once and never sees an old render.
-  const latest = useRef({ player, practice, loops, playGate, helpOpen });
+  const latest = useRef({ player, practice, loops, playGate, helpOpen, off });
   useLayoutEffect(() => {
-    latest.current = { player, practice, loops, playGate, helpOpen };
+    latest.current = { player, practice, loops, playGate, helpOpen, off };
   });
 
   useEffect(() => {
@@ -68,6 +76,7 @@ export function useSongShortcuts({
       // Only for the press whose keydown this is: a keyup lost to another window must not
       // cancel a later Space the page leaves alone (the shortcut list's Close).
       if (event.key === ' ') swallowSpaceKeyup = false;
+      if (latest.current.off) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       const resolved = resolveShortcut(event, {
         focus: focusKindOf(

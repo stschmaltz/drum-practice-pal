@@ -30,27 +30,40 @@ interface ShortcutOptions {
   strict?: boolean;
   /** The song's loops are still being read: the view comes back before they are in. */
   loopsPending?: boolean;
+  /** The screen offers none of what the keys work (a recording source). */
+  off?: boolean;
 }
 
 /** The shortcuts over a real player, the song's loops and the practice hook, as the song page wires them. */
 async function renderShortcuts(
   loops: Loop[] = [verse, outro, intro],
-  { loaded = true, drumTrackIndex = 0, strict = false, loopsPending = false }: ShortcutOptions = {},
+  {
+    loaded = true,
+    drumTrackIndex = 0,
+    strict = false,
+    loopsPending = false,
+    off = false,
+  }: ShortcutOptions = {},
 ) {
   const table = serveLoopTable(loops);
   if (loopsPending) table.holdNext('select');
   const { engine, player, finishLoading } = loopPlayer({ loaded, drumTrackIndex });
   const hook = renderHook(
-    ({ mounted }: { mounted: PlayerService | null }) => {
+    ({ mounted, keysOff }: { mounted: PlayerService | null; keysOff: boolean }) => {
       const snapshot = usePlayerSnapshot(player);
       const query = useLoops(LOOP_SONG_ID);
       const practice = useLoopPractice(mounted, snapshot, query.data);
-      const shortcuts = useSongShortcuts({ player: mounted, practice, loops: query.data });
+      const shortcuts = useSongShortcuts({
+        player: mounted,
+        practice,
+        loops: query.data,
+        off: keysOff,
+      });
       return { practice, shortcuts, query };
     },
     {
       wrapper: wrapperFor(testQueryClient(), signedInAs()),
-      initialProps: { mounted: player as PlayerService | null },
+      initialProps: { mounted: player as PlayerService | null, keysOff: off },
       reactStrictMode: strict,
     },
   );
@@ -665,13 +678,37 @@ describe('the overlay', () => {
 describe('the listener', () => {
   it('before alphaTab has loaded (no player yet), the player keys do nothing and ? still opens the list', async () => {
     const view = await renderShortcuts();
-    view.hook.rerender({ mounted: null });
+    view.hook.rerender({ mounted: null, keysOff: false });
 
     for (const k of [' ', 'ArrowUp', 'ArrowRight', 'm', 'd', 's', 'c']) view.key(k);
     expect(view.engine.play).not.toHaveBeenCalled();
     expect(view.player.getSnapshot()).toMatchObject({ speedRatio: 1, countInBars: 0, range: null });
     view.key('?', { shiftKey: true });
     expect(view.helpOpen()).toBe(true);
+  });
+
+  it('while off (a recording source), takes no key at all, and takes them again once on', async () => {
+    const view = await renderShortcuts([verse, outro], { off: true });
+
+    // Every key is the browser's: none is cancelled, Space's keyup neither.
+    for (const k of [' ', 'ArrowUp', 'ArrowRight', 'PageDown', 'm', 'd', 's', 'c']) {
+      expect(view.keyDown(k)).toBe(true);
+      expect(view.keyUp(k)).toBe(true);
+    }
+    expect(view.keyDown('?', { shiftKey: true })).toBe(true);
+    expect(view.helpOpen()).toBe(false);
+    expect(view.engine.play).not.toHaveBeenCalled();
+    expect(view.player.getSnapshot()).toMatchObject({
+      speedRatio: 1,
+      countInBars: 0,
+      range: null,
+      metronomeOn: true,
+    });
+    expect(view.hook.result.current.practice.activeLoop).toBeNull();
+
+    view.hook.rerender({ mounted: view.player, keysOff: false });
+    expect(view.key(' ')).toBe(false);
+    expect(view.engine.play).toHaveBeenCalledTimes(1);
   });
 
   it('stops listening when the page unmounts', async () => {

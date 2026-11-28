@@ -9,6 +9,14 @@
 @custom-variant short (@media (max-height: 30rem));
 
 /*
+ * A phone on its side, wide enough for two columns: the play screen's video
+ * bar puts its note and "Open in YouTube" beside the video there, not under
+ * it, so the bar is about half the window and the score has the rest
+ * (14 QA issue 3). A short window narrower than this keeps the stacked bar.
+ */
+@custom-variant sideways (@media (max-height: 30rem) and (min-width: 32rem));
+
+/*
  * Design tokens (Unit 12). Every colour the app uses is one of these: the
  * default palette is switched off below, so `text-sky-400` and the like draw
  * nothing, and tests/unit/designTokens.test.ts fails on any palette class or
@@ -183,6 +191,22 @@
 .jam-score .at-surface,
 .jam-score .at-surface * {
   cursor: pointer;
+}
+
+/*
+ * A score that is only read, under a recording that plays (Unit 14): the paused
+ * player's bar and beat cursor aren't drawn, since standing still under a video
+ * they read as a playhead that never moves, and a bar that takes no tap doesn't
+ * look tappable. Hidden, not removed: alphaTab still places them, so they are
+ * back at the same bar the moment the tab is the source again.
+ */
+.jam-score.score-read-only .at-cursor-bar,
+.jam-score.score-read-only .at-cursor-beat {
+  visibility: hidden;
+}
+.jam-score.score-read-only .at-surface,
+.jam-score.score-read-only .at-surface * {
+  cursor: default;
 }
 
 /*

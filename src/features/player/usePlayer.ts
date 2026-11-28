@@ -8,6 +8,7 @@ import {
   type BarRange,
   type PlayerSnapshot,
 } from './PlayerService';
+import { layoutToDraw } from './layout';
 import { useLayout } from './useLayout';
 
 export interface UsePlayerOptions {
@@ -22,6 +23,12 @@ export interface UsePlayerOptions {
    * with `player.setVisibleBars`. The whole score when absent.
    */
   initialVisibleBars?: BarRange | null;
+  /**
+   * The score is only read, by hand, under something else that plays (a
+   * recording): page layout at every width (`layoutToDraw`). Live, like the
+   * width: changing it redraws the score and never stops, plays or reloads.
+   */
+  readAlong?: boolean;
   /** Tests pass a fake; the default loads alphaTab lazily. */
   createEngine?: EngineFactory;
 }
@@ -56,13 +63,14 @@ export function usePlayer({
   drumTrackIndex,
   initialOptions,
   initialVisibleBars = null,
+  readAlong = false,
   createEngine = loadAlphaTabEngine,
 }: UsePlayerOptions) {
   const scoreRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [player, setPlayer] = useState<PlayerService | null>(null);
   const [engineFailed, setEngineFailed] = useState(false);
-  const layout = useLayout();
+  const layout = layoutToDraw(useLayout(), readAlong);
 
   // Mount-time inputs, read once by the effect below.
   const mountInputs = useRef({

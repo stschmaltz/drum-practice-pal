@@ -5,6 +5,7 @@ import { buttonClass, inputClass, labelClass, primaryButtonClass } from '@/compo
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
 import { failureCopy } from '@/lib/errorCopy';
 import { isOnline, useOnline } from '@/lib/network';
+import { pointerIsFine } from '@/lib/pointer';
 import { randomUuid } from '@/lib/randomUuid';
 import {
   barCountLabel,
@@ -100,7 +101,7 @@ export function LoopEditorForm({
   const range = formBarRange(values, barCount);
   const hint = selectionHint(
     range ? { ...range, awaitingEnd: editor.awaitingEnd } : null,
-    hasFinePointer(),
+    pointerIsFine(),
   );
   // The tempo the loop's BPM is worked out from: the file's tempo at its first bar.
   const tempo = range ? (player?.tempoAtBar(range.startBar) ?? null) : null;
@@ -222,11 +223,6 @@ export function LoopEditorForm({
       )}
     </form>
   );
-}
-
-/** Whether there is a mouse to drag with; the hint only offers a drag where it works. */
-function hasFinePointer(): boolean {
-  return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: fine)').matches;
 }
 
 function Field({

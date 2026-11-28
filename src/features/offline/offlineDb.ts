@@ -44,7 +44,19 @@ export interface QueuedLoopEdit {
   changes: Partial<LoopEdit>;
 }
 
-export type OutboxEntry = QueuedSession | QueuedLoopEdit;
+/** A recording of a song was opened (Unit 14): its "last played" moves to `playedAt`. */
+export interface QueuedSongPlayed {
+  kind: 'songPlayed';
+  /** Made for the write when it is first sent. */
+  id: string;
+  userId: string;
+  queuedAt: number;
+  songId: string;
+  /** ISO time, by this device's clock when the recording was opened. */
+  playedAt: string;
+}
+
+export type OutboxEntry = QueuedSession | QueuedLoopEdit | QueuedSongPlayed;
 
 export interface StoredValue {
   key: string;

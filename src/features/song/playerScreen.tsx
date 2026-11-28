@@ -61,6 +61,7 @@ export function ScoreBox({
   snapshot,
   hidden,
   fitsScore = false,
+  readOnly = false,
 }: {
   scrollRef: Ref<HTMLDivElement>;
   scoreRef: Ref<HTMLDivElement>;
@@ -71,6 +72,14 @@ export function ScoreBox({
    * a loop's few bars, not a fixed 60% of the window of blank paper under them.
    */
   fitsScore?: boolean;
+  /**
+   * The score is only read, under something else that plays (a recording,
+   * Unit 14): the paused player's bar and beat cursor aren't drawn, since
+   * they would stand still and read as a playhead, and a bar doesn't look
+   * tappable (`score-read-only` in index.css). A drawing change only: the
+   * player keeps its bar, and the cursor is back where it was without it.
+   */
+  readOnly?: boolean;
 }) {
   return (
     // The counter covers the score box without scrolling with what's inside it.
@@ -89,7 +98,7 @@ export function ScoreBox({
         // Below 768 px the score is one line of music scrolling sideways, so the box is as tall
         // as that line (alphaTab sizes it) rather than a fixed height of blank paper under it.
         // At least as tall as the count-in number drawn over it.
-        className={`jam-score relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card ${fitsScore ? 'md:max-h-[60dvh]' : 'md:h-[60dvh]'} md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))]`}
+        className={`jam-score ${readOnly ? 'score-read-only ' : ''}relative min-h-44 scroll-mb-[calc(7.5rem+env(safe-area-inset-bottom))] overflow-auto rounded-card shadow-card ${fitsScore ? 'md:max-h-[60dvh]' : 'md:h-[60dvh]'} md:scroll-mb-[calc(4rem+env(safe-area-inset-bottom))]`}
       >
         <div ref={scoreRef} />
       </div>
