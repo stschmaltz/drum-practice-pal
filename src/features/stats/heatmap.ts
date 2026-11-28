@@ -154,14 +154,19 @@ const MONTH_LABEL_MIN_COLUMNS = 3;
  */
 export function heatmapMonths(
   weeks: readonly (readonly HeatmapDay[])[],
-): { column: number; date: Date }[] {
-  const labels: { column: number; date: Date }[] = [];
+): { column: number; date: Date; anchor: 'start' | 'end' }[] {
+  const labels: { column: number; date: Date; anchor: 'start' | 'end' }[] = [];
   weeks.forEach((week, column) => {
     const monday = week[0]?.date;
     const before = weeks[column - 1]?.[0]?.date;
     if (!monday) return;
     if (column === 0 || (before && before.getMonth() !== monday.getMonth())) {
-      labels.push({ column, date: monday });
+      // A name needs the width of a few columns. With fewer than that from its own column
+      // to the map's right edge it would be cut off there, so it ends at its column's
+      // right edge instead of starting at its left.
+      const columnsToEdge = weeks.length - column;
+      const anchor = columnsToEdge < MONTH_LABEL_MIN_COLUMNS ? 'end' : 'start';
+      labels.push({ column, date: monday, anchor });
     }
   });
   const [first, second] = labels;

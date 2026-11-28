@@ -4,17 +4,30 @@
  * leaves it to the browser.
  */
 
+/**
+ * One formatter per locale and shape, kept: building one is slow next to
+ * using it, and a heatmap with a year-long chart writes hundreds of dates a
+ * render. The key space is tiny (a locale or none, two flags).
+ */
+const formats = new Map<string, Intl.DateTimeFormat>();
+
 /** Day and short month; the year after them, and the weekday before, only when asked. */
 function dayMonthFormat(
   locale: string | undefined,
   { year, weekday = false }: { year: boolean; weekday?: boolean },
 ): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat(locale, {
-    ...(weekday ? { weekday: 'short' } : {}),
-    day: 'numeric',
-    month: 'short',
-    ...(year ? { year: 'numeric' } : {}),
-  });
+  const key = `${locale ?? ''}|${year}|${weekday}`;
+  let format = formats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, {
+      ...(weekday ? { weekday: 'short' } : {}),
+      day: 'numeric',
+      month: 'short',
+      ...(year ? { year: 'numeric' } : {}),
+    });
+    formats.set(key, format);
+  }
+  return format;
 }
 
 const inAnotherYear = (date: Date, than: Date) => date.getFullYear() !== than.getFullYear();

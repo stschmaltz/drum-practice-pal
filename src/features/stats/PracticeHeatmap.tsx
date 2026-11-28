@@ -66,10 +66,12 @@ export function PracticeHeatmap({ weeks, now }: { weeks: HeatmapWeeks; now: Date
           }}
           data-testid="practice-heatmap"
         >
-          {heatmapMonths(weeks).map(({ column, date }) => (
+          {heatmapMonths(weeks).map(({ column, date, anchor }) => (
             <text
               key={column}
-              x={column * CELL_STEP}
+              // In the last columns a name ends at its column's right edge (heatmapMonths).
+              x={anchor === 'end' ? column * CELL_STEP + CELL : column * CELL_STEP}
+              textAnchor={anchor}
               y={-4}
               className={heatmapTextClass}
               data-testid="heatmap-month"

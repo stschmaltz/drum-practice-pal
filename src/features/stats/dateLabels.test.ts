@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { axisDates, dateSpan, shortDate, weekdayDate } from './dateLabels';
 
 const now = new Date(2026, 10, 26, 18);
@@ -22,6 +22,33 @@ it('writes a span, or one date when it starts and ends on the same day', () => {
   expect(dateSpan(new Date(2025, 11, 30), new Date(2026, 0, 2), now, 'en-GB')).toBe(
     '30 Dec 2025 – 2 Jan',
   );
+});
+
+// Copilot review on #32: a formatter was built for every date written, hundreds a render
+// with a heatmap and a year-long chart on show.
+it('builds one formatter per locale and shape, however many dates it writes', () => {
+  const Original = Intl.DateTimeFormat;
+  let built = 0;
+  // A counting stand-in that still constructs the real thing (a spy can't be called with `new`).
+  vi.stubGlobal('Intl', {
+    ...Intl,
+    DateTimeFormat: function (...args: ConstructorParameters<typeof Original>) {
+      built++;
+      return new Original(...args);
+    },
+  });
+  try {
+    // A locale nothing else in this file uses, so the count starts from none.
+    for (let day = 1; day <= 28; day++) {
+      shortDate(new Date(2026, 1, day), now, 'fr-CA');
+      weekdayDate(new Date(2026, 1, day), now, 'fr-CA');
+    }
+    expect(built).toBe(2);
+    shortDate(new Date(2025, 1, 1), now, 'fr-CA');
+    expect(built).toBe(3);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 // 17 QA issue 1: a first date with its year ran under the next one.

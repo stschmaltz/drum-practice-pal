@@ -241,4 +241,18 @@ describe('heatmapMonths', () => {
       [3, 6],
     ]);
   });
+
+  // Copilot review on #32: in the week a month begins (Monday 2 November 2026) its name is
+  // on the last column, with 13 units to the edge of the drawing: "Nov" was cut off.
+  it('ends a name in the last columns at its column’s right edge, so it is never cut off', () => {
+    const anchors = (today: Date) =>
+      heatmapMonths(practiceHeatmap([], today, 26)).map(({ column, anchor }) => [column, anchor]);
+    // Thursday 5 November: November's first week is the last column.
+    expect(anchors(at(2026, 11, 5)).at(-1)).toEqual([25, 'end']);
+    // A week on it has a column to its right, still too few for a name.
+    expect(anchors(at(2026, 11, 12)).at(-1)).toEqual([24, 'end']);
+    // With three columns from its own to the edge it starts at its column, as the others do.
+    expect(anchors(at(2026, 11, 19)).at(-1)).toEqual([23, 'start']);
+    expect(anchors(now).every(([, anchor]) => anchor === 'start')).toBe(true);
+  });
 });
