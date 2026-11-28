@@ -91,7 +91,9 @@ function HistoryItem({ day, tempo }: { day: HistoryDay; tempo: number | null }) 
   return (
     <li className="py-1.5 text-sm text-ink-muted tabular-nums">
       <time dateTime={day.key}>{day.label}</time> · {durationLabel(day.seconds)} ·{' '}
-      {speedLabel(day.speedRatio, tempo)} · {repeatsLabel(day.repeats)}
+      {speedLabel(day.speedRatio, tempo)} ·{' '}
+      {/* One piece, so a narrow row never leaves "passes" alone on a line (20 batch 5 QA). */}
+      <span className="whitespace-nowrap">{repeatsLabel(day.repeats)}</span>
     </li>
   );
 }

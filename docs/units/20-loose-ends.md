@@ -515,3 +515,55 @@ One break changed nothing and is not a gap: dropping "a speed set while paused i
 
 - `npm run check`: green, 146 files, 5767 tests passed, 2 skipped.
 - `E2E_PORT=4383 npx playwright test tests/e2e/practice.spec.ts tests/e2e/design.spec.ts tests/e2e/stats.spec.ts --project=phone --project=desktop`: 64 passed, 4 skipped (the phone-only cases on desktop). By spec: practice 27, design 23, stats 14.
+
+### QA
+
+Walked with Playwright (Chromium) on a development build at `E2E_PORT=4383` against this worktree's stack (API 54421), at 390x844 and 1440x900, and at 820x1180 for the History list. Throwaway users only; sessions on earlier days written by the service role (`addSessions`). A loop's History shows in two places: the song overview (More, Show history: percent only) and the Tab page's loop sheet (percent and BPM). The practice screen has none. Screenshots: `docs/units/20-shots/b5-*.png` (9).
+
+**Verdict: PASS.** No blocker or major issue. Three minor issues, one of them a product call for Shane (issue 1); one cosmetic issue fixed.
+
+**Per acceptance line**
+
+| Line                                                                         | Result | How                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A session's logged speed is the speed most of it was played at               | Pass   | Practised on the practice screen at phone and desktop: 12 s at 80%, four nudges to 100% while playing, 3 s more, Pause. One row, `speed_ratio` 0.8, 15 s, 3 passes; the loop saved at 1. Also the two other ways out, at desktop: 8 s at 80% then 2 s at 100% and the page hidden (row at 0.8); then 6 s at 100%, 2 s at 80% and the back link pressed while playing (row at 1).                                                                                                                                                                                                                   |
+| A loop's History shows a day once with its total time                        | Pass   | 15 sessions on 13 days: "13 days · 1 h 31 min in all", ten rows, "Show all 13 days" (44 px tall, full width) gives 13 and goes. Today's three sessions one row ("Today · 4 min 40 s · 80% · 29 passes"), the sitting across midnight two rows. One session: "1 day · 31 s in all". None: "No practice logged yet…". A day of three sessions and 3 h 6 min: one row, "Yesterday · 3 h 6 min · 200% · 1159 passes". A year back: "Oct 24, 2025". With the History open in the sheet while practising: "Today · 3 min 40 s …" became "Today · 3 min 45 s …", one "Today" row, also after the refetch. |
+| Stored sessions are unchanged; the Stats numbers still match `stats.spec.ts` | Pass   | Rows read back with the service role are one per stop, as before. `stats.spec.ts` at phone and desktop: 14 of 14. For the QA user, Stats and History agree: the loop's row "43% → 80%, up 37 · 1 h 31 min · 13 days", its chart 13 points whose speeds are History's 13 rows one for one (Nov 5 43% … Nov 27 70%, Nov 28 80%), All time 17 practice days for 13 + 1 + 3 distinct days over the loops.                                                                                                                                                                                              |
+
+**Layout, states, offline**
+
+- No text outside the History box at any size, overview or sheet (`textSpillingOutOf`); `auditScreen` clean (targets, contrast, names, no sideways scroll) with a History open on the overview and in the sheet, at all three sizes.
+- A 100-character unbroken loop name wraps in its item; its History is drawn under it at the full width (`b5-390x844-overview-long-name.png`).
+- Offline (connection cut in the page): a History read before opens from the cache with the same rows and "Show all"; one never read says "You're offline. This loop's history shows once you're back online." and fills in by itself on reconnect.
+- Reads failing: "Loading history…", then "Couldn't load this loop's history." with "Try again", which loads it.
+
+**Issues**
+
+1. **Minor, product call for Shane: one sitting, three speeds on one screen.** Repro: a loop at 80%; play ten seconds or more, nudge to 100% while playing, a few seconds more, Pause, back to the song. The overview then says "Fill: 15 s, 80% → 100%" in the summary, "Bars 3 to 4 · 100%" on the loop's line, and "Today · 15 s · 80% · 3 passes" in its History (`b5-390x844-summary-beside-history.png`, `b5-1440x900-summary-beside-history.png`). My reading: each is right, and the summary beside the row is not a contradiction once you know the row's rule, but nothing on the History says the rule. A drummer who has just reached 100% for the first time opens History and sees 80% for today, on the day it matters most to job 3; it reads as "the 100% wasn't recorded". The Stats page already answers this in a sentence under Loop progress ("Each day counts at the speed you spent the most time at, so a quick try at full speed isn't a day at full speed."); History has nothing. Options, cheapest first: the same sentence (or "mostly" before the speed: "Today · 15 s · mostly 80%") in the History; or the day's top speed beside it ("80%, up to 100%"), which needs the tracker to keep it, since a session stores one speed. I'd add the wording now and leave the top speed until Shane has seen a week of his own rows.
+2. **Minor: a row is a run of text, not columns, so "is it getting faster" means reading the third field of every row.** The day and the time vary in width, so the speeds don't line up under one another at any size (`b5-1440x900-overview-history.png`); the speed is in the same muted ink as the rest. On a phone in the loop sheet (332 px, where the BPM is shown) rows that begin "N days ago" take two lines and the others one, so the list is ragged (`b5-390x844-sheet-history.png`; four of ten rows in the walk). The overview on a phone (no BPM) keeps every row on one line. A four-column grid (day, time, speed, passes) with the speed in `ink` would let the eye run down the speeds; on the phone sheet the passes could go under. Layout only, but a redesign of the row, so not done here.
+3. **Minor, from before this batch: "Show all N days" drops focus.** Repro: Tab to "Show all 13 days", Enter. The button leaves the page and `document.activeElement` is `<body>`; the next Tab starts from the top of the page. Same with the old "Show all N sessions". Fix: hand focus to the History section (`tabIndex={-1}`) or the first newly shown row, as AGENTS.md's "focus when a pressed control leaves the page" does elsewhere.
+4. **Cosmetic, fixed:** in the phone sheet a wrapped row left "passes" alone on its second line ("… (91 BPM) · 29" / "passes"). The passes are now one unbreakable piece (`LoopHistory.tsx`, a `whitespace-nowrap` span; the row's text is unchanged, and the existing component and e2e assertions pass).
+
+**Seen, not issues**
+
+- What a row lost with the clock time: the time of day and the number of sessions. Neither was missed in the walk; a drummer asks "which days, how long, how fast", and the row answers those. The one thing a day row can't say that the session rows could is the fastest speed tried that day (issue 1).
+- "59 min 59 s" in a row beside "1 h 1 min in all" in the summary: `durationLabel` gives seconds under an hour and none over it. Reads fine.
+- The overview's summary for a sitting that went 80%, 100%, 80% says "Fill: 18 s, 80%" (opened and left at 80%). Unchanged by this batch.
+- On a phone the overview's loop line has no "Last practised …" (it shows from 768 px), so there the History is the only place that says when. Unchanged.
+- Not walked again: a session dated ahead of the device's clock (History "1 day", Stats "2 days"), which Test pinned; History left open past midnight (batch 9's class). Safari, Firefox and a real device.
+
+**Product walk (docs/product.md, jobs 3 and 6)**
+
+- _First-time user:_ a loop never practised says what will make a row appear; after the first sitting there is one "Today" row. Nothing to learn, nothing asked.
+- _A user missing a piece:_ a song with no tab has no loops, so no History; on the overview, where the tempo isn't known, a row is the percent alone. Offline it is the cached days or a plain line saying why not.
+- _Taps:_ History is two taps from the overview (More, Show history) and three from the Tab page (Loops, More, Show history), as before. It is not on the practice screen, where the speed is being worked; the overview's summary covers that moment.
+- _Job 6:_ days are the device's local days, grouped on the device from the same rows on every device.
+
+**Human check for Shane**
+
+- After a real sitting that ends with a try at full speed, read the overview: the summary, the loop's line and History's row for today. Does the 80% in History read as right, or as the 100% gone missing (issue 1)?
+- A week of rows on the phone, in the loop sheet: can the speeds be read down the list at arm's length (issue 2)?
+
+**Cleanup**
+
+Seventeen users recorded, plus a handful the fixture made for skipped cases and for the re-runs of `practice.spec.ts` and `stats.spec.ts`; every one was deleted by the `user` fixture (files first), and a listing by the service role afterwards finds no `e2e-qa-b5-` user. The preview server was Playwright's own and stopped with each run; nothing listens on 4383 or 5383. The temporary spec `tests/e2e/qa-b5.spec.ts` was removed. `npm run check` green after the cosmetic fix (146 files, 5767 tests).
