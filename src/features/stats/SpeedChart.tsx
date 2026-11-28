@@ -12,7 +12,7 @@ import {
   textBox,
   type TextAnchor,
 } from './speedChartLayout';
-import { minutesLabel } from './statLabels';
+import { countLabel, minutesLabel } from './statLabels';
 
 /**
  * The plot sits inside these margins: `left` holds the axis's percents, `top`
@@ -179,7 +179,7 @@ function speedSummary(days: readonly SpeedDay[], loopName: string, now: Date): s
   if (days.length === 1) {
     return `Speed of ${loopName}: ${lastDay.percent}% on ${shortDate(lastDay.date, now)}, its one practice day.`;
   }
-  return `Speed of ${loopName} over ${days.length} practice days: from ${firstDay.percent}% on ${shortDate(firstDay.date, now)} to ${lastDay.percent}% on ${shortDate(lastDay.date, now)}.`;
+  return `Speed of ${loopName} over ${countLabel(days.length)} practice days: from ${firstDay.percent}% on ${shortDate(firstDay.date, now)} to ${lastDay.percent}% on ${shortDate(lastDay.date, now)}.`;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { Icon } from '@/components/icons';
 import { useAllSessions } from '@/features/practice/useSessions';
-import { daysLabel } from './statLabels';
+import { countLabel, daysLabel } from './statLabels';
 import { currentStreak } from './streak';
 
 /**
@@ -20,7 +20,7 @@ export function StreakBadge() {
     >
       <Icon name="flame" className="size-6 text-warning" />
       <span className="sr-only">Practice streak: </span>
-      {days}
+      {countLabel(days)}
       <span className="sr-only">{days === 1 ? ' day' : ' days'}</span>
     </p>
   );

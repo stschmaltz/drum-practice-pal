@@ -1,6 +1,6 @@
 import { Icon } from '@/components/icons';
 import { smallHeadingClass, statValueClass } from '@/components/styles';
-import { countLabel, daysLabel, minutesLabel } from './statLabels';
+import { countLabel, dayCountAdjective, daysLabel, minutesLabel } from './statLabels';
 import type { StatsData } from './statsData';
 import { currentStreak, longestStreak } from './streak';
 import {
@@ -82,7 +82,7 @@ export function StreakLine({
         className={`shrink-0 ${current > 0 ? 'text-warning' : 'text-ink-muted'}`}
       />
       <span>
-        {current > 0 ? `On a ${current}-day streak.` : 'No streak running.'}{' '}
+        {current > 0 ? `On a ${dayCountAdjective(current)} streak.` : 'No streak running.'}{' '}
         {current === longest ? 'Your longest yet.' : `Your longest is ${daysLabel(longest)}.`}
       </span>
     </p>

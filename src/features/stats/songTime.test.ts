@@ -151,14 +151,15 @@ describe('songBarScale and barShare', () => {
   });
 
   it('gives a smaller Other its own share', () => {
-    const many = Array.from({ length: 6 }, (_, index) => loop(`l${index}`, `s${index}`));
+    const many = Array.from({ length: 7 }, (_, index) => loop(`l${index}`, `s${index}`));
     const time = timeBySong(
-      many.map((each, index) => session(each.id, at(2026, 11, 25), (6 - index) * 100)),
+      many.map((each, index) => session(each.id, at(2026, 11, 25), (7 - index) * 100)),
       many,
       'week',
       now,
     );
-    expect(barShare(time.other!.seconds, songBarScale(time))).toBeCloseTo(100 / 600);
+    // The sixth and seventh songs, 200 and 100 seconds, against the first's 700.
+    expect(barShare(time.other!.seconds, songBarScale(time))).toBeCloseTo(300 / 700);
   });
 
   it('falls back to Other when no song is named, and to nothing with no time at all', () => {
@@ -176,7 +177,8 @@ describe('timeBySong, the sixth song and the period', () => {
     Array.from({ length: count }, (_, index) => loop(`l${index}`, `s${index}`, `Song ${index}`));
   const firstFive = ['Song 0', 'Song 1', 'Song 2', 'Song 3', 'Song 4'];
 
-  it('makes a single sixth song "Other" with one song in it', () => {
+  // Unit 20, batch 9 (17 QA): "Other (1 song)" took a row to hide one name.
+  it('lists a single sixth song by name: a row of its own is no shorter as "Other"', () => {
     const six = songs(6);
     const time = timeBySong(
       six.map((each, index) => session(each.id, at(2026, 11, 25), (6 - index) * 60)),
@@ -184,15 +186,62 @@ describe('timeBySong, the sixth song and the period', () => {
       'week',
       now,
     );
-    expect(time.songs.map((song) => song.title)).toEqual(firstFive);
-    expect(time.other).toEqual({ songs: 1, seconds: 60 });
+    expect(time.songs.map((song) => song.title)).toEqual([...firstFive, 'Song 5']);
+    expect(time.songs[5]).toEqual({ songId: 's5', title: 'Song 5', seconds: 60 });
+    expect(time.other).toBeNull();
+    expect(time.songs.reduce((total, song) => total + song.seconds, 0)).toBe(time.totalSeconds);
+  });
+
+  it('sums two or more past the fifth as Other, never one', () => {
+    for (const count of [7, 8, 12]) {
+      const many = songs(count);
+      const time = timeBySong(
+        many.map((each, index) => session(each.id, at(2026, 11, 25), (count - index) * 60)),
+        many,
+        'week',
+        now,
+      );
+      expect(time.songs.map((song) => song.title)).toEqual(firstFive);
+      expect(time.other?.songs).toBe(count - 5);
+    }
+  });
+
+  it('names the sixth song beside an Other that holds only sessions of unknown loops', () => {
+    const six = songs(6);
+    const time = timeBySong(
+      [
+        ...six.map((each, index) => session(each.id, at(2026, 11, 25), (6 - index) * 60)),
+        session('gone', at(2026, 11, 25), 30),
+      ],
+      six,
+      'week',
+      now,
+    );
+    expect(time.songs.map((song) => song.title)).toEqual([...firstFive, 'Song 5']);
+    // No song is in it, so it is plain "Other": the rows still add up to the total.
+    expect(time.other).toEqual({ songs: 0, seconds: 30 });
+    expect(otherSongsLabel(time.other!.songs)).toBe('Other');
+    expect(time.songs.reduce((total, song) => total + song.seconds, 0) + 30).toBe(
+      time.totalSeconds,
+    );
+  });
+
+  it('keeps to the limit it is given: one past it is named, two are Other', () => {
+    const four = songs(4);
+    const sessions = four.map((each, index) =>
+      session(each.id, at(2026, 11, 25), (4 - index) * 60),
+    );
+    expect(timeBySong(sessions, four, 'week', now, 3).songs).toHaveLength(4);
+    const two = timeBySong(sessions, four, 'week', now, 2);
+    expect(two.songs).toHaveLength(2);
+    expect(two.other).toEqual({ songs: 2, seconds: 120 + 60 });
   });
 
   it('cuts a tie at the fifth place by title, the same whatever order the loops come in', () => {
-    const six = songs(6);
-    const sessions = six.map((each) => session(each.id, at(2026, 11, 25), 60));
-    const forwards = timeBySong(sessions, six, 'week', now);
-    const backwards = timeBySong([...sessions].reverse(), [...six].reverse(), 'week', now);
+    const seven = songs(7);
+    const sessions = seven.map((each) => session(each.id, at(2026, 11, 25), 60));
+    const forwards = timeBySong(sessions, seven, 'week', now);
+    const backwards = timeBySong([...sessions].reverse(), [...seven].reverse(), 'week', now);
     expect(forwards.songs.map((song) => song.title)).toEqual(firstFive);
     expect(backwards).toEqual(forwards);
   });
@@ -208,10 +257,11 @@ describe('timeBySong, the sixth song and the period', () => {
     expect(week.songs).toHaveLength(5);
     expect(week.other).toBeNull();
     expect(week.totalSeconds).toBe(600);
-    // All time it leads, and the last of the five that tie is the one song in Other.
+    // All time it leads, and all six are named: one song is never "Other".
     const all = timeBySong(sessions, six, 'all', now);
     expect(all.songs[0]).toMatchObject({ title: 'Song 5', seconds: 9000 });
-    expect(all.other).toEqual({ songs: 1, seconds: 120 });
+    expect(all.songs).toHaveLength(6);
+    expect(all.other).toBeNull();
   });
 
   it('counts songs past the fifth and sessions of unknown loops in one Other, naming only the songs', () => {

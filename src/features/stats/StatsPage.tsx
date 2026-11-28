@@ -24,6 +24,7 @@ import { RecordsList } from './RecordsList';
 import { SongTimeBars } from './SongTimeBars';
 import type { StatsData } from './statsData';
 import { StatsSection } from './StatsSection';
+import { useToday } from './useToday';
 import {
   dailyPractice,
   hasPracticeHistory,
@@ -65,7 +66,10 @@ export function StatsPage() {
           if (loops.isLoadingError) void loops.refetch();
         }}
       >
-        Couldn't load your stats. {failureCopy(sessions.error ?? loops.error)}
+        {/* The reason of the read with nothing to show: the other may hold an error from a
+            refetch that failed over rows it still has (17 Review). */}
+        Couldn't load your stats.{' '}
+        {failureCopy(sessions.isLoadingError ? sessions.error : loops.error)}
       </LoadErrorAlert>
     );
   } else if (!sessions.data || !loops.data) {
@@ -122,7 +126,8 @@ const ALL_TIME = STATS_RANGE_HEADINGS.all;
 /** The page once both lists are in and there is practice to show: its sections, top to bottom. */
 function Stats({ sessions, loops }: StatsData) {
   const [range, setRange] = useStatsRange();
-  const now = new Date();
+  // Drawn again when the local day changes, so a page left open has the right "today".
+  const now = useToday();
   const heatmapWeeks = practiceHeatmap(sessions, now);
 
   return (

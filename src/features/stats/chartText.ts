@@ -23,6 +23,3 @@ export const chartWidthClass = 'w-full max-w-md';
 /** The font size of every label in the bar and line charts, in their units. */
 export const CHART_FONT = 9;
 export const chartTextClass = 'text-[9px]';
-
-/** A weekday as one letter: under a day's bar, beside a row of the heatmap. */
-export const narrowWeekdayFormat = new Intl.DateTimeFormat(undefined, { weekday: 'narrow' });

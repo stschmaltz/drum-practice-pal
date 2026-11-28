@@ -8,7 +8,7 @@ import { ExpandButton } from '@/components/ExpandButton';
 import { LOOP_PROGRESS_SHOWN, loopProgress, speedChange, type LoopProgress } from './loopProgress';
 import { Sparkline } from './Sparkline';
 import { SpeedChart } from './SpeedChart';
-import { daysLabel, minutesLabel } from './statLabels';
+import { countLabel, daysLabel, minutesLabel } from './statLabels';
 import type { StatsData } from './statsData';
 
 /**
@@ -55,7 +55,7 @@ export function LoopProgressList({ sessions, loops, now }: StatsData & { now: Da
           controls={listId}
           onToggle={() => setShowingAll((all) => !all)}
         >
-          {showingAll ? 'Show fewer' : `Show all ${progress.length} loops`}
+          {showingAll ? 'Show fewer' : `Show all ${countLabel(progress.length)} loops`}
         </ExpandButton>
       )}
     </>

@@ -18,18 +18,19 @@ export interface SongTime {
 }
 
 export interface TimeBySong {
-  /** The songs with the most play time, most first. */
+  /** The songs with the most play time, most first: five, or all six when there are six. */
   songs: SongTime[];
   /**
-   * Everything past the songs listed, as one row: how many more songs, and
-   * their play time. Null when every song is listed.
+   * Everything past the songs listed, as one row: how many more songs (never
+   * one, which is listed by name), and their play time. Null when every song
+   * is listed and every session's loop is known.
    */
   other: { songs: number; seconds: number } | null;
   /** All play time in the period: the rows and "Other" add up to it. */
   totalSeconds: number;
 }
 
-/** How many songs get a bar of their own before the rest are "Other". */
+/** How many songs get a bar of their own before the rest are "Other"; a single one more gets one too. */
 export const SONG_TIME_SHOWN = 5;
 
 /**
@@ -70,10 +71,13 @@ export function timeBySong(
     (a, b) =>
       b.seconds - a.seconds || a.title.localeCompare(b.title) || a.songId.localeCompare(b.songId),
   );
-  const rest = ranked.slice(shown);
+  // One song past the limit is named too: "Other (1 song)" took a row to hide one name
+  // (Unit 20, batch 9). So "Other" holds two songs or more, or none (unknown loops only).
+  const named = ranked.length === shown + 1 ? ranked.length : shown;
+  const rest = ranked.slice(named);
   const otherSeconds = rest.reduce((total, song) => total + song.seconds, 0) + unknownSeconds;
   return {
-    songs: ranked.slice(0, shown),
+    songs: ranked.slice(0, named),
     other:
       rest.length > 0 || unknownSeconds > 0 ? { songs: rest.length, seconds: otherSeconds } : null,
     totalSeconds,
@@ -95,8 +99,9 @@ export function barShare(seconds: number, scale: number): number {
 }
 
 /**
- * The name of the "Other" row: "Other (2 songs)", "Other (1 song)", and
- * plain "Other" when it holds only sessions whose loop isn't in the list.
+ * The name of the "Other" row: "Other (2 songs)", and plain "Other" when it
+ * holds only sessions whose loop isn't in the list. `timeBySong` never makes
+ * an "Other" of one song.
  */
 export function otherSongsLabel(songs: number): string {
   if (songs <= 0) return 'Other';

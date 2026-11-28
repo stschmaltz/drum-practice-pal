@@ -1,5 +1,5 @@
-import { narrowWeekdayFormat } from './chartText';
-import { shortDate } from './dateLabels';
+import { useLayoutEffect, useRef } from 'react';
+import { narrowWeekday, shortDate, shortMonth } from './dateLabels';
 import {
   heatmapLine,
   heatmapMonths,
@@ -10,8 +10,6 @@ import {
 } from './heatmap';
 import { HEAT_CLASSES } from './heatmapShades';
 import { daysLabel, minutesLabel } from './statLabels';
-
-const monthFormat = new Intl.DateTimeFormat(undefined, { month: 'short' });
 
 const CELL = 10;
 const CELL_GAP = 3;
@@ -49,11 +47,12 @@ export function PracticeHeatmap({ weeks, now }: { weeks: HeatmapWeeks; now: Date
   const height = 7 * CELL_STEP - CELL_GAP;
   const edge = TODAY_RING * 2;
   const units = width + HEATMAP_LEFT + edge;
+  const scrollBox = useScrolledToEnd(weeks.length);
 
   return (
     <figure className="flex flex-col gap-2">
-      {/* On the narrowest phones the map keeps a readable size and scrolls. */}
-      <div className="overflow-x-auto">
+      {/* On the narrowest phones the map keeps a readable size and scrolls, from its newest week. */}
+      <div ref={scrollBox} className="overflow-x-auto">
         <svg
           // Room for today's ring round a cell on the edge.
           viewBox={`${-HEATMAP_LEFT} ${-HEATMAP_TOP} ${units} ${height + HEATMAP_TOP + edge}`}
@@ -76,7 +75,7 @@ export function PracticeHeatmap({ weeks, now }: { weeks: HeatmapWeeks; now: Date
               className={heatmapTextClass}
               data-testid="heatmap-month"
             >
-              {monthFormat.format(date)}
+              {shortMonth(date)}
             </text>
           ))}
           {LABELLED_ROWS.map((row) => {
@@ -88,7 +87,7 @@ export function PracticeHeatmap({ weeks, now }: { weeks: HeatmapWeeks; now: Date
                 y={row * CELL_STEP + CELL - 1}
                 className={heatmapTextClass}
               >
-                {narrowWeekdayFormat.format(day.date)}
+                {narrowWeekday(day.date)}
               </text>
             ) : null;
           })}
@@ -111,6 +110,23 @@ export function PracticeHeatmap({ weeks, now }: { weeks: HeatmapWeeks; now: Date
       <WeeksTable weeks={weeks} now={now} />
     </figure>
   );
+}
+
+/**
+ * A box that opens scrolled to its right-hand end: where the map is wider
+ * than the page (under 358 px of it, with 26 weeks) the weeks on show are the
+ * latest, today among them, not the oldest (17 QA round 1). Done before the
+ * first paint, and again only when the map gains or loses a week: any other
+ * render (a refetch, the day changing) leaves the box where the reader put
+ * it. A box the map fits in has nowhere to scroll, and this does nothing.
+ */
+function useScrolledToEnd(columns: number) {
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (element) element.scrollLeft = element.scrollWidth;
+  }, [columns]);
+  return box;
 }
 
 /** One day's square, shaded by its play time, with today's ring round it. */

@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { axisDates, dateSpan, shortDate, weekdayDate } from './dateLabels';
+import { inBrowserLocale } from '@/test/browserLocale';
+import {
+  axisDates,
+  dateSpan,
+  dayOfMonth,
+  narrowWeekday,
+  shortDate,
+  shortMonth,
+  weekdayDate,
+} from './dateLabels';
 
 const now = new Date(2026, 10, 26, 18);
 
@@ -74,5 +83,57 @@ describe('axisDates', () => {
       'Dec 31, 2025',
       'Jan 1, 2026',
     ]);
+  });
+});
+
+// Unit 20, batch 9 (17 QA issue 4): the page's sentences are English, and a German
+// browser wrote "the week of 8. Juni." into them, the date's own full stop before the
+// sentence's.
+describe('with the browser set to German', () => {
+  inBrowserLocale('de');
+  const june = new Date(2026, 5, 8);
+
+  it('still writes every date in English, left to itself', () => {
+    expect(shortDate(june, now)).toBe('Jun 8');
+    expect(shortDate(new Date(2025, 11, 31), now)).toBe('Dec 31, 2025');
+    expect(weekdayDate(new Date(2026, 10, 14), now)).toBe('Sat, Nov 14');
+    expect(dateSpan(new Date(2026, 10, 3), new Date(2026, 10, 9), now)).toBe('Nov 3 – Nov 9');
+    expect(axisDates(new Date(2025, 10, 28), new Date(2026, 10, 27))).toEqual([
+      'Nov 28, 2025',
+      'Nov 27, 2026',
+    ]);
+  });
+
+  it('writes the charts’ own marks in English too: a weekday’s letter, a month, a day of the month', () => {
+    // A Monday to a Sunday.
+    const week = Array.from({ length: 7 }, (_, index) => new Date(2026, 5, 8 + index));
+    expect(week.map(narrowWeekday)).toEqual(['M', 'T', 'W', 'T', 'F', 'S', 'S']);
+    expect(Array.from({ length: 12 }, (_, month) => shortMonth(new Date(2026, month, 1)))).toEqual([
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ]);
+    expect(dayOfMonth(june)).toBe('8');
+  });
+
+  // 17 QA round 1: "…, the week of 8. Juni.." The sentence brings the only full stop.
+  it('ends no date in a full stop, in any month, with a weekday or a year', () => {
+    for (let month = 0; month < 12; month++) {
+      for (const year of [2025, 2026]) {
+        const date = new Date(year, month, 14);
+        for (const written of [shortDate(date, now), weekdayDate(date, now)]) {
+          expect(written).not.toMatch(/\./);
+        }
+      }
+    }
   });
 });

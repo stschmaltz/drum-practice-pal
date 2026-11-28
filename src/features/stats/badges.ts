@@ -5,6 +5,7 @@
  * streak badge back).
  */
 import { songMastery } from '@/features/loops/mastery';
+import { countLabel } from './statLabels';
 import { longestStreak } from './streak';
 import type { StatsLoop, StatsSession } from './totals';
 
@@ -76,16 +77,16 @@ function measures(input: BadgeInput): Record<Measure, number> {
 function progressLabel(measure: Measure, current: number, target: number): string {
   switch (measure) {
     case 'streakDays':
-      return `${current} of ${target} days in a row`;
+      return `${countLabel(current)} of ${countLabel(target)} days in a row`;
     case 'hours':
       // In minutes below the first hour, where "0 of 1 hours" says nothing.
       return target === 1
-        ? `${Math.floor(current * 60)} of 60 min`
-        : `${Math.floor(current)} of ${target} hours`;
+        ? `${countLabel(Math.floor(current * 60))} of 60 min`
+        : `${countLabel(Math.floor(current))} of ${countLabel(target)} hours`;
     case 'passes':
-      return `${current.toLocaleString('en')} of ${target.toLocaleString('en')} passes`;
+      return `${countLabel(current)} of ${countLabel(target)} passes`;
     case 'loopsMastered':
-      return `${current} of ${target} loops`;
+      return `${countLabel(current)} of ${countLabel(target)} loops`;
     case 'songsMastered':
       return 'Every loop of one song';
   }

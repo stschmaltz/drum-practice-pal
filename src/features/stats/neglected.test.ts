@@ -203,6 +203,13 @@ describe('neglectedLoops', () => {
 });
 
 describe('neglectedLabel', () => {
+  // Unit 20, batch 9: every count of a thousand or more is grouped.
+  it('groups a count of days from a thousand up', () => {
+    expect(neglectedLabel({ days: 1100, lastPractised: null })).toBe(
+      'not practised yet, saved 1,100 days ago',
+    );
+  });
+
   it('says how long since the last session', () => {
     expect(neglectedLabel({ days: 12, lastPractised: daysAgo(12) })).toBe(
       'last practised 12 days ago',

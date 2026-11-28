@@ -5,6 +5,7 @@
  * is asked of the user, and a finished loop is never one.
  */
 import { daysBetween } from './days';
+import { countLabel } from './statLabels';
 import { latestSessionTimes, type StatsLoop, type StatsSession } from './totals';
 
 /** Calendar days without a session before a loop is named. */
@@ -69,6 +70,6 @@ export function neglectedLabel({
   lastPractised,
 }: Pick<NeglectedLoop<unknown>, 'days' | 'lastPractised'>): string {
   return lastPractised === null
-    ? `not practised yet, saved ${days} days ago`
-    : `last practised ${days} days ago`;
+    ? `not practised yet, saved ${countLabel(days)} days ago`
+    : `last practised ${countLabel(days)} days ago`;
 }

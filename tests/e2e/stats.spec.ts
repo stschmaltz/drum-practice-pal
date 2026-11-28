@@ -792,7 +792,7 @@ test('after one session ever, every section speaks from that session', async ({ 
   expect(await textSpillingOutOf(page.getByRole('main'))).toEqual([]);
 });
 
-test('seven songs and loops: five songs then Other, six loops then "Show all", one chart at a time', async ({
+test('seven songs and loops: five songs then Other (a lone sixth by name), six loops then "Show all", one chart at a time', async ({
   page,
   user,
 }) => {
@@ -836,9 +836,14 @@ test('seven songs and loops: five songs then Other, six loops then "Show all", o
     'Song C10 min',
     'Song D8 min',
     'Song E6 min',
-    'Other (1 song)4 min',
+    // One song past the fifth is named: "Other (1 song)" was a row that hid one name (20, batch 9).
+    'Song F4 min',
   ]);
-  await expect(page.getByRole('link', { name: /^Other/ })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Song F' })).toHaveAttribute(
+    'href',
+    `/songs/${songIds[5]}`,
+  );
+  await expect(page.getByTestId('song-time').filter({ hasText: /^Other/ })).toHaveCount(0);
 
   // Loop G was last practised seven days ago: named as left, with its song and a way to it.
   const left = page.getByTestId('neglected-loop');
@@ -1059,4 +1064,44 @@ test('a year of practice days on one loop draws a line with three days marked an
   // And at a phone's width, whatever the project's: the chart is smallest there.
   await page.setViewportSize({ width: 390, height: 844 });
   await expectReadableChart('390 px');
+});
+
+// 17 QA round 1 (Unit 20, batch 9): a 26-week map is 351 px at its smallest, which under 358 px
+// of page scrolls in its own box, and it opened on its oldest week with today off the edge.
+test('on a 320 px phone a 26-week practice-days map opens on its newest week, today on show', async ({
+  page,
+  user,
+}) => {
+  const loop = await addLoop(user, await addSong(user, 'Old Song'), 'Old Loop');
+  // Practised today and 200 days ago: the map spans its longest, 26 weeks.
+  await addSession(user, loop, noonOf(200), 600, 0.6, 5);
+  await addSession(user, loop, midnight(0), 600, 0.7, 5);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await signIn(page, user, '/stats');
+  await expect(page.getByRole('heading', { name: 'Practice days Last 26 weeks' })).toBeVisible();
+
+  const map = page.getByTestId('practice-heatmap');
+  const box = map.locator('xpath=..');
+  const scroll = () =>
+    box.evaluate((element) => ({
+      left: element.scrollLeft,
+      furthest: element.scrollWidth - element.clientWidth,
+    }));
+  // The map is wider than its box here, or the test would prove nothing.
+  expect((await scroll()).furthest).toBeGreaterThan(20);
+  expect((await scroll()).left).toBeCloseTo((await scroll()).furthest, 0);
+
+  // Today's ring is inside the box, on screen; the page itself doesn't scroll sideways.
+  const boxEdges = (await box.boundingBox())!;
+  const todayEdges = (await map.getByTestId('heatmap-today').boundingBox())!;
+  expect(todayEdges.x).toBeGreaterThanOrEqual(boxEdges.x);
+  expect(todayEdges.x + todayEdges.width).toBeLessThanOrEqual(boxEdges.x + boxEdges.width + 0.5);
+  expect(await sidewaysScroll(page)).toBeLessThanOrEqual(0);
+
+  // Scrolled back by the reader, it stays there when the page draws again (another period).
+  await box.evaluate((element) => {
+    element.scrollLeft = 0;
+  });
+  await choosePeriod(page, 'Month');
+  expect((await scroll()).left).toBe(0);
 });

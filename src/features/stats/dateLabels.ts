@@ -1,49 +1,60 @@
 /**
- * How the Stats page writes a date: short, in the reader's own locale, with
- * the year only when it isn't this one. Pure; `locale` is for tests, the page
- * leaves it to the browser.
+ * How the Stats page writes a date, and the parts of one its charts are
+ * marked with: short, in English like the sentences round it (`STATS_LOCALE`,
+ * never the browser's own: Unit 20, batch 9), with the year only when it
+ * isn't this one. Pure; `locale` is for tests.
  */
+import { STATS_LOCALE } from './statsLocale';
 
 /**
  * One formatter per locale and shape, kept: building one is slow next to
  * using it, and a heatmap with a year-long chart writes hundreds of dates a
- * render. The key space is tiny (a locale or none, two flags).
+ * render. The key space is tiny (a locale, a handful of shapes). Built on
+ * first use, never when the module loads.
  */
 const formats = new Map<string, Intl.DateTimeFormat>();
 
-/** Day and short month; the year after them, and the weekday before, only when asked. */
-function dayMonthFormat(
-  locale: string | undefined,
-  { year, weekday = false }: { year: boolean; weekday?: boolean },
+function formatOf(
+  locale: string,
+  shape: string,
+  options: Intl.DateTimeFormatOptions,
 ): Intl.DateTimeFormat {
-  const key = `${locale ?? ''}|${year}|${weekday}`;
+  const key = `${locale}|${shape}`;
   let format = formats.get(key);
   if (!format) {
-    format = new Intl.DateTimeFormat(locale, {
-      ...(weekday ? { weekday: 'short' } : {}),
-      day: 'numeric',
-      month: 'short',
-      ...(year ? { year: 'numeric' } : {}),
-    });
+    format = new Intl.DateTimeFormat(locale, options);
     formats.set(key, format);
   }
   return format;
 }
 
+/** Day and short month; the year after them, and the weekday before, only when asked. */
+function dayMonthFormat(
+  locale: string,
+  { year, weekday = false }: { year: boolean; weekday?: boolean },
+): Intl.DateTimeFormat {
+  return formatOf(locale, `${year}|${weekday}`, {
+    ...(weekday ? { weekday: 'short' } : {}),
+    day: 'numeric',
+    month: 'short',
+    ...(year ? { year: 'numeric' } : {}),
+  });
+}
+
 const inAnotherYear = (date: Date, than: Date) => date.getFullYear() !== than.getFullYear();
 
-/** "26 Nov"; "26 Nov 2025" for a day in another year than `now`. */
-export function shortDate(date: Date, now: Date, locale?: string): string {
+/** "Nov 26"; "Nov 26, 2025" for a day in another year than `now`. */
+export function shortDate(date: Date, now: Date, locale = STATS_LOCALE): string {
   return dayMonthFormat(locale, { year: inAnotherYear(date, now) }).format(date);
 }
 
-/** "Sat 14 Nov": a single day worth naming, with its weekday (punctuated as the locale does). */
-export function weekdayDate(date: Date, now: Date, locale?: string): string {
+/** "Sat, Nov 14": a single day worth naming, with its weekday. */
+export function weekdayDate(date: Date, now: Date, locale = STATS_LOCALE): string {
   return dayMonthFormat(locale, { year: inAnotherYear(date, now), weekday: true }).format(date);
 }
 
-/** "3 Nov – 9 Nov", or the one date when both ends are the same day. */
-export function dateSpan(start: Date, end: Date, now: Date, locale?: string): string {
+/** "Nov 3 – Nov 9", or the one date when both ends are the same day. */
+export function dateSpan(start: Date, end: Date, now: Date, locale = STATS_LOCALE): string {
   const first = shortDate(start, now, locale);
   const last = shortDate(end, now, locale);
   return first === last ? first : `${first} – ${last}`;
@@ -55,7 +66,22 @@ export function dateSpan(start: Date, end: Date, now: Date, locale?: string): st
  * first date with its year ran under the next one). Within one year neither
  * needs it: the two only place the line between them.
  */
-export function axisDates(first: Date, last: Date, locale?: string): [string, string] {
+export function axisDates(first: Date, last: Date, locale = STATS_LOCALE): [string, string] {
   const format = dayMonthFormat(locale, { year: inAnotherYear(first, last) });
   return [format.format(first), format.format(last)];
+}
+
+/** A weekday as one letter ("M"): under a day's bar, beside a row of the heatmap. */
+export function narrowWeekday(date: Date): string {
+  return formatOf(STATS_LOCALE, 'weekday', { weekday: 'narrow' }).format(date);
+}
+
+/** A month's short name ("Nov"): over the heatmap's column where it begins. */
+export function shortMonth(date: Date): string {
+  return formatOf(STATS_LOCALE, 'month', { month: 'short' }).format(date);
+}
+
+/** The day of the month ("26"): under a day's bar, so the bar can be put to a date. */
+export function dayOfMonth(date: Date): string {
+  return formatOf(STATS_LOCALE, 'day', { day: 'numeric' }).format(date);
 }
