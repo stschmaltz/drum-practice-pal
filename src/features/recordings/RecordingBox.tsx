@@ -1,10 +1,9 @@
-import type { MouseEvent } from 'react';
-import { Icon } from '@/components/icons';
 import { OfflineNote } from '@/components/OfflineNote';
 import { LoadingLine } from '@/components/StatusMessages';
 import { lockableLinkClass } from '@/components/styles';
 import { useOnline } from '@/lib/network';
-import { canOpenRecording } from './recordingGate';
+import { LinkOut } from './LinkOut';
+import { refuseUnlessCanOpen } from './recordingGate';
 import { RECORDING_NOTE, SONG_LINK_KIND_LABELS, type VideoSource } from './songLinks';
 
 /** The frame's permissions: what YouTube's player uses, and no more (no autoplay, no clipboard). */
@@ -56,10 +55,6 @@ export function RecordingBox({
     );
   }
   const label = SONG_LINK_KIND_LABELS[video.source];
-  // Asked at the press, like every way of opening a recording: offline it would open an error page.
-  const refuseOffline = (event: MouseEvent) => {
-    if (!canOpenRecording()) event.preventDefault();
-  };
   return (
     <>
       <div className={frameBoxClass}>
@@ -85,18 +80,16 @@ export function RecordingBox({
       <div className="flex min-w-0 flex-col items-center lg:items-start sideways:items-start">
         {/* Beside the video where there is room; under the bar, off it, on a narrower window. */}
         <p className="hidden text-sm text-ink-muted lg:block sideways:block">{RECORDING_NOTE}</p>
-        <a
-          href={video.link.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`${lockableLinkClass} text-sm`}
-          // Locked, not taken away, offline: the note in the box says why.
-          aria-disabled={!online || undefined}
-          onClick={refuseOffline}
+        <LinkOut
+          link={video.link}
+          className={`${lockableLinkClass} gap-1.5 text-sm`}
+          // Locked, not taken away, offline: the note in the box says why. The press is asked
+          // of the gate too, like every way of opening a recording: it would open an error page.
+          off={!online}
+          onClick={refuseUnlessCanOpen}
         >
-          <Icon name="external" className="mr-1.5 size-4" />
-          Open in YouTube<span className="sr-only"> (opens in a new tab)</span>
-        </a>
+          Open in YouTube
+        </LinkOut>
       </div>
     </>
   );

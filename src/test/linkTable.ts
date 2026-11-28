@@ -32,6 +32,12 @@ export const videoLink = (id = 'link-original', overrides: Partial<SongLinkRow> 
 export const spotifyLink = (id = 'link-drumless', overrides: Partial<SongLinkRow> = {}) =>
   linkRow(id, { kind: 'drumless', provider: 'spotify', url: SPOTIFY_URL, ...overrides });
 
+/** Every "a recording of this song was opened" write the app has sent (`markSongPlayed`). */
+export const playedWrites = (): QueryCall[] =>
+  queryResult.mock.calls
+    .map(([call]) => call)
+    .filter((call) => call.table === 'songs' && opArgs(call, 'update') !== undefined);
+
 type LinkQueryMethod = 'select' | 'insert' | 'update' | 'delete';
 const LINK_WRITES = ['insert', 'update', 'delete'] as const;
 

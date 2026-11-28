@@ -18,10 +18,17 @@ import { failureCopy } from '@/lib/errorCopy';
 import { useOnline } from '@/lib/network';
 import { songPlayPath, songSourcePath } from '@/lib/routes';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
+import { LinkOut } from './LinkOut';
 import { ADD_RECORDING_ATTRIBUTES, findRecordingsOpener } from './recordingFocus';
-import { canOpenRecording } from './recordingGate';
+import { canOpenRecording, refuseUnlessCanOpen } from './recordingGate';
 import { RecordingsForm } from './RecordingsForm';
-import { isRecordingSource, otherLinkLabel, playAlongLabel, type SongLink } from './songLinks';
+import {
+  isRecordingSource,
+  otherLinkLabel,
+  otherLinkSpokenAs,
+  playAlongLabel,
+  type SongLink,
+} from './songLinks';
 import { useSongLinks, useSongLinkSaves, useUsableLinks } from './useSongLinks';
 
 /** How many other links are listed before "Show all n links". */
@@ -73,9 +80,9 @@ export function PlayAlong({
     );
   }
 
-  const single = (usable ?? []).filter((link) => isRecordingSource(link.kind));
+  const recordings = (usable ?? []).filter((link) => isRecordingSource(link.kind));
   const others = (usable ?? []).filter((link) => link.kind === 'other');
-  const hasLinks = single.length + others.length > 0;
+  const hasLinks = recordings.length + others.length > 0;
   // A link out records that the song was played along to; a refused press (offline) does nothing.
   const onLinkOut = (event: MouseEvent) => {
     if (!canOpenRecording()) {
@@ -83,9 +90,6 @@ export function PlayAlong({
       return;
     }
     markPlayed(song.id);
-  };
-  const refuseOffline = (event: MouseEvent) => {
-    if (!canOpenRecording()) event.preventDefault();
   };
   const dismissSaveFailure = () => {
     saves.forgetFailure();
@@ -104,31 +108,15 @@ export function PlayAlong({
             <Icon name="music" />
             Tab
           </Link>
-          {single.map((link) =>
-            link.provider === 'youtube' && isRecordingSource(link.kind) ? (
-              <Link
-                key={link.id}
-                to={songSourcePath(song.id, link.kind)}
-                className={buttonClass}
-                aria-disabled={!online || undefined}
-                onClick={refuseOffline}
-              >
-                <Icon name="video" />
-                {playAlongLabel(link)}
-              </Link>
-            ) : (
-              <LinkOut
-                key={link.id}
-                link={link}
-                className={`${buttonClass} max-w-full`}
-                textClassName="wrap-anywhere"
-                off={!online}
-                onClick={onLinkOut}
-              >
-                {playAlongLabel(link)}
-              </LinkOut>
-            ),
-          )}
+          {recordings.map((link) => (
+            <RecordingButton
+              key={link.id}
+              songId={song.id}
+              link={link}
+              off={!online}
+              onLinkOut={onLinkOut}
+            />
+          ))}
           {/* Only once the links are read: until then it isn't known that there are none. */}
           {links.data !== undefined && !hasLinks && (
             <button
@@ -147,23 +135,7 @@ export function PlayAlong({
             Couldn't load this song's recordings. {failureCopy(links.error)}
           </LoadErrorAlert>
         )}
-        {saves.error && (
-          // A save whose form was left before it answered (the page's links stay live while it
-          // saves): its failure is said here, to whoever is on the overview when it lands.
-          <div
-            role="alert"
-            className={`${dangerCardClass} flex flex-wrap items-center gap-x-4 gap-y-2 py-1 pr-1 pl-3`}
-          >
-            <p className="flex-1 basis-64 text-sm text-danger">
-              <Icon name="alert" className={`${inlineIconClass} size-4`} />
-              Couldn't save the recordings. {failureCopy(saves.error)} Some changes may have been
-              saved: this shows what is saved now.
-            </p>
-            <button type="button" className={buttonClass} onClick={dismissSaveFailure}>
-              Dismiss
-            </button>
-          </div>
-        )}
+        {saves.error && <SaveFailureAlert error={saves.error} onDismiss={dismissSaveFailure} />}
         {/* Above the list, not under it: with many links it would be a screen away from the buttons it explains. */}
         {!online && hasLinks && (
           <OfflineNote>
@@ -179,6 +151,72 @@ export function PlayAlong({
 
 function ActionRow({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap gap-x-2 gap-y-1">{children}</div>;
+}
+
+/**
+ * The button for the song's Original or Drumless. A YouTube video opens the
+ * play screen on that source; anything else (Spotify, another site) leaves
+ * the app, and the button says where to.
+ */
+function RecordingButton({
+  songId,
+  link,
+  off,
+  onLinkOut,
+}: {
+  songId: string;
+  link: SongLink;
+  off: boolean;
+  onLinkOut: (event: MouseEvent) => void;
+}) {
+  if (link.provider === 'youtube' && isRecordingSource(link.kind)) {
+    return (
+      <Link
+        to={songSourcePath(songId, link.kind)}
+        className={buttonClass}
+        aria-disabled={off || undefined}
+        // The play screen records the opening itself, once its video shows.
+        onClick={refuseUnlessCanOpen}
+      >
+        <Icon name="video" />
+        {playAlongLabel(link)}
+      </Link>
+    );
+  }
+  return (
+    <LinkOut
+      link={link}
+      className={`${buttonClass} max-w-full`}
+      textClassName="wrap-anywhere"
+      off={off}
+      onClick={onLinkOut}
+    >
+      {playAlongLabel(link)}
+    </LinkOut>
+  );
+}
+
+/**
+ * A save of the recordings that failed after its form was left (the page's
+ * links stay live while it saves): said here, to whoever is on the overview
+ * when it lands or comes back to it, until it is dismissed.
+ */
+function SaveFailureAlert({ error, onDismiss }: { error: unknown; onDismiss: () => void }) {
+  return (
+    <div
+      role="alert"
+      className={`${dangerCardClass} flex flex-wrap items-center gap-x-4 gap-y-2 py-1 pr-1 pl-3`}
+    >
+      <p className="flex-1 basis-64 text-sm text-danger">
+        <Icon name="alert" className={`${inlineIconClass} size-4`} />
+        Couldn't save the recordings. {failureCopy(error)} Some changes may have been saved: this
+        shows what is saved now.
+      </p>
+      <button type="button" className={buttonClass} onClick={onDismiss}>
+        Dismiss
+      </button>
+    </div>
+  );
 }
 
 /**
@@ -210,7 +248,7 @@ function OtherLinks({
               textClassName="line-clamp-1 wrap-anywhere"
               title={link.url}
               // The words are a shortened address; a screen reader gets all of it.
-              spokenAs={link.url.replace(/^https:\/\/(www\.)?/, '')}
+              spokenAs={otherLinkSpokenAs(link)}
               off={off}
               onClick={onOpen}
             >
@@ -229,52 +267,5 @@ function OtherLinks({
         </ExpandButton>
       )}
     </>
-  );
-}
-
-/** A link that leaves the app, in a new tab, with nothing of this page passed on. */
-function LinkOut({
-  link,
-  className,
-  textClassName,
-  title,
-  spokenAs,
-  off,
-  onClick,
-  children,
-}: {
-  link: SongLink;
-  className: string;
-  textClassName: string;
-  title?: string;
-  /** The link's accessible name, when the words on show are a shortened form of it. */
-  spokenAs?: string;
-  off: boolean;
-  onClick: (event: MouseEvent) => void;
-  children: ReactNode;
-}) {
-  return (
-    <a
-      href={link.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={className}
-      title={title}
-      aria-disabled={off || undefined}
-      onClick={onClick}
-    >
-      <Icon name="external" className="size-4 shrink-0" />
-      <span className={`min-w-0 ${textClassName}`}>
-        {spokenAs === undefined ? (
-          children
-        ) : (
-          <>
-            <span aria-hidden="true">{children}</span>
-            <span className="sr-only">{spokenAs}</span>
-          </>
-        )}
-        <span className="sr-only"> (opens in a new tab)</span>
-      </span>
-    </a>
   );
 }

@@ -10,3 +10,11 @@ import { isOnline } from '@/lib/network';
 export function canOpenRecording(): boolean {
   return isOnline();
 }
+
+/**
+ * The click handler of a link that opens a recording and does nothing else:
+ * a press the gate refuses goes nowhere (no navigation, no new tab).
+ */
+export function refuseUnlessCanOpen(event: { preventDefault: () => void }): void {
+  if (!canOpenRecording()) event.preventDefault();
+}

@@ -7,7 +7,7 @@ import { LoadingLine } from '@/components/StatusMessages';
 import {
   buttonClass,
   cardClass,
-  ghostButtonClass,
+  ghostButtonAtEdgeClass,
   inputClass,
   labelClass,
   primaryButtonClass,
@@ -26,6 +26,7 @@ import {
   fieldReading,
   isEmptyPlan,
   linkFields,
+  otherLinkSlot,
   planLinkSave,
   type LinkDraft,
   type LinkField,
@@ -38,13 +39,23 @@ import {
   recognisedAs,
   SONG_LINK_KIND_LABELS,
   type LinkRefusal,
+  type RecordingSource,
 } from './songLinks';
 import { useSaveSongLinks, useSongLinkSaves } from './useSongLinks';
 
-const FIELD_HINTS: Record<'original' | 'drumless', string> = {
+const FIELD_HINTS: Record<RecordingSource, string> = {
   original: 'The song as it was recorded.',
   drumless: 'A version without the drums, to be the drummer.',
 };
+
+/** How many fields come before the first other link: Original and Drumless. */
+const SINGLE_FIELDS = 2;
+
+/** "Original", "Drumless", then "Other link 1" and up, in the order the fields are drawn. */
+const fieldLabel = (field: LinkField, index: number) =>
+  field.kind === 'other'
+    ? `Other link ${index - SINGLE_FIELDS + 1}`
+    : SONG_LINK_KIND_LABELS[field.kind];
 
 /**
  * "Manage recordings": a link field for the song's Original and Drumless, one
@@ -110,7 +121,7 @@ export function RecordingsForm({
     if (saving) return;
     const id = randomUuid();
     setDraft((current) => ({ ...current, added: [...current.added, id] }));
-    focusWhenReady(() => document.getElementById(linkInputId(formId, `other:${id}`)));
+    focusWhenReady(() => document.getElementById(linkInputId(formId, otherLinkSlot(id))));
   };
   const remove = (field: LinkField) => {
     if (saving) return;
@@ -181,11 +192,7 @@ export function RecordingsForm({
               key={field.slot}
               field={field}
               inputId={linkInputId(formId, field.slot)}
-              label={
-                field.kind === 'other'
-                  ? `Other link ${index - 1}`
-                  : SONG_LINK_KIND_LABELS[field.kind]
-              }
+              label={fieldLabel(field, index)}
               hint={field.kind === 'other' ? null : FIELD_HINTS[field.kind]}
               error={errors[field.slot]}
               locked={saving}
@@ -196,7 +203,7 @@ export function RecordingsForm({
           <button
             type="button"
             id={`${formId}-add`}
-            className={`${ghostButtonClass} -ml-4 self-start`}
+            className={`${ghostButtonAtEdgeClass} self-start`}
             aria-disabled={saving || undefined}
             onClick={addOther}
           >
@@ -211,11 +218,35 @@ export function RecordingsForm({
           the fields show what is saved now.
         </ErrorAlert>
       )}
+      <FormButtons
+        canSave={fields !== null && online}
+        saving={saving}
+        offline={!online}
+        onCancel={cancel}
+      />
+    </form>
+  );
+}
+
+/** Save and Cancel, and under them why Save is off while offline. */
+function FormButtons({
+  canSave,
+  saving,
+  offline,
+  onCancel,
+}: {
+  canSave: boolean;
+  saving: boolean;
+  offline: boolean;
+  onCancel: () => void;
+}) {
+  return (
+    <>
       <div className="flex flex-wrap gap-2">
         <button
           type="submit"
           className={primaryButtonClass}
-          disabled={fields === null || !online}
+          disabled={!canSave}
           // Locked, not disabled, while saving: focus is on it, and a disabled button drops it.
           aria-disabled={saving || undefined}
         >
@@ -226,17 +257,17 @@ export function RecordingsForm({
           className={buttonClass}
           // Locked, not disabled: focus may be on it, and a disabled button would drop it.
           aria-disabled={saving || undefined}
-          onClick={cancel}
+          onClick={onCancel}
         >
           Cancel
         </button>
       </div>
-      {!online && (
+      {offline && (
         <OfflineNote>
           You're offline. Recordings can be changed once you're back online.
         </OfflineNote>
       )}
-    </form>
+    </>
   );
 }
 
@@ -275,11 +306,10 @@ function LinkFieldRow({
   onChange: (text: string) => void;
   onRemove: () => void;
 }) {
-  const reading = fieldReading(field);
-  const empty = field.text.trim() === '';
   // A new Original or Drumless field has nothing saved to remove: it is emptied by hand.
   const removable = field.kind === 'other' || field.saved !== null;
-  const nothingToRemove = field.saved !== null && empty;
+  // A saved link whose field has been emptied: Remove has done all it does until Save.
+  const removedAtSave = field.saved !== null && field.text.trim() === '';
   const noteId = `${inputId}-note`;
   return (
     <div className="flex flex-col gap-1">
@@ -313,9 +343,9 @@ function LinkFieldRow({
             type="button"
             className={`${quietButtonClass} min-w-touch shrink-0`}
             // Locked, not disabled, once the saved link's field is empty: focus is on it then.
-            aria-disabled={locked || nothingToRemove || undefined}
+            aria-disabled={locked || removedAtSave || undefined}
             onClick={() => {
-              if (!locked && !nothingToRemove) onRemove();
+              if (!locked && !removedAtSave) onRemove();
             }}
           >
             <Icon name="trash" className="size-4" />
@@ -330,14 +360,20 @@ function LinkFieldRow({
         role={error !== undefined ? 'alert' : undefined}
         className={`min-h-5 text-sm wrap-anywhere ${error !== undefined ? 'text-danger' : 'text-ink-muted'}`}
       >
-        {error !== undefined
-          ? LINK_REFUSAL_COPY[error]
-          : nothingToRemove
-            ? 'This link is removed when you save.'
-            : reading?.ok
-              ? recognisedAs(reading.link, field.kind)
-              : null}
+        {fieldNote(field, error, removedAtSave)}
       </p>
     </div>
   );
+}
+
+/** The line under a field: why Save refused it, that Save will remove it, or what it was read as. */
+function fieldNote(
+  field: LinkField,
+  error: LinkRefusal | undefined,
+  removedAtSave: boolean,
+): string | null {
+  if (error !== undefined) return LINK_REFUSAL_COPY[error];
+  if (removedAtSave) return 'This link is removed when you save.';
+  const reading = fieldReading(field);
+  return reading?.ok ? recognisedAs(reading.link, field.kind) : null;
 }

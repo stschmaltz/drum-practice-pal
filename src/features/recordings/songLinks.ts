@@ -68,6 +68,9 @@ const MAX_START_SECONDS = 24 * 60 * 60;
 const isHostOf = (host: string, domains: readonly string[]) =>
   domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
 
+/** A host as it is named to the user: "www." says nothing. */
+const withoutWww = (host: string) => host.replace(/^www\./, '');
+
 /** The first http(s) address among other words, up to the next space. */
 const ADDRESS_IN_TEXT = /https?:\/\/\S+/i;
 /** What a sentence puts after an address, or wraps it in: not part of it. */
@@ -138,7 +141,7 @@ export function parseSongLink(text: string): LinkParse {
     url: plain,
     mediaId: null,
     startSeconds: null,
-    hostLabel: youTube ? 'YouTube' : spotify ? 'Spotify' : host.replace(/^www\./, ''),
+    hostLabel: youTube ? 'YouTube' : spotify ? 'Spotify' : withoutWww(host),
   });
 }
 
@@ -272,20 +275,26 @@ interface SavedLink {
   created_at: string;
 }
 
+/** Saved links oldest first, by id among ones saved in the same instant: a total order. */
+export function oldestFirst(
+  a: Pick<SavedLink, 'id' | 'created_at'>,
+  b: Pick<SavedLink, 'id' | 'created_at'>,
+): number {
+  return (
+    Date.parse(a.created_at) - Date.parse(b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  );
+}
+
+const KIND_ORDER: Record<SongLinkKind, number> = { original: 0, drumless: 1, other: 2 };
+
 /**
  * The saved links the app can use, Original first, then Drumless, then the
  * others oldest first. A row whose URL the parser refuses (written by
  * something other than this app) is left out: it is never opened or embedded.
  */
 export function usableLinks(rows: readonly SavedLink[]): SongLink[] {
-  const order: Record<SongLinkKind, number> = { original: 0, drumless: 1, other: 2 };
   return [...rows]
-    .sort(
-      (a, b) =>
-        order[a.kind] - order[b.kind] ||
-        Date.parse(a.created_at) - Date.parse(b.created_at) ||
-        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-    )
+    .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || oldestFirst(a, b))
     .flatMap((row) => {
       const parsed = parseSongLink(row.url);
       return parsed.ok ? [{ ...parsed.link, id: row.id, kind: row.kind }] : [];
@@ -302,12 +311,17 @@ const OTHER_LINK_LABEL_LENGTH = 40;
  */
 export function otherLinkLabel(link: Pick<ParsedLink, 'url'>): string {
   const url = new URL(link.url);
-  const host = url.hostname.replace(/^www\./, '');
+  const host = withoutWww(url.hostname);
   const rest = `${url.pathname}${url.search}${url.hash}`;
   if (rest === '/') return host;
   if (host.length + rest.length <= OTHER_LINK_LABEL_LENGTH) return `${host}${rest}`;
   const room = Math.max(1, OTHER_LINK_LABEL_LENGTH - 1 - host.length);
   return `${host}${rest.slice(0, room)}…`;
+}
+
+/** An other link's accessible name: all of its address, less the scheme every link has. */
+export function otherLinkSpokenAs(link: Pick<ParsedLink, 'url'>): string {
+  return link.url.replace(/^https:\/\/(www\.)?/, '');
 }
 
 /** "Original", or "Original on Spotify" for a link that leaves the app. */

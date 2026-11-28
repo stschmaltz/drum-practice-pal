@@ -68,6 +68,13 @@ export const primaryButtonClass = `${buttonBase} border border-transparent bg-br
 /** A quieter button for actions beside a primary one: no fill until hovered. */
 export const ghostButtonClass = `${buttonBase} text-ink-soft hover:bg-raised hover:text-ink ${dimmedWhenOff}`;
 
+/**
+ * A ghost button that starts a row or stands alone under a list ("New loop",
+ * "Show all 9 loops"): pulled left by its own padding, so its icon lines up
+ * with the text above it rather than sitting a padding's width in.
+ */
+export const ghostButtonAtEdgeClass = `${ghostButtonClass} -ml-4`;
+
 const quietBase = `${buttonShape} min-h-touch gap-1.5 px-3 py-2 text-sm`;
 
 /** A list item's secondary actions (Edit, History, Delete): ghost, smaller text, still 44 px tall. */

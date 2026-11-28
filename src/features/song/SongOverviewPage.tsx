@@ -9,7 +9,7 @@ import { ProgressBar, ProgressRing } from '@/components/ProgressMarks';
 import { EmptyState, LoadingLine } from '@/components/StatusMessages';
 import {
   focusRing,
-  ghostButtonClass,
+  ghostButtonAtEdgeClass,
   nameLinkClass,
   sectionHeadingClass,
 } from '@/components/styles';
@@ -134,7 +134,7 @@ function SongOverview({ song }: { song: Song }) {
         actions={
           <Link
             to={newLoopPath(song.id)}
-            className={`${ghostButtonClass} -ml-4`}
+            className={ghostButtonAtEdgeClass}
             {...NEW_LOOP_BUTTON_ATTRIBUTES}
           >
             <Icon name="plus" />

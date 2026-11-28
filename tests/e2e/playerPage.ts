@@ -54,11 +54,16 @@ export async function openSongPlayer(page: Page, title: string) {
   await expect(page).toHaveURL(/\/songs\/[^/]+\/play$/);
 }
 
+/** On the songs list: uploads a fixture and waits until the list says it was added. */
+export async function uploadFixture(page: Page, name: string, title: string): Promise<void> {
+  await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture(name));
+  await expect(page.getByRole('status').filter({ hasText: `Added “${title}”.` })).toBeVisible();
+}
+
 /** Uploads a fixture on the songs list and opens it in jam mode (`/songs/:id/play`). */
 export async function openFixture(page: Page, user: E2eUser, name: string, title: string) {
   await signIn(page, user, '/');
-  await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture(name));
-  await expect(page.getByRole('status').filter({ hasText: `Added “${title}”.` })).toBeVisible();
+  await uploadFixture(page, name, title);
   await openSongPlayer(page, title);
   await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
   // Enabled once the score, MIDI and soundfont are all in.

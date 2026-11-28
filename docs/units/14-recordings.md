@@ -489,3 +489,47 @@ As in the first QA section, plus: the page of tab under the video on a real phon
 - The dev server on 5283 was stopped. The one `qa14r2-…@drumpal.test` user was deleted with its two files, by its id; nothing else on the stack was touched.
 
 **Verdict: PASS.** No blocker and no major. Minor: issues 1 to 7, of which 1 and 2 are product calls for Shane.
+
+## Readability
+
+No behaviour changed. Checks before and after are at the end.
+
+### What changed
+
+- **One link out.** `LinkOut` (the new tab, `rel="noopener noreferrer"`, the icon, "(opens in a new tab)" in the name) is its own file, `src/features/recordings/LinkOut.tsx`, and the play screen's "Open in YouTube" draws it too, where it had a second copy of the same `<a>`. That link's markup is now the shared one (its words in a `span`, `gap-1.5` for the icon's `mr-1.5`); its name, address and attributes are as they were, and the design test's audit of that screen passes.
+- **The overview's block, one component per part** (`PlayAlong.tsx`): `RecordingButton` (a YouTube Original or Drumless opens the play screen, anything else leaves the app), `SaveFailureAlert`, `OtherLinks`. The hooks and handlers stay in `PlayAlong`.
+- **The form** (`RecordingsForm.tsx`): `FormButtons` (Save, Cancel and the offline note), `fieldLabel` (with `SINGLE_FIELDS` for what was `index - 1`), `fieldNote` in place of a four-way nested ternary, and `removedAtSave` for what was `nothingToRemove`.
+- **The play screen** (`SongPage.tsx`, 544 to 425 lines): `useSongSources` is its own file with `useMarkedPlayed` and `sourceShown` split out of it; the three effects that set the tab aside on a recording are `useTabSetAside`; the sticky video bar and the note under it are `RecordingBar`, its class string a named constant. `linkedLoopFormOf` moved to `linkedLoopForm.ts` (pure), since both the source hook and `useLinkedLoopForm` read it. The file's first line no longer calls the screen "Play whole song".
+- **Pure modules.** `oldestFirst` is the one order of saved links (it was written twice, in `songLinks.ts` and `songLinkForm.ts`); `otherLinkSpokenAs` moved out of the component; `withoutWww` names a replace done in three places; `otherLinkSlot(id)` builds the `other:<id>` slot (three template strings); `RecordingSource` stands for `'original' | 'drumless'` where that was spelled out.
+- **The API** (`songLinksApi.ts`): `pointLinkAt` is the update that asks for its row back, used by `updateSongLink` and by the insert that finds its id already saved, which each had a copy.
+- **The gate.** `refuseUnlessCanOpen` (`recordingGate.ts`) is the click handler `PlayAlong` and `RecordingBox` each defined as `refuseOffline`.
+- **Styles.** `ghostButtonAtEdgeClass` (`styles.ts`) for the ghost button with `-ml-4`, used by `ExpandButton`, "Add another link", "New loop" and the compact Upload.
+- **Tests.**
+  - `SongOverviewPage.test.tsx`: `addRecording(user)` (18 uses), `formButton(name)` (21), `formAlert()` (12), `savingShown()`, `noOverviewAlert()`, and one `dropped` for the describe (it was defined twice and written out twice more).
+  - `SongPage.test.tsx`: `choose(user, 'Original')` for a press on the switch (37), `frameShown()` (18), one `linksKey`.
+  - `playedWrites()` is in `src/test/linkTable.ts` (both page tests had it); `stubPointer(fine)` is in `src/test/mediaQueries.ts`, shared with the login page's and the loop form's tests, which each had their own stub.
+  - e2e: `recordingsPage.ts` gained `openNewSongOverview`, `tabLink`, `recordingLink`, `addRecordingButton`, `saveRecordingsButton` and `gotoSource`, and `recordings.spec.ts` and the recordings design test use them; `uploadFixture` is in `playerPage.ts`, used by `openFixture` too.
+- `AGENTS.md`: the recordings section names the new modules and helpers, and the styles list has `ghostButtonAtEdgeClass`.
+
+### Assertions changed
+
+None deleted or weakened. Three kinds of step changed how they find what they press:
+
+- `choose` (component test) waits for the radio with `findByRole` where 31 of the 37 presses used `getByRole`: the press still fails if the radio isn't there, after the wait.
+- `recordingLink(page, 'Original')` (e2e) matches the name exactly, where six uses matched "Original" as a substring: stricter.
+- `stubPointer` answers `matches: false` for any query but `(pointer: fine)` and has `media` and the listener methods; the loop form's own stub had only `matches`.
+
+The unit-test count went from 5550 to 5555 with no test added: `designTokens.test.ts` and the tests beside it have cases per source file, and there are four new files.
+
+### Left
+
+- "Couldn't save the recordings. … Some changes may have been saved: …" is written in the form and in `SaveFailureAlert`, with different endings ("the fields show" / "this shows"). Two sentences; not worth a helper that takes the ending.
+- `keptLinkText` and `parseSongLink` both ask "has it a space, then take the first address". They answer differently when there is none (the text as typed; a refusal), so they stay two.
+- `sentTimes` in `songPlayed.test.tsx` filters the same calls as `playedWrites`; it is the library's test and maps them to times, so it keeps its own.
+- The upload's two lines are still written out in `journey.spec.ts`, `library.spec.ts`, `player.spec.ts`, `drums-only.spec.ts`, `release-fixes.spec.ts` and one other design test: earlier units' specs, which this stage could not run in full.
+- `SongPage.test.tsx` is 3,450 lines, a third of it this unit's; splitting it by describe is a change for a stage that can run all of it at leisure.
+
+### Run
+
+- Before: `npm run check` green (5550 passed, 2 skipped); `tests/db/song-links.test.ts` 68 passed; e2e on `E2E_PORT=4283` at phone and desktop, `recordings.spec.ts`, `journey.spec.ts` and the recordings design test, 30 passed.
+- After: `npm run check` green (5555 passed, 2 skipped); `tests/db/song-links.test.ts` 68 passed; the same e2e on a fresh build plus `drums-only.spec.ts` (for `openFixture`), 40 passed. The full e2e suite was not run, by the stage's instruction.

@@ -5,7 +5,7 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { Icon } from '@/components/icons';
 import {
   buttonClass,
-  ghostButtonClass,
+  ghostButtonAtEdgeClass,
   focusRing,
   linkClass,
   primaryButtonClass,
@@ -182,7 +182,7 @@ function FilePicker({
   return (
     <label
       // Compact once there are songs (Unit 16): a quiet action, the songs being what the page is for.
-      className={`${compact ? `${ghostButtonClass} -ml-4 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50` : `${primaryButtonClass} ${primaryLabelOffClass}`} shrink-0 cursor-pointer has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus`}
+      className={`${compact ? `${ghostButtonAtEdgeClass} has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50` : `${primaryButtonClass} ${primaryLabelOffClass}`} shrink-0 cursor-pointer has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus`}
     >
       <Icon name="upload" />
       {compact ? (

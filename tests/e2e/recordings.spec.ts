@@ -1,26 +1,32 @@
 /// <reference lib="dom" />
 import type { Page } from '@playwright/test';
-import { expect, signIn, test, type E2eUser } from './auth';
-import { boxOf, fixture, openSongOverview, playButton, viewport } from './playerPage';
+import { expect, signIn, test } from './auth';
+import { boxOf, openSongOverview, playButton, uploadFixture, viewport } from './playerPage';
 import { navLink } from './practicePage';
 import {
+  addRecordingButton,
   EMBED_URL,
+  gotoSource,
   lastPlayedOf,
   linkField,
   linksOf,
   openInYouTube,
+  openNewSongOverview,
   openRecordingsForm,
   playAlong,
   recordingBar,
   recordingFrame,
+  recordingLink,
   recordingNote,
   recordingsForm,
   saveRecordings,
+  saveRecordingsButton,
   sourceOption,
   sourceSwitch,
   SPOTIFY_URL,
   STUB_PLAYER_TEXT,
   stubServices,
+  tabLink,
   VIDEO_ID,
   WATCH_URL,
 } from './recordingsPage';
@@ -29,17 +35,6 @@ import {
 // hosts are answered by a stub page: what is asserted is the frame the app
 // builds, that nothing of YouTube's is asked for until a recording is opened,
 // the way out, and what a Spotify link does.
-
-async function uploadFixture(page: Page, name: string, title: string): Promise<void> {
-  await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture(name));
-  await expect(page.getByRole('status').filter({ hasText: `Added “${title}”.` })).toBeVisible();
-}
-
-async function songWithOverviewOpen(page: Page, user: E2eUser): Promise<void> {
-  await signIn(page, user, '/');
-  await uploadFixture(page, 'groove-120', 'Groove 120');
-  await openSongOverview(page, 'Groove 120');
-}
 
 const songTitles = (page: Page) =>
   page
@@ -55,10 +50,10 @@ test('a YouTube link plays in the play screen over the tab, and nothing of YouTu
 }) => {
   test.setTimeout(90_000);
   const services = await stubServices(context);
-  await songWithOverviewOpen(page, user);
+  await openNewSongOverview(page, user);
   // A song with no links: the tab under Play along, and one quiet way in.
   await expect(playAlong(page).getByRole('link')).toHaveText(['Tab']);
-  await expect(playAlong(page).getByRole('button', { name: 'Add a recording' })).toBeVisible();
+  await expect(addRecordingButton(page)).toBeVisible();
 
   // Pasted as the YouTube app's share sheet gives it: saved in its normal form.
   await saveRecordings(page, 'Groove 120', {
@@ -76,7 +71,7 @@ test('a YouTube link plays in the play screen over the tab, and nothing of YouTu
   await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
   await navLink(page, 'Songs').click();
   await openSongOverview(page, 'Groove 120');
-  await playAlong(page).getByRole('link', { name: 'Tab', exact: true }).click();
+  await tabLink(page).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(sourceSwitch(page)).toBeVisible();
   await expect(recordingFrame(page)).toHaveCount(0);
@@ -85,7 +80,7 @@ test('a YouTube link plays in the play screen over the tab, and nothing of YouTu
 
   // Two taps from the overview: the song's Original, then Play on the video itself.
   await page.goBack();
-  await playAlong(page).getByRole('link', { name: 'Original' }).click();
+  await recordingLink(page, 'Original').click();
   await expect(page).toHaveURL(/\/play\?source=original$/);
   const frame = recordingFrame(page);
   await expect(frame).toHaveAttribute('src', EMBED_URL);
@@ -106,7 +101,7 @@ test('a YouTube link plays in the play screen over the tab, and nothing of YouTu
   expect(services.requests).toEqual([EMBED_URL]);
 
   // The way out is always there, since a video that refuses embedding only says so inside the frame.
-  const out = page.getByRole('link', { name: /^Open in YouTube/ });
+  const out = openInYouTube(page);
   await expect(out).toHaveAttribute('href', WATCH_URL);
   await expect(out).toHaveAttribute('target', '_blank');
   await expect(out).toHaveAttribute('rel', 'noopener noreferrer');
@@ -174,16 +169,16 @@ test('a Spotify link opens Spotify in a new tab, says it can’t be slowed, and 
   context,
 }) => {
   const services = await stubServices(context);
-  await songWithOverviewOpen(page, user);
+  await openNewSongOverview(page, user);
 
-  await page.getByRole('button', { name: 'Add a recording' }).click();
+  await addRecordingButton(page).click();
   await linkField(page, 'Drumless').fill(
     'https://open.spotify.com/intl-de/track/4uLU6hMCjMI75M1A2tKUQC?si=0123456789abcdef',
   );
   await expect(recordingsForm(page)).toContainText(
     "Spotify track. Opens Spotify, which can't slow a song down: for that, add a YouTube link.",
   );
-  await recordingsForm(page).getByRole('button', { name: 'Save' }).click();
+  await saveRecordingsButton(page).click();
   await expect(recordingsForm(page)).toHaveCount(0);
   await expect
     .poll(() => linksOf(user))
@@ -206,10 +201,10 @@ test('a Spotify link opens Spotify in a new tab, says it can’t be slowed, and 
   await expect.poll(async () => (await lastPlayedOf(user))['Groove 120']).not.toBeNull();
 
   // The play screen has no source for it: Spotify never plays in the app.
-  await playAlong(page).getByRole('link', { name: 'Tab', exact: true }).click();
+  await tabLink(page).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(sourceSwitch(page)).toHaveCount(0);
-  await page.goto(`${new URL(page.url()).pathname}?source=drumless`);
+  await gotoSource(page, 'drumless');
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(page).toHaveURL(/\/play$/);
   await expect(recordingFrame(page)).toHaveCount(0);
@@ -221,8 +216,8 @@ test('a link that isn’t one is refused with fixed copy, and nothing is saved',
   context,
 }) => {
   await stubServices(context);
-  await songWithOverviewOpen(page, user);
-  await page.getByRole('button', { name: 'Add a recording' }).click();
+  await openNewSongOverview(page, user);
+  await addRecordingButton(page).click();
 
   for (const [text, copy] of [
     ['javascript:alert(document.domain)', 'Only links that start with https:// can be saved.'],
@@ -230,14 +225,14 @@ test('a link that isn’t one is refused with fixed copy, and nothing is saved',
     ['not a link', "That isn't a link."],
   ] as const) {
     await linkField(page, 'Original').fill(text);
-    await recordingsForm(page).getByRole('button', { name: 'Save' }).click();
+    await saveRecordingsButton(page).click();
     await expect(recordingsForm(page).getByRole('alert')).toContainText(copy);
     await expect(linkField(page, 'Original')).toBeFocused();
   }
   expect(await linksOf(user)).toEqual([]);
 
   await recordingsForm(page).getByRole('button', { name: 'Cancel' }).click();
-  await expect(page.getByRole('button', { name: 'Add a recording' })).toBeFocused();
+  await expect(addRecordingButton(page)).toBeFocused();
   await expect(playAlong(page).getByRole('link')).toHaveText(['Tab']);
 });
 
@@ -256,7 +251,7 @@ test('the Songs list’s recently practised order follows a recording being open
 
   await openSongOverview(page, 'Groove 120');
   await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
-  await playAlong(page).getByRole('link', { name: 'Original' }).click();
+  await recordingLink(page, 'Original').click();
   await expect(recordingFrame(page)).toBeVisible();
   await expect.poll(async () => (await lastPlayedOf(user))['Groove 120']).not.toBeNull();
   expect((await lastPlayedOf(user))['Waltz 3-4']).toBeNull();
@@ -313,7 +308,7 @@ test.describe('with the service worker in charge of the page', () => {
   }) => {
     test.setTimeout(90_000);
     const services = await stubServices(context);
-    await songWithOverviewOpen(page, user);
+    await openNewSongOverview(page, user);
     // A link with a start time, as the share sheet's "Start at" writes it.
     await saveRecordings(page, 'Groove 120', {
       Original: `https://youtu.be/${VIDEO_ID}?si=AbCdEf123456&t=1m30s`,
@@ -330,10 +325,10 @@ test.describe('with the service worker in charge of the page', () => {
     await expect
       .poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null))
       .toBe(true);
-    await expect(playAlong(page).getByRole('link', { name: 'Original' })).toBeVisible();
+    await expect(recordingLink(page, 'Original')).toBeVisible();
     await navLink(page, 'Songs').click();
     await openSongOverview(page, 'Groove 120');
-    await playAlong(page).getByRole('link', { name: 'Tab', exact: true }).click();
+    await tabLink(page).click();
     await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
     expect(await page.locator('iframe').count()).toBe(0);
     expect(services.requests).toEqual([]);
@@ -347,10 +342,7 @@ test.describe('with the service worker in charge of the page', () => {
     // The recorder sees the frame, so the empty list above meant no request.
     expect(services.requests).toEqual([`${EMBED_URL}&start=90`]);
     // The way out starts at the same place.
-    await expect(page.getByRole('link', { name: /^Open in YouTube/ })).toHaveAttribute(
-      'href',
-      `${WATCH_URL}&t=90s`,
-    );
+    await expect(openInYouTube(page)).toHaveAttribute('href', `${WATCH_URL}&t=90s`);
   });
 });
 
@@ -361,9 +353,9 @@ test('offline, the recording buttons are off and a press goes nowhere; on a reco
 }) => {
   test.setTimeout(90_000);
   const services = await stubServices(context);
-  await songWithOverviewOpen(page, user);
+  await openNewSongOverview(page, user);
   await saveRecordings(page, 'Groove 120', { Original: WATCH_URL, Drumless: SPOTIFY_URL });
-  const original = playAlong(page).getByRole('link', { name: 'Original' });
+  const original = recordingLink(page, 'Original');
   const spotify = playAlong(page).getByRole('link', { name: /^Drumless on Spotify/ });
   await expect(original).toBeVisible();
   const overview = page.url();
@@ -372,10 +364,7 @@ test('offline, the recording buttons are off and a press goes nowhere; on a reco
   await expect(original).toHaveAttribute('aria-disabled', 'true');
   await expect(spotify).toHaveAttribute('aria-disabled', 'true');
   await expect(playAlong(page)).toContainText("You're offline. Recordings need a connection");
-  await expect(playAlong(page).getByRole('link', { name: 'Tab', exact: true })).not.toHaveAttribute(
-    'aria-disabled',
-    'true',
-  );
+  await expect(tabLink(page)).not.toHaveAttribute('aria-disabled', 'true');
   // The presses arrive (the links are there and take a click) and do nothing: no new screen,
   // no new tab, no request.
   const pagesBefore = context.pages().length;
@@ -427,11 +416,11 @@ test('a second tab sees a link saved in the first at its next read, and its form
   await stubServices(context);
   // Each tab's clock can be moved on: a list read in the last half minute isn't read again.
   await context.clock.install();
-  await songWithOverviewOpen(page, user);
+  await openNewSongOverview(page, user);
   const second = await context.newPage();
   try {
     await second.goto(page.url());
-    await expect(second.getByRole('button', { name: 'Add a recording' })).toBeVisible();
+    await expect(addRecordingButton(second)).toBeVisible();
 
     await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
     // A while later the tab comes to the front: the app reads its lists again.
@@ -440,16 +429,16 @@ test('a second tab sees a link saved in the first at its next read, and its form
       await tab.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
     };
     // Until then it shows what it last read.
-    await expect(second.getByRole('button', { name: 'Add a recording' })).toBeVisible();
+    await expect(addRecordingButton(second)).toBeVisible();
     await comesToFront(second);
     await expect(playAlong(second).getByRole('link')).toHaveText(['Tab', 'Original']);
-    await expect(second.getByRole('button', { name: 'Add a recording' })).toHaveCount(0);
+    await expect(addRecordingButton(second)).toHaveCount(0);
 
     // Its form shows the link the first tab saved, and changing it there writes the same row.
     await openRecordingsForm(second, 'Groove 120');
     await expect(linkField(second, 'Original')).toHaveValue(WATCH_URL);
     await linkField(second, 'Original').fill(SPOTIFY_URL);
-    await recordingsForm(second).getByRole('button', { name: 'Save' }).click();
+    await saveRecordingsButton(second).click();
     await expect(recordingsForm(second)).toHaveCount(0);
     await expect
       .poll(() => linksOf(user))
@@ -470,12 +459,12 @@ test('Back and Forward step between the song and its recording, never through th
 }) => {
   test.setTimeout(90_000);
   await stubServices(context);
-  await songWithOverviewOpen(page, user);
+  await openNewSongOverview(page, user);
   await saveRecordings(page, 'Groove 120', {
     Original: WATCH_URL,
     Drumless: 'https://www.youtube.com/watch?v=aaaaaaaaaaa',
   });
-  await playAlong(page).getByRole('link', { name: 'Original' }).click();
+  await recordingLink(page, 'Original').click();
   await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
   await sourceOption(page, 'Drumless').click();
   await expect(recordingFrame(page)).toHaveAttribute('src', /\/embed\/aaaaaaaaaaa\?/);
@@ -492,7 +481,7 @@ test('Back and Forward step between the song and its recording, never through th
   await expect(playButton(page)).toHaveCount(0);
 
   // A source the song has no video for, typed into the address: the tab, and the address says so.
-  await page.goto(`${new URL(page.url()).pathname}?source=bogus`);
+  await gotoSource(page, 'bogus');
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   await expect(recordingFrame(page)).toHaveCount(0);
   await expect(sourceSwitch(page)).toBeVisible();
@@ -518,9 +507,9 @@ test('the YouTube frame is at least 200 px wide and tall at every width, and a p
 }) => {
   test.setTimeout(120_000);
   await stubServices(context);
-  await songWithOverviewOpen(page, user);
+  await openNewSongOverview(page, user);
   await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
-  await playAlong(page).getByRole('link', { name: 'Original' }).click();
+  await recordingLink(page, 'Original').click();
   const frame = recordingFrame(page);
   await expect(frame).toBeVisible();
   await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
@@ -588,9 +577,9 @@ test('under a recording a phone draws the score as a page that scrolls with the 
 }) => {
   test.setTimeout(90_000);
   await stubServices(context);
-  await songWithOverviewOpen(page, user);
+  await openNewSongOverview(page, user);
   await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
-  await playAlong(page).getByRole('link', { name: 'Tab', exact: true }).click();
+  await tabLink(page).click();
   await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
   const size = page.viewportSize()!;
   const phone = size.width < 768;
@@ -638,7 +627,7 @@ test('nothing on the overview moves when the links arrive on a cold load', async
 }) => {
   test.setTimeout(90_000);
   await stubServices(context);
-  await songWithOverviewOpen(page, user);
+  await openNewSongOverview(page, user);
   await saveRecordings(page, 'Groove 120', {
     Original: WATCH_URL,
     Drumless: 'https://www.youtube.com/watch?v=aaaaaaaaaaa',
@@ -666,7 +655,7 @@ test('nothing on the overview moves when the links arrive on a cold load', async
 
     const drawn = {
       heading: cold.getByRole('heading', { name: 'Play along' }),
-      tab: playAlong(cold).getByRole('link', { name: 'Tab', exact: true }),
+      tab: tabLink(cold),
       newLoop: cold.getByRole('link', { name: 'New loop' }),
       loops: cold.getByText(/^No loops yet\./),
     };
@@ -696,8 +685,8 @@ test('the form: Remove stays on its field’s row, a paste with words keeps its 
 }, testInfo) => {
   test.setTimeout(60_000);
   await stubServices(context);
-  await songWithOverviewOpen(page, user);
-  await page.getByRole('button', { name: 'Add a recording' }).click();
+  await openNewSongOverview(page, user);
+  await addRecordingButton(page).click();
   // A mouse or trackpad: ready for the paste. A touch screen: the form, so no keyboard comes up.
   if (testInfo.project.name === 'desktop') await expect(linkField(page, 'Original')).toBeFocused();
   else await expect(recordingsForm(page)).toBeFocused();
@@ -712,7 +701,7 @@ test('the form: Remove stays on its field’s row, a paste with words keeps its 
   await recordingsForm(page).getByRole('button', { name: 'Add another link' }).click();
   await linkField(page, 'Other link 1').fill(`https://youtu.be/${VIDEO_ID}`);
   await expect(recordingsForm(page)).toContainText('YouTube video. Opens in YouTube.');
-  await recordingsForm(page).getByRole('button', { name: 'Save' }).click();
+  await saveRecordingsButton(page).click();
   await expect(recordingsForm(page)).toHaveCount(0);
   await expect
     .poll(() => linksOf(user))

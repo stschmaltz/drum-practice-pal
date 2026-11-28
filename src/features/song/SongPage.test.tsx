@@ -49,6 +49,7 @@ import {
   EMBED_URL,
   linkRow,
   linkTable,
+  playedWrites,
   spotifyLink,
   videoLink,
   WATCH_URL,
@@ -2553,17 +2554,19 @@ describe('SongPage recordings (Unit 14)', () => {
     'https://www.youtube-nocookie.com/embed/aaaaaaaaaaa?playsinline=1&rel=0&start=30';
   const verse = loopOfSongA('verse', { name: 'Verse', start_bar: 5, end_bar: 8, speed_ratio: 0.8 });
 
+  const linksKey = songLinkKeys.forSong(USER, SONG_A);
   const sources = () => screen.getByRole('radiogroup', { name: 'Play along with' });
   const noSources = () =>
     expect(screen.queryByRole('radiogroup', { name: 'Play along with' })).not.toBeInTheDocument();
   const source = (name: string) => within(sources()).getByRole('radio', { name });
   const frame = () => screen.getByTestId('recording-frame');
+  /** The frame, once it is on the page. */
+  const frameShown = () => screen.findByTestId('recording-frame');
   const noFrame = () => expect(screen.queryByTestId('recording-frame')).not.toBeInTheDocument();
+  /** Presses a source in the switch, once the switch has it. */
+  const choose = async (user: ReturnType<typeof userEvent.setup>, name: string) =>
+    user.click(await screen.findByRole('radio', { name }));
   const location = () => screen.getByTestId('location').textContent;
-  const playedWrites = () =>
-    queryResult.mock.calls
-      .map(([call]) => call)
-      .filter((call) => call.table === 'songs' && opArgs(call, 'update'));
   /** Nothing of the tab's player is offered: no Play, no controls bar, no readout, no loop panel. */
   const expectNoTabControls = () => {
     expect(screen.queryByRole('button', { name: /^(Play|Pause)$/ })).not.toBeInTheDocument();
@@ -2651,7 +2654,7 @@ describe('SongPage recordings (Unit 14)', () => {
   describe('on a recording', () => {
     it('shows the video in YouTube’s no-cookie player, with the way out under it and the score below', async () => {
       const { user } = await openSong();
-      await user.click(await screen.findByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
 
       expect(frame()).toHaveAttribute('src', EMBED_URL);
       expect(frame().tagName).toBe('IFRAME');
@@ -2686,14 +2689,14 @@ describe('SongPage recordings (Unit 14)', () => {
       act(() => engine.fire('stateChanged', { playing: true }));
       expect(playButton()).toHaveTextContent('Pause');
 
-      await user.click(screen.getByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
       await waitFor(() => expect(engine.pause).toHaveBeenCalled());
       act(() => engine.fire('stateChanged', { playing: false }));
       expect(frame()).toBeInTheDocument();
       expectNoTabControls();
 
       const plays = engine.play.mock.calls.length;
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       noFrame();
       expect(playButton()).toHaveTextContent('Play');
       expect(screen.getByRole('slider', { name: 'Speed' })).toBeInTheDocument();
@@ -2709,9 +2712,9 @@ describe('SongPage recordings (Unit 14)', () => {
       await user.click(playButton());
       expect(status()).toHaveTextContent('Counting in…');
 
-      await user.click(await screen.findByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
       expect(frame()).toBeInTheDocument();
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       await waitFor(() => expect(playButton()).toHaveTextContent('Play'));
       expect(status()).not.toHaveTextContent('Counting in');
       await settle();
@@ -2720,10 +2723,10 @@ describe('SongPage recordings (Unit 14)', () => {
 
     it('switching from one video to the other replaces the frame, so the first stops', async () => {
       const { user } = await openSong({ links: [original, drumlessVideo] });
-      await user.click(await screen.findByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
       const first = frame();
 
-      await user.click(screen.getByRole('radio', { name: 'Drumless' }));
+      await choose(user, 'Drumless');
       expect(frame()).not.toBe(first);
       expect(first).not.toBeInTheDocument();
       expect(frame()).toHaveAttribute('src', DRUMLESS_EMBED);
@@ -2740,7 +2743,7 @@ describe('SongPage recordings (Unit 14)', () => {
 
     it('leaves the keys to the browser: Space and the pedal keys start and move nothing', async () => {
       const { user, engine } = await openSong();
-      await user.click(await screen.findByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
       (document.activeElement as HTMLElement).blur();
 
       for (const key of [' ', 'm', 'd', 's', 'c', 'ArrowUp', 'PageDown', '?']) {
@@ -2752,7 +2755,7 @@ describe('SongPage recordings (Unit 14)', () => {
       expect(screen.queryByTestId('active-loop')).not.toBeInTheDocument();
 
       // Back on the tab every key is the page's again, with the options as they were.
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       expect(screen.getByRole('slider', { name: 'Speed' })).toHaveValue('100');
       expect(screen.getByRole('button', { name: 'Metronome' })).toHaveAttribute(
         'aria-pressed',
@@ -2765,13 +2768,13 @@ describe('SongPage recordings (Unit 14)', () => {
 
     it('a tap or a drag on the score moves nothing and opens no form', async () => {
       const { user, engine } = await openSong();
-      await user.click(await screen.findByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
 
       act(() => engine.fire('barTapped', { barIndex: 11 }));
       act(() => engine.fire('barsDragged', { fromBarIndex: 2, toBarIndex: 5, done: true }));
       expect(engine.seek).not.toHaveBeenCalled();
 
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       expect(status()).toHaveTextContent('Bar 1 of 16');
       expect(screen.queryByRole('form')).not.toBeInTheDocument();
       // The same tap now seeks: it was the source that held it.
@@ -2786,9 +2789,9 @@ describe('SongPage recordings (Unit 14)', () => {
       await user.click(await panel.findByRole('button', { name: 'New loop' }));
       expect(panel.getByRole('form')).toBeInTheDocument();
 
-      await user.click(screen.getByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
       await waitFor(() => expect(panel.queryByRole('form')).not.toBeInTheDocument());
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       expect(panel.queryByRole('form')).not.toBeInTheDocument();
     });
 
@@ -2796,7 +2799,7 @@ describe('SongPage recordings (Unit 14)', () => {
       serve({ links: [original] });
       storageResult.mockResolvedValue(fail('Object not found'));
       renderSong(`${SONG_A}?source=original`);
-      expect(await screen.findByTestId('recording-frame')).toHaveAttribute('src', EMBED_URL);
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
       expect(await screen.findByRole('alert')).toHaveTextContent(
         "Couldn't download this song's file.",
       );
@@ -2806,7 +2809,7 @@ describe('SongPage recordings (Unit 14)', () => {
   describe('?source=', () => {
     it('opens on the recording, with no Play to start the tab under it, before the player is ready', async () => {
       await openSong({ query: '?source=original', ready: false });
-      expect(await screen.findByTestId('recording-frame')).toHaveAttribute('src', EMBED_URL);
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
       expect(source('Original')).toBeChecked();
       expectNoTabControls();
     });
@@ -2842,18 +2845,18 @@ describe('SongPage recordings (Unit 14)', () => {
       noFrame();
 
       release();
-      expect(await screen.findByTestId('recording-frame')).toHaveAttribute('src', EMBED_URL);
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
     });
 
     it('opens a link saved on another device since the list was cached', async () => {
       const queryClient = testQueryClient();
-      queryClient.setQueryData(songLinkKeys.forSong(USER, SONG_A), []);
+      queryClient.setQueryData(linksKey, []);
       await queryClient.invalidateQueries({
-        queryKey: songLinkKeys.forSong(USER, SONG_A),
+        queryKey: linksKey,
         refetchType: 'none',
       });
       await openSong({ query: '?source=original', queryClient });
-      expect(await screen.findByTestId('recording-frame')).toBeInTheDocument();
+      expect(await frameShown()).toBeInTheDocument();
       expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
     });
 
@@ -2870,9 +2873,7 @@ describe('SongPage recordings (Unit 14)', () => {
       act(() => engine.fire('stateChanged', { playing: true }));
 
       links.setRows([original]);
-      await act(() =>
-        queryClient.invalidateQueries({ queryKey: songLinkKeys.forSong(USER, SONG_A) }),
-      );
+      await act(() => queryClient.invalidateQueries({ queryKey: linksKey }));
       // The switch appears, as an offer; the source stays the tab, still playing.
       expect(await screen.findByRole('radio', { name: 'Original' })).not.toBeChecked();
       noFrame();
@@ -2905,10 +2906,10 @@ describe('SongPage recordings (Unit 14)', () => {
         links: [original, drumlessVideo],
         before: [`/songs/${SONG_A}`],
       });
-      await user.click(await screen.findByRole('radio', { name: 'Original' }));
-      await user.click(screen.getByRole('radio', { name: 'Drumless' }));
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
-      await user.click(screen.getByRole('radio', { name: 'Drumless' }));
+      await choose(user, 'Original');
+      await choose(user, 'Drumless');
+      await choose(user, 'Tab');
+      await choose(user, 'Drumless');
       expect(location()).toBe(`/songs/${SONG_A}/play?source=drumless`);
 
       historyBack();
@@ -2918,7 +2919,7 @@ describe('SongPage recordings (Unit 14)', () => {
 
     it('from a recording the overview opened goes back to the overview', async () => {
       await openSong({ query: '?source=original', before: [`/songs/${SONG_A}`] });
-      await screen.findByTestId('recording-frame');
+      await frameShown();
       historyBack();
       expect(await screen.findByText('At song overview')).toBeVisible();
     });
@@ -2933,7 +2934,7 @@ describe('SongPage recordings (Unit 14)', () => {
         await settle();
         expect(playedWrites()).toEqual([]);
 
-        await user.click(screen.getByRole('radio', { name: 'Original' }));
+        await choose(user, 'Original');
         await waitFor(() => expect(playedWrites()).toHaveLength(1));
         expect(opArgs(playedWrites()[0]!, 'update')).toEqual([
           { last_played_at: '2026-11-27T18:30:00.000Z' },
@@ -2943,9 +2944,9 @@ describe('SongPage recordings (Unit 14)', () => {
         await settle();
         expect(playedWrites()).toHaveLength(1);
 
-        await user.click(screen.getByRole('radio', { name: 'Drumless' }));
+        await choose(user, 'Drumless');
         await waitFor(() => expect(playedWrites()).toHaveLength(2));
-        await user.click(screen.getByRole('radio', { name: 'Tab' }));
+        await choose(user, 'Tab');
         await settle();
         expect(playedWrites()).toHaveLength(2);
         await waitFor(async () => expect(await offlineDb.outbox.count()).toBe(0));
@@ -2975,7 +2976,7 @@ describe('SongPage recordings (Unit 14)', () => {
     it('shows no frame and says why, writes nothing, and the tab under it still reads', async () => {
       const queryClient = testQueryClient();
       queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
-      queryClient.setQueryData(songLinkKeys.forSong(USER, SONG_A), [original]);
+      queryClient.setQueryData(linksKey, [original]);
       queryClient.setQueryData(['settings', USER], settingsRow);
       await offlineDb.songFiles.put({
         userId: USER,
@@ -2997,7 +2998,7 @@ describe('SongPage recordings (Unit 14)', () => {
 
       // The connection comes back: the frame loads, and that is the opening that counts.
       act(() => onlineManager.setOnline(true));
-      expect(await screen.findByTestId('recording-frame')).toHaveAttribute('src', EMBED_URL);
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
       await waitFor(() => expect(playedWrites()).toHaveLength(1));
     });
   });
@@ -3013,11 +3014,11 @@ describe('SongPage recordings (Unit 14)', () => {
       expect(engine.mount?.layout).toBe('horizontal');
       const restarts = engine.restartCalls();
 
-      await user.click(screen.getByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
       await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('page'));
       expect(frame()).toBeInTheDocument();
 
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('horizontal'));
       // Redrawn only: nothing was stopped, started or loaded again.
       expect(engine.restartCalls()).toBe(restarts);
@@ -3035,11 +3036,11 @@ describe('SongPage recordings (Unit 14)', () => {
       const { user, engine } = await openSong();
       // Paused at bar 9, as after playing that far.
       act(() => engine.fire('position', { tick: startOfBar(9) }));
-      await user.click(screen.getByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
       await waitFor(() => expect(engine.setLayout).toHaveBeenLastCalledWith('page'));
       engine.scrollToBar.mockClear();
 
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       await waitFor(() => expect(engine.scrollToBar).toHaveBeenLastCalledWith(8));
       // After the layout was asked for, so the scroll is to the bar's place in the new drawing.
       expect(engine.scrollToBar.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
@@ -3052,7 +3053,7 @@ describe('SongPage recordings (Unit 14)', () => {
   describe('offline on a recording, the way out (QA issue 9)', () => {
     it('locks Open in YouTube with the note beside it, refuses a press, and is heard again once back', async () => {
       await openSong({ query: '?source=original' });
-      await screen.findByTestId('recording-frame');
+      await frameShown();
       const out = screen.getByRole('link', { name: /^Open in YouTube/ });
       expectUnlocked(out);
       expect(fireEvent.click(out)).toBe(true);
@@ -3117,13 +3118,13 @@ describe('SongPage recordings (Unit 14)', () => {
   describe('Back and Forward (14 Test)', () => {
     it('Forward after Back opens the recording again; the sources in between were never entries', async () => {
       await openSong({ query: '?source=original', before: [`/songs/${SONG_A}`] });
-      await screen.findByTestId('recording-frame');
+      await frameShown();
       historyBack();
       expect(await screen.findByText('At song overview')).toBeVisible();
       noFrame();
 
       historyForward();
-      expect(await screen.findByTestId('recording-frame')).toHaveAttribute('src', EMBED_URL);
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
       expect(location()).toBe(`/songs/${SONG_A}/play?source=original`);
       expect(source('Original')).toBeChecked();
       expectNoTabControls();
@@ -3135,9 +3136,9 @@ describe('SongPage recordings (Unit 14)', () => {
         before: [`/songs/${SONG_A}`],
         links: [original, drumlessVideo],
       });
-      await screen.findByTestId('recording-frame');
-      await user.click(screen.getByRole('radio', { name: 'Drumless' }));
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await frameShown();
+      await choose(user, 'Drumless');
+      await choose(user, 'Tab');
       historyBack();
       expect(await screen.findByText('At song overview')).toBeVisible();
 
@@ -3169,13 +3170,13 @@ describe('SongPage recordings (Unit 14)', () => {
       expect(screen.getByTestId('active-loop')).toHaveTextContent('Verse');
       const rangeSets = engine.setPlaybackRange.mock.calls.length;
 
-      await user.click(screen.getByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
       await waitFor(() => expect(engine.pause).toHaveBeenCalled());
       act(() => engine.fire('stateChanged', { playing: false }));
       expect(frame()).toBeInTheDocument();
       expectNoTabControls();
 
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       expect(screen.getByTestId('active-loop')).toHaveTextContent('Verse');
       expect(screen.getByTestId('jam-speed')).toHaveTextContent('80%');
       expect(playButton()).toHaveTextContent('Play');
@@ -3199,7 +3200,7 @@ describe('SongPage recordings (Unit 14)', () => {
         act(() => engine.fire('stateChanged', { playing: true }));
         vi.setSystemTime(Date.now() + 40_000);
 
-        await user.click(screen.getByRole('radio', { name: 'Original' }));
+        await choose(user, 'Original');
         await waitFor(() => expect(engine.pause).toHaveBeenCalled());
         act(() => engine.fire('stateChanged', { playing: false }));
         await waitFor(() =>
@@ -3210,7 +3211,7 @@ describe('SongPage recordings (Unit 14)', () => {
 
         // Ten minutes of the video, then back.
         vi.setSystemTime(Date.now() + 600_000);
-        await user.click(screen.getByRole('radio', { name: 'Tab' }));
+        await choose(user, 'Tab');
         await settle();
         expect(sessionsSent()).toHaveLength(1);
       } finally {
@@ -3229,7 +3230,7 @@ describe('SongPage recordings (Unit 14)', () => {
       const release = loops.holdNext('insert');
       await user.click(form.getByRole('button', { name: 'Save loop' }));
 
-      await user.click(screen.getByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
       expect(frame()).toBeInTheDocument();
       // Its form is kept, out of sight, for the answer.
       expect(screen.getByTestId('loop-panel')).not.toBeVisible();
@@ -3238,7 +3239,7 @@ describe('SongPage recordings (Unit 14)', () => {
       release();
       await waitFor(() => expect(loops.sent('insert')).toHaveLength(1));
       await waitFor(() => expect(panel().queryByRole('form')).not.toBeInTheDocument());
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       expect(await screen.findByTestId('active-loop')).toHaveTextContent('Bridge');
       expect(panel().queryByRole('form')).not.toBeInTheDocument();
     });
@@ -3250,7 +3251,7 @@ describe('SongPage recordings (Unit 14)', () => {
       await waitFor(() => expect(playButton()).toBeEnabled());
       await user.click(playButton());
       expect(engine.play).toHaveBeenCalledTimes(1);
-      await user.click(screen.getByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
 
       // The worker's answers, in the order the engine was told: playing, then stopped.
       act(() => engine.fire('stateChanged', { playing: true }));
@@ -3265,14 +3266,14 @@ describe('SongPage recordings (Unit 14)', () => {
       expect(engine.play).toHaveBeenCalledTimes(1);
       expectNoTabControls();
 
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       expect(playButton()).toHaveTextContent('Play');
       expect(engine.play).toHaveBeenCalledTimes(1);
     });
 
     it('the sounds coming in after a recording was chosen start nothing and offer no Play', async () => {
       const { engine } = await openSong({ query: '?source=original', ready: false });
-      await screen.findByTestId('recording-frame');
+      await frameShown();
       act(() => engine.finishLoading({ barCount: 16, trackCount: 3 }));
       await settle();
       expectNoTabControls();
@@ -3282,12 +3283,10 @@ describe('SongPage recordings (Unit 14)', () => {
   });
 
   describe('the links read again while on a recording (14 Test)', () => {
-    const linksKey = songLinkKeys.forSong(USER, SONG_A);
-
     it('a link removed on another device puts the screen back on the tab, stopped, with the address saying so', async () => {
       const queryClient = testQueryClient();
       const { engine } = await openSong({ query: '?source=original', queryClient });
-      await screen.findByTestId('recording-frame');
+      await frameShown();
 
       links.setRows([]);
       await act(() => queryClient.invalidateQueries({ queryKey: linksKey }));
@@ -3302,7 +3301,7 @@ describe('SongPage recordings (Unit 14)', () => {
     it('a link pointed at another video is a new frame, and not another opening', async () => {
       const queryClient = testQueryClient();
       await openSong({ query: '?source=original', queryClient });
-      const first = await screen.findByTestId('recording-frame');
+      const first = await frameShown();
       await waitFor(() => expect(playedWrites()).toHaveLength(1));
 
       links.setRows([{ ...original, url: drumlessVideo.url }]);
@@ -3322,7 +3321,7 @@ describe('SongPage recordings (Unit 14)', () => {
     it('a read that fails over the links keeps the very frame that is playing', async () => {
       const queryClient = testQueryClient();
       await openSong({ query: '?source=original', queryClient });
-      const first = await screen.findByTestId('recording-frame');
+      const first = await frameShown();
 
       links.failNext('select', { message: 'TypeError: Failed to fetch', code: '' });
       await act(() => queryClient.invalidateQueries({ queryKey: linksKey }));
@@ -3337,7 +3336,7 @@ describe('SongPage recordings (Unit 14)', () => {
     it('an unchanged list read again keeps the very frame too', async () => {
       const queryClient = testQueryClient();
       await openSong({ query: '?source=original', queryClient });
-      const first = await screen.findByTestId('recording-frame');
+      const first = await frameShown();
       const reads = () => queryResult.mock.calls.filter(([c]) => c.table === 'song_links').length;
       const before = reads();
       await act(() => queryClient.invalidateQueries({ queryKey: linksKey }));
@@ -3351,7 +3350,7 @@ describe('SongPage recordings (Unit 14)', () => {
   describe('the connection going and coming back (14 Test)', () => {
     it('on a recording: the frame goes, the note says why, and back online it is one opening, not two', async () => {
       await openSong({ query: '?source=original' });
-      await screen.findByTestId('recording-frame');
+      await frameShown();
       await waitFor(() => expect(playedWrites()).toHaveLength(1));
 
       act(() => onlineManager.setOnline(false));
@@ -3364,7 +3363,7 @@ describe('SongPage recordings (Unit 14)', () => {
       expect(source('Tab')).toBeEnabled();
 
       act(() => onlineManager.setOnline(true));
-      expect(await screen.findByTestId('recording-frame')).toHaveAttribute('src', EMBED_URL);
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
       await settle();
       expect(playedWrites()).toHaveLength(1);
       expect(await offlineDb.outbox.count()).toBe(0);
@@ -3410,7 +3409,7 @@ describe('SongPage recordings (Unit 14)', () => {
       // then mounts already on its source, and it is the mount whose effects run twice.
       const queryClient = testQueryClient();
       queryClient.setQueryData(songKeys.detail(USER, SONG_A), songRow(SONG_A));
-      queryClient.setQueryData(songLinkKeys.forSong(USER, SONG_A), savedLinks);
+      queryClient.setQueryData(linksKey, savedLinks);
       renderRoutes(<Route path="/songs/:id/play" element={<SongPage />} />, {
         path: `/songs/${SONG_A}/play${query}`,
         queryClient,
@@ -3420,7 +3419,7 @@ describe('SongPage recordings (Unit 14)', () => {
 
     it('one opening is one frame and one write, and each source opened after it one more', async () => {
       const user = renderStrict('?source=original', [original, drumlessVideo]);
-      expect(await screen.findByTestId('recording-frame')).toHaveAttribute('src', EMBED_URL);
+      expect(await frameShown()).toHaveAttribute('src', EMBED_URL);
       await waitFor(() => expect(playedWrites()).toHaveLength(1));
       await waitFor(async () => expect(await offlineDb.outbox.count()).toBe(0));
       await settle();
@@ -3428,14 +3427,14 @@ describe('SongPage recordings (Unit 14)', () => {
       expect(screen.getAllByTestId('recording-frame')).toHaveLength(1);
       expect(document.querySelectorAll('iframe')).toHaveLength(1);
 
-      await user.click(screen.getByRole('radio', { name: 'Drumless' }));
+      await choose(user, 'Drumless');
       await waitFor(() => expect(playedWrites()).toHaveLength(2));
       expect(screen.getAllByTestId('recording-frame')).toHaveLength(1);
-      await user.click(screen.getByRole('radio', { name: 'Tab' }));
+      await choose(user, 'Tab');
       await settle();
       expect(playedWrites()).toHaveLength(2);
       noFrame();
-      await user.click(screen.getByRole('radio', { name: 'Original' }));
+      await choose(user, 'Original');
       await waitFor(() => expect(playedWrites()).toHaveLength(3));
       await waitFor(async () => expect(await offlineDb.outbox.count()).toBe(0));
       await settle();

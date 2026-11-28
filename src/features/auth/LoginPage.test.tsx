@@ -3,6 +3,7 @@ import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
 import { fakeSupabase, resetFakeSupabase } from '@/test/fakeSupabase';
+import { stubPointer } from '@/test/mediaQueries';
 import {
   loadingAuth,
   renderRoutes,
@@ -253,18 +254,6 @@ describe('LoginPage offline', () => {
 });
 
 describe('LoginPage email field (12 UX pass)', () => {
-  const pointer = (fine: boolean) =>
-    // jsdom has no matchMedia, and Vitest 4 won't spy on a missing property.
-    vi.stubGlobal(
-      'matchMedia',
-      (query: string) =>
-        ({
-          matches: query === '(pointer: fine)' ? fine : false,
-          media: query,
-          addEventListener: () => {},
-          removeEventListener: () => {},
-        }) as unknown as MediaQueryList,
-    );
   afterEach(() => vi.unstubAllGlobals());
 
   it('shows an example address in the empty field', () => {
@@ -273,13 +262,13 @@ describe('LoginPage email field (12 UX pass)', () => {
   });
 
   it('takes focus on a device with a mouse or trackpad', () => {
-    pointer(true);
+    stubPointer(true);
     renderLogin();
     expect(screen.getByLabelText('Email')).toHaveFocus();
   });
 
   it('leaves focus alone on a touch screen, where it would bring up the keyboard unasked', () => {
-    pointer(false);
+    stubPointer(false);
     renderLogin();
     expect(screen.getByLabelText('Email')).not.toHaveFocus();
   });

@@ -7,7 +7,8 @@
  */
 import type { BrowserContext, Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
-import { expect, type E2eUser } from './auth';
+import { expect, signIn, type E2eUser } from './auth';
+import { openSongOverview, uploadFixture } from './playerPage';
 
 const admin = createAdminClient();
 
@@ -43,10 +44,28 @@ export async function stubServices(context: BrowserContext): Promise<{ requests:
   return { requests };
 }
 
+/** A new user's one song, Groove 120 with no links yet, on its overview. */
+export async function openNewSongOverview(page: Page, user: E2eUser): Promise<void> {
+  await signIn(page, user, '/');
+  await uploadFixture(page, 'groove-120', 'Groove 120');
+  await openSongOverview(page, 'Groove 120');
+}
+
 export const playAlong = (page: Page) => page.getByRole('region', { name: 'Play along' });
+/** "Tab": the tab's own player, on every song. */
+export const tabLink = (page: Page) =>
+  playAlong(page).getByRole('link', { name: 'Tab', exact: true });
+/** The button of a recording that plays in the app (a YouTube link). */
+export const recordingLink = (page: Page, name: 'Original' | 'Drumless') =>
+  playAlong(page).getByRole('link', { name, exact: true });
+/** On the overview of a song with no links, once they have been read. */
+export const addRecordingButton = (page: Page) =>
+  page.getByRole('button', { name: 'Add a recording' });
 export const recordingsForm = (page: Page) => page.getByRole('form', { name: 'Recordings' });
 export const linkField = (page: Page, name: 'Original' | 'Drumless' | `Other link ${number}`) =>
   recordingsForm(page).getByRole('textbox', { name: new RegExp(`^${name}`) });
+export const saveRecordingsButton = (page: Page) =>
+  recordingsForm(page).getByRole('button', { name: 'Save' });
 export const sourceSwitch = (page: Page) =>
   page.getByRole('radiogroup', { name: 'Play along with' });
 export const recordingFrame = (page: Page) => page.getByTestId('recording-frame');
@@ -63,7 +82,7 @@ export const sourceOption = (page: Page, name: 'Tab' | 'Original' | 'Drumless') 
 
 /** On a song's overview: opens the recordings form by whichever door the page has. */
 export async function openRecordingsForm(page: Page, songTitle: string): Promise<void> {
-  const add = page.getByRole('button', { name: 'Add a recording' });
+  const add = addRecordingButton(page);
   if (await add.isVisible()) await add.click();
   else {
     await page.getByRole('button', { name: `More actions for ${songTitle}` }).click();
@@ -82,11 +101,16 @@ export async function saveRecordings(
   for (const [name, text] of Object.entries(fields)) {
     await linkField(page, name as 'Original' | 'Drumless').fill(text);
   }
-  await recordingsForm(page).getByRole('button', { name: 'Save' }).click();
+  await saveRecordingsButton(page).click();
   await expect(recordingsForm(page)).toHaveCount(0);
 }
 
 export const openInYouTube = (page: Page) => page.getByRole('link', { name: /^Open in YouTube/ });
+
+/** The play screen the page is on, opened again by address with `?source=` set to `source`. */
+export async function gotoSource(page: Page, source: string): Promise<void> {
+  await page.goto(`${new URL(page.url()).pathname}?source=${source}`);
+}
 
 /** The user's links as the database has them, by the service role. */
 export async function linksOf(user: E2eUser) {

@@ -6,7 +6,7 @@
  */
 import type { Database } from '@/lib/database.types';
 import type { SongLinkKind, SongLinkProvider } from '@/lib/schema';
-import { parseSongLink, type LinkRefusal } from './songLinks';
+import { oldestFirst, parseSongLink, type LinkRefusal, type RecordingSource } from './songLinks';
 
 type SongLinkTableRow = Database['public']['Tables']['song_links']['Row'];
 
@@ -40,7 +40,10 @@ export const SONG_LINK_INSERT_FIELDS = [
 ] as const;
 
 /** A field's place in the form: the two single links, a saved other link, or one being added. */
-export type LinkSlot = 'original' | 'drumless' | `other:${string}`;
+export type LinkSlot = RecordingSource | `other:${string}`;
+
+/** The slot of the other link with this id, saved or being added. */
+export const otherLinkSlot = (id: string): LinkSlot => `other:${id}`;
 
 /**
  * What the user has typed, by slot, and nothing else: an untouched field
@@ -55,10 +58,7 @@ export interface LinkDraft {
 export const EMPTY_LINK_DRAFT: LinkDraft = { texts: {}, added: [] };
 
 /** The ids a form's new Original and Drumless take, made once when it opens. */
-export interface NewLinkIds {
-  original: string;
-  drumless: string;
-}
+export type NewLinkIds = Record<RecordingSource, string>;
 
 export interface LinkField {
   slot: LinkSlot;
@@ -73,16 +73,13 @@ export interface LinkField {
   text: string;
 }
 
-const byAge = (a: SongLinkRow, b: SongLinkRow) =>
-  Date.parse(a.created_at) - Date.parse(b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-
 /** The form's fields: Original, Drumless, the saved other links oldest first, then the ones being added. */
 export function linkFields(
   saved: readonly SongLinkRow[],
   draft: LinkDraft,
   newIds: NewLinkIds,
 ): LinkField[] {
-  const single = (kind: 'original' | 'drumless'): LinkField => {
+  const single = (kind: RecordingSource): LinkField => {
     const row = saved.find((link) => link.kind === kind) ?? null;
     return {
       slot: kind,
@@ -92,20 +89,20 @@ export function linkFields(
       text: draft.texts[kind] ?? row?.url ?? '',
     };
   };
-  const others = saved.filter((link) => link.kind === 'other').sort(byAge);
+  const others = saved.filter((link) => link.kind === 'other').sort(oldestFirst);
   const savedIds = new Set(others.map((link) => link.id));
   return [
     single('original'),
     single('drumless'),
     ...others.map((row): LinkField => {
-      const slot: LinkSlot = `other:${row.id}`;
+      const slot = otherLinkSlot(row.id);
       return { slot, kind: 'other', id: row.id, saved: row, text: draft.texts[slot] ?? row.url };
     }),
     // One whose save got through with its answer lost is among the saved ones by now.
     ...draft.added
       .filter((id) => !savedIds.has(id))
       .map((id): LinkField => {
-        const slot: LinkSlot = `other:${id}`;
+        const slot = otherLinkSlot(id);
         return { slot, kind: 'other', id, saved: null, text: draft.texts[slot] ?? '' };
       }),
   ];

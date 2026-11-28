@@ -53,19 +53,13 @@ export async function saveSongLinks(
   for (const insert of plan.inserts) await insertSongLink(userId, songId, insert);
 }
 
-async function updateSongLink(userId: string, { id, provider, url }: LinkUpdate): Promise<void> {
-  const updated = await supabase
-    .from('song_links')
-    .update({ provider, url })
-    .eq('id', id)
-    .eq('user_id', userId)
-    .select('id')
-    .maybeSingle();
-  throwIfError(updated);
-  // An update that matches no row is a success to PostgREST. The link was removed on another
-  // device since the form read it: say so (14 Test, bug 3), or the form closes as if it had
-  // saved and the link is gone at the next read. Pressed again, the field adds it anew.
-  if (!updated.data) throw Object.assign(new Error('No such song link'), { code: PG.NO_ROWS });
+async function updateSongLink(userId: string, update: LinkUpdate): Promise<void> {
+  // No row: the link was removed on another device since the form read it. Say so (14 Test,
+  // bug 3), or the form closes as if it had saved and the link is gone at the next read.
+  // Pressed again, the field adds it anew.
+  if (!(await pointLinkAt(userId, update))) {
+    throw Object.assign(new Error('No such song link'), { code: PG.NO_ROWS });
+  }
 }
 
 /**
@@ -80,13 +74,22 @@ async function insertSongLink(userId: string, songId: string, link: LinkInsert):
     .from('song_links')
     .insert({ ...link, song_id: songId, user_id: userId });
   if (inserted.error?.code !== PG.UNIQUE_VIOLATION) return throwIfError(inserted);
+  if (!(await pointLinkAt(userId, link))) throw inserted.error;
+}
+
+/**
+ * Points a saved link somewhere else, and says whether its row was there to
+ * point: PostgREST answers an update that matched no row as a success, so the
+ * row is asked for back.
+ */
+async function pointLinkAt(userId: string, { id, provider, url }: LinkUpdate): Promise<boolean> {
   const updated = await supabase
     .from('song_links')
-    .update({ provider: link.provider, url: link.url })
-    .eq('id', link.id)
+    .update({ provider, url })
+    .eq('id', id)
     .eq('user_id', userId)
     .select('id')
     .maybeSingle();
   throwIfError(updated);
-  if (!updated.data) throw inserted.error;
+  return updated.data !== null;
 }

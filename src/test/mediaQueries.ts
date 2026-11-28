@@ -18,3 +18,18 @@ export function stubWindow({ width, fontSize = 16 }: { width: number; fontSize?:
     };
   });
 }
+
+/**
+ * A device with a mouse or trackpad (`fine`), or a touch screen, as
+ * `pointerIsFine()` asks it (`src/lib/pointer.ts`). jsdom has no `matchMedia`,
+ * and Vitest won't spy on a missing property, so the whole function is
+ * stubbed. Undo with `vi.unstubAllGlobals()`.
+ */
+export function stubPointer(fine: boolean) {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: fine && query === '(pointer: fine)',
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+}

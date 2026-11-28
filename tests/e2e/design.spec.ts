@@ -14,7 +14,6 @@ import { loopItem, loopPanel, openLoopPanel, saveNewLoop } from './loopsPage';
 import {
   controls,
   chooseCountIn,
-  fixture,
   openFixture,
   openSongOverview,
   playButton,
@@ -31,11 +30,15 @@ import {
   shortSessions,
 } from './practicePage';
 import {
+  addRecordingButton,
   linkField,
+  openNewSongOverview,
   openRecordingsForm,
   playAlong,
   recordingFrame,
+  recordingLink,
   recordingsForm,
+  saveRecordingsButton,
   stubServices,
   WATCH_URL,
 } from './recordingsPage';
@@ -341,11 +344,8 @@ test('a song’s recordings: the overview’s buttons and form, and the play scr
 }) => {
   test.setTimeout(90_000);
   await stubServices(context);
-  await signIn(page, user, '/');
-  await page.getByLabel('Upload a Guitar Pro file').setInputFiles(fixture('groove-120'));
-  await expect(page.getByRole('status').filter({ hasText: 'Added “Groove 120”.' })).toBeVisible();
-  await openSongOverview(page, 'Groove 120');
-  await expect(page.getByRole('button', { name: 'Add a recording' })).toBeVisible();
+  await openNewSongOverview(page, user);
+  await expect(addRecordingButton(page)).toBeVisible();
   await expectWellDrawn(page, 'overview, no recordings');
   await expectFocusRings(page, 'overview, no recordings');
 
@@ -354,7 +354,7 @@ test('a song’s recordings: the overview’s buttons and form, and the play scr
   await linkField(page, 'Original').fill(WATCH_URL);
   await linkField(page, 'Drumless').fill('javascript:alert(1)');
   await recordingsForm(page).getByRole('button', { name: 'Add another link' }).click();
-  await recordingsForm(page).getByRole('button', { name: 'Save' }).click();
+  await saveRecordingsButton(page).click();
   await expect(recordingsForm(page).getByRole('alert')).toBeVisible();
   await expectWellDrawn(page, 'recordings form');
   await expectFocusRings(page, 'recordings form');
@@ -366,7 +366,7 @@ test('a song’s recordings: the overview’s buttons and form, and the play scr
   await linkField(page, 'Other link 1').fill(longUrl);
   await expect(recordingsForm(page)).toContainText(`Link to ${longHost}.`);
   expect(await textSpillingOutOf(recordingsForm(page)), 'recordings form').toEqual([]);
-  await recordingsForm(page).getByRole('button', { name: 'Save' }).click();
+  await saveRecordingsButton(page).click();
   await expect(recordingsForm(page)).toHaveCount(0);
 
   await expect(
@@ -378,7 +378,7 @@ test('a song’s recordings: the overview’s buttons and form, and the play scr
   expect(await textSpillingOutOf(playAlong(page)), 'play along').toEqual([]);
   expect((await auditScreen(page)).overflow).toEqual([]);
 
-  await playAlong(page).getByRole('link', { name: 'Original', exact: true }).click();
+  await recordingLink(page, 'Original').click();
   await expect(recordingFrame(page)).toBeVisible();
   await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
   await expectWellDrawn(page, 'play screen, on a recording');
