@@ -605,7 +605,7 @@ test('a refused status change: its message and Dismiss, in the loop panel and on
   await refuseWrite();
 
   const panelAlert = loopItem(page, 'Verse').getByRole('alert');
-  await expect(panelAlert).toContainText("Couldn't change the loop.");
+  await expect(panelAlert).toContainText("Couldn't mark the loop finished.");
   // Back among the active loops, and focus with it, not on <body>.
   await expect(finish).toBeFocused();
   const panelDismiss = loopItem(page, 'Verse').getByRole('button', { name: /^Dismiss/ });
@@ -728,7 +728,7 @@ test('at 320 px a refused status change’s message and Dismiss fit the loop she
   await page.keyboard.press('Enter');
   await expect(loopPanel(page).getByRole('button', { name: 'Reopen Verse' })).toBeFocused();
   await refuse();
-  await expect(item.getByRole('alert')).toContainText("Couldn't change the loop.");
+  await expect(item.getByRole('alert')).toContainText("Couldn't mark the loop finished.");
   await expect(finish).toBeFocused();
   await expectRefusalDrawnIn(item, 'loop sheet at 320 px');
   await expectWellDrawn(page, 'loop sheet at 320 px, refused status change');
@@ -753,7 +753,7 @@ test('at 320 px a refused status change’s message and Dismiss fit the loop she
   );
   await expect(header).toBeFocused();
   await openLoopPanel(page);
-  await expect(item.getByRole('alert')).toContainText("Couldn't change the loop.");
+  await expect(item.getByRole('alert')).toContainText("Couldn't mark the loop finished.");
   await expect(header).toBeFocused();
   await item.getByRole('button', { name: /^Dismiss/ }).click();
   await expect(item.getByRole('alert')).toHaveCount(0);
@@ -779,6 +779,61 @@ test('at 320 px a refused status change’s message and Dismiss fit the loop she
   await expect(row.getByRole('button', { name: /^Dismiss/ })).toHaveCount(0);
   await expect(more).toBeFocused();
   expect((await loopsOf(user)).map((loop) => loop.status)).toEqual(['active']);
+});
+
+// 20 batch 8, Review (Test's bug 2): the practice band's speed and Play were 334 px wide side
+// by side, so a 320 px phone's page panned sideways with the row cut at both edges. Under
+// 334 px the two sit closer and the pill's ends are narrower; from 334 px nothing changed.
+test('the practice screen fits a 320 px phone, and its speed and Play row is as it was from 334 px', async ({
+  user,
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'phone', 'about phone widths');
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await backTo(page, 'Groove 120').click();
+  await openPractice(page, 'Verse');
+  await expect(playButton(page)).toBeEnabled({ timeout: 20_000 });
+
+  /** The row's box and gap, the "−5%" end's width, and how wide the page is. */
+  const measure = () =>
+    page.evaluate(() => {
+      const slower = document.querySelector('button[aria-label="Slower by 5%"]');
+      const row = slower?.closest('[role="group"]')?.parentElement;
+      if (!slower || !row) return null;
+      const box = row.getBoundingClientRect();
+      return {
+        left: box.left,
+        right: box.right,
+        gap: getComputedStyle(row).columnGap,
+        endWidth: slower.getBoundingClientRect().width,
+        pageWidth: document.documentElement.scrollWidth,
+        windowWidth: window.innerWidth,
+      };
+    });
+
+  for (const width of [320, 328]) {
+    await page.setViewportSize({ width, height: 640 });
+    const narrow = await measure();
+    if (!narrow) throw new Error('no speed and Play row to measure');
+    expect(narrow.pageWidth, `the page's width in a ${width} px window`).toBe(width);
+    expect(narrow.left, `the row's left edge at ${width} px`).toBeGreaterThanOrEqual(0);
+    expect(narrow.right, `the row's right edge at ${width} px`).toBeLessThanOrEqual(width);
+    // Still a touch target.
+    expect(narrow.endWidth, `the −5% end at ${width} px`).toBeGreaterThanOrEqual(44);
+    await expectWellDrawn(page, `practice at ${width} px`);
+  }
+
+  // From the row's own width up it is as it was: the wider gap and ends, the page no wider.
+  for (const width of [334, 360, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    const wide = await measure();
+    expect(wide, `at ${width} px`).toMatchObject({
+      gap: '16px',
+      endWidth: 56,
+      pageWidth: width,
+    });
+  }
 });
 
 // The third place a loop's status is changed: the practice screen's "Mark finished?" prompt.
@@ -815,11 +870,11 @@ test('a refused Mark finished from the practice screen’s prompt: the prompt is
   await expectWellDrawn(page, 'practice screen, refused Mark finished');
   await expectFocusRings(page, 'practice screen, refused Mark finished');
   if (test.info().project.name === 'phone') {
-    // The narrowest phone, for the prompt alone: at 320 px the practice band's speed and
-    // Play row is 334 px wide with or without a refusal (20 batch 8 Test, bug 2), so the
-    // page's own audit is taken at 390 px above.
+    // The narrowest phone: the prompt, and the page with it (the band's speed and Play
+    // fit 320 px since 20 batch 8 Review; the test below is about that row).
     await page.setViewportSize({ width: 320, height: 640 });
     await expectRefusalDrawnIn(prompt, 'practice prompt at 320 px');
+    await expectWellDrawn(page, 'practice screen at 320 px, refused Mark finished');
     await page.setViewportSize({ width: 390, height: 844 });
   }
 

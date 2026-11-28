@@ -136,6 +136,7 @@ export function PlayerControls({
     <section
       ref={keepFocus.ref}
       onFocus={keepFocus.onFocus}
+      onBlur={keepFocus.onBlur}
       aria-label="Player controls"
       data-folded={folded || undefined}
       className={
@@ -294,6 +295,12 @@ function useFocusKeptInBar(folded: boolean, canFold: boolean, countInBars: Count
     ref,
     onFocus: (event: { target: EventTarget }) => {
       if (event.target instanceof HTMLElement) lastFocused.current = event.target;
+    },
+    // Focus given up while the control was still there (a tap on the score) was not lost
+    // to a fold: nothing is handed on, or a radio would take the arrow keys from the page.
+    onBlur: (event: { target: EventTarget }) => {
+      const last = lastFocused.current;
+      if (event.target === last && last.isConnected) lastFocused.current = null;
     },
   };
 }

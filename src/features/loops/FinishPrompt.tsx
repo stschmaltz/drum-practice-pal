@@ -3,6 +3,7 @@ import { Icon } from '@/components/icons';
 import { ghostButtonClass, inlineIconClass, primaryButtonClass } from '@/components/styles';
 import { failureCopy } from '@/lib/errorCopy';
 import type { Loop } from './loopForm';
+import { statusRefusalCopy } from './loopLabels';
 import { StatusRefusal } from './LoopStatusButton';
 import { useSetLoopStatus } from './useLoops';
 
@@ -52,7 +53,7 @@ export function FinishPrompt({
           Not yet
         </button>
       </div>
-      {status.error && (
+      {status.error && status.refused && (
         <StatusRefusal
           loopName={loop.name}
           onDismiss={() => {
@@ -60,7 +61,7 @@ export function FinishPrompt({
             status.dismissError();
           }}
         >
-          Couldn't mark the loop finished. {failureCopy(status.error)}
+          {statusRefusalCopy(status.refused)} {failureCopy(status.error)}
         </StatusRefusal>
       )}
     </div>

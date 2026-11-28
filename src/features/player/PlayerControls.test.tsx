@@ -738,6 +738,19 @@ describe('PlayerControls count-in', () => {
       }
     });
 
+    // 20 batch 8, Review: focus given up since (a tap on the score puts it on <body>) is not
+    // lost to the group leaving, and must not be pulled onto a radio, which would then take
+    // the arrow keys from the speed and the loops (a pedal's keys).
+    it('stays on the page when the user has tapped outside the bar since', () => {
+      const { player } = setup({ options: everyRepeat as PlayerOptions });
+      modeRadio('Every repeat').focus();
+      modeRadio('Every repeat').blur();
+      expect(document.body).toHaveFocus();
+      act(() => player.setCountInBars(0));
+      expect(countInModeGroup()).not.toBeInTheDocument();
+      expect(document.body).toHaveFocus();
+    });
+
     it('is left alone while the group stays (2 bars to 1 bar)', () => {
       const { player } = setup({ options: everyRepeat as PlayerOptions });
       modeRadio('Every repeat').focus();

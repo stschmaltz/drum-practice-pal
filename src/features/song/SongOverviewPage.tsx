@@ -30,6 +30,7 @@ import {
   masterySummary,
 } from '@/features/loops/mastery';
 import { practiceLoopsFor } from '@/features/loops/practiceList';
+import { statusRefusalCopy } from '@/features/loops/loopLabels';
 import { StatusRefusal } from '@/features/loops/LoopStatusButton';
 import { useLoops, useLoopStatusRefusals, useSetLoopStatus } from '@/features/loops/useLoops';
 import { ratioToPercent } from '@/features/player/speed';
@@ -155,11 +156,13 @@ function SongOverview({ song }: { song: Song }) {
 function SongLoops({ song, loops }: { song: Song; loops: ReturnType<typeof useLoops> }) {
   const focusWhenReady = useFocusWhenReady();
   // A refused "Mark finished" or "Reopen" moves the loop back to its list, away from the
-  // focus that followed it: on to its "More" button there. Leaving the page puts the
-  // refusals' messages away.
-  useLoopStatusRefusals((loopId, refused) => {
-    const find = findStatusButtonAfterRefusal(loopId, refused);
-    if (find) focusWhenReady(find);
+  // focus that followed it: on to its "More" button there. Leaving the page puts away the
+  // refusals' messages, which it has all on show.
+  useLoopStatusRefusals({
+    onRefused: (loopId, refused) => {
+      const find = findStatusButtonAfterRefusal(loopId, refused);
+      if (find) focusWhenReady(find);
+    },
   });
 
   if (waitsForNetwork(loops)) {
@@ -347,7 +350,7 @@ function LoopRow({
           onDeletePressed={onDeletePressed}
         />
       )}
-      {status.error && (
+      {status.error && status.refused && (
         <StatusRefusal
           loopName={loop.name}
           onDismiss={() => {
@@ -356,8 +359,7 @@ function LoopRow({
             status.dismissError();
           }}
         >
-          {finished ? "Couldn't reopen the loop." : "Couldn't mark the loop finished."}{' '}
-          {failureCopy(status.error)}
+          {statusRefusalCopy(status.refused)} {failureCopy(status.error)}
         </StatusRefusal>
       )}
       {showingHistory && <LoopHistory loopId={loop.id} loopName={loop.name} tempo={null} />}

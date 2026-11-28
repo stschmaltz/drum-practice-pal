@@ -20,8 +20,12 @@ import { useLoopSpeed } from './useLoopSpeed';
 import { useTypedValue } from './useTypedValue';
 import { fullSpeedFraction, fullSpeedLabel } from './mastery';
 
-/** The stepper's ±5% ends: its own rounded ends, the full height of the pill. */
-const endButtonClass = `inline-flex w-14 shrink-0 flex-col items-center justify-center self-stretch rounded-full text-ink transition-colors duration-150 hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
+/**
+ * The stepper's ±5% ends: its own rounded ends, the full height of the pill. Narrower under
+ * 334 px (20.875rem), the width the practice band's speed and Play need side by side: a
+ * 320 px phone then fits them with no sideways scroll (20 batch 8).
+ */
+const endButtonClass = `inline-flex w-14 max-[20.875rem]:w-12 shrink-0 flex-col items-center justify-center self-stretch rounded-full text-ink transition-colors duration-150 hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
 /** The ±1 BPM steps beside the BPM: quiet text, still a 44 px target. */
 const bpmStepClass = `inline-flex min-h-touch min-w-touch items-center justify-center rounded-full text-xs font-semibold text-ink-muted tabular-nums transition-colors duration-150 hover:bg-raised-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
 /** The two values, tapped to type: on the pill's fill, so they light up a step above it. */

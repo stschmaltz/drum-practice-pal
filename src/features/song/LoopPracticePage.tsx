@@ -98,9 +98,6 @@ export function LoopPracticePage() {
 
 function PracticeScreen({ song, loopId }: { song: Song; loopId: string }) {
   const loops = useLoops(song.id);
-  // A "Mark finished" refused here is said in the prompt; leaving puts the message away, so
-  // it isn't under the loop on the song's page.
-  useLoopStatusRefusals();
   const lookup = lookUpPracticeLoop(loops, loopId);
 
   const back = <BackLink to={songPath(song.id)}>{song.title}</BackLink>;
@@ -317,6 +314,10 @@ function PracticePlayer({
     practice.activeLoop !== null &&
     shouldAskToFinish(practice.activeLoop, speedMoved) &&
     declinedFinish !== finishQuestionKey(practice.activeLoop);
+  // A "Mark finished" refused here is said in the prompt; leaving puts that message away,
+  // so it isn't under the loop on the song's page. Only what the prompt said: a refusal of
+  // another loop's change, or one that came with no prompt up, is the song's page's to say.
+  useLoopStatusRefusals({ loopId: practice.activeLoop?.id, showing: askToFinish });
   const nothingToShow = snapshot.error === 'score' || snapshot.error === 'engine';
 
   return (
@@ -353,8 +354,10 @@ function PracticePlayer({
           </p>
         </div>
         {/* Play sits with the speed, in the middle: the two things pressed while practising
-            are one reach apart, not a screen's width (Shane, 2026-11-27). */}
-        <div className="col-span-2 row-start-2 flex items-center justify-self-center gap-4 lg:col-span-1 lg:col-start-2 lg:row-start-1 short:col-span-1 short:col-start-2 short:row-start-1">
+            are one reach apart, not a screen's width (Shane, 2026-11-27). Under 334 px, the
+            row's own width, the two sit closer (and the pill's ends are narrower), so a
+            320 px phone has no sideways scroll. */}
+        <div className="col-span-2 row-start-2 flex items-center justify-self-center gap-4 max-[20.875rem]:gap-2 lg:col-span-1 lg:col-start-2 lg:row-start-1 short:col-span-1 short:col-start-2 short:row-start-1">
           <PracticeSpeed loop={loop} player={player} snapshot={snapshot} gate={speedGate} />
           <span className="contents" {...PRACTICE_PLAY_ATTRIBUTES}>
             <PlayPauseButton player={player} snapshot={snapshot} round gate={playGate} />

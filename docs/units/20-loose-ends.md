@@ -1199,3 +1199,64 @@ No cosmetic fix was made: none of the above is a small change of looks only.
 **Screenshots** (`docs/units/20-shots/`): `b8-phone-panel-refused.png`, `b8-phone-overview-refused.png`, `b8-phone-prompt-refused.png`, `b8-desktop-bug1-silent-revert.png`, `b8-phone-320-practice-sideways.png`, `b8-desktop-countin-off-focus.png`, `b8-phone-empty-library-loading.png`.
 
 **Clean-up.** 19 throwaway users were made by Playwright's `user` fixture (emails `e2e-zz-qa-…@drumpal.test`) and deleted by it, files first; a listing of the stack's users afterwards has none of them left. The QA script was a temporary spec and is not committed. The preview server on 4383 was Playwright's own and stopped with each run. No `db:reset`, no `db:seed`, nothing on port 54321.
+
+### Review
+
+**Summary.** `origin/main` (batches 1, 2, 4 and 5) merged in first; the only conflict was this note, resolved with the batches in numeric order. Batch 4's `LoopPanel.tsx` and this batch's sit together unchanged (the hook's call moved a few lines, see finding 1). Every line of `git diff origin/main...HEAD` read, tests and e2e included, each stateful piece taken through the checklist. Four findings fixed, each with a test that fails without its fix; the two bugs and the cosmetic issue Test and QA logged are among them. Four items accepted in writing (`docs/plan.md`, Accepted, 20.8a to 20.8d), and 20.5d added for batch 5.
+
+**Inventory** (the stateful pieces the diff adds or changes)
+
+- `useSetLoopStatus` (`useLoops.ts`): `dismissError`, and since this stage `refused`.
+- `useLoopStatusRefusals` (`useLoops.ts`): a mutation-cache subscription, a timer set on unmount, and since this stage the set of refusals the screen had on show. Its helpers `statusWriteIn`, `refusedStatusWrites`, `dismissStatusRefusals`.
+- `findStatusButtonAfterRefusal` (`loopFocus.ts`), `isInItem` (`itemFocus.ts`): finders over the DOM, no state of their own.
+- `StatusRefusal` and the three "Dismiss" handlers (`LoopStatusButton`, `FinishPrompt`, `SongOverviewPage`'s `LoopRow`).
+- The three callers of the hook: `LoopPanelBody`, `SongLoops`, and the practice screen (`PracticePlayer` since this stage).
+- `useFocusKeptInBar` (`PlayerControls.tsx`): a layout effect on the fold and the count-in's bars, `onFocus`, and since this stage `onBlur`.
+- `LibraryPage`'s `knownEmpty`.
+- No mutation, migration, engine listener or script. Test helpers that hold state: `refuseStatusWrites` and the held routes in `design.spec.ts` and `library.spec.ts`.
+
+**Findings**
+
+1. **Fixed. Leaving a screen put away refusals it never showed** (checklist 1, new row "Put away by a screen that never showed it"; Test's bug 1, QA issue 1). `useLoops.ts`, `useLoopStatusRefusals`' clean-up called `dismissStatusRefusals(queryClient, user.id)` for every loop. So a "Mark finished" refused while another loop's practice screen was up, or behind the Tab page's closed sheet or its loop form, was gone when the song's page opened, with the loop back among the active ones and nothing to say why. Now the hook takes `{ onRefused, loopId, showing }` and keeps a `WeakSet` of the refusals that were on show (added as the screen opens, as a refusal lands, and as `showing` turns true); leaving removes those and no others. `SongLoops` shows all of them always; `LoopPanelBody` passes `showing: open && form === null` (it now gets `open`); the practice screen's call moved from `PracticeScreen` into `PracticePlayer`, beside the prompt, with `loopId` and `showing: askToFinish`. Small after all: about 25 lines of the hook. Tests: `useLoops.test.tsx` (one loop's scope; never on show; hidden, shown, hidden again; on show as the screen opens, StrictMode), `LoopPanel.test.tsx` (closed sheet left unopened; closed, then seen; under the loop form), `LoopPracticePage.test.tsx` (Test's pinned case flipped: said on the song's page on coming back; and this loop's own change refused with no prompt up). Two pinned tests changed meaning with it: the practice one above, and the panel's "refused in the tick between leaving and the messages being put away", which was "cleared, unsaid" and is now "kept, and said on coming back". With the clean-up put back to "every refusal", 7 of them fail.
+2. **Fixed. C to Off pulled focus off the page onto a radio** (checklist 3, "A copy of what the browser holds"). `PlayerControls.tsx`, `useFocusKeptInBar`: `lastFocused` was only ever set, so after "Every repeat" was chosen and the score then tapped (focus on `<body>`, the radio still on the bar), a later C to Off found a remembered control gone and focus on `<body>`, and focused the bars' "Off". A focused radio takes the arrow keys (`focusKindOf`), so Up and Down stopped changing the speed and Left and Right stopped switching loops, a pedal's keys, until the user clicked away again. Before this batch the effect ran only on a fold, where the target is a button and takes no keys. Now `onBlur` forgets a control that lost focus while still on the page: 7 lines, the section's one new prop. Test: `PlayerControls.test.tsx`, "stays on the page when the user has tapped outside the bar since" (failed before the fix). Whether Chromium fires `blur` on a focused element as React removes it, which would have undone 13.37a, is what `shortcuts.spec.ts`'s two count-in tests prove it doesn't: they pass.
+3. **Fixed. The message was worded by the list the loop was in, and in the sheet not at all** (checklist 6; QA issue 4 and Build's first known gap). The song's page chose its sentence from `loop.status`, wrong for the render in which the failure is drawn before the rollback; the sheet said "Couldn't change the loop." Now `useSetLoopStatus` returns `refused`, the status the failed write asked for, and all three places say `statusRefusalCopy(status.refused)` (`loopLabels.ts`, pure). The pinned copy changed in 5 component assertions and 3 e2e ones. Tests: `loopLabels.test.ts`, `useLoops.test.tsx` "reports what the refused change asked for".
+4. **Fixed. The practice screen was wider than a 320 px window** (checklist 6; Test's bug 2, QA issue 2; older than this batch). The band's speed and Play need 334 px side by side. Under 20.875rem (334 px at the default font size; in rem, as the row's own width is) the row's gap is `gap-2` and the pill's ends `w-12` (48 px, still a touch target): 310 px. Two classes, CSS only; from 334 px nothing changed. Test: `design.spec.ts`, "the practice screen fits a 320 px phone, and its speed and Play row is as it was from 334 px" (the page is the window's width at 320 and 328 px and passes the audit; at 334, 360 and 390 px the gap is 16 px and the end 56 px). The refused prompt's page audit is now also taken at 320 px.
+
+**Checked and left**
+
+- **Dismiss and the mutation cache.** `dismissStatusRefusals` filters on `status: 'error'`, the user's loop-write key and a `status` in the variables. A loop edit only reaches `error` on a refusal: a network failure and a refused token retry (`retryNetworkFailures`), and TanStack (5.108.4) sets `error` after `onSettled`, which is where the outbox hold is let go. So nothing still queued or waiting in the outbox can be removed, and a pending write never matches. `MutationCache.remove` destroys the mutation's gc timer, and an observer still holding it only schedules gc if the cache still has it (`mutation.js`, `removeObserver`), so the control that sent the write is safe to press again. Proven by "never takes a status write that is still on its way" and "leaves another loop's refusal, and a failed write of another kind".
+- **The subscription.** One per mounted screen, unsubscribed in the clean-up; the leaving timer is cancelled by StrictMode's remount and is each instance's own. Heard once under StrictMode (tested). `setHeard` can't run after unmount.
+- **`onRefused` for a loop that isn't on the page** (a replayed write of another song's loop failing): with focus on `<body>` it replaces a hand-over already waiting with one that finds nothing. It needs a replay refused in the half second a form is closing. Left.
+- **A refusal marked as shown while the list itself isn't drawn** (the loops read failing with the sheet open): the message isn't on screen, and leaving clears it. It needs a refused status write and a failed first read of the same list at once. Left.
+- **e2e.** Held routes are released or closed with the page; the second context in `library.spec.ts` closes in a `finally`; every "nothing changed" assertion follows proof that the thing it waited for happened (`held.length`, `loopsOf(user)`).
+- Bars, pagination, secrets, Supabase errors: nothing in this batch reads a list, writes a row or touches a bar number.
+
+**What was done with each logged issue**
+
+| Logged                                                                         | Outcome                                                       |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| Test bug 1, QA issue 1 (a refusal no screen showed is put away unsaid)         | Fixed, finding 1                                              |
+| QA issue 4 (the sheet doesn't say which change failed)                         | Fixed, finding 3; Build's "wrong sentence for one render" too |
+| Test bug 2, QA issue 2 (the practice screen at 320 px)                         | Fixed, finding 4                                              |
+| Build's known gap, QA issue 6 (focus stays on Play after the prompt's refusal) | Accepted, 20.8a                                               |
+| QA issue 5 (Dismiss two Tab stops after "More")                                | Accepted, 20.8b                                               |
+| QA issue 3 (the song's page redraws its loops after the Tab page)              | Accepted, 20.8c                                               |
+| 13.37b's side effect (a new, empty library moves once)                         | Accepted, 20.8d                                               |
+| Copilot's note on batch 5's merged PR (a day's speed is an estimate)           | Accepted, 20.5d                                               |
+
+None of the orchestrator's calls was overruled.
+
+**Docs**
+
+- `docs/plan.md`: the four Carried forward lines this batch closes are deleted (13.21, 13.35c, 13.37a, 13.37b); batch 8 is marked done in Unit 20's list; Accepted gains 20.5d and a "Focus and small jumps" group, 20.8a to 20.8d.
+- `docs/loose-ends.md`: Batch 8 marked done, with what was built differently from its lines.
+- `docs/review-checklist.md`: one row, "Put away by a screen that never showed it" (section 1).
+- `AGENTS.md`: the refusal rules now say `useLoopStatusRefusals({ onRefused, loopId, showing })`, what leaving puts away, and `statusRefusalCopy`; the count-in's focus rule says what a blur does.
+
+Nothing is carried forward: each open item is in Accepted, or is one of the two "left" cases above.
+
+**How to verify**
+
+- `npm run check`: green, 147 test files passed and 1 skipped, 5929 tests passed and 2 skipped (as before).
+- `E2E_PORT=4383 npx playwright test tests/e2e/design.spec.ts tests/e2e/shortcuts.spec.ts tests/e2e/library.spec.ts tests/e2e/practice.spec.ts tests/e2e/loops.spec.ts --project=phone --project=desktop`: 148 passed, 10 skipped by their own width conditions. With the two classes of finding 4 taken out and the app rebuilt, the 320 px test fails ("the page's width in a 320 px window": 327). The port was free before the run and the preview server stopped with it. No screenshot under `docs/units/*-shots/` was rewritten. No `db:reset`, no `db:seed`, nothing on port 54321.
+- By hand, for finding 1: with status writes refused slowly (Build's recipe), on the song's page "More", "Mark finished" on one loop, then at once the round Practise button of another. Back on the song's page the first loop is on the go again with "Couldn't mark the loop finished." and Dismiss under it.

@@ -316,11 +316,16 @@ function refusedStatusWrites(userId: string, loopId?: string) {
  * failed mutations kept in the mutation cache, which is all the message under
  * the loop is read from: removing them changes nothing saved, here or on the
  * server. Only writes that have failed go; one still on its way is never touched.
+ * With `among`, only those of them it holds.
  */
-function dismissStatusRefusals(queryClient: QueryClient, userId: string, loopId?: string): void {
+function dismissStatusRefusals(
+  queryClient: QueryClient,
+  userId: string,
+  { loopId, among }: { loopId?: string; among?: WeakSet<object> } = {},
+): void {
   const cache = queryClient.getMutationCache();
   for (const mutation of cache.findAll(refusedStatusWrites(userId, loopId))) {
-    cache.remove(mutation);
+    if (among === undefined || among.has(mutation)) cache.remove(mutation);
   }
 }
 
@@ -381,9 +386,14 @@ export function useSetLoopStatus(songId: string, loopId: string) {
   // In the order they were sent.
   const writes = useMutationState({
     filters,
-    select: (mutation) => ({ status: mutation.state.status, error: mutation.state.error }),
+    select: (mutation) => ({
+      status: mutation.state.status,
+      error: mutation.state.error,
+      asked: statusWriteIn(mutation.state.variables)?.status ?? null,
+    }),
   });
   const latest = writes.at(-1);
+  const refused = latest?.status === 'error' ? latest : null;
 
   /** False, sending nothing, while another status write to the loop is on its way. */
   const setStatus = (status: LoopStatus): boolean => {
@@ -395,10 +405,26 @@ export function useSetLoopStatus(songId: string, loopId: string) {
   return {
     setStatus,
     isPending: writes.some((write) => write.status === 'pending'),
-    error: latest?.status === 'error' ? (latest.error as { message: string }) : null,
+    error: refused ? (refused.error as { message: string }) : null,
+    /** The status the refused change asked for, which is what the message says; null with no `error`. */
+    refused: refused?.asked ?? null,
     /** Puts `error` away, for every control of the loop. Sends nothing and changes no loop. */
-    dismissError: () => dismissStatusRefusals(queryClient, user.id, loopId),
+    dismissError: () => dismissStatusRefusals(queryClient, user.id, { loopId }),
   };
+}
+
+/** What a screen tells `useLoopStatusRefusals` about itself. */
+interface LoopStatusRefusalsScreen {
+  /** Hears each status change the server refuses while the screen is up. */
+  onRefused?: (loopId: string, refused: LoopStatus) => void;
+  /** The one loop whose refusals the screen says (the practice screen); every loop's without it. */
+  loopId?: string;
+  /**
+   * Whether those refusals' messages are on show now: false while what draws
+   * them is closed or replaced (the loop sheet closed, the loop form over the
+   * list, no "Mark finished?" prompt).
+   */
+  showing?: boolean;
 }
 
 /**
@@ -411,13 +437,17 @@ export function useSetLoopStatus(songId: string, loopId: string) {
  *   taken away: the list hands focus on (`findStatusButtonAfterRefusal`). A
  *   refusal from before the screen opened is not heard, so nothing takes focus
  *   as a page opens.
- * - Leaving the screen puts away every refusal's message, so it isn't there
- *   again on coming back (until then it stays, up to the five minutes the
- *   mutation cache keeps a failed write).
+ * - Leaving the screen puts away the message of every refusal it had on show
+ *   (`loopId`, `showing`), so it isn't there again on coming back (until then
+ *   it stays, up to the five minutes the mutation cache keeps a failed write).
+ *   A refusal the screen never showed is kept: until a screen that says it has
+ *   been opened, the message is the only sign that the change did not hold.
  */
-export function useLoopStatusRefusals(
-  onRefused?: (loopId: string, refused: LoopStatus) => void,
-): void {
+export function useLoopStatusRefusals({
+  onRefused,
+  loopId,
+  showing = true,
+}: LoopStatusRefusalsScreen = {}): void {
   const user = useSignedInUser();
   const queryClient = useQueryClient();
   const latestOnRefused = useRef(onRefused);
@@ -426,7 +456,9 @@ export function useLoopStatusRefusals(
   });
   // The hand-over waits for a render of the caller (`useFocusWhenReady`), and the loop may
   // have been drawn back in its place before the refusal is heard: this makes one.
-  const [, setHeard] = useState(0);
+  const [heard, setHeard] = useState(0);
+  // The refusals this screen has had on show, for as long as it is up.
+  const [shown] = useState(() => new WeakSet<object>());
   const leaving = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
@@ -444,9 +476,19 @@ export function useLoopStatusRefusals(
     return () => {
       unsubscribe();
       // After this commit, not in it: a clean-up that a mount follows at once is no leaving.
-      leaving.current = setTimeout(() => dismissStatusRefusals(queryClient, user.id));
+      leaving.current = setTimeout(() =>
+        dismissStatusRefusals(queryClient, user.id, { among: shown }),
+      );
     };
-  }, [queryClient, user.id]);
+  }, [queryClient, user.id, shown]);
+
+  // After the one above, so it has heard: as the screen opens, as a refusal lands, and as
+  // the messages come on show.
+  useEffect(() => {
+    if (!showing) return;
+    const refusals = queryClient.getMutationCache().findAll(refusedStatusWrites(user.id, loopId));
+    for (const refusal of refusals) shown.add(refusal);
+  }, [queryClient, user.id, loopId, showing, heard, shown]);
 }
 
 /**

@@ -337,7 +337,7 @@ describe('LoopPracticePage', () => {
   describe('a refused "Mark finished" from the prompt', () => {
     const prompt = () => within(screen.getByTestId('finish-prompt'));
     /** What any screen says of a refused status change (the recordings' own alert aside). */
-    const STATUS_REFUSAL = /Couldn't (mark the loop finished|reopen the loop|change the loop)/;
+    const STATUS_REFUSAL = /Couldn't (mark the loop finished|reopen the loop)/;
     const statusWrites = () =>
       loops.sent('update').filter((sent) => (sent as Partial<Loop>).status !== undefined);
 
@@ -442,10 +442,10 @@ describe('LoopPracticePage', () => {
       expect(screen.queryByRole('button', { name: /^Dismiss/ })).not.toBeInTheDocument();
     });
 
-    // Pinned, and logged under Bugs found: a change made on the song's page and refused while
-    // the practice screen is up is heard by that screen, which shows no loop's status but
-    // the prompt's, and is put away when it is left. The loop is back where it was, unsaid.
-    it('a refusal of the song page’s change that lands on the practice screen is put away unsaid on leaving it', async () => {
+    // 20 batch 8, Review (Test's bug 1): a change made on the song's page and refused while
+    // another loop's practice screen is up is not that screen's to say or to put away. The
+    // song's page says it on coming back, or the loop would be back where it was, unsaid.
+    it('a refusal of the song page’s change that lands on another loop’s practice screen is said on the song’s page on coming back', async () => {
       serve();
       const { user, queryClient } = renderPracticeWithClient(
         CHORUS_ID,
@@ -478,9 +478,48 @@ describe('LoopPracticePage', () => {
       const onTheGo = await screen.findByRole('list', { name: 'Loops on the go' });
       expect(within(onTheGo).getByRole('link', { name: 'Verse' })).toBeInTheDocument();
       await settle();
-      expect(screen.queryByText(STATUS_REFUSAL)).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /^Dismiss/ })).not.toBeInTheDocument();
+      expect(within(onTheGo).getByRole('alert')).toHaveTextContent(
+        "Couldn't mark the loop finished. Something went wrong. Try again.",
+      );
+      expect(
+        within(onTheGo).getByRole('button', { name: 'Dismiss the message about Verse' }),
+      ).toBeInTheDocument();
       expect(statusWrites()).toEqual([{ status: 'finished' }]);
+    });
+
+    // The practice loop's own change, refused with no prompt up to say it (the loop is below
+    // full speed): the same. It was made from the song's page on the way here.
+    it('a refusal of this loop’s change with no prompt up is kept for the song’s page', async () => {
+      serve();
+      const { user, queryClient } = renderPracticeWithClient(
+        CHORUS_ID,
+        undefined,
+        undefined,
+        <Route path="/songs/:id" element={<SongOverviewPage />} />,
+      );
+      await loadPlayer();
+      await user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+      const refuse = loops.holdNext('update');
+      loops.failNext('update', 'nope');
+      await user.click(await screen.findByRole('button', { name: 'More actions for Verse' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Mark finished' }));
+      const mastered = await screen.findByRole('list', { name: 'Mastered loops' });
+      await user.click(within(mastered).getByRole('link', { name: 'Practise Verse' }));
+      await screen.findByRole('heading', { level: 1, name: 'Verse' });
+      await settle();
+      refuse();
+      await waitFor(() =>
+        expect(queryClient.getMutationCache().findAll({ status: 'error' })).toHaveLength(1),
+      );
+      await settle();
+      expect(screen.queryByTestId('finish-prompt')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('link', { name: 'Tempo Change' }));
+
+      const onTheGo = await screen.findByRole('list', { name: 'Loops on the go' });
+      expect(await within(onTheGo).findByRole('alert')).toHaveTextContent(
+        "Couldn't mark the loop finished.",
+      );
     });
   });
 

@@ -1410,7 +1410,7 @@ describe('LoopPanel finishing a loop', () => {
 
     await waitFor(() => expect(finishedNames(view)).toEqual(['Intro']));
     expect(await view.item('Intro').findByRole('alert')).toHaveTextContent(
-      "Couldn't change the loop. Something went wrong. Try again.",
+      "Couldn't reopen the loop. Something went wrong. Try again.",
     );
   });
 
@@ -1438,7 +1438,9 @@ describe('LoopPanel finishing a loop', () => {
     await view.user.click(prompt(view).getByRole('button', { name: 'Not yet' }));
     await waitFor(() => expect(view.panel.queryByTestId('finish-prompt')).not.toBeInTheDocument());
     expect(view.panel.getAllByRole('alert')).toHaveLength(1);
-    expect(view.item('Late').getByRole('alert')).toHaveTextContent("Couldn't change the loop.");
+    expect(view.item('Late').getByRole('alert')).toHaveTextContent(
+      "Couldn't mark the loop finished.",
+    );
   });
 
   it('asks when the speed shows as 100%, though its ratio is a hair under', async () => {
@@ -1868,7 +1870,7 @@ describe('LoopPanel keeping focus', () => {
       expect(view.panel.queryByRole('region', { name: 'Finished loops' })).not.toBeInTheDocument(),
     );
     expect(await view.item('Intro').findByRole('alert')).toHaveTextContent(
-      "Couldn't change the loop. Something went wrong. Try again.",
+      "Couldn't mark the loop finished. Something went wrong. Try again.",
     );
     const finish = view.panel.getByRole('button', { name: 'Mark finished Intro' });
     expectUnlocked(finish);
@@ -2159,7 +2161,7 @@ describe('LoopPanel keeping focus', () => {
             .find((li) => within(li).queryByText('Intro', { selector: 'p' })) ?? document.body,
         );
       await waitFor(() =>
-        expect(item().getByRole('alert')).toHaveTextContent("Couldn't change the loop."),
+        expect(item().getByRole('alert')).toHaveTextContent("Couldn't mark the loop finished."),
       );
       expect(panel.getByRole('button', { name: 'Mark finished Intro' })).toBeInTheDocument();
       await settle();
@@ -2171,7 +2173,8 @@ describe('LoopPanel keeping focus', () => {
       expect(view.refusedStatusWrites()).toHaveLength(0);
     });
 
-    it('refused in the tick between leaving and the messages being put away: cleared with them, the loop back as it was', async () => {
+    // 20 batch 8, Review: it was never on show, so leaving doesn't put it away (Test's bug 1).
+    it('refused in the tick between leaving and the messages being put away: kept, and said on coming back', async () => {
       const view = renderPanel();
       const refuse = view.table.holdNext('update');
       view.table.failNext('update', 'nope');
@@ -2182,15 +2185,64 @@ describe('LoopPanel keeping focus', () => {
       view.leave();
       refuse();
       await waitFor(() => expect(view.table.sent('update')).toEqual([{ status: 'finished' }]));
+      await refusalLanded(view);
       await settle();
-      expect(view.refusedStatusWrites()).toHaveLength(0);
+      expect(view.refusedStatusWrites()).toHaveLength(1);
 
       const panel = view.comeBack();
-      // Unsaid, but not wrong: the loop is active, as the server has it.
+      // The loop is active, as the server has it, and the page says the change didn't hold.
       expect(await panel.findByRole('button', { name: 'Mark finished Intro' })).toBeInTheDocument();
-      await settle();
-      expect(panel.queryByRole('alert')).not.toBeInTheDocument();
+      expect(await panel.findByRole('alert')).toHaveTextContent("Couldn't mark the loop finished.");
       expect(panel.queryByRole('region', { name: 'Finished loops' })).not.toBeInTheDocument();
+    });
+
+    // 20 batch 8, Review (Test's bug 1, the Tab page's half): the sheet's list is the only
+    // place the Tab page says a refusal, so one that came with the sheet closed, or with the
+    // loop form over the list, has not been said when the page is left.
+    it('refused with the sheet closed and the page left before it is opened: said on coming back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.user.click(view.header());
+      expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+      refuse();
+      await refusalLanded(view);
+      await settle();
+
+      view.leave();
+      await settle();
+      expect(view.refusedStatusWrites()).toHaveLength(1);
+
+      const panel = view.comeBack();
+      expect(await panel.findByRole('alert')).toHaveTextContent("Couldn't mark the loop finished.");
+      expect(panel.getByRole('button', { name: /^Dismiss/ })).toBeInTheDocument();
+    });
+
+    it('refused with the sheet closed, then seen with the sheet open: gone on coming back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.user.click(view.header());
+      refuse();
+      await refusalLanded(view);
+      await view.user.click(view.header());
+      await alertUnder(view, 'Intro');
+      // Closed again over it: it was seen, which is what counts.
+      await view.user.click(view.header());
+
+      view.leave();
+
+      await waitFor(() => expect(view.refusedStatusWrites()).toHaveLength(0));
+    });
+
+    it('refused with the loop form over the list and the page left with the form still up: said on coming back', async () => {
+      const { view, refuse } = await refusedFinish();
+      await view.press('New loop');
+      await view.panel.findByRole('form', { name: 'New loop' });
+      refuse();
+      await refusalLanded(view);
+      await settle();
+
+      view.leave();
+      await settle();
+
+      expect(view.refusedStatusWrites()).toHaveLength(1);
     });
 
     it('the page opened again in the same tick it was left: the message is put away all the same', async () => {
@@ -2237,7 +2289,9 @@ describe('LoopPanel keeping focus', () => {
       // "Not yet": the prompt goes and the loop's own button says it, still once.
       await view.user.click(prompt(view).getByRole('button', { name: 'Not yet' }));
       await waitFor(() =>
-        expect(view.item('Late').getByRole('alert')).toHaveTextContent("Couldn't change the loop."),
+        expect(view.item('Late').getByRole('alert')).toHaveTextContent(
+          "Couldn't mark the loop finished.",
+        ),
       );
       expect(view.panel.getAllByRole('alert')).toHaveLength(1);
 

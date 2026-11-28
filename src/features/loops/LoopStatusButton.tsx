@@ -6,6 +6,7 @@ import { failureCopy } from '@/lib/errorCopy';
 import type { LoopStatus } from '@/lib/schema';
 import { statusButtonAttributes } from './loopFocus';
 import type { Loop } from './loopForm';
+import { statusRefusalCopy } from './loopLabels';
 import { useSetLoopStatus } from './useLoops';
 
 /**
@@ -54,7 +55,7 @@ export function LoopStatusButton({
         {finished ? 'Reopen' : 'Mark finished'}
         <span className="sr-only"> {loop.name}</span>
       </button>
-      {showError && status.error && (
+      {showError && status.error && status.refused && (
         // After the row's other buttons, whatever the button's own place in it.
         <div className="order-last basis-full">
           <StatusRefusal
@@ -65,7 +66,7 @@ export function LoopStatusButton({
               status.dismissError();
             }}
           >
-            Couldn't change the loop. {failureCopy(status.error)}
+            {statusRefusalCopy(status.refused)} {failureCopy(status.error)}
           </StatusRefusal>
         </div>
       )}
