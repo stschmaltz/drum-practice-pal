@@ -27,6 +27,7 @@ import {
   otherLinkNames,
   otherLinkSpokenAs,
   playAlongLabel,
+  SONG_LINK_KIND_LABELS,
   type SongLink,
 } from './songLinks';
 import { useSongLinks, useSongLinkSaves, useUsableLinks } from './useSongLinks';
@@ -103,10 +104,17 @@ export function PlayAlong({
         <h2 id="play-along-heading" className={sectionHeadingClass}>
           Play along
         </h2>
-        <div className="flex flex-wrap gap-2" data-testid="play-along-buttons">
-          <Link to={songPlayPath(song.id)} className={buttonClass}>
-            <Icon name="music" />
-            Tab
+        {/* Below 640 px the row is three equal columns that can't wrap: Tab, Original and
+            Drumless always fit one line (words only, an address's site read out, not drawn),
+            so nothing under the row moves when the links arrive on a cold load. With CI's
+            fonts a wrapping row took a second line at 390 px and "New loop" dropped 52 px. */}
+        <div
+          className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap"
+          data-testid="play-along-buttons"
+        >
+          <Link to={songPlayPath(song.id)} className={`${buttonClass} ${rowButtonClass}`}>
+            <Icon name="music" className="max-sm:hidden" />
+            <span className="truncate">Tab</span>
           </Link>
           {recordings.map((link) => (
             <RecordingButton
@@ -121,7 +129,7 @@ export function PlayAlong({
           {links.data !== undefined && !hasLinks && (
             <button
               type="button"
-              className={ghostButtonClass}
+              className={`${ghostButtonClass} max-sm:col-span-2 max-sm:justify-start`}
               onClick={onManage}
               {...ADD_RECORDING_ATTRIBUTES}
             >
@@ -149,6 +157,9 @@ export function PlayAlong({
   );
 }
 
+/** A button of the "Play along" row: on a phone it shares the row in thirds, on one line. */
+const rowButtonClass = 'max-sm:min-w-0 max-sm:px-2';
+
 function ActionRow({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap gap-x-2 gap-y-1">{children}</div>;
 }
@@ -173,25 +184,27 @@ function RecordingButton({
     return (
       <Link
         to={songSourcePath(songId, link.kind)}
-        className={buttonClass}
+        className={`${buttonClass} ${rowButtonClass}`}
         aria-disabled={off || undefined}
         // The play screen records the opening itself, once its video shows.
         onClick={refuseUnlessCanOpen}
       >
-        <Icon name="video" />
-        {playAlongLabel(link)}
+        <Icon name="video" className="max-sm:hidden" />
+        <span className="truncate">{playAlongLabel(link)}</span>
       </Link>
     );
   }
   return (
     <LinkOut
       link={link}
-      className={`${buttonClass} max-w-full`}
-      textClassName="wrap-anywhere"
+      className={`${buttonClass} ${rowButtonClass} max-w-full`}
+      textClassName="max-sm:truncate sm:wrap-anywhere"
       off={off}
       onClick={onLinkOut}
     >
-      {playAlongLabel(link)}
+      {/* "Original on Spotify": on a phone the site is read out and the icon says it leaves. */}
+      {SONG_LINK_KIND_LABELS[link.kind]}
+      <span className="max-sm:sr-only"> on {link.hostLabel}</span>
     </LinkOut>
   );
 }

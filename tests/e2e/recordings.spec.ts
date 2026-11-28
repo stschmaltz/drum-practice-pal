@@ -695,6 +695,12 @@ test('nothing on the overview moves when the links arrive on a cold load', async
     release();
     await expect(playAlong(cold).getByRole('link')).toHaveText(['Tab', 'Original', 'Drumless']);
     expect(await places()).toEqual(before);
+    // One row, whatever the fonts: in CI the three wrapped to a second line at 390 px and
+    // everything under them dropped. Below 640 px the row is three columns that can't wrap.
+    const tops = await playAlong(cold)
+      .getByRole('link')
+      .evaluateAll((links) => links.map((link) => Math.round(link.getBoundingClientRect().top)));
+    expect(new Set(tops).size).toBe(1);
   } finally {
     await other.close();
   }
