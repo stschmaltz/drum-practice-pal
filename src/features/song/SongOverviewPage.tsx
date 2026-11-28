@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
-import { ErrorAlert } from '@/components/ErrorAlert';
 import { Icon } from '@/components/icons';
 import { LoadErrorAlert } from '@/components/LoadErrorAlert';
 import { OverflowMenu } from '@/components/OverflowMenu';
@@ -16,7 +15,12 @@ import {
 import { songFactsLabel, type Song } from '@/features/library/songForm';
 import { NO_DRUM_TRACK_NOTE } from '@/features/library/songMetadata';
 import { ConfirmDeleteLoop } from '@/features/loops/ConfirmDeleteLoop';
-import { findFormOpener, NEW_LOOP_BUTTON_ATTRIBUTES } from '@/features/loops/loopFocus';
+import {
+  findFormOpener,
+  findStatusButtonAfterRefusal,
+  NEW_LOOP_BUTTON_ATTRIBUTES,
+  statusButtonAttributes,
+} from '@/features/loops/loopFocus';
 import { barsLabel, type Loop } from '@/features/loops/loopForm';
 import {
   fullSpeedFraction,
@@ -26,7 +30,8 @@ import {
   masterySummary,
 } from '@/features/loops/mastery';
 import { practiceLoopsFor } from '@/features/loops/practiceList';
-import { useLoops, useSetLoopStatus } from '@/features/loops/useLoops';
+import { StatusRefusal } from '@/features/loops/LoopStatusButton';
+import { useLoops, useLoopStatusRefusals, useSetLoopStatus } from '@/features/loops/useLoops';
 import { ratioToPercent } from '@/features/player/speed';
 import { LoopHistory } from '@/features/practice/LoopHistory';
 import { lastPracticedLabel } from '@/features/practice/sessions';
@@ -149,6 +154,13 @@ function SongOverview({ song }: { song: Song }) {
 
 function SongLoops({ song, loops }: { song: Song; loops: ReturnType<typeof useLoops> }) {
   const focusWhenReady = useFocusWhenReady();
+  // A refused "Mark finished" or "Reopen" moves the loop back to its list, away from the
+  // focus that followed it: on to its "More" button there. Leaving the page puts the
+  // refusals' messages away.
+  useLoopStatusRefusals((loopId, refused) => {
+    const find = findStatusButtonAfterRefusal(loopId, refused);
+    if (find) focusWhenReady(find);
+  });
 
   if (waitsForNetwork(loops)) {
     return (
@@ -283,7 +295,8 @@ function LoopRow({
         </div>
         <OverflowMenu
           name={loop.name}
-          buttonAttributes={itemMenuAttributes(loop.id)}
+          // The button stands for the status change its menu holds, in the list the loop is in.
+          buttonAttributes={{ ...itemMenuAttributes(loop.id), ...statusButtonAttributes(loop) }}
           items={[
             {
               id: 'edit',
@@ -335,10 +348,17 @@ function LoopRow({
         />
       )}
       {status.error && (
-        <ErrorAlert>
+        <StatusRefusal
+          loopName={loop.name}
+          onDismiss={() => {
+            // "Dismiss" goes with the message: the menu that holds the change takes focus.
+            findItemControl(loop.id, 'delete')?.focus();
+            status.dismissError();
+          }}
+        >
           {finished ? "Couldn't reopen the loop." : "Couldn't mark the loop finished."}{' '}
           {failureCopy(status.error)}
-        </ErrorAlert>
+        </StatusRefusal>
       )}
       {showingHistory && <LoopHistory loopId={loop.id} loopName={loop.name} tempo={null} />}
     </li>

@@ -709,6 +709,49 @@ describe('PlayerControls count-in', () => {
     expect(chosenCountIn()).toBe('1 bar');
   });
 
+  // 20 batch 8 (13.37a): the C key cycles the count-in with focus anywhere; cycling to Off
+  // takes "When to count in" away, and focus on it must not fall to <body>.
+  describe('focus when the count-in turns off under "When to count in"', () => {
+    const everyRepeat = { ...DEFAULT_PLAYER_OPTIONS, countInBars: 2, countInMode: 'every_repeat' };
+    const modeRadio = (name: string) => within(countInModeGroup()!).getByRole('radio', { name });
+
+    it('goes to the checked option of the count-in bars', () => {
+      const { player } = setup({ options: everyRepeat as PlayerOptions });
+      modeRadio('Every repeat').focus();
+      act(() => player.setCountInBars(0));
+      expect(countInModeGroup()).not.toBeInTheDocument();
+      expect(within(countInGroup()).getByRole('radio', { name: 'Off' })).toHaveFocus();
+    });
+
+    it('stays where the user has since put it', () => {
+      const outside = document.createElement('button');
+      document.body.append(outside);
+      try {
+        const { player } = setup({ options: everyRepeat as PlayerOptions });
+        modeRadio('Every repeat').focus();
+        outside.focus();
+        act(() => player.setCountInBars(0));
+        expect(outside).toHaveFocus();
+      } finally {
+        outside.remove();
+      }
+    });
+
+    it('is left alone while the group stays (2 bars to 1 bar)', () => {
+      const { player } = setup({ options: everyRepeat as PlayerOptions });
+      modeRadio('Every repeat').focus();
+      act(() => player.setCountInBars(1));
+      expect(modeRadio('Every repeat')).toHaveFocus();
+    });
+
+    it('a count-in turned off with focus on another control of the bar moves nothing', () => {
+      const { player } = setup({ options: everyRepeat as PlayerOptions });
+      metronome().focus();
+      act(() => player.setCountInBars(0));
+      expect(metronome()).toHaveFocus();
+    });
+  });
+
   it('the choice made in the bar is what the next Play counts', async () => {
     const clicks = new FakeClickOutput();
     const { engine, player, user } = setup({ clicks });

@@ -17,7 +17,10 @@ import {
 import {
   barNumber,
   chooseCountIn,
+  chooseCountInMode,
   checkedCountIn,
+  checkedCountInMode,
+  countInModeGroup,
   drumsOnlyButton,
   expectedLayout,
   metronomeButton,
@@ -461,4 +464,27 @@ test('on a focused count-in choice the arrows move the choice, and Space still p
   await page.keyboard.press('Space');
   await expect(playButton(page)).toHaveText('Play');
   await expect(checkedCountIn(page)).toHaveValue('0');
+});
+
+// 20 batch 8 (13.37a): C acts wherever focus is, and cycling to Off takes "When to count
+// in" off the bar. Focus on one of its choices goes to the count-in's own, not to <body>.
+test('C cycling the count-in to Off under a focused "When to count in" hands focus to the count-in', async ({
+  user,
+  page,
+}) => {
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await chooseCountIn(page, 2);
+  await chooseCountInMode(page, 'every_repeat');
+  await expect(checkedCountInMode(page)).toBeFocused();
+
+  // 2 bars, then Off: the mode's group goes with the count-in.
+  await page.keyboard.press('c');
+  await expect(checkedCountIn(page)).toHaveValue('0');
+  await expect(countInModeGroup(page)).toHaveCount(0);
+  await expect(checkedCountIn(page)).toBeFocused();
+
+  // The keyboard goes on from there: the arrows move the count-in, and the mode is back.
+  await page.keyboard.press('ArrowRight');
+  await expect(checkedCountIn(page)).toHaveValue('1');
+  await expect(checkedCountInMode(page)).toHaveValue('every_repeat');
 });

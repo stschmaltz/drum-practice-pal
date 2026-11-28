@@ -1,8 +1,9 @@
-import { ErrorAlert } from '@/components/ErrorAlert';
+import { useRef } from 'react';
 import { Icon } from '@/components/icons';
 import { ghostButtonClass, inlineIconClass, primaryButtonClass } from '@/components/styles';
 import { failureCopy } from '@/lib/errorCopy';
 import type { Loop } from './loopForm';
+import { StatusRefusal } from './LoopStatusButton';
 import { useSetLoopStatus } from './useLoops';
 
 /**
@@ -21,6 +22,7 @@ export function FinishPrompt({
   onFinished: () => void;
 }) {
   const status = useSetLoopStatus(songId, loop.id);
+  const finish = useRef<HTMLButtonElement>(null);
   return (
     <div
       role="group"
@@ -34,6 +36,7 @@ export function FinishPrompt({
       </p>
       <div className="flex flex-wrap gap-2">
         <button
+          ref={finish}
           type="button"
           className={primaryButtonClass}
           // Locked like the list's status button (`LoopStatusButton`), which says why.
@@ -50,7 +53,15 @@ export function FinishPrompt({
         </button>
       </div>
       {status.error && (
-        <ErrorAlert>Couldn't mark the loop finished. {failureCopy(status.error)}</ErrorAlert>
+        <StatusRefusal
+          loopName={loop.name}
+          onDismiss={() => {
+            finish.current?.focus();
+            status.dismissError();
+          }}
+        >
+          Couldn't mark the loop finished. {failureCopy(status.error)}
+        </StatusRefusal>
       )}
     </div>
   );

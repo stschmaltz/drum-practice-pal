@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   useMutation,
   useMutationState,
@@ -289,6 +290,40 @@ export function isStatusWriteOf(variables: unknown, loopId: string): boolean {
   return writtenId === loopId && changes?.status !== undefined;
 }
 
+/** The loop and the status a status write asked for, or null for any other write. */
+function statusWriteIn(variables: unknown): { loopId: string; status: LoopStatus } | null {
+  if (typeof variables !== 'object' || variables === null) return null;
+  const { loopId, changes } = variables as Partial<LoopUpdate>;
+  return loopId !== undefined && changes?.status !== undefined
+    ? { loopId, status: changes.status }
+    : null;
+}
+
+/** The status writes the server refused: of one loop, or of every loop. */
+function refusedStatusWrites(userId: string, loopId?: string) {
+  return {
+    mutationKey: loopKeys.writes(userId),
+    status: 'error' as const,
+    predicate: (mutation: { state: { variables?: unknown } }) => {
+      const write = statusWriteIn(mutation.state.variables);
+      return write !== null && (loopId === undefined || write.loopId === loopId);
+    },
+  };
+}
+
+/**
+ * Puts away what refused status changes left to say (13.35c). The refusals are
+ * failed mutations kept in the mutation cache, which is all the message under
+ * the loop is read from: removing them changes nothing saved, here or on the
+ * server. Only writes that have failed go; one still on its way is never touched.
+ */
+function dismissStatusRefusals(queryClient: QueryClient, userId: string, loopId?: string): void {
+  const cache = queryClient.getMutationCache();
+  for (const mutation of cache.findAll(refusedStatusWrites(userId, loopId))) {
+    cache.remove(mutation);
+  }
+}
+
 /** Whether a mutation's variables are a write of this loop's speed. */
 export function isSpeedWriteOf(variables: unknown, loopId: string): boolean {
   if (typeof variables !== 'object' || variables === null) return false;
@@ -361,7 +396,57 @@ export function useSetLoopStatus(songId: string, loopId: string) {
     setStatus,
     isPending: writes.some((write) => write.status === 'pending'),
     error: latest?.status === 'error' ? (latest.error as { message: string }) : null,
+    /** Puts `error` away, for every control of the loop. Sends nothing and changes no loop. */
+    dismissError: () => dismissStatusRefusals(queryClient, user.id, loopId),
   };
+}
+
+/**
+ * For a screen that shows loops' status controls, called once by the part of
+ * it that outlives its loops' items (the list, the page):
+ *
+ * - `onRefused` hears each status change the server refuses while the screen
+ *   is up, as it is refused, and the caller re-renders. The refusal moves the
+ *   loop back to the list it came from, so the item focus followed it to is
+ *   taken away: the list hands focus on (`findStatusButtonAfterRefusal`). A
+ *   refusal from before the screen opened is not heard, so nothing takes focus
+ *   as a page opens.
+ * - Leaving the screen puts away every refusal's message, so it isn't there
+ *   again on coming back (until then it stays, up to the five minutes the
+ *   mutation cache keeps a failed write).
+ */
+export function useLoopStatusRefusals(
+  onRefused?: (loopId: string, refused: LoopStatus) => void,
+): void {
+  const user = useSignedInUser();
+  const queryClient = useQueryClient();
+  const latestOnRefused = useRef(onRefused);
+  useEffect(() => {
+    latestOnRefused.current = onRefused;
+  });
+  // The hand-over waits for a render of the caller (`useFocusWhenReady`), and the loop may
+  // have been drawn back in its place before the refusal is heard: this makes one.
+  const [, setHeard] = useState(0);
+  const leaving = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    // Mounted again straight after a clean-up (StrictMode): the screen never left.
+    clearTimeout(leaving.current);
+    const cache = queryClient.getMutationCache();
+    const unsubscribe = cache.subscribe((event) => {
+      if (event.type !== 'updated' || event.action.type !== 'error') return;
+      if (!cache.findAll(refusedStatusWrites(user.id)).includes(event.mutation)) return;
+      const write = statusWriteIn(event.mutation.state.variables);
+      if (!write) return;
+      latestOnRefused.current?.(write.loopId, write.status);
+      setHeard((count) => count + 1);
+    });
+    return () => {
+      unsubscribe();
+      // After this commit, not in it: a clean-up that a mount follows at once is no leaving.
+      leaving.current = setTimeout(() => dismissStatusRefusals(queryClient, user.id));
+    };
+  }, [queryClient, user.id]);
 }
 
 /**

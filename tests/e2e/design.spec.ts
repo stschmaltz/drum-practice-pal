@@ -22,6 +22,7 @@ import {
 import {
   addLoopLeftAlone,
   backTo,
+  loopsOf,
   navLink,
   openLoopHistory,
   overviewItem,
@@ -556,4 +557,78 @@ test('at 320 px a loop’s More menu opens inside the sheet, active and finished
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
   }
+});
+
+// 20 batch 8 (13.35c, 13.21): a refused "Mark finished" says so under the loop with a
+// "Dismiss" beside it, in the loop panel and on the song's page. Each write is held first,
+// so the loop is seen in the other list, with focus on it, before the refusal moves it back.
+test('a refused status change: its message and Dismiss, in the loop panel and on the song’s page', async ({
+  user,
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await openFixture(page, user, 'groove-120', 'Groove 120');
+  await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 8 });
+  await openLoopPanel(page);
+
+  // Refused as a missing grant is: a code, so no retry, and nothing reaches the database.
+  const held: (() => void)[] = [];
+  await page.route('**/rest/v1/loops*', async (route) => {
+    if (route.request().method() !== 'PATCH') return route.continue();
+    await new Promise<void>((resolve) => held.push(resolve));
+    await route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify({ code: '42501', message: 'permission denied for table loops' }),
+    });
+  });
+  const refuseWrite = async () => {
+    await expect.poll(() => held.length).toBe(1);
+    held.shift()?.();
+  };
+
+  const finish = loopItem(page, 'Verse').getByRole('button', { name: 'Mark finished Verse' });
+  await finish.focus();
+  await page.keyboard.press('Enter');
+  await expect(loopPanel(page).getByRole('button', { name: 'Reopen Verse' })).toBeFocused();
+  await refuseWrite();
+
+  const panelAlert = loopItem(page, 'Verse').getByRole('alert');
+  await expect(panelAlert).toContainText("Couldn't change the loop.");
+  // Back among the active loops, and focus with it, not on <body>.
+  await expect(finish).toBeFocused();
+  const panelDismiss = loopItem(page, 'Verse').getByRole('button', { name: /^Dismiss/ });
+  await expect(panelDismiss).toBeVisible();
+  await expectWellDrawn(page, 'loop panel, refused status change');
+  await expectFocusRings(page, 'loop panel, refused status change');
+
+  await panelDismiss.click();
+  await expect(panelAlert).toHaveCount(0);
+  await expect(panelDismiss).toHaveCount(0);
+  await expect(finish).toBeFocused();
+
+  // The song's page: the change is in the loop's More menu, which takes the focus.
+  await backTo(page, 'Groove 120').click();
+  const row = overviewItem(page, 'on the go', 'Verse');
+  const more = row.getByRole('button', { name: 'More actions for Verse' });
+  await more.click();
+  await page.getByRole('menuitem', { name: 'Mark finished' }).click();
+  await expect(
+    overviewItem(page, 'mastered', 'Verse').getByRole('button', { name: 'More actions for Verse' }),
+  ).toBeFocused();
+  await refuseWrite();
+
+  await expect(row.getByRole('alert')).toContainText("Couldn't mark the loop finished.");
+  await expect(more).toBeFocused();
+  await expectWellDrawn(page, 'song overview, refused status change');
+  await expectFocusRings(page, 'song overview, refused status change');
+
+  // Left without dismissing: the message is not there on coming back.
+  await navLink(page, 'Settings').click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+  await page.goBack();
+  await expect(overviewItem(page, 'on the go', 'Verse')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect((await loopsOf(user)).map((loop) => loop.status)).toEqual(['active']);
 });

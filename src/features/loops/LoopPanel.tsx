@@ -34,6 +34,7 @@ import {
   findFormOpener,
   findLoopSpeed,
   findStatusButton,
+  findStatusButtonAfterRefusal,
   NEW_LOOP_BUTTON_ATTRIBUTES,
   type LoopFormOpener,
 } from './loopFocus';
@@ -53,7 +54,7 @@ import { editorOnPanel } from './loopPanelContent';
 import { LoopSpeedControl } from './LoopSpeedControl';
 import { LoopStatusButton } from './LoopStatusButton';
 import { countInClosesPanel, playLoopClosesPanel } from './useLoopPanelOpen';
-import type { useLoops } from './useLoops';
+import { useLoopStatusRefusals, type useLoops } from './useLoops';
 import { hasPickedBars, type LoopPractice } from './useLoopPractice';
 import { useSpeedMovedSinceChosen } from './useSpeedMovedSinceChosen';
 
@@ -289,6 +290,12 @@ function LoopPanelBody({
   // The loop now has its button in the other section; focus follows it there.
   const followStatusButton = (loop: Loop, status: LoopStatus) =>
     focusWhenReady(() => findStatusButton(loop.id, status));
+  // And back again when the server refuses the change, which moves the loop back. Leaving
+  // the page puts the refusals' messages away.
+  useLoopStatusRefusals((loopId, refused) => {
+    const find = findStatusButtonAfterRefusal(loopId, refused);
+    if (find) focusWhenReady(find);
+  });
   // A deleted loop takes its buttons with it: focus goes to the next loop's Delete (the one
   // before, for the last loop listed), or to "New loop" when no loop is left.
   const followDelete = (loop: Loop) => {

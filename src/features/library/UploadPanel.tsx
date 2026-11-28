@@ -35,10 +35,11 @@ const STEP_LABELS: Record<UploadStep, string> = {
  * Offline both are off: an upload can't wait for the connection (the file
  * would have to be held, and the duplicate check needs the server).
  *
- * `compact` once the library has songs (12 UX pass): the big drop box gives
- * way to an "Upload" button, and a file can be dropped anywhere over the
- * library (`children`, the list), which outlines itself while a file is
- * dragged over it. The upload is the same either way.
+ * `compact` unless the library is known to be empty (12 UX pass; while the
+ * songs load too, 20 batch 8): the big drop box gives way to an "Upload"
+ * button, and a file can be dropped anywhere over the library (`children`:
+ * the list, or what stands for it while it loads), which outlines itself
+ * while a file is dragged over it. The upload is the same either way.
  */
 export function UploadPanel({
   compact = false,

@@ -501,6 +501,48 @@ describe('LibraryPage layout (12 UX pass)', () => {
     expect(screen.getByLabelText('Upload a Guitar Pro file')).toBeInTheDocument();
   });
 
+  // 20 batch 8 (13.37b): the layout a returning user sees while the list loads is the one
+  // it has once loaded, so nothing jumps under a pointer on its way to the upload.
+  it('is compact while the songs load, and stays so once they are in', async () => {
+    serveLibrary(library);
+    const serve = queryResult.getMockImplementation()!;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    queryResult.mockImplementation(async (call) => {
+      if (call.table === 'songs') await held;
+      return serve(call);
+    });
+    renderLibrary();
+    expect(screen.getByText('Loading your songs…')).toBeInTheDocument();
+    expect(screen.queryByText(/or drop one here/)).not.toBeInTheDocument();
+    expect(screen.getByText(/or drop a Guitar Pro file anywhere here/)).toBeInTheDocument();
+    const picker = screen.getByLabelText('Upload a Guitar Pro file');
+
+    release();
+    await screen.findByRole('heading', { name: 'Your songs (3)' });
+    expect(screen.queryByText(/or drop one here/)).not.toBeInTheDocument();
+    // The same control, not one drawn anew in another place.
+    expect(screen.getByLabelText('Upload a Guitar Pro file')).toBe(picker);
+  });
+
+  it('is compact while the songs load, and opens the big drop box only once the list is known to be empty', async () => {
+    serveLibrary([]);
+    const serve = queryResult.getMockImplementation()!;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    queryResult.mockImplementation(async (call) => {
+      if (call.table === 'songs') await held;
+      return serve(call);
+    });
+    renderLibrary();
+    expect(screen.getByText('Loading your songs…')).toBeInTheDocument();
+    expect(screen.queryByText(/or drop one here/)).not.toBeInTheDocument();
+
+    release();
+    await screen.findByText(/No songs yet/);
+    expect(screen.getByText(/or drop one here/)).toBeInTheDocument();
+  });
+
   it('opens a song from anywhere on its card: one link stretched over it, with its More menu apart from it', async () => {
     serveLibrary(library);
     renderLibrary();

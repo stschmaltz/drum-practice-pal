@@ -21,6 +21,7 @@ import {
   useDeleteLoop,
   useLoops,
   usePracticeLoops,
+  useLoopStatusRefusals,
   useSetLoopStatus,
   useUpdateLoop,
 } from './useLoops';
@@ -845,5 +846,155 @@ describe('useSetLoopStatus', () => {
 
     expect(later.result.current.error?.message).toBe('nope');
     expect(later.result.current.isPending).toBe(false);
+  });
+});
+
+// 20 batch 8 (13.21, 13.35c): a refused status change is a failed mutation the cache keeps.
+// The screen hears it as it happens, a control can put it away, and so does leaving.
+describe('refused status changes: dismissed, and heard by the screen', () => {
+  function renderScreen({ queryClient = testQueryClient(), strict = false } = {}) {
+    queryClient.setQueryData<Loop[]>(loopKeys.forSong('user-1', SONG), [
+      loopRow('a'),
+      loopRow('b'),
+    ]);
+    const heard: [string, string][] = [];
+    const hooks = renderHook(
+      () => {
+        useLoopStatusRefusals((loopId, refused) => heard.push([loopId, refused]));
+        return {
+          a: useSetLoopStatus(SONG, 'a'),
+          b: useSetLoopStatus(SONG, 'b'),
+          update: useUpdateLoop(SONG),
+        };
+      },
+      { wrapper: wrapperFor(queryClient, signedInAs('user-1')), reactStrictMode: strict },
+    );
+    /** The loop writes the cache holds as failed, by what they sent. */
+    const failed = () =>
+      queryClient
+        .getMutationCache()
+        .findAll({ status: 'error' })
+        .map((mutation) => (mutation.state.variables as { changes: Partial<Loop> }).changes);
+    return { ...hooks, queryClient, heard, failed };
+  }
+  /** Each write refused in turn, each list read answered. */
+  const refuseWrites = () =>
+    queryResult.mockImplementation(async (call) =>
+      opArgs(call, 'update') ? fail('nope') : ok([loopRow('a'), loopRow('b')]),
+    );
+
+  it('dismissError puts the loop’s refusal away for each of its controls, and sends nothing', async () => {
+    const view = renderScreen();
+    refuseWrites();
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.error?.message).toBe('nope'));
+    const sent = queryResult.mock.calls.length;
+
+    act(() => view.result.current.a.dismissError());
+
+    await waitFor(() => expect(view.result.current.a.error).toBeNull());
+    expect(view.failed()).toEqual([]);
+    await settle();
+    expect(queryResult.mock.calls).toHaveLength(sent);
+    // Nothing of the loop changed with it.
+    expect(view.queryClient.getQueryData<Loop[]>(loopKeys.forSong('user-1', SONG))).toEqual([
+      loopRow('a'),
+      loopRow('b'),
+    ]);
+  });
+
+  it('dismissError leaves another loop’s refusal, and a failed write of another kind', async () => {
+    const view = renderScreen();
+    refuseWrites();
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.error).not.toBeNull());
+    act(() => void view.result.current.b.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.b.error).not.toBeNull());
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    await waitFor(() => expect(view.failed()).toHaveLength(3));
+
+    act(() => view.result.current.a.dismissError());
+
+    await waitFor(() => expect(view.result.current.a.error).toBeNull());
+    expect(view.result.current.b.error?.message).toBe('nope');
+    expect(view.failed()).toEqual([{ status: 'finished' }, { speed_ratio: 0.9 }]);
+  });
+
+  it('dismissError never takes a status write that is still on its way', async () => {
+    const view = renderScreen();
+    const pending = deferred();
+    queryResult.mockReturnValueOnce(pending.promise);
+    queryResult.mockResolvedValue(ok([loopRow('a', { status: 'finished' }), loopRow('b')]));
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.isPending).toBe(true));
+
+    act(() => view.result.current.a.dismissError());
+
+    expect(view.result.current.a.isPending).toBe(true);
+    await act(async () => pending.resolve(ok(loopRow('a', { status: 'finished' }))));
+    await waitFor(() => expect(view.result.current.a.isPending).toBe(false));
+    expect(
+      view.queryClient.getQueryData<Loop[]>(loopKeys.forSong('user-1', SONG))?.[0]?.status,
+    ).toBe('finished');
+  });
+
+  it.each([
+    ['', false],
+    [' (StrictMode: once, not twice)', true],
+  ])('the screen hears a refusal, with the loop and what was asked%s', async (_, strict) => {
+    const view = renderScreen({ strict });
+    refuseWrites();
+    act(() => void view.result.current.b.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.b.error).not.toBeNull());
+    expect(view.heard).toEqual([['b', 'finished']]);
+  });
+
+  it('hears nothing for a status change that went through, or a refused write of another kind', async () => {
+    const view = renderScreen();
+    queryResult.mockResolvedValueOnce(ok(loopRow('a', { status: 'finished' })));
+    queryResult.mockResolvedValue(ok([loopRow('a', { status: 'finished' }), loopRow('b')]));
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.isPending).toBe(false));
+
+    refuseWrites();
+    act(() => view.result.current.update.mutate({ loopId: 'b', changes: { speed_ratio: 0.9 } }));
+    // The refused speed did fail, so the silence isn't a write that never settled.
+    await waitFor(() => expect(view.failed()).toEqual([{ speed_ratio: 0.9 }]));
+    expect(view.heard).toEqual([]);
+  });
+
+  it('leaving the screen puts every loop’s refusal away, and nothing else', async () => {
+    const view = renderScreen();
+    refuseWrites();
+    act(() => void view.result.current.a.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.a.error).not.toBeNull());
+    act(() => void view.result.current.b.setStatus('finished'));
+    await waitFor(() => expect(view.result.current.b.error).not.toBeNull());
+    act(() => view.result.current.update.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    await waitFor(() => expect(view.failed()).toHaveLength(3));
+
+    view.unmount();
+
+    await waitFor(() => expect(view.failed()).toEqual([{ speed_ratio: 0.9 }]));
+  });
+
+  it('a refusal from before the screen opened is still there under StrictMode, whose first clean-up is no leaving', async () => {
+    const queryClient = testQueryClient();
+    // Refused with no screen up to hear it or to put it away.
+    const before = renderHook(() => useSetLoopStatus(SONG, 'a'), {
+      wrapper: wrapperFor(queryClient, signedInAs('user-1')),
+    });
+    queryClient.setQueryData<Loop[]>(loopKeys.forSong('user-1', SONG), [loopRow('a')]);
+    refuseWrites();
+    act(() => void before.result.current.setStatus('finished'));
+    await waitFor(() => expect(before.result.current.error).not.toBeNull());
+    before.unmount();
+
+    const view = renderScreen({ queryClient, strict: true });
+    await settle();
+
+    expect(view.result.current.a.error?.message).toBe('nope');
+    // It was refused before the screen opened: not heard, so nothing takes focus for it.
+    expect(view.heard).toEqual([]);
   });
 });

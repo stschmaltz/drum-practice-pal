@@ -28,7 +28,7 @@ import {
   useLoopPractice,
   type LoopPractice,
 } from '@/features/loops/useLoopPractice';
-import { useLoops } from '@/features/loops/useLoops';
+import { useLoops, useLoopStatusRefusals } from '@/features/loops/useLoops';
 import { useSaveLoopSpeed } from '@/features/loops/useSaveLoopSpeed';
 import { useSpeedMovedSinceChosen } from '@/features/loops/useSpeedMovedSinceChosen';
 import {
@@ -98,6 +98,9 @@ export function LoopPracticePage() {
 
 function PracticeScreen({ song, loopId }: { song: Song; loopId: string }) {
   const loops = useLoops(song.id);
+  // A "Mark finished" refused here is said in the prompt; leaving puts the message away, so
+  // it isn't under the loop on the song's page.
+  useLoopStatusRefusals();
   const lookup = lookUpPracticeLoop(loops, loopId);
 
   const back = <BackLink to={songPath(song.id)}>{song.title}</BackLink>;

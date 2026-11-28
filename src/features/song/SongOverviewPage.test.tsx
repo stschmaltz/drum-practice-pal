@@ -192,6 +192,93 @@ describe('SongOverviewPage', () => {
     );
   });
 
+  // 20 batch 8 (13.21, 13.35c). Held first, so the loop is seen in the other list before
+  // the refusal lands and moves it back, taking the focus that followed it.
+  describe('a refused status change', () => {
+    const more = (list: string, loopName: string) =>
+      within(screen.getByRole('list', { name: list })).getByRole('button', {
+        name: `More actions for ${loopName}`,
+      });
+
+    /** "Mark finished" for Intro from its menu, refused once it is seen among the mastered. */
+    async function refusedFinish() {
+      serve();
+      const user = renderOverview();
+      const refuse = loops.holdNext('update');
+      loops.failNext('update', 'nope');
+      await user.click(await screen.findByRole('button', { name: 'More actions for Intro' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Mark finished' }));
+      await waitFor(() => expect(more('Mastered loops', 'Intro')).toHaveFocus());
+      refuse();
+      // Looked up afresh: the loop's row is drawn anew in the list it lands back in.
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          "Couldn't mark the loop finished. Something went wrong. Try again.",
+        ),
+      );
+      return user;
+    }
+
+    it('hands focus to the loop’s More button where it lands back, not to <body>', async () => {
+      await refusedFinish();
+      await waitFor(() => expect(more('Loops on the go', 'Intro')).toHaveFocus());
+    });
+
+    it('a refused Reopen hands focus back to the mastered loop’s More button', async () => {
+      serve();
+      const user = renderOverview();
+      const refuse = loops.holdNext('update');
+      loops.failNext('update', 'nope');
+      await user.click(await screen.findByRole('button', { name: 'More actions for Outro' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Reopen' }));
+      await waitFor(() => expect(more('Loops on the go', 'Outro')).toHaveFocus());
+      refuse();
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent("Couldn't reopen the loop."),
+      );
+      await waitFor(() => expect(more('Mastered loops', 'Outro')).toHaveFocus());
+    });
+
+    it('leaves focus where the user has since put it', async () => {
+      serve();
+      const user = renderOverview();
+      const refuse = loops.holdNext('update');
+      loops.failNext('update', 'nope');
+      await user.click(await screen.findByRole('button', { name: 'More actions for Intro' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Mark finished' }));
+      await waitFor(() => expect(more('Mastered loops', 'Intro')).toHaveFocus());
+      const elsewhere = screen.getByRole('link', { name: 'New loop' });
+      elsewhere.focus();
+      refuse();
+      await screen.findByRole('alert');
+      await settle();
+      expect(elsewhere).toHaveFocus();
+    });
+
+    it('Dismiss puts the message away, sends nothing, and hands focus to the loop’s More button', async () => {
+      const user = await refusedFinish();
+
+      await user.click(screen.getByRole('button', { name: /^Dismiss/ }));
+
+      await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+      expect(screen.queryByRole('button', { name: /^Dismiss/ })).not.toBeInTheDocument();
+      expect(more('Loops on the go', 'Intro')).toHaveFocus();
+      expect(loops.sent('update')).toEqual([{ status: 'finished' }]);
+    });
+
+    it('is gone on coming back to the page', async () => {
+      const user = await refusedFinish();
+
+      await user.click(screen.getByRole('link', { name: 'Practise Intro' }));
+      expect(await screen.findByText('At practice')).toBeInTheDocument();
+      historyBack();
+
+      await screen.findByRole('list', { name: 'Loops on the go' });
+      await settle();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+  });
+
   it('says so for a song with no loops', async () => {
     serve([]);
     renderOverview();
