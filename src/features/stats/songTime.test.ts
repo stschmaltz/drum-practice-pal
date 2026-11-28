@@ -246,6 +246,66 @@ describe('timeBySong, the sixth song and the period', () => {
     expect(backwards).toEqual(forwards);
   });
 
+  // Unit 20, batch 9 Test: exactly six, the last two level.
+  it('names all six when the fifth and sixth tie, by title, whatever order the loops come in', () => {
+    const six = songs(6);
+    // Four songs ahead, then two with the same time: neither is cut, so the tie decides only the order.
+    const sessions = six.map((each, index) =>
+      session(each.id, at(2026, 11, 25), index < 4 ? (6 - index) * 60 : 60),
+    );
+    const forwards = timeBySong(sessions, six, 'week', now);
+    const backwards = timeBySong([...sessions].reverse(), [...six].reverse(), 'week', now);
+    expect(forwards.songs.map((song) => song.title)).toEqual([...firstFive, 'Song 5']);
+    expect(forwards.other).toBeNull();
+    expect(backwards).toEqual(forwards);
+    // All six level: still six names, in title order.
+    const level = timeBySong(
+      six.map((each) => session(each.id, at(2026, 11, 25), 60)).reverse(),
+      [...six].reverse(),
+      'week',
+      now,
+    );
+    expect(level.songs.map((song) => song.title)).toEqual([...firstFive, 'Song 5']);
+    expect(level.other).toBeNull();
+  });
+
+  it('goes from five names to six to five and Other as the period takes in a sixth and a seventh song', () => {
+    const seven = songs(7);
+    const sessions = [
+      ...seven.slice(0, 5).map((each, index) => session(each.id, at(2026, 11, 25), 600 - index)),
+      // The sixth song three weeks ago, the seventh in the summer.
+      session('l5', at(2026, 11, 5), 90),
+      session('l6', at(2026, 7, 1), 30),
+    ];
+    const week = timeBySong(sessions, seven, 'week', now);
+    expect(week.songs.map((song) => song.title)).toEqual(firstFive);
+    expect(week.other).toBeNull();
+
+    const month = timeBySong(sessions, seven, 'month', now);
+    expect(month.songs.map((song) => song.title)).toEqual([...firstFive, 'Song 5']);
+    expect(month.other).toBeNull();
+
+    const all = timeBySong(sessions, seven, 'all', now);
+    expect(all.songs.map((song) => song.title)).toEqual(firstFive);
+    expect(all.other).toEqual({ songs: 2, seconds: 120 });
+    for (const time of [week, month, all]) {
+      expect(
+        time.songs.reduce((total, song) => total + song.seconds, 0) + (time.other?.seconds ?? 0),
+      ).toBe(time.totalSeconds);
+    }
+  });
+
+  it('counts seven songs of which one has no time in the period as six, all named', () => {
+    const seven = songs(7);
+    const sessions = [
+      ...seven.slice(0, 6).map((each, index) => session(each.id, at(2026, 11, 25), 600 - index)),
+      session('l6', at(2026, 7, 1), 9000),
+    ];
+    const week = timeBySong(sessions, seven, 'week', now);
+    expect(week.songs.map((song) => song.title)).toEqual([...firstFive, 'Song 5']);
+    expect(week.other).toBeNull();
+  });
+
   it('leaves a song with no time in the period out of the rows, out of Other and out of the total', () => {
     const six = songs(6);
     const sessions = [

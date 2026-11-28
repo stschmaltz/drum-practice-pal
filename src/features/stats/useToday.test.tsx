@@ -141,6 +141,72 @@ describe('useToday', () => {
     });
   });
 
+  // Unit 20, batch 9 Test: the clock stays, the zone moves (a flight landed, the device set to another zone).
+  describe('when the device changes time zone', () => {
+    const HOME = 'America/Edmonton';
+    inTimeZone(HOME);
+    afterEach(() => {
+      process.env.TZ = HOME;
+    });
+    // 02:00 UTC on the 27th: 19:00 on the 26th in Edmonton, 11:00 on the 27th in Tokyo.
+    const instant = new Date('2026-11-27T02:00:00Z');
+
+    it('east, into tomorrow: the day moves on at the next check, then at the new zone’s midnight', () => {
+      vi.setSystemTime(instant);
+      const today = renderToday();
+      expect(today.day()).toBe('2026-11-26');
+
+      process.env.TZ = 'Asia/Tokyo';
+      pass(59_000);
+      expect(today.renders()).toBe(1);
+      pass(1000);
+      expect(today.day()).toBe('2026-11-27');
+      expect(today.renders()).toBe(2);
+
+      // Tokyo's midnight is 15:00 UTC, not Edmonton's 07:00.
+      vi.setSystemTime(new Date('2026-11-27T07:00:30Z'));
+      pass(MINUTE);
+      expect(today.day()).toBe('2026-11-27');
+      // The clock was moved under the timer: one check to find where it is, then to the second.
+      vi.setSystemTime(new Date('2026-11-27T14:58:00Z'));
+      pass(MINUTE);
+      pass(59_000);
+      expect(today.day()).toBe('2026-11-27');
+      pass(1000);
+      expect(today.day()).toBe('2026-11-28');
+      expect(today.renders()).toBe(3);
+    });
+
+    it('west, back into yesterday: the day goes back when the page is looked at', () => {
+      process.env.TZ = 'Asia/Tokyo';
+      vi.setSystemTime(instant);
+      const today = renderToday();
+      expect(today.day()).toBe('2026-11-27');
+
+      process.env.TZ = HOME;
+      lookAgain();
+      expect(today.day()).toBe('2026-11-26');
+      // And on again at Edmonton's midnight, 07:00 UTC.
+      vi.setSystemTime(new Date('2026-11-27T06:58:00Z'));
+      pass(MINUTE);
+      pass(59_000);
+      expect(today.day()).toBe('2026-11-26');
+      pass(1000);
+      expect(today.day()).toBe('2026-11-27');
+    });
+  });
+
+  it('draws again when the page is hidden on another day too, so it is right before it is shown', () => {
+    vi.setSystemTime(at(26, 23, 50));
+    const today = renderToday();
+    const state = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    vi.setSystemTime(at(27, 0, 5));
+    lookAgain();
+    expect(today.day()).toBe('2026-11-27');
+    expect(vi.getTimerCount()).toBe(1);
+    state.mockRestore();
+  });
+
   it('draws again as soon as the page is looked at on another day, with no timer run', () => {
     vi.setSystemTime(at(26, 18));
     const today = renderToday();
