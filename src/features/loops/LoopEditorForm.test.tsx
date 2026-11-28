@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { PlayerService } from '@/features/player/PlayerService';
 import { LOOP_NAME_MAX_LENGTH } from '@/lib/schema';
@@ -7,7 +7,7 @@ import { opArgs, queryResult, resetFakeSupabase } from '@/test/fakeSupabase';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { LOOP_SONG_ID, loopRow, serveLoopTable } from '@/test/loopTable';
 import { stubPointer } from '@/test/mediaQueries';
-import { testQueryClient, wrapperFor } from '@/test/render';
+import { settle, testQueryClient, wrapperFor } from '@/test/render';
 import type { Loop } from './loopForm';
 import { LoopEditorForm } from './LoopEditorForm';
 import { loopKeys } from './loopKeys';
@@ -463,6 +463,21 @@ describe('LoopEditorForm bringing typed bars on screen (13.27a)', () => {
 
     // No digit of it makes a range with the saved last bar, 8.
     await replace(view, view.firstBar(), '90');
+
+    expect(view.engine.scrollToBar).not.toHaveBeenCalled();
+  });
+
+  it('while the save is on its way a change to a bar field scrolls nowhere', async () => {
+    const view = await renderForm({ editing: chorus });
+    view.table.holdNext('update');
+    await fill(view, { name: ' again' });
+    await view.user.click(view.save());
+    await waitFor(() => expect(view.save()).toHaveTextContent('Saving…'));
+    view.engine.scrollToBar.mockClear();
+
+    // The field is read-only meanwhile; a change that reaches the form anyway is dropped whole.
+    fireEvent.change(view.firstBar(), { target: { value: '2' } });
+    await settle();
 
     expect(view.engine.scrollToBar).not.toHaveBeenCalled();
   });

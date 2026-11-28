@@ -59,6 +59,8 @@ interface PanelOptions {
   loops?: Loop[];
   loaded?: boolean;
   startsOpen?: boolean;
+  /** Under StrictMode: effects run, are cleaned up and run again. */
+  strict?: boolean;
   /** Runs before the first render, to make the first load fail or hang. */
   prepare?: (table: LoopTable) => void;
 }
@@ -67,13 +69,17 @@ function renderPanel({
   loops = [intro, late],
   loaded = true,
   startsOpen = true,
+  strict = false,
   prepare,
 }: PanelOptions = {}) {
   const table = serveLoopTable(loops);
   prepare?.(table);
   const { engine, player, finishLoading } = loopPlayer({ loaded });
   const queryClient = testQueryClient();
-  render(<Panel player={player} startsOpen={startsOpen} />, { wrapper: wrapperFor(queryClient) });
+  render(<Panel player={player} startsOpen={startsOpen} />, {
+    wrapper: wrapperFor(queryClient),
+    reactStrictMode: strict,
+  });
   const panel = within(screen.getByTestId('loop-panel'));
   const user = userEvent.setup();
   return {
@@ -639,6 +645,58 @@ describe('LoopPanel and a count-in started from outside it (13.32)', () => {
     expect(view.panel.getByRole('group', { name: 'Loop speed' })).toBeVisible();
   });
 
+  it('Pause during the count-in and Play again is a new start: a sheet opened meanwhile closes again', async () => {
+    const view = renderPanel({ startsOpen: false });
+    act(() => view.player.setCountInBars(2));
+    pressPlay(view);
+    await view.user.click(view.header());
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    // Called off before the downbeat: the engine was never told to play.
+    act(() => view.player.pause());
+    expect(view.player.getSnapshot().status).toBe('ready');
+    await settle();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+
+    pressPlay(view);
+
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+  });
+
+  it('under StrictMode, closes once for the count-in and leaves open a sheet opened during it', async () => {
+    const view = renderPanel({ strict: true });
+    act(() => view.player.setCountInBars(2));
+    const more = await view.panel.findByRole('button', { name: 'More actions for Late' });
+    more.focus();
+
+    pressPlay(view);
+
+    await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+    expect(view.header()).toHaveFocus();
+
+    // The effect's second run must not read the count-in as having just begun.
+    await view.user.click(view.header());
+    await settle();
+    expect(view.player.getSnapshot().status).toBe('countingIn');
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    view.enginePlays();
+    await settle();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('focus already on the header stays there, and the sheet closes', async () => {
+    const view = renderPanel();
+    act(() => view.player.setCountInBars(1));
+    await view.panel.findByRole('button', { name: 'Play loop Late' });
+    view.header().focus();
+
+    pressPlay(view);
+
+    await waitFor(() => expect(view.header()).toHaveAttribute('aria-expanded', 'false'));
+    expect(view.header()).toHaveFocus();
+  });
+
   it('hands focus to the header when it was in the sheet, and leaves it alone when it was not', async () => {
     const view = renderPanel();
     act(() => view.player.setCountInBars(1));
@@ -684,6 +742,33 @@ describe('LoopPanel focus after Play loop closes the sheet (13.28a)', () => {
 
     expect(view.header()).toHaveAttribute('aria-expanded', 'true');
     expect(view.item('Late').getByText('Now looping')).toBeVisible();
+  });
+
+  // 20 batch 4 Build, Known gaps, pinned as it is (Test, bug 2). The checklist's "side effects
+  // of a refused action" says none of this should happen; when `practice.playLoop` reports
+  // whether it acted, the last three expectations flip: open, focus on the button, no change.
+  it('a Play loop the player refuses at the press starts nothing, yet the sheet closes and focus moves to its header', async () => {
+    const view = renderPanel();
+    const play = await view.panel.findByRole('button', { name: 'Play loop Late' });
+    await waitFor(() => expect(play).toBeEnabled());
+    play.focus();
+
+    // The sounds fail between the last render and the press: the button is still drawn enabled.
+    act(() => {
+      view.engine.fire('error', { error: new Error('boom') });
+      expect(play).toBeEnabled();
+      fireEvent.click(play);
+    });
+
+    // Refused: no loop is set up and nothing was told to play.
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'error', range: null });
+    expect(view.engine.play).not.toHaveBeenCalled();
+    expect(view.panel.queryByTestId('active-loop')).not.toBeInTheDocument();
+    expect(play).toBeDisabled();
+    // And still:
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+    expect(view.header()).toHaveFocus();
+    expect(view.header()).toHaveTextContent('Loops (2)');
   });
 
   it('Restart loop while playing closes nothing and keeps its focus', async () => {
