@@ -1,14 +1,22 @@
+import { AuthRetryableFetchError } from '@supabase/supabase-js';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { onlineManager, type QueryClient } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router';
-import { fakeSupabase, resetFakeSupabase } from '@/test/fakeSupabase';
+import {
+  FAKE_AUTH_STORAGE_KEY,
+  fakeSession,
+  fakeSupabase,
+  queryResult,
+  resetFakeSupabase,
+} from '@/test/fakeSupabase';
 import { songKeys } from '@/features/library/useSongs';
 import { loopKeys } from '@/features/loops/loopKeys';
 import { songLinkKeys } from '@/features/recordings/songLinkKeys';
 import { offlineDb } from '@/features/offline/offlineDb';
 import { settingsKeys } from '@/features/settings/useSettings';
 import { sessionKeys } from '@/features/practice/sessionKeys';
+import { useLogSession } from '@/features/practice/useSessions';
 import { renderRoutes, settle, testQueryClient } from '@/test/render';
 import { SignOutButton } from './SignOutButton';
 
@@ -175,6 +183,71 @@ describe('SignOutButton with another tab’s writes in the outbox', () => {
     renderRoutes(<Route path="/" element={<SignOutButton />} />);
     await settle();
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(fakeSupabase.auth.signOut).toHaveBeenCalledTimes(1));
+  });
+});
+
+// Unit 20 Test (13.23): a write held back for want of a session is still on its way,
+// between its tries too. Signing out would empty the outbox it waits in.
+describe('SignOutButton with a write held back because supabase-js has no session', () => {
+  function LogsASession() {
+    const { mutate } = useLogSession();
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          mutate({
+            id: 's1',
+            loopId: 'loop-1',
+            startedAt: '2026-11-23T18:00:00.000Z',
+            durationSeconds: 45,
+            speedRatio: 0.8,
+            repeats: 3,
+          })
+        }
+      >
+        Log
+      </button>
+    );
+  }
+
+  it('is off with its reason while the write waits, refuses a press, and signs out once the write has landed', async () => {
+    localStorage.setItem(FAKE_AUTH_STORAGE_KEY, JSON.stringify(fakeSession()));
+    let lost = true;
+    fakeSupabase.auth.getSession.mockImplementation(async () =>
+      lost
+        ? { data: { session: null }, error: new AuthRetryableFetchError('Failed to fetch', 0) }
+        : { data: { session: fakeSession() }, error: null },
+    );
+    queryResult.mockResolvedValue({ data: null, error: null });
+    renderRoutes(
+      <Route
+        path="/"
+        element={
+          <>
+            <LogsASession />
+            <SignOutButton />
+          </>
+        }
+      />,
+    );
+    const button = screen.getByRole('button', { name: 'Sign out' });
+    fireEvent.click(screen.getByRole('button', { name: 'Log' }));
+
+    await waitFor(() => expect(fakeSupabase.auth.getSession).toHaveBeenCalledTimes(1));
+    await settle();
+    // Held back, between tries: nothing was sent, and nothing may empty the device.
+    expect(queryResult).not.toHaveBeenCalled();
+    expect(button).toBeDisabled();
+    expect(screen.getByTestId('offline-note')).toHaveTextContent('still on their way');
+    fireEvent.click(button);
+    await settle();
+    expect(fakeSupabase.auth.signOut).not.toHaveBeenCalled();
+
+    lost = false;
+    await waitFor(() => expect(button).toBeEnabled(), { timeout: 3000 });
+    expect(queryResult).toHaveBeenCalledTimes(1);
+    await userEvent.click(button);
     await waitFor(() => expect(fakeSupabase.auth.signOut).toHaveBeenCalledTimes(1));
   });
 });

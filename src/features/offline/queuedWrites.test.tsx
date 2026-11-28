@@ -20,6 +20,7 @@ import { LOOP_SONG_ID, loopRow } from '@/test/loopTable';
 import { settle, testQueryClient, wrapperFor } from '@/test/render';
 import { offlineDb, type OutboxEntry } from './offlineDb';
 import { outboxEntries } from './outbox';
+import { hasUnsentWrites, useHasUnsentWrites } from './unsentWrites';
 import { useOutboxReplay } from './useOutboxReplay';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -445,5 +446,308 @@ describe('loop edits, round trips and lost answers', () => {
       queryClient.getQueryData<Loop[]>(loopKeys.forSong(USER, LOOP_SONG_ID))?.[0],
     ).toMatchObject({ speed_ratio: 0.8, name: 'Verse' });
     await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+  });
+});
+
+// Unit 20 Test (13.23, 14.6): the windows the Build note lists, through the hooks.
+describe('queued writes while supabase-js has no session, window by window', () => {
+  const permissionDenied: FakeResult = {
+    data: null,
+    error: { message: 'permission denied for table loops', code: '42501' },
+  };
+  const noSession = {
+    data: { session: null },
+    error: new AuthRetryableFetchError('Failed to fetch', 0),
+  };
+  const signedIn = () => ({ data: { session: fakeSession(USER) }, error: null });
+  const storeSession = () =>
+    localStorage.setItem(FAKE_AUTH_STORAGE_KEY, JSON.stringify(fakeSession(USER)));
+
+  /** No session in memory, one stored, until `sessionBack()`. */
+  function loseSession() {
+    storeSession();
+    let lost = true;
+    fakeSupabase.auth.getSession.mockImplementation(async () => (lost ? noSession : signedIn()));
+    return () => {
+      lost = false;
+    };
+  }
+  const asked = () => fakeSupabase.auth.getSession.mock.calls.length;
+  const loopWrites = () =>
+    queryResult.mock.calls
+      .map(([call]) => call)
+      .filter((call) => call.table === 'loops' && opArgs(call, 'update'))
+      .map((call) => opArgs(call, 'update')?.[0] as Partial<Loop>);
+  const playedWrites = () =>
+    queryResult.mock.calls
+      .map(([call]) => call)
+      .filter((call) => call.table === 'songs' && opArgs(call, 'update'))
+      .map((call) => (opArgs(call, 'update')?.[0] as { last_played_at: string }).last_played_at);
+  const queuedIds = async () => (await outboxEntries(USER)).map((entry) => entry.id).sort();
+
+  function renderLoopEdit(loop = loopRow('a', { speed_ratio: 1 })) {
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(loopKeys.forSong(USER, LOOP_SONG_ID), [loop]);
+    const view = renderHook(
+      () => ({ edit: useUpdateLoop(LOOP_SONG_ID), unsent: useHasUnsentWrites(USER) }),
+      { wrapper: wrapperFor(queryClient) },
+    );
+    const cached = () =>
+      queryClient.getQueryData<Loop[]>(loopKeys.forSong(USER, LOOP_SONG_ID))?.[0];
+    return { ...view, queryClient, cached };
+  }
+
+  it('keeps sign-out off for as long as a write is held back, and lets it go once the write has landed', async () => {
+    answerWith(loopRow('a', { speed_ratio: 1 }));
+    const sessionBack = loseSession();
+    const { result, queryClient } = renderLoopEdit();
+    act(() => result.current.edit.mutate({ loopId: 'a', changes: { speed_ratio: 0.5 } }));
+
+    await waitFor(() => expect(result.current.edit.failureCount).toBe(1));
+    // Between tries, not only during one: the mutation is pending, and its entry is stored.
+    expect(hasUnsentWrites(queryClient, USER)).toBe(true);
+    await waitFor(() => expect(result.current.unsent).toBe(true));
+    expect(loopWrites()).toEqual([]);
+
+    sessionBack();
+    await waitFor(() => expect(result.current.edit.isSuccess).toBe(true), { timeout: 3000 });
+    await waitFor(() => expect(result.current.unsent).toBe(false));
+    expect(hasUnsentWrites(queryClient, USER)).toBe(false);
+    expect(loopWrites()).toEqual([{ speed_ratio: 0.5 }]);
+  });
+
+  it('a second edit of the loop made while the first is held back waits behind it, and both land once, in order', async () => {
+    answerWith(loopRow('a', { speed_ratio: 1 }));
+    const sessionBack = loseSession();
+    const { result, cached } = renderLoopEdit();
+    act(() => result.current.edit.mutate({ loopId: 'a', changes: { speed_ratio: 0.9 } }));
+    await waitFor(() => expect(asked()).toBe(1));
+    act(() => result.current.edit.mutate({ loopId: 'a', changes: { speed_ratio: 0.8 } }));
+    await waitFor(async () => expect(await queuedIds()).toHaveLength(2));
+    await settle();
+    // The second hasn't asked for a session of its own: it is behind the first in the queue.
+    expect(asked()).toBe(1);
+    expect(loopWrites()).toEqual([]);
+    expect(cached()?.speed_ratio).toBe(0.8);
+
+    sessionBack();
+    await waitFor(() => expect(loopWrites()).toHaveLength(2), { timeout: 3000 });
+    expect(loopWrites()).toEqual([{ speed_ratio: 0.9 }, { speed_ratio: 0.8 }]);
+    await waitFor(async () => expect(await queuedIds()).toEqual([]));
+    expect(cached()?.speed_ratio).toBe(0.8);
+  });
+
+  it('going offline while a write is held back pauses its retries, and it lands once when the connection and the session are back', async () => {
+    queryResult.mockResolvedValue(ok(null));
+    const sessionBack = loseSession();
+    const { result } = renderHook(() => useLogSession(), {
+      wrapper: wrapperFor(testQueryClient()),
+    });
+    act(() => result.current.mutate(record('s1')));
+    await waitFor(() => expect(result.current.failureCount).toBe(1));
+
+    act(() => onlineManager.setOnline(false));
+    await waitFor(() => expect(result.current.isPaused).toBe(true), { timeout: 3000 });
+    // Paused, it asks for nothing more and sends nothing.
+    expect(asked()).toBe(1);
+    expect(sessionInserts()).toEqual([]);
+    expect(await queuedIds()).toEqual(['s1']);
+
+    sessionBack();
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true), { timeout: 3000 });
+    expect(sessionInserts()).toEqual(['s1']);
+    await waitFor(async () => expect(await queuedIds()).toEqual([]));
+  });
+
+  it("a 42501 with a session in memory is still the server's refusal: the edit fails, rolls back and leaves the outbox", async () => {
+    queryResult.mockResolvedValue(permissionDenied);
+    const { result, cached } = renderLoopEdit();
+    act(() => result.current.edit.mutate({ loopId: 'a', changes: { speed_ratio: 0.5 } }));
+
+    await waitFor(() => expect(result.current.edit.isError).toBe(true));
+    expect(result.current.edit.failureCount).toBe(1);
+    expect(asked()).toBe(1);
+    expect(loopWrites()).toEqual([{ speed_ratio: 0.5 }]);
+    expect(cached()?.speed_ratio).toBe(1);
+    await waitFor(async () => expect(await queuedIds()).toEqual([]));
+    await settle();
+    expect(loopWrites()).toHaveLength(1);
+  });
+
+  it('a 42501 with a session in memory fails a session log too, sent once', async () => {
+    storeSession();
+    queryResult.mockResolvedValue(permissionDenied);
+    const { result } = renderHook(() => useLogSession(), {
+      wrapper: wrapperFor(testQueryClient()),
+    });
+    act(() => result.current.mutate(record('s1')));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(sessionInserts()).toEqual(['s1']);
+    await waitFor(async () => expect(await queuedIds()).toEqual([]));
+  });
+
+  it('a sign-out the server forces while the write is asking for its session: sent, refused, rolled back, not held for ever', async () => {
+    queryResult.mockResolvedValue(permissionDenied);
+    storeSession();
+    let answer!: (result: typeof noSession) => void;
+    fakeSupabase.auth.getSession.mockReturnValueOnce(
+      new Promise<typeof noSession>((resolve) => (answer = resolve)),
+    );
+    const { result, cached } = renderLoopEdit();
+    act(() => result.current.edit.mutate({ loopId: 'a', changes: { speed_ratio: 0.5 } }));
+    await waitFor(() => expect(asked()).toBe(1));
+    await settle();
+    expect(loopWrites()).toEqual([]);
+    expect(cached()?.speed_ratio).toBe(0.5);
+
+    // The refresh was refused: supabase-js empties its storage, then answers "no session".
+    localStorage.removeItem(FAKE_AUTH_STORAGE_KEY);
+    await act(async () =>
+      answer({ data: { session: null }, error: new AuthRetryableFetchError('refused', 400) }),
+    );
+
+    await waitFor(() => expect(result.current.edit.isError).toBe(true));
+    expect(loopWrites()).toEqual([{ speed_ratio: 0.5 }]);
+    expect(cached()?.speed_ratio).toBe(1);
+    await waitFor(async () => expect(await queuedIds()).toEqual([]));
+  });
+
+  describe('replayed from an earlier page', () => {
+    const left: OutboxEntry[] = [
+      { kind: 'session', id: 's-left', userId: USER, queuedAt: 1, record: record('s-left') },
+      {
+        kind: 'loopEdit',
+        id: 'e-left',
+        userId: USER,
+        queuedAt: 2,
+        songId: LOOP_SONG_ID,
+        loopId: 'a',
+        changes: { speed_ratio: 0.7 },
+      },
+      {
+        kind: 'songPlayed',
+        id: 'p-left',
+        userId: USER,
+        queuedAt: 3,
+        songId: 'song-9',
+        playedAt: '2026-11-26T09:00:00.000Z',
+      },
+    ];
+
+    it('every kind of entry stays in the outbox while the session is missing, with nothing sent, and lands once each when it is back', async () => {
+      await offlineDb.outbox.bulkPut(left);
+      answerWith(loopRow('a'));
+      const sessionBack = loseSession();
+      const queryClient = testQueryClient();
+      renderHook(() => useOutboxReplay(), {
+        wrapper: wrapperFor(queryClient),
+        reactStrictMode: true,
+      });
+
+      // Each entry's write has asked for a session and been held back.
+      await waitFor(() => expect(asked()).toBe(3));
+      await settle();
+      expect(sessionInserts()).toEqual([]);
+      expect(loopWrites()).toEqual([]);
+      expect(playedWrites()).toEqual([]);
+      expect(await queuedIds()).toEqual(['e-left', 'p-left', 's-left']);
+      expect(hasUnsentWrites(queryClient, USER)).toBe(true);
+
+      sessionBack();
+      await waitFor(
+        async () => {
+          expect(sessionInserts()).toEqual(['s-left']);
+          expect(loopWrites()).toEqual([{ speed_ratio: 0.7 }]);
+          expect(playedWrites()).toEqual(['2026-11-26T09:00:00.000Z']);
+          expect(await queuedIds()).toEqual([]);
+        },
+        { timeout: 3000 },
+      );
+      await settle();
+      expect(sessionInserts()).toHaveLength(1);
+      expect(loopWrites()).toHaveLength(1);
+      expect(playedWrites()).toHaveLength(1);
+    });
+
+    it('a replayed edit the server refuses with 42501, session in memory, rolls back and leaves the outbox', async () => {
+      await offlineDb.outbox.put(left[1]!);
+      queryResult.mockImplementation(async (call: QueryCall) =>
+        opArgs(call, 'update') ? permissionDenied : ok([loopRow('a', { speed_ratio: 1 })]),
+      );
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(loopKeys.forSong(USER, LOOP_SONG_ID), [
+        loopRow('a', { speed_ratio: 1 }),
+      ]);
+      renderHook(() => useOutboxReplay(), { wrapper: wrapperFor(queryClient) });
+
+      await waitFor(() => expect(loopWrites()).toEqual([{ speed_ratio: 0.7 }]));
+      await waitFor(async () => expect(await queuedIds()).toEqual([]));
+      await waitFor(() =>
+        expect(
+          queryClient.getQueryData<Loop[]>(loopKeys.forSong(USER, LOOP_SONG_ID))?.[0]?.speed_ratio,
+        ).toBe(1),
+      );
+      await settle();
+      expect(loopWrites()).toHaveLength(1);
+    });
+  });
+});
+
+describe('the outbox while an answered write is being taken out of it (14.6), through the hooks', () => {
+  /** The next delete of an outbox row waits `where` the real delete until `release()`. */
+  function holdNextDelete(where: 'before' | 'after') {
+    const real = offlineDb.outbox.delete.bind(offlineDb.outbox);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const spy = vi.spyOn(offlineDb.outbox, 'delete').mockImplementationOnce(((id: string) =>
+      (async () => {
+        if (where === 'before') await gate;
+        await real(id);
+        if (where === 'after') await gate;
+      })()) as never);
+    return { spy, release };
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  it('a replay mounted again (StrictMode) while the row is still being deleted sends nothing a second time', async () => {
+    queryResult.mockResolvedValue(ok(null));
+    const queryClient = testQueryClient();
+    const { result } = renderHook(() => useLogSession(), { wrapper: wrapperFor(queryClient) });
+    const held = holdNextDelete('before');
+    act(() => result.current.mutate(record('s1')));
+    // Answered: its removal has started, the row is still there.
+    await waitFor(() => expect(held.spy).toHaveBeenCalledWith('s1'));
+    expect((await outboxEntries(USER)).map((entry) => entry.id)).toEqual(['s1']);
+
+    renderHook(() => useOutboxReplay(), {
+      wrapper: wrapperFor(queryClient),
+      reactStrictMode: true,
+    });
+    await settle();
+    expect(sessionInserts()).toEqual(['s1']);
+
+    held.release();
+    await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await settle();
+    expect(sessionInserts()).toEqual(['s1']);
+  });
+
+  it('an answered write whose row could not be deleted is not sent again by a replay on this page', async () => {
+    queryResult.mockResolvedValue(ok(null));
+    const queryClient = testQueryClient();
+    const { result } = renderHook(() => useLogSession(), { wrapper: wrapperFor(queryClient) });
+    vi.spyOn(offlineDb.outbox, 'delete').mockRejectedValueOnce(new Error('quota'));
+    act(() => result.current.mutate(record('s1')));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect((await outboxEntries(USER)).map((entry) => entry.id)).toEqual(['s1']);
+
+    renderHook(() => useOutboxReplay(), {
+      wrapper: wrapperFor(queryClient),
+      reactStrictMode: true,
+    });
+    await settle();
+    expect(sessionInserts()).toEqual(['s1']);
   });
 });

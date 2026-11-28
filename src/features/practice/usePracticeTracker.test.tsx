@@ -1,10 +1,21 @@
+import { AuthRetryableFetchError } from '@supabase/supabase-js';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { onlineManager } from '@tanstack/react-query';
+import { offlineDb } from '@/features/offline/offlineDb';
 import { outboxEntries } from '@/features/offline/outbox';
+import { useOutboxReplay } from '@/features/offline/useOutboxReplay';
 import { hasUnsentWrites, useHasUnsentWrites } from '@/features/offline/unsentWrites';
 import { loopKeys } from '@/features/loops/loopKeys';
 import { songKeys } from '@/features/library/useSongs';
-import { opArgs, queryResult, resetFakeSupabase, type FakeResult } from '@/test/fakeSupabase';
+import {
+  FAKE_AUTH_STORAGE_KEY,
+  fakeSession,
+  fakeSupabase,
+  opArgs,
+  queryResult,
+  resetFakeSupabase,
+  type FakeResult,
+} from '@/test/fakeSupabase';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
 import { settle, signedInAs, testQueryClient, wrapperFor } from '@/test/render';
 import { sessionKeys } from './sessionKeys';
@@ -861,5 +872,175 @@ describe('offline (Unit 11)', () => {
     const ids = logged().map((row) => row.id);
     expect(ids).toHaveLength(2);
     expect(ids[0]).toBe(ids[1]);
+  });
+});
+
+// Unit 20 Test (13.23): supabase-js lost its session (a refresh that found no connection),
+// the session still stored. A log must wait, not go out as anon and be dropped as refused.
+describe('with no session in memory, one still stored (Unit 20)', () => {
+  const queued = async () => (await outboxEntries(USER)).map((entry) => entry.id);
+  const permissionDenied: FakeResult = {
+    data: null,
+    error: { message: 'permission denied for table practice_sessions', code: '42501' },
+  };
+  const asked = () => fakeSupabase.auth.getSession.mock.calls.length;
+
+  /** The next `tries` sends find no session; after that it is back. */
+  function sessionLost(tries = 1) {
+    localStorage.setItem(FAKE_AUTH_STORAGE_KEY, JSON.stringify(fakeSession(USER)));
+    for (let count = 0; count < tries; count++) {
+      fakeSupabase.auth.getSession.mockResolvedValueOnce({
+        data: { session: null },
+        error: new AuthRetryableFetchError('Failed to fetch', 0),
+      });
+    }
+  }
+
+  it('a stop sends nothing and offers no "Try again"; the session waits on the device and is logged once when the session is back', async () => {
+    sessionLost();
+    const view = renderTracker();
+    const unsent = renderHook(() => useHasUnsentWrites(USER), {
+      wrapper: wrapperFor(view.queryClient, signedInAs(USER)),
+    });
+    view.playFor(45);
+
+    await waitFor(() => expect(asked()).toBe(1));
+    await settle();
+    expect(logged()).toEqual([]);
+    expect(view.tracker().unsaved).toEqual([]);
+    expect(view.tracker().waiting).toHaveLength(1);
+    const id = view.tracker().waiting[0]!.id;
+    expect(await queued()).toEqual([id]);
+    // Sign out would empty the device of it.
+    expect(hasUnsentWrites(view.queryClient, USER)).toBe(true);
+    expect(unsent.result.current).toBe(true);
+
+    await waitFor(() => expect(view.tracker().lastLogged?.id).toBe(id), { timeout: 3000 });
+    expect(logged().map((row) => row.id)).toEqual([id]);
+    expect(view.tracker().unsaved).toEqual([]);
+    expect(view.tracker().waiting).toEqual([]);
+    await waitFor(async () => expect(await queued()).toEqual([]));
+    await waitFor(() => expect(unsent.result.current).toBe(false));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a hidden page: the keepalive with the stale token is refused, and its fallback waits instead of going out as anon', async () => {
+    // The token the page holds is the stored, expired one: the server answers 401.
+    fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
+    sessionLost();
+    const view = renderTracker();
+    view.playOn(40);
+
+    setVisibility('hidden');
+    await waitFor(() => expect(asked()).toBe(1));
+    await settle();
+    const id = keptAlive()[0]!.id as string;
+    expect(logged()).toEqual([]);
+    expect(view.tracker().unsaved).toEqual([]);
+    expect(await queued()).toEqual([id]);
+
+    // TanStack Query holds a retry while the page is hidden; in a browser the event
+    // reaches the window, where it listens.
+    setVisibility('visible');
+    act(() => {
+      window.dispatchEvent(new Event('visibilitychange'));
+    });
+    await waitFor(() => expect(logged()).toHaveLength(1), { timeout: 3000 });
+    expect(logged()[0]!.id).toBe(id);
+    await waitFor(async () => expect(await queued()).toEqual([]));
+    expect(view.tracker().unsaved).toEqual([]);
+    expect(keptAlive()).toHaveLength(1);
+  });
+
+  it('a session that ends as the screen goes is held the same way, and logged once', async () => {
+    sessionLost();
+    const view = renderTracker();
+    view.cacheEmptyHistory();
+    view.playOn(45);
+    view.hook.unmount();
+
+    await waitFor(() => expect(asked()).toBe(1));
+    await settle();
+    expect(logged()).toEqual([]);
+    expect(await queued()).toHaveLength(1);
+
+    await waitFor(() => expect(logged()).toHaveLength(1), { timeout: 3000 });
+    await waitFor(() =>
+      expect(view.cachedHistory()).toEqual([expect.objectContaining({ duration_seconds: 45 })]),
+    );
+    await waitFor(async () => expect(await queued()).toEqual([]));
+    await settle();
+    expect(logged()).toHaveLength(1);
+  });
+
+  it('a 42501 with a session in memory is a real refusal: sent once, kept for "Try again", out of the outbox', async () => {
+    localStorage.setItem(FAKE_AUTH_STORAGE_KEY, JSON.stringify(fakeSession(USER)));
+    queryResult.mockResolvedValueOnce(permissionDenied);
+    const view = renderTracker();
+    view.playFor(45);
+
+    await waitFor(() => expect(view.tracker().unsaved).toHaveLength(1));
+    expect(logged()).toHaveLength(1);
+    expect(view.tracker().waiting).toEqual([]);
+    expect(view.tracker().lastLogged).toBeNull();
+    await waitFor(async () => expect(await queued()).toEqual([]));
+    await settle();
+    expect(logged()).toHaveLength(1);
+  });
+});
+
+// Unit 20 Test (14.6): one session id can be queued again while the removal of its last
+// entry is still on its way: a keepalive that failed, its fallback refused, then "Try again"
+// pressed twice. The second press's entry must stay this page's, or a replay sends it too.
+describe('a session queued again while its last outbox removal is on its way (Unit 20)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('stays claimed by this page: a replay mounted meanwhile sends nothing, and it is logged by its own retry', async () => {
+    const refused: FakeResult = { data: null, error: { message: 'nope', code: '23514' } };
+    fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
+    queryResult.mockResolvedValueOnce(refused);
+    const view = renderTracker();
+    view.playOn(40);
+    setVisibility('hidden');
+    await waitFor(() => expect(view.tracker().unsaved).toHaveLength(1));
+    setVisibility('visible');
+    const id = keptAlive()[0]!.id as string;
+    await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+
+    // First "Try again": refused again. Its row is deleted; the removal hasn't finished.
+    const realDelete = offlineDb.outbox.delete.bind(offlineDb.outbox);
+    let finishRemoval!: () => void;
+    const removalHeld = new Promise<void>((resolve) => (finishRemoval = resolve));
+    const deleting = vi.spyOn(offlineDb.outbox, 'delete').mockImplementationOnce(((key: string) =>
+      (async () => {
+        await realDelete(key);
+        await removalHeld;
+      })()) as never);
+    queryResult.mockResolvedValueOnce(refused);
+    act(() => view.tracker().retryUnsaved());
+    await waitFor(() => expect(deleting).toHaveBeenCalledWith(id));
+    expect(logged()).toHaveLength(2);
+
+    // Second "Try again", before that removal is done: queued again, its answer on its way.
+    const second = heldAnswer();
+    queryResult.mockReturnValueOnce(second.promise);
+    act(() => view.tracker().retryUnsaved());
+    await waitFor(() => expect(logged()).toHaveLength(3));
+    expect((await outboxEntries(USER)).map((entry) => entry.id)).toEqual([id]);
+    await act(async () => finishRemoval());
+    await settle();
+
+    renderHook(() => useOutboxReplay(), {
+      wrapper: wrapperFor(view.queryClient, signedInAs(USER)),
+      reactStrictMode: true,
+    });
+    await settle();
+    expect(logged()).toHaveLength(3);
+    expect((await outboxEntries(USER)).map((entry) => entry.id)).toEqual([id]);
+
+    await act(async () => second.answer(ok));
+    await waitFor(() => expect(view.tracker().lastLogged?.id).toBe(id));
+    await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+    expect(logged().map((row) => row.id)).toEqual([id, id, id]);
   });
 });

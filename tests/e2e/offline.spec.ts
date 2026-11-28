@@ -421,3 +421,82 @@ test('offline, a loop opens from the home page and every control that needs the 
   await expect.poll(() => outboxCount(page)).toBe(0);
   await expect(page.getByRole('button', { name: 'Delete song' })).toBeEnabled();
 });
+
+// Unit 20 batch 2 (13.23): online, but the token can't be refreshed (a captive portal, one
+// bar of signal). supabase-js then has no session and would sign the write with the
+// publishable key, as anon. No service worker here: the spec aborts requests itself.
+test.describe('with the access token expired and its refresh failing', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  /** The `role` a request's bearer token claims; null when it isn't a user's token at all. */
+  function roleOf(authorization: string | undefined): string | null {
+    try {
+      const payload = (authorization ?? '').replace(/^Bearer /, '').split('.')[1] ?? '';
+      const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+        role?: string;
+      };
+      return claims.role ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  test('a loop speed changed meanwhile is never sent as anon, stays on show, and is saved once when the refresh gets through', async ({
+    page,
+    context,
+    user,
+  }) => {
+    test.setTimeout(240_000);
+    await openFixture(page, user, 'groove-120', 'Groove 120');
+    await saveNewLoop(page, { name: 'Verse', firstBar: 5, lastBar: 6 });
+    await openLoopPanel(page);
+    await playLoopButton(page, 'Verse').click();
+    await playFor(page, 500);
+    await openLoopPanel(page);
+    await expect(loopPercentField(page)).toHaveValue('100');
+
+    const loopWrites: (string | null)[] = [];
+    context.on('request', (request) => {
+      if (request.method() === 'PATCH' && request.url().includes('/rest/v1/loops')) {
+        loopWrites.push(roleOf(request.headers().authorization));
+      }
+    });
+    let refreshTries = 0;
+    await context.route('**/auth/v1/token**', async (route) => {
+      refreshTries += 1;
+      await route.abort('connectionfailed');
+    });
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) {
+        if (!key.endsWith('-auth-token')) continue;
+        const session = JSON.parse(localStorage.getItem(key) ?? '{}') as { expires_at?: number };
+        session.expires_at = Math.floor(Date.now() / 1000) - 60;
+        localStorage.setItem(key, JSON.stringify(session));
+      }
+    });
+
+    await commit(loopPercentField(page), '80');
+    // supabase-js tries the refresh eight times over about 25 seconds, then reports no
+    // session. A ninth try is a later ask: by then the write has been told there is none.
+    await expect.poll(() => refreshTries, { timeout: 90_000 }).toBeGreaterThanOrEqual(9);
+    await page.waitForTimeout(1_500);
+    expect(loopWrites).toEqual([]);
+    await expect(loopPanel(page).getByRole('alert')).toHaveCount(0);
+    await expect(loopPercentField(page)).toHaveValue('80');
+    await expect(loopItem(page, 'Verse')).toBeVisible();
+    expect(await outboxCount(page)).toBe(1);
+    expect((await loopsOf(user))[0]?.speed_ratio).toBe(1);
+    // Signing out would empty the device of it.
+    await expect(page).not.toHaveURL(/\/login/);
+
+    await context.unroute('**/auth/v1/token**');
+    await expect
+      .poll(async () => (await loopsOf(user))[0]?.speed_ratio, { timeout: 90_000 })
+      .toBe(0.8);
+    await expect.poll(() => outboxCount(page)).toBe(0);
+    await page.waitForTimeout(2_000);
+    expect(loopWrites).toEqual(['authenticated']);
+    await expect(loopPanel(page).getByRole('alert')).toHaveCount(0);
+    await expect(loopPercentField(page)).toHaveValue('80');
+  });
+});

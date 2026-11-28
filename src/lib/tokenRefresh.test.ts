@@ -141,6 +141,56 @@ describe('sendRefreshingToken with no session in memory (13.23: a write never go
     expect(retryNetworkFailures(1, failure)).toBe(false);
   });
 
+  // Unit 20 Test: the window while getSession() is still answering.
+  it('a sign-out the server forced while the session was being asked for: the write is sent for its refusal, not held for ever', async () => {
+    storeSession();
+    let answer!: (result: typeof noSession) => void;
+    fakeSupabase.auth.getSession.mockReturnValueOnce(
+      new Promise<typeof noSession>((resolve) => (answer = resolve)),
+    );
+    const send = sendFailing(refused);
+    const sending = sendRefreshingToken(send).catch((error: unknown) => error);
+    await Promise.resolve();
+    expect(send).not.toHaveBeenCalled();
+
+    // The refresh was refused: supabase-js removes the stored session, then answers "none".
+    localStorage.removeItem(FAKE_AUTH_STORAGE_KEY);
+    answer({ data: { session: null }, error: new AuthApiError('Invalid Refresh Token', 400, 'x') });
+
+    const failure = await sending;
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(failure).toBe(refused);
+    expect(retryNetworkFailures(1, failure)).toBe(false);
+  });
+
+  it('a session stored in a shape that is not one (cleared, or junk) holds nothing back', async () => {
+    localStorage.setItem(FAKE_AUTH_STORAGE_KEY, '{"access_token":"only"}');
+    fakeSupabase.auth.getSession.mockResolvedValue(noSession);
+    const send = sendFailing(refused);
+    await expect(sendRefreshingToken(send)).rejects.toBe(refused);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('a write held back after its token was refused and the refresh found no connection', async () => {
+    storeSession();
+    fakeSupabase.auth.refreshSession.mockResolvedValue({
+      data: { session: null, user: null },
+      error: new AuthRetryableFetchError('Failed to fetch', 0),
+    });
+    const send = sendFailing(expired);
+    // First try: sent, token refused, refresh unreachable. The refusal is left to the retries.
+    const first = await sendRefreshingToken(send).catch((error: unknown) => error);
+    expect(retryNetworkFailures(1, first)).toBe(true);
+    // Second try: supabase-js has dropped the session from memory meanwhile. Nothing more is sent.
+    fakeSupabase.auth.getSession.mockResolvedValueOnce(noSession);
+    const second = await sendRefreshingToken(send).catch((error: unknown) => error);
+    expect(retryNetworkFailures(2, second)).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
+    // Third: the session is back, and the write lands.
+    await expect(sendRefreshingToken(send)).resolves.toBe('saved');
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
   it('asks for the session before the send, never after it', async () => {
     const send = sendFailing();
     await sendRefreshingToken(send);
