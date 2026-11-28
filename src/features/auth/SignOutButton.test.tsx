@@ -5,6 +5,7 @@ import { Route } from 'react-router';
 import { fakeSupabase, resetFakeSupabase } from '@/test/fakeSupabase';
 import { songKeys } from '@/features/library/useSongs';
 import { loopKeys } from '@/features/loops/loopKeys';
+import { songLinkKeys } from '@/features/recordings/songLinkKeys';
 import { offlineDb } from '@/features/offline/offlineDb';
 import { settingsKeys } from '@/features/settings/useSettings';
 import { sessionKeys } from '@/features/practice/sessionKeys';
@@ -87,6 +88,9 @@ describe('SignOutButton with writes on their way', () => {
     // Bug hunt S2: signed out mid-upload, the rest of it ran as nobody and left a file behind.
     ['a song upload, edit or delete', songKeys.writes('user-1')],
     ['a settings save', settingsKeys.writes('user-1')],
+    // Unit 14: a save of a song's links, and the queued time a recording was opened.
+    ['a save of a song’s recordings', songLinkKeys.writes('user-1')],
+    ['a recording-opened time', songKeys.plays('user-1')],
   ])(
     'is off with a reason while %s is unanswered online, and signs out once it lands',
     async (_case, key) => {

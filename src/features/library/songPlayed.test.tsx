@@ -151,6 +151,68 @@ describe('marking a song played', () => {
   });
 });
 
+// 14 Test: two openings of one song close together (Original, then Drumless), each a write.
+describe('two played times for one song in flight', () => {
+  const LATER = '2026-11-27T18:30:05.000Z';
+
+  /** Holds each write's answer; `answer(n)` lets the nth sent one land with what the database kept then. */
+  function holdAnswers() {
+    const answers: Array<() => void> = [];
+    let held: string | null = null;
+    queryResult.mockImplementation(async (call) => {
+      const sent = (opArgs(call, 'update')?.[0] as { last_played_at: string } | undefined)
+        ?.last_played_at;
+      if (sent === undefined) return { data: null, error: null };
+      // The database does each as it arrives; only the answers are slow.
+      if (held === null || Date.parse(sent) > Date.parse(held)) held = sent;
+      const kept = held;
+      await new Promise<void>((resolve) => answers.push(resolve));
+      return { data: { last_played_at: kept }, error: null };
+    });
+    return { answer: (index: number) => act(async () => answers[index]!()) };
+  }
+
+  it('shows the later time while both are on their way, and after the answers in the order sent', async () => {
+    const { answer } = holdAnswers();
+    const { result, queryClient, cachedPlayedAt } = renderMark();
+    act(() => result.current.mark('a'));
+    vi.setSystemTime(new Date(LATER));
+    act(() => result.current.mark('a'));
+    await waitFor(() => expect(sentTimes()).toEqual([NOW, LATER]));
+    expect(cachedPlayedAt('a')).toBe(LATER);
+    expect(hasUnsentWrites(queryClient, USER)).toBe(true);
+
+    await answer(0);
+    await waitFor(() => expect(pendingPlays(queryClient)).toBe(1));
+    // The first answer says NOW, which was true when it was written: the newer time stays.
+    expect(cachedPlayedAt('a')).toBe(LATER);
+    await answer(1);
+    await waitFor(() => expect(pendingPlays(queryClient)).toBe(0));
+    expect(cachedPlayedAt('a')).toBe(LATER);
+    await waitFor(async () => expect(await outboxEntries(USER)).toEqual([]));
+    expect(hasUnsentWrites(queryClient, USER)).toBe(false);
+  });
+
+  // 14 Test, bug 4: the last answer to land is taken whole once nothing else is pending, so
+  // an older write's answer that arrives after a newer one's moves the shown time back until
+  // the list is next read. Take ".fails" off once it is fixed.
+  it.fails('never shows the older time when the answers land in the other order', async () => {
+    const { answer } = holdAnswers();
+    const { result, queryClient, cachedPlayedAt } = renderMark();
+    act(() => result.current.mark('a'));
+    vi.setSystemTime(new Date(LATER));
+    act(() => result.current.mark('a'));
+    await waitFor(() => expect(sentTimes()).toEqual([NOW, LATER]));
+
+    await answer(1);
+    await waitFor(() => expect(pendingPlays(queryClient)).toBe(1));
+    expect(cachedPlayedAt('a')).toBe(LATER);
+    await answer(0);
+    await waitFor(() => expect(pendingPlays(queryClient)).toBe(0));
+    expect(cachedPlayedAt('a')).toBe(LATER);
+  });
+});
+
 describe('marking a song played, offline and on a bad connection', () => {
   it('waits for the connection, kept on the device, and is sent once when it is back', async () => {
     serveSong();

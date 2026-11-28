@@ -54,9 +54,18 @@ export async function saveSongLinks(
 }
 
 async function updateSongLink(userId: string, { id, provider, url }: LinkUpdate): Promise<void> {
-  throwIfError(
-    await supabase.from('song_links').update({ provider, url }).eq('id', id).eq('user_id', userId),
-  );
+  const updated = await supabase
+    .from('song_links')
+    .update({ provider, url })
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('id')
+    .maybeSingle();
+  throwIfError(updated);
+  // An update that matches no row is a success to PostgREST. The link was removed on another
+  // device since the form read it: say so (14 Test, bug 3), or the form closes as if it had
+  // saved and the link is gone at the next read. Pressed again, the field adds it anew.
+  if (!updated.data) throw Object.assign(new Error('No such song link'), { code: PG.NO_ROWS });
 }
 
 /**

@@ -14,6 +14,7 @@ import { renderRoutes, settle, testQueryClient } from '@/test/render';
 import { chooseSongAction, moreButton } from '@/test/songActions';
 import { LibraryPage } from './LibraryPage';
 import type { LibrarySong } from './songForm';
+import { markSongPlayedUnobserved } from './songPlayed';
 import { songKeys } from './useSongs';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -104,6 +105,48 @@ describe('LibraryPage', () => {
     expect(await screen.findByRole('heading', { name: 'Your songs (3)' })).toBeInTheDocument();
     expect(shownTitles()).toEqual(['Halo', 'Waltz 3-4', 'Chorus Fill']);
     expect(screen.getByLabelText('Sort by')).toHaveValue('practiced');
+  });
+
+  // Unit 14 (Test): a recording opened counts as practising the song, for this order only.
+  it('puts a song played along to where its recording was last opened, beside the loops’ practice', async () => {
+    serveLibrary([
+      ...library.slice(0, 2),
+      // Never practised, played along to between the other two.
+      { ...library[2]!, last_played_at: '2026-11-15T00:00:00Z' },
+    ]);
+    renderLibrary();
+    await screen.findByRole('heading', { name: 'Your songs (3)' });
+    expect(shownTitles()).toEqual(['Halo', 'Chorus Fill', 'Waltz 3-4']);
+  });
+
+  it('moves a song to the top the moment its recording is opened, and not at all by date added', async () => {
+    serveLibrary(library);
+    const { queryClient, user } = renderLibrary();
+    await screen.findByRole('heading', { name: 'Your songs (3)' });
+    expect(shownTitles()).toEqual(['Halo', 'Waltz 3-4', 'Chorus Fill']);
+
+    act(() =>
+      markSongPlayedUnobserved(queryClient, 'user-1', {
+        songId: 'fill',
+        playedAt: '2026-11-27T18:30:00.000Z',
+      }),
+    );
+    await waitFor(() => expect(shownTitles()).toEqual(['Chorus Fill', 'Halo', 'Waltz 3-4']));
+    // Still so once the write has been answered and the list read again.
+    await waitFor(() => expect(queryClient.isMutating()).toBe(0));
+    await act(() => queryClient.invalidateQueries({ queryKey: songKeys.forUser('user-1') }));
+    expect(shownTitles()).toEqual(['Chorus Fill', 'Halo', 'Waltz 3-4']);
+
+    await user.selectOptions(screen.getByLabelText('Sort by'), 'added');
+    expect(shownTitles()).toEqual(['Chorus Fill', 'Waltz 3-4', 'Halo']);
+    act(() =>
+      markSongPlayedUnobserved(queryClient, 'user-1', {
+        songId: 'halo',
+        playedAt: '2026-11-27T18:31:00.000Z',
+      }),
+    );
+    await waitFor(() => expect(queryClient.isMutating()).toBe(0));
+    expect(shownTitles()).toEqual(['Chorus Fill', 'Waltz 3-4', 'Halo']);
   });
 
   it('invites an upload when the library is empty', async () => {

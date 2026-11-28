@@ -166,3 +166,89 @@ Needs `npm run db:start` (the migration applied: `npx supabase migration up`) an
 7. Songs: the song is first under "Recently practised".
 8. Go offline (DevTools): the overview's recording buttons are off with a note; the play screen at `?source=original` says the video needs a connection; the tab plays.
 9. Human check, on the hosted preview: a real video on the phone, tablet and laptop (first tap, inline on iOS, slowed with YouTube's speed menu), a video whose owner blocks embedding, a Spotify link opening the app on the phone and coming back.
+
+## Test
+
+Build's tests already walked the acceptance criteria. This stage went after what they left thin in the plan's Test focus and the checklist's rows: odd pastes, what else can happen round the form's save, the source switch with something else going on, a read that fails over what is showing, StrictMode, two tabs, and where a request to YouTube could be made from without a page drawing it.
+
+### Tests added
+
+- **`src/features/recordings/songLinks.test.ts`** (106 to 202 tests). The parser, as tables:
+  - More YouTube shapes: a port, capitals, `watch/`, a doubled slash, `youtu.be/<id>/` and more path, another subdomain, two `v`, a full-width host, a backslash for a slash.
+  - Start times: `t=1h`, `t=01m05s`, `t=1h30m`, `t` beside `start` (`t` wins), a whole day kept and a second over it dropped, `90S`, `30s1m`, a fragment `#t=90` (dropped). `t=1m30s`, `t=90`, `start=90` and `t=90s` all end as `&t=90s` in the link and `&start=90` in the frame.
+  - Trailing junk (a full stop, a bracket, a comma, a twelfth character, `%00`): never played as some other video; a plain link to YouTube that says "Opens in a new tab". Wrapped in `<>`, quotes or brackets: refused.
+  - Hosts in other scripts: saved as punycode and named by it; a path in another script encoded and read back the same; length counted on what is saved (400 "é" is too long once encoded); characters that don't show taken out.
+  - An address that says one host and opens another (a backslash before `@`, the name in the path, the query or the fragment): named for where the browser really goes. More refusals: `mailto:`, `tel:`, `intent://`, `vnd.youtube:`, `youtube://`, `spotify://`, `javascript:` with a host, a tab or a control character in it, IPv6, a line break or no-break space inside.
+  - One invariant over 18 pastes: what is saved is https, has no sign-in part, is within the limit, equals its own `URL.href`, parses back to the same link, and gives a frame address only when it is a YouTube video.
+- **`src/features/song/SongOverviewPage.test.tsx`** (53 to 65), "other tabs, other reads and other ways out": Remove and "Add another link" locked while saving; an Original saved in another tab while one is typed here (refused once, then the same field updates that row); a link saved or removed in another tab showing at the next read; a read from before the save answering after it; a read that fails over the links (query state asserted as `error` with data first) keeping the buttons and the form; a removal and a change whose answers were lost, pressed again; a link changed here after another tab removed it (bug 3); a step after a link that has gone isn't sent; the page left by "New loop" while the save is on its way; a cold start offline with the song cached and its links never read.
+- **`src/features/song/SongPage.test.tsx`** (146 to 166):
+  - `?source=original` when the Original is a Spotify track, another site, a YouTube channel, or a row that says YouTube over an address the parser refuses: Tab, the parameter gone, nothing written.
+  - Back and Forward: Forward opens the recording again; Forward after the sources were changed comes back to the one left on, and there is no entry beyond it.
+  - A loop on the go: the recording stops it and leaves it set up (same loop, same speed, range never touched, no speed write); its session ends at the switch and ten minutes of video log nothing; a loop save still on its way lands with its form hidden.
+  - Late events: a Play the engine reports only after the switch ends paused and its `finished` restarts nothing; the sounds coming in after the switch offer no Play.
+  - Links read again while on a recording: removed (Tab, stopped), pointed at another video (a new frame, not another opening), a failed read and an unchanged read (the very same frame element, so the video isn't started over).
+  - The connection: going and coming back on a recording is one opening; offline with the links never read, `?source=` is the tab, which plays, and a link read later is only offered.
+  - StrictMode (at the root): one opening is one frame and one write.
+- **`src/features/library/LibraryPage.test.tsx`** (+2): the list drawn in the order `last_played_at` gives, moving the moment a recording is opened, and not at all by date added.
+- **`src/features/library/songPlayed.test.tsx`** (+2): two openings of one song in flight, answers in the order sent, and in the other order (bug 4, `it.fails`).
+- **`src/features/auth/SignOutButton.test.tsx`** (+2): Sign out is off while a save of recordings or a "recording opened" time is unanswered.
+- **`tests/unit/thirdPartyRequests.test.ts`** (new, 9): `index.html` loads nothing from another origin and has no preconnect, preload or frame; the service worker's configuration has no runtime cache and names no outside host; in `src/` a frame is made in one component, the player's address is built in one module, no script of YouTube's or Spotify's is loaded (IFrame API, oEmbed, thumbnails), and the frame's `allow` has no autoplay, camera, microphone or clipboard.
+- **`tests/db/song-links.test.ts`** (51 to 68): the forms the parser saves pass the checks (punycode, encoded paths, `&t=90s`, a port, an IP address) and what it never saves is refused; what each step of a save meets after another device got there first (an update of a removed link is no error and no row; a removal sent twice; a second Original under a new id is a 23505 with no row of that id); a played time sent twice and then an older one leaves one time.
+- **`tests/e2e/recordings.spec.ts`** (4 to 9 tests, each at three sizes):
+  - The build: the served `index.html` has only this origin's addresses and no preconnect; every file in `sw.js`'s precache list is relative, none of it YouTube's or Spotify's.
+  - With the service worker in charge of the page (`serviceWorkers: 'allow'`, after a reload): nothing asked of YouTube on the overview, Songs or the tab's player, then the frame loads the stub, with `start=90` from a pasted `t=1m30s`.
+  - Offline: the buttons are off, a forced press goes nowhere (no navigation, no new tab, no request, no write); on a recording the frame gives way to the note with the score still there, and comes back.
+  - Two tabs: the second sees the first's link at its next read (a faked clock past the 30 s `staleTime`), its form edits the same row, and the first sees that.
+  - Back and Forward between the song and its recording.
+
+### Checked that each fails without its code
+
+Each group was run against the app with the code it covers broken, then the file put back from a copy:
+
+| Break                                                                | Tests that failed                                                           |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| The form's `if (saving) return` in Remove, Add and typing            | "locks Remove and Add another link too"                                     |
+| `insertSongLink` not rethrowing the 23505                            | "an Original saved in another tab…"                                         |
+| `cancelQueries` and the `onSettled` invalidation both gone           | the stale read, the lost removal                                            |
+| "Add a recording" drawn before the links are read                    | the cold start offline                                                      |
+| The effect that pauses the tab on a recording                        | the loop, the session, the late Play (and Build's two)                      |
+| The `marked` latch                                                   | StrictMode's one write; one opening across an offline spell                 |
+| The effect that drops `?source=`                                     | all five "is no video" rows, the removed link, offline never read           |
+| `replace: false` in the switch                                       | Forward after the sources were changed (and Build's Back)                   |
+| The loop panel unmounted on a recording                              | the loop save on its way                                                    |
+| The frame's `key` gone, and a random one                             | the new frame for another video; the same frame over a failed or equal read |
+| The frame drawn offline                                              | the connection going and coming back                                        |
+| `videoSources` trusting any row; `chooseSource` waiting while paused | the "is no video" rows; offline never read                                  |
+| `unsentFilters` without the two Unit 14 kinds                        | both sign-out rows                                                          |
+| `onSuccess` taking the answer whole                                  | two played times, answers in the order sent                                 |
+| The order ignoring `last_played_at`                                  | both library rows                                                           |
+| A preconnect in `index.html`; a second frame on the overview         | the unit test's four, the e2e build test, the service-worker test           |
+| The offline press not cancelled                                      | the e2e offline test                                                        |
+
+Three tests pin behaviour and weren't broken: a link saved or removed in another tab showing at the next read, and the failed read over the overview's links (they hold by `usableLinks` reading `data`, with no branch to break short of deleting the block). The stale-read test holds by either of two lines (`cancelQueries`, or the invalidation that cancels the same read); it fails only with both gone.
+
+The first StrictMode test passed with the latch removed: `<StrictMode>` in a layout route doesn't run a mount's effects twice, and the links weren't cached, so the screen didn't mount on the recording. It is now at the root with the links cached, and fails without the latch.
+
+### Bugs found
+
+1. **A look-alike in another script isn't refused** (low; logged). `https://youtubе.com/watch?v=…` with a Cyrillic "е" (and `https://xn--youtub-8of.com/…`) is saved as a plain link, where `youtube.com.evil.test` is refused as a look-alike. Repro: paste it into Original; the line under the field says "Link to xn--youtub-8of.com. Opens in a new tab." and Save keeps it. It is never played, embedded or named "YouTube", and the overview shows its punycode address, so the user can see it isn't YouTube. Not fixed: refusing it means deciding what to do with real sites in other scripts. Carried forward.
+2. **The overview's own links stay live while the form saves** (low; Build's known gap, a checklist row 1 miss). Repro: type a link, hold the request (slow network), press Save, then "New loop" (or Back, or a loop's row). The save lands; had it failed, its message and the text typed would be gone. Not a few lines (five kinds of link to lock). Carried forward; the test pins that the save still lands.
+3. **A link changed here after another device removed it was dropped without a word** (medium; fixed, 8 lines in `songLinksApi.ts`). Repro before the fix: open the form on two tabs; remove the Original and save in one; in the other change the Original's address and Save. The form closed as if saved and the song had no Original at the next read: PostgREST answers an update that matched no row as a success. `updateSongLink` now asks for the row back and reports none as gone, so the form stays with "It has been deleted, on this device or another."; the list is read again, the field keeps what was typed, and Save adds it. `tests/db/song-links.test.ts` shows the server's side of it.
+4. **Two "recording opened" answers in the other order show the older time** (low; logged, `it.fails` in `songPlayed.test.tsx`). Repro: open Original then Drumless within one round trip, the first answer arriving last. The cached Songs list holds the first time until its next read; the database holds the later. A few seconds' difference in a sort key, so not worth a rushed fix: the obvious one (always keep the later) breaks the case where the device's clock runs ahead. Carried forward.
+
+Not bugs, noted: `example.com:8080/x` pasted without a scheme is refused as "Only links that start with https://" (it parses as the scheme `example.com:`); `SPOTIFY:TRACK:…` in capitals is refused; a start time in the fragment (`#t=90`) is dropped; a loop saved while a recording is up is the active loop on return to Tab.
+
+### Not covered
+
+- A real YouTube player, as in Build: every test stops at the frame's address and attributes.
+- Requests made by the service worker itself aren't seen by Playwright's routes; that the worker asks for nothing outside is shown from its precache list and its configuration, not by watching it.
+- A count-in past its downbeat when a recording is chosen (the engine told to play, not yet playing): the source's effect calls `pause()`, which `PlayerService.countInEdges.test.ts` covers for that moment, but no test puts the two together.
+- Focus when the source switch itself leaves (the last video link removed on another device while a radio has focus): it falls to `<body>`.
+- Safari and Firefox: e2e is Chromium.
+- The full e2e suite, by the stage's instruction: `recordings.spec.ts`, `journey.spec.ts`, `library.spec.ts` and the design test for the new screens were run at phone, tablet and desktop.
+
+### Run
+
+- `npm run check`: green, 5478 passed, 1 expected fail (bug 4), 2 skipped (was 5336).
+- `npm run test:db`: green, 263 passed (was 246).
+- e2e on `E2E_PORT=4283`: `recordings.spec.ts`, `journey.spec.ts` and `library.spec.ts`, 60 passed; `design.spec.ts` "a song's recordings", 3 passed; `recordings.spec.ts` twice over at each size, 54 passed.

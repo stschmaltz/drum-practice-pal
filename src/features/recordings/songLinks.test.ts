@@ -369,3 +369,263 @@ describe('chooseSource', () => {
     );
   });
 });
+
+// Unit 14 Test: the shapes a paste really has (a link lifted out of a sentence, a host in
+// another script, an address typed by hand), and what each one may become.
+describe('parseSongLink: more YouTube shapes', () => {
+  it.each([
+    ['its port', `https://www.youtube.com:443/watch?v=${VIDEO}`],
+    ['another port, which the saved form drops', `https://www.youtube.com:8443/watch?v=${VIDEO}`],
+    ['a scheme and host in capitals', `HTTPS://YOUTU.BE/${VIDEO}`],
+    ['a slash after watch', `https://www.youtube.com/watch/?v=${VIDEO}`],
+    ['a doubled slash', `https://www.youtube.com//watch?v=${VIDEO}`],
+    ['a slash after a short link', `https://youtu.be/${VIDEO}/`],
+    ['more path after a short link', `https://youtu.be/${VIDEO}/extra`],
+    ['another subdomain of YouTube', `https://gaming.youtube.com/watch?v=${VIDEO}`],
+    ['two v parameters, the first', `https://www.youtube.com/watch?v=${VIDEO}&v=AAAAAAAAAAA`],
+    ['a host typed in full-width letters', `https://ｙｏｕｔｕｂｅ.com/watch?v=${VIDEO}`],
+    ['a start time in the fragment, which is dropped', `${WATCH}#t=90`],
+    ['a backslash for a slash', `https:\\\\www.youtube.com\\watch?v=${VIDEO}`],
+  ])('takes a watch address with %s', (_name, text) => {
+    expect(accepted(text).url).toBe(WATCH);
+  });
+
+  it.each([
+    ['t=1h', 3600],
+    ['t=01m05s', 65],
+    ['t=1h30m', 5400],
+    ['t=90&start=45', 90],
+    ['start=45&t=90', 90],
+    // A whole day is the most a start time may be.
+    ['t=86400', 86400],
+  ])('reads %s as a start time', (param, seconds) => {
+    expect(accepted(`${WATCH}&${param}`)).toMatchObject({
+      startSeconds: seconds,
+      url: `${WATCH}&t=${seconds}s`,
+    });
+  });
+
+  it.each(['t=86401', 't=90S', 't=30s1m', 't=1h2', 't=%20', 'start=1m30s&t='])(
+    'drops %s and keeps the video, from its beginning',
+    (param) => {
+      expect(accepted(`${WATCH}&${param}`)).toMatchObject({ url: WATCH, mediaId: VIDEO });
+    },
+  );
+
+  it('a start time survives the round trip into the frame’s address and the way out', () => {
+    for (const param of ['t=1m30s', 't=90', 'start=90', 't=90s']) {
+      const link = accepted(`https://youtu.be/${VIDEO}?si=abc&${param}`);
+      expect(link.url).toBe(`${WATCH}&t=90s`);
+      expect(youTubeEmbedUrl(link)).toBe(
+        `https://www.youtube-nocookie.com/embed/${VIDEO}?playsinline=1&rel=0&start=90`,
+      );
+      expect(youTubeEmbedUrl(accepted(link.url))).toBe(youTubeEmbedUrl(link));
+    }
+  });
+
+  // A link lifted out of a sentence brings its punctuation. What follows the id isn't part
+  // of an id, so it is never played as some other video: it is a plain link, and says so.
+  it.each([
+    ['a full stop', `https://youtu.be/${VIDEO}.`],
+    ['a bracket', `https://youtu.be/${VIDEO})`],
+    ['a comma after a watch address', `${WATCH},`],
+    ['a bracket and a full stop', `${WATCH}).`],
+    ['a twelfth character', `${WATCH}x`],
+    ['an encoded NUL', `${WATCH}%00`],
+    ['v in capitals', `https://www.youtube.com/watch?V=${VIDEO}`],
+    [
+      'a redirect that carries the video',
+      `https://www.youtube.com/attribution_link?u=/watch?v=${VIDEO}`,
+    ],
+  ])('with %s after it, is a plain link to YouTube that never plays here', (_name, text) => {
+    const link = accepted(text);
+    expect(link).toMatchObject({ provider: 'web', mediaId: null, hostLabel: 'YouTube' });
+    expect(new URL(link.url).hostname).toMatch(/(^|\.)(youtube\.com|youtu\.be)$/);
+    expect(youTubeEmbedUrl(link)).toBeNull();
+    expect(recognisedAs(link)).toBe('Link to YouTube. Opens in a new tab.');
+  });
+
+  it.each([`<https://youtu.be/${VIDEO}>`, `"https://youtu.be/${VIDEO}"`, `(${WATCH})`])(
+    'refuses %s, wrapped as a chat app wraps it',
+    (text) => {
+      expect(refusal(text)).toBe('notALink');
+    },
+  );
+});
+
+describe('parseSongLink: hosts in other scripts', () => {
+  it.each([
+    ['https://münchen.example/lesson', 'https://xn--mnchen-3ya.example/lesson'],
+    ['https://xn--mnchen-3ya.example/lesson', 'https://xn--mnchen-3ya.example/lesson'],
+    ['https://例え.テスト/drums', 'https://xn--r8jz45g.xn--zckzah/drums'],
+    ['https://MÜNCHEN.example/Lesson', 'https://xn--mnchen-3ya.example/Lesson'],
+  ])('saves %s under its punycode host, and names it by that', (text, url) => {
+    const link = accepted(text);
+    expect(link).toMatchObject({ provider: 'web', url, hostLabel: new URL(url).hostname });
+    expect(accepted(link.url)).toEqual(link);
+  });
+
+  it('keeps a path and query in another script, encoded, and reads it back the same', () => {
+    const link = accepted('https://example.com/путь?q=ударные#часть');
+    expect(link.url).toBe(
+      'https://example.com/%D0%BF%D1%83%D1%82%D1%8C?q=%D1%83%D0%B4%D0%B0%D1%80%D0%BD%D1%8B%D0%B5#%D1%87%D0%B0%D1%81%D1%82%D1%8C',
+    );
+    expect(accepted(link.url)).toEqual(link);
+  });
+
+  it('counts the length of what is saved: a short address that encodes long is refused', () => {
+    const text = `https://example.com/${'é'.repeat(400)}`;
+    expect(text.length).toBeLessThan(SONG_LINK_URL_MAX_LENGTH);
+    expect(refusal(text)).toBe('tooLong');
+  });
+
+  // youtube.com with a Cyrillic letter for its last "e", and the same host already in punycode. The parser
+  // doesn't refuse them (14 Test, bug 1); what is pinned here is that neither is ever taken
+  // for YouTube: not played, not named "YouTube", and shown by the host it really opens.
+  it.each([
+    `https://youtub\u0435.com/watch?v=${VIDEO}`,
+    `https://xn--youtub-8of.com/watch?v=${VIDEO}`,
+  ])('a look-alike in another script, %s, is never YouTube', (text) => {
+    const link = accepted(text);
+    expect(link).toMatchObject({ provider: 'web', mediaId: null, hostLabel: 'xn--youtub-8of.com' });
+    expect(link.url).toBe(`https://xn--youtub-8of.com/watch?v=${VIDEO}`);
+    expect(youTubeEmbedUrl(link)).toBeNull();
+    expect(videoSources([{ ...link, id: 'a', kind: 'original' }])).toEqual([]);
+    expect(recognisedAs(link)).toBe('Link to xn--youtub-8of.com. Opens in a new tab.');
+  });
+
+  it('takes out characters that don’t show, so the host saved is the host opened', () => {
+    expect(accepted('https://exa\u200bmple.com/x').url).toBe('https://example.com/x');
+    expect(accepted('https://example.com/\u202egpj.exe').url).toBe(
+      'https://example.com/%E2%80%AEgpj.exe',
+    );
+  });
+});
+
+describe('parseSongLink: an address that says one host and opens another', () => {
+  // Where the browser would go is the only host that counts: each is parsed as the browser does.
+  it.each([
+    // A backslash is a slash to a browser: this is youtube.com, at the path /@evil.test/…
+    [`https://www.youtube.com\\@evil.test/watch?v=${VIDEO}`, 'www.youtube.com', 'YouTube'],
+    [`https://evil.test\\.youtube.com/watch?v=${VIDEO}`, 'evil.test', 'evil.test'],
+    [`https://evil.test/watch?v=${VIDEO}#@youtube.com`, 'evil.test', 'evil.test'],
+    [`https://evil.test/youtube.com/watch?v=${VIDEO}`, 'evil.test', 'evil.test'],
+    [`https://evil.test/?next=https://youtu.be/${VIDEO}`, 'evil.test', 'evil.test'],
+    [`https://evil.test/open.spotify.com/track/${TRACK}`, 'evil.test', 'evil.test'],
+  ])('%s is a plain link named for where it opens', (text, host, label) => {
+    const link = accepted(text);
+    expect(new URL(link.url).hostname).toBe(host);
+    expect(link).toMatchObject({ provider: 'web', mediaId: null, hostLabel: label });
+    expect(youTubeEmbedUrl(link)).toBeNull();
+  });
+
+  it.each<[string, LinkRefusal]>([
+    [`https://www.youtube.com%2eevil.test/watch?v=${VIDEO}`, 'lookAlike'],
+    [`https://youtube.com.au/watch?v=${VIDEO}`, 'lookAlike'],
+    [`https://www.youtube.com.:pw@evil.test/`, 'lookAlike'],
+    [`https://open.spotify.com:x@evil.test/track/${TRACK}`, 'lookAlike'],
+    [`https://my-spotify-playlists.test/track/${TRACK}`, 'lookAlike'],
+  ])('refuses %s', (text, reason) => {
+    expect(refusal(text)).toBe(reason);
+  });
+});
+
+describe('parseSongLink: more refusals', () => {
+  it.each<[string, string, LinkRefusal]>([
+    ['an email address', 'mailto:a@example.com', 'notHttps'],
+    ['a phone number', 'tel:123', 'notHttps'],
+    [
+      'an Android intent',
+      `intent://youtube.com/watch?v=${VIDEO}#Intent;scheme=https;end`,
+      'notHttps',
+    ],
+    ['the YouTube app’s own scheme', `vnd.youtube:${VIDEO}`, 'notHttps'],
+    ['youtube://', `youtube://watch?v=${VIDEO}`, 'notHttps'],
+    ['spotify://', `spotify://track/${TRACK}`, 'notHttps'],
+    ['a Spotify URI with more after it', `spotify:track:${TRACK}?si=abc`, 'notHttps'],
+    ['a Spotify URI for a short id', 'spotify:track:abc', 'notHttps'],
+    ['javascript: with a host', 'javascript://youtube.com/%0aalert(1)', 'notHttps'],
+    ['javascript: after a space', ' javascript:alert(1)', 'notHttps'],
+    ['javascript: with a tab inside', 'java\tscript:alert(1)', 'notALink'],
+    ['javascript: after a control character', '\u0001javascript:alert(1)', 'notALink'],
+    ['an IPv6 address', 'https://[::1]/x', 'notALink'],
+    // Read as the scheme "example.com:", which an address bar wouldn't; refused either way.
+    ['a host and port with no scheme', 'example.com:8080/x', 'notHttps'],
+    ['a line break inside', `https://youtu.be/\n${VIDEO}`, 'notALink'],
+    ['a no-break space inside', `https://youtu.be/\u00a0${VIDEO}`, 'notALink'],
+  ])('refuses %s', (_name, text, reason) => {
+    expect(refusal(text)).toBe(reason);
+  });
+});
+
+describe('parseSongLink: more Spotify and tracking', () => {
+  it('takes a track address with a slash after it', () => {
+    expect(accepted(`${SPOTIFY}/`).url).toBe(SPOTIFY);
+  });
+
+  it.each([
+    ['a full stop after the id', `${SPOTIFY}.`],
+    ['the embed player’s address', `https://open.spotify.com/embed/track/${TRACK}`],
+    ['another Spotify host', `https://play.spotify.com/track/${TRACK}`],
+    ['two language segments', `https://open.spotify.com/intl-de/intl-fr/track/${TRACK}`],
+  ])('keeps %s as a plain link to Spotify, not a track', (_name, text) => {
+    expect(accepted(text)).toMatchObject({ provider: 'web', mediaId: null, hostLabel: 'Spotify' });
+  });
+
+  it('drops only the tracking parameters it knows, and leaves every other one as it was', () => {
+    expect(accepted('https://example.com/?a=1&a=2&b=%26&q=a+b&si=x&utm_campaign=y').url).toBe(
+      'https://example.com/?a=1&a=2&b=%26&q=a+b',
+    );
+    // Names are matched as written: a site's own SI or UTM_SOURCE isn't the share sheet's.
+    expect(accepted('https://example.com/?SI=b&UTM_SOURCE=c').url).toBe(
+      'https://example.com/?SI=b&UTM_SOURCE=c',
+    );
+  });
+});
+
+describe('parseSongLink: what every saved link is', () => {
+  const pasted = [
+    `https://youtu.be/${VIDEO}?si=abc&t=1m30s`,
+    `youtu.be/${VIDEO}`,
+    `https://www.youtube.com:8443/watch?v=${VIDEO}`,
+    `https://www.youtube.com\\@evil.test/watch?v=${VIDEO}`,
+    `https://youtu.be/${VIDEO}).`,
+    'https://www.youtube.com/@somedrummer',
+    `spotify:track:${TRACK}`,
+    `https://open.spotify.com/intl-de/track/${TRACK}?si=abc`,
+    'https://spotify.link/AbCdEf',
+    'https://münchen.example/lesson?utm_source=x',
+    `https://youtub\u0435.com/watch?v=${VIDEO}`,
+    'https://example.com/путь?q=ударные',
+    'example.com/cover',
+    'https:/example.com/x',
+    '//example.com/x',
+    'https://127.0.0.1/x',
+    'https://example.com./x',
+    'https://example.com/x\u0000y',
+  ];
+
+  it.each(pasted)(
+    '%s: https, no sign-in part, within the limit, and read back unchanged',
+    (text) => {
+      const link = accepted(text);
+      const url = new URL(link.url);
+      expect(url.protocol).toBe('https:');
+      expect(url.username + url.password).toBe('');
+      expect(url.href).toBe(link.url);
+      expect(link.url.length).toBeLessThanOrEqual(SONG_LINK_URL_MAX_LENGTH);
+      expect(link.url).not.toMatch(/\s/);
+      // Saved, read from the row and parsed again (as `usableLinks` does), it is the same link.
+      expect(accepted(link.url)).toEqual(link);
+      if (link.provider === 'youtube') {
+        expect(url.origin + url.pathname).toBe('https://www.youtube.com/watch');
+        expect(youTubeEmbedUrl(link)).toMatch(
+          /^https:\/\/www\.youtube-nocookie\.com\/embed\/[A-Za-z0-9_-]{11}\?playsinline=1&rel=0(&start=\d+)?$/,
+        );
+      } else {
+        expect(youTubeEmbedUrl(link)).toBeNull();
+      }
+      if (link.provider === 'spotify') expect(link.url).toBe(SPOTIFY);
+    },
+  );
+});

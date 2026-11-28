@@ -3,10 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { onlineManager, type QueryClient } from '@tanstack/react-query';
 import { Route } from 'react-router';
 import type { Song } from '@/features/library/songForm';
+import { songKeys } from '@/features/library/useSongs';
+import { loopKeys } from '@/features/loops/loopKeys';
 import { offlineDb } from '@/features/offline/offlineDb';
 import type { Sitting } from '@/features/practice/sittings';
 import { readVisitSittings, recordVisitSitting } from '@/features/practice/visitSittings';
 import type { SongLinkRow } from '@/features/recordings/songLinkForm';
+import { songLinkKeys } from '@/features/recordings/songLinkKeys';
 import {
   opArgs,
   queryResult,
@@ -26,7 +29,14 @@ import {
 } from '@/test/linkTable';
 import { expectLocked, expectUnlocked } from '@/test/locked';
 import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
-import { historyBack, historyForward, renderRoutes, RouteMarker, settle } from '@/test/render';
+import {
+  historyBack,
+  historyForward,
+  renderRoutes,
+  RouteMarker,
+  settle,
+  testQueryClient,
+} from '@/test/render';
 import { SongOverviewPage } from './SongOverviewPage';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
@@ -914,6 +924,310 @@ describe('SongOverviewPage recordings (Unit 14)', () => {
       );
       expect(field('Original')).toHaveValue(SPOTIFY_URL);
       expect(field('Drumless')).toHaveValue('https://example.com/drumless');
+    });
+  });
+
+  // 14 Test: what else can happen round a save, and a read that fails over what is showing.
+  describe('other tabs, other reads and other ways out (14 Test)', () => {
+    const linksKey = songLinkKeys.forSong('user-1', SONG);
+    const dropped = { message: 'TypeError: Failed to fetch', code: '' };
+
+    it('locks Remove and Add another link too while the save is on its way', async () => {
+      const lesson = linkRow('lesson', { url: 'https://example.com/lesson' });
+      const user = await opened([original, lesson]);
+      await screen.findByRole('link', { name: 'Original' });
+      await manage(user);
+      await user.type(field('Drumless'), SPOTIFY_URL);
+      const release = links.holdNext('insert');
+      await user.click(save());
+      await within(form()).findByRole('button', { name: 'Saving…' });
+
+      const removeOriginal = within(form()).getByRole('button', { name: 'Remove Original' });
+      const addAnother = within(form()).getByRole('button', { name: 'Add another link' });
+      for (const control of [removeOriginal, addAnother]) expectLocked(control);
+      await user.click(removeOriginal);
+      await user.click(within(form()).getByRole('button', { name: 'Remove Other link 1' }));
+      await user.click(addAnother);
+      expect(field('Original')).toHaveValue(WATCH_URL);
+      expect(within(form()).getAllByRole('textbox', { name: /^Other link/ })).toHaveLength(1);
+      expect(field('Other link 1')).toHaveValue('https://example.com/lesson');
+
+      release();
+      await waitFor(() => noForm());
+      // Only what was typed before the press was sent.
+      expect(links.sent('delete')).toEqual([]);
+      expect(links.sent('update')).toEqual([]);
+      expect(links.sent('insert')).toHaveLength(1);
+      expect(links.rows()).toHaveLength(3);
+    });
+
+    it('an Original saved in another tab while one is typed here is refused once, then the same field points that row at what was typed', async () => {
+      const user = await opened();
+      await user.click(await screen.findByRole('button', { name: 'Add a recording' }));
+      await user.type(field('Original'), WATCH_URL);
+      // The other tab's save is in the database; this tab hasn't read the list since.
+      const theirs = spotifyLink('theirs', { kind: 'original' });
+      links.setRows([theirs]);
+      await user.click(save());
+
+      expect(await within(form()).findByRole('alert')).toHaveTextContent(
+        "Couldn't save the recordings. The server refused it.",
+      );
+      expect(links.rows()).toEqual([theirs]);
+      // The list is read again: the field now stands for their row, and keeps what was typed.
+      expect(await within(form()).findByRole('button', { name: 'Remove Original' })).toBeVisible();
+      expect(field('Original')).toHaveValue(WATCH_URL);
+
+      await user.click(save());
+      await waitFor(() => noForm());
+      expect(links.sent('insert')).toHaveLength(1);
+      expect(links.rows()).toEqual([{ ...theirs, provider: 'youtube', url: WATCH_URL }]);
+      expect(await screen.findByRole('link', { name: 'Original' })).toHaveAttribute(
+        'href',
+        `/songs/${SONG}/play?source=original`,
+      );
+    });
+
+    it('a link saved in another tab shows here at the next read, without the page being touched', async () => {
+      await opened();
+      const add = await screen.findByRole('button', { name: 'Add a recording' });
+      add.focus();
+      links.setRows([original, drumless]);
+      await act(() => client.invalidateQueries({ queryKey: linksKey }));
+
+      const names = within(await screen.findByTestId('play-along-buttons'))
+        .getAllByRole('link')
+        .map((link) => link.textContent);
+      expect(names).toEqual(['Tab', 'Original', 'Drumless on Spotify (opens in a new tab)']);
+      expect(screen.queryByRole('link', { name: 'Play whole song' })).not.toBeInTheDocument();
+      noForm();
+    });
+
+    it('a link removed in another tab leaves here at the next read, and the page is as it was before any link', async () => {
+      await opened([original]);
+      await screen.findByRole('link', { name: 'Original' });
+      links.setRows([]);
+      await act(() => client.invalidateQueries({ queryKey: linksKey }));
+      await waitFor(() => noPlayAlong());
+      expect(screen.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Add a recording' })).toBeVisible();
+    });
+
+    it('a read from before the save that answers after it doesn’t take the new link away', async () => {
+      const user = await opened();
+      await user.click(await screen.findByRole('button', { name: 'Add a recording' }));
+      await user.type(field('Original'), WATCH_URL);
+
+      // A read of the links goes out (the window was focused, say) and hangs.
+      let answerStale!: () => void;
+      const stale = new Promise<FakeResult>((resolve) => (answerStale = () => resolve(ok([]))));
+      const served = queryResult.getMockImplementation()!;
+      let held = false;
+      queryResult.mockImplementation(async (call) => {
+        const isRead =
+          call.table === 'song_links' &&
+          !['insert', 'update', 'delete'].some((method) => opArgs(call, method));
+        if (isRead && !held) {
+          held = true;
+          return stale;
+        }
+        return served(call);
+      });
+      void client.refetchQueries({ queryKey: linksKey });
+      await waitFor(() => expect(held).toBe(true));
+
+      await user.click(save());
+      await waitFor(() => noForm());
+      expect(await screen.findByRole('link', { name: 'Original' })).toBeVisible();
+      // The old answer arrives now: it says the song has no links.
+      await act(async () => {
+        answerStale();
+        await stale;
+      });
+      await settle();
+      expect(screen.getByRole('link', { name: 'Original' })).toBeVisible();
+      expect(screen.queryByRole('button', { name: 'Add a recording' })).not.toBeInTheDocument();
+      expect(client.getQueryData<SongLinkRow[]>(linksKey)).toMatchObject([{ url: WATCH_URL }]);
+    });
+
+    it('a read that fails over the links keeps the buttons, and the form still edits what is saved', async () => {
+      const user = await opened([original, drumless]);
+      await screen.findByRole('link', { name: 'Original' });
+      links.failNext('select', dropped);
+      await act(() => client.invalidateQueries({ queryKey: linksKey }));
+
+      // The read did fail, with the rows still there: only then is "still showing" worth asserting.
+      await waitFor(() => expect(client.getQueryState(linksKey)?.status).toBe('error'));
+      expect(client.getQueryData(linksKey)).toHaveLength(2);
+      expect(screen.getByRole('link', { name: 'Original' })).toBeVisible();
+      expect(screen.getByRole('link', { name: /^Drumless on Spotify/ })).toBeVisible();
+      expect(screen.queryByText(/Couldn't load this song's recordings/)).not.toBeInTheDocument();
+
+      await manage(user);
+      expect(field('Original')).toHaveValue(WATCH_URL);
+      expect(field('Drumless')).toHaveValue(SPOTIFY_URL);
+      expect(within(form()).queryByRole('alert')).not.toBeInTheDocument();
+      expectUnlocked(save());
+      expect(save()).toBeEnabled();
+    });
+
+    it('a removal whose answer was lost and is pressed again asks for nothing more and closes', async () => {
+      const user = await opened([original]);
+      await screen.findByRole('link', { name: 'Original' });
+      await manage(user);
+      await user.click(within(form()).getByRole('button', { name: 'Remove Original' }));
+      links.loseNext('delete');
+      await user.click(save());
+
+      expect(await within(form()).findByRole('alert')).toHaveTextContent(
+        "The server couldn't be reached. Check the connection and try again. Some changes may have been saved",
+      );
+      expect(links.rows()).toEqual([]);
+      // Read again, the field is an empty new one: there is nothing saved to remove.
+      await waitFor(() =>
+        expect(
+          within(form()).queryByRole('button', { name: 'Remove Original' }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(field('Original')).toHaveValue('');
+
+      await user.click(save());
+      await waitFor(() => noForm());
+      expect(links.sent('delete')).toEqual([[original.id]]);
+      expect(links.sent('insert')).toEqual([]);
+      expect(await screen.findByRole('button', { name: 'Add a recording' })).toBeVisible();
+      expect(screen.getByRole('link', { name: 'Play whole song' })).toBeVisible();
+    });
+
+    it('a change whose answer was lost and is pressed again sends the same change, and ends with one link', async () => {
+      const user = await opened([original]);
+      await screen.findByRole('link', { name: 'Original' });
+      await manage(user);
+      await user.clear(field('Original'));
+      await user.type(field('Original'), SPOTIFY_URL);
+      links.loseNext('update');
+      await user.click(save());
+      expect(await within(form()).findByRole('alert')).toHaveTextContent(
+        "The server couldn't be reached.",
+      );
+      expect(links.rows()).toMatchObject([{ id: original.id, url: SPOTIFY_URL }]);
+
+      await user.click(save());
+      await waitFor(() => noForm());
+      expect(links.sent('insert')).toEqual([]);
+      expect(links.rows()).toMatchObject([
+        { id: original.id, provider: 'spotify', url: SPOTIFY_URL },
+      ]);
+      expect(await screen.findByRole('link', { name: /^Original on Spotify/ })).toBeVisible();
+    });
+
+    // 14 Test, bug 3 (fixed here): an update that matches no row is no error to PostgREST, so
+    // the form used to close as if it had saved, and the next read showed no link at all.
+    it('a link changed here after another tab removed it: the form says it has been deleted, and Save again adds it', async () => {
+      const user = await opened([original]);
+      await screen.findByRole('link', { name: 'Original' });
+      await manage(user);
+      await user.clear(field('Original'));
+      await user.type(field('Original'), SPOTIFY_URL);
+      links.setRows([]);
+      await user.click(save());
+
+      expect(await within(form()).findByRole('alert')).toHaveTextContent(
+        "Couldn't save the recordings. It has been deleted, on this device or another.",
+      );
+      expect(links.sent('update')).toHaveLength(1);
+      expect(links.rows()).toEqual([]);
+      // Read again, the field is a new one that keeps what was typed.
+      await waitFor(() =>
+        expect(
+          within(form()).queryByRole('button', { name: 'Remove Original' }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(field('Original')).toHaveValue(SPOTIFY_URL);
+
+      await user.click(save());
+      await waitFor(() => noForm());
+      expect(links.rows()).toMatchObject([
+        { kind: 'original', provider: 'spotify', url: SPOTIFY_URL },
+      ]);
+      expect(await screen.findByRole('link', { name: /^Original on Spotify/ })).toBeVisible();
+    });
+
+    it('a step after a link that has gone isn’t sent: the save stops there, as at any refusal', async () => {
+      const lesson = linkRow('lesson', { url: 'https://example.com/lesson' });
+      const user = await opened([original, lesson]);
+      await screen.findByRole('link', { name: 'Original' });
+      await manage(user);
+      await user.clear(field('Other link 1'));
+      await user.type(field('Other link 1'), 'https://example.com/lesson-2');
+      await user.type(field('Drumless'), SPOTIFY_URL);
+      // Another device removes the lesson.
+      links.setRows([original]);
+      await user.click(save());
+
+      expect(await within(form()).findByRole('alert')).toHaveTextContent(
+        'It has been deleted, on this device or another. Some changes may have been saved',
+      );
+      expect(links.sent('insert')).toEqual([]);
+      // Its field goes with it; what was typed elsewhere stays for the next press.
+      await waitFor(() =>
+        expect(
+          within(form()).queryByRole('textbox', { name: /^Other link/ }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(field('Drumless')).toHaveValue(SPOTIFY_URL);
+      await user.click(save());
+      await waitFor(() => noForm());
+      expect(links.rows()).toMatchObject([{ id: original.id }, { kind: 'drumless' }]);
+    });
+
+    // The page's own links aren't locked while the form saves (Build's known gap; 14 Test,
+    // bug 2): what holds is that the save still lands and the page shows it on return.
+    it('left by one of the page’s links while the save is on its way, the save still lands and shows on return', async () => {
+      const user = await opened();
+      await user.click(await screen.findByRole('button', { name: 'Add a recording' }));
+      await user.type(field('Original'), WATCH_URL);
+      const release = links.holdNext('insert');
+      await user.click(save());
+      await within(form()).findByRole('button', { name: 'Saving…' });
+
+      await user.click(screen.getByRole('link', { name: 'New loop' }));
+      expect(await screen.findByText('At whole song')).toBeVisible();
+      release();
+      await waitFor(() => expect(links.rows()).toHaveLength(1));
+      await waitFor(() =>
+        expect(client.getQueryData<SongLinkRow[]>(linksKey)).toMatchObject([{ url: WATCH_URL }]),
+      );
+
+      historyBack();
+      expect(await screen.findByRole('link', { name: 'Original' })).toBeVisible();
+      noForm();
+      expect(links.sent('insert')).toHaveLength(1);
+    });
+
+    it('on a cold start offline with the song cached but its links never read, offers the tab and asks for nothing', async () => {
+      serve();
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(songKeys.detail('user-1', SONG), song);
+      queryClient.setQueryData(loopKeys.forSong('user-1', SONG), [older]);
+      act(() => onlineManager.setOnline(false));
+      renderRoutes(<Route path="/songs/:id" element={<SongOverviewPage />} />, {
+        path: `/songs/${SONG}`,
+        queryClient,
+      });
+
+      expect(await screen.findByRole('link', { name: 'Play whole song' })).toBeVisible();
+      expect(screen.getByRole('link', { name: 'New loop' })).toBeVisible();
+      await settle();
+      // Not known to be none, so not offered; and not a failure either.
+      expect(screen.queryByRole('button', { name: 'Add a recording' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Couldn't load this song's recordings/)).not.toBeInTheDocument();
+      noPlayAlong();
+      expect(queryResult.mock.calls.filter(([call]) => call.table === 'song_links')).toEqual([]);
+
+      // Back online the links are read and the way in appears.
+      act(() => onlineManager.setOnline(true));
+      expect(await screen.findByRole('button', { name: 'Add a recording' })).toBeVisible();
     });
   });
 

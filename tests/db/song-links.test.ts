@@ -493,3 +493,123 @@ describe('songs.last_played_at', () => {
     expect(data?.loops).toEqual([]);
   });
 });
+
+// 14 Test. The addresses are `parseSongLink`'s own output for odd pastes (songLinks.test.ts has
+// the pastes), written out for the reason given at the top: what the parser saves, the checks take.
+describe('the forms the parser saves pass the checks', () => {
+  it.each([
+    ['a video with a start time', 'youtube', `${WATCH}&t=90s`],
+    ['a host in another script, as punycode', 'web', 'https://xn--mnchen-3ya.example/lesson'],
+    [
+      'a path in another script, encoded',
+      'web',
+      'https://example.com/%D0%BF%D1%83%D1%82%D1%8C?q=%D1%83%D0%B4%D0%B0%D1%80%D0%BD%D1%8B%D0%B5#%D1%87',
+    ],
+    ['an encoded space and NUL', 'web', 'https://example.com/a%20b/x%00y'],
+    ['an address with a port and a fragment', 'web', 'https://example.com:8443/x?a=1&a=2#part-2'],
+    ['a bare host', 'web', 'https://a.b/'],
+    ['an IP address', 'web', 'https://127.0.0.1/x'],
+    ['a YouTube page that is no video', 'web', 'https://www.youtube.com/@somedrummer'],
+  ] as const)('takes %s and gives it back unchanged', async (_name, provider, url) => {
+    const id = await insertLink(a, songA, { provider, url });
+    expect(await linkAsAdmin(id)).toMatchObject({ provider, url });
+  });
+
+  it.each([
+    ['a space inside', 'https://example.com/a b'],
+    ['a line break at the end', 'https://example.com/a\n'],
+    ['a tab inside', 'https://example.com/a\tb'],
+    ['capitals in the scheme', 'HTTPS://example.com/a'],
+    ['nothing after the scheme', 'https://'],
+  ])('refuses %s, which the parser never saves', async (_name, url) => {
+    const row = linkRow(a, songA, { url });
+    const { error } = await a.client.from('song_links').insert(row);
+    expect(error?.code).toBe(PG.CHECK_VIOLATION);
+    expect(await linkAsAdmin(row.id)).toBeNull();
+  });
+});
+
+// What each step of the form's save meets when another tab or device got there first.
+describe('a save’s steps after another device has changed the links', () => {
+  it('an update of a link removed since is no error and changes no row: only the row asked back tells', async () => {
+    const song = await insertSong(a);
+    const id = await insertLink(a, song, { kind: 'original', provider: 'youtube', url: WATCH });
+    const removed = await a.client.from('song_links').delete().eq('id', id).eq('user_id', a.id);
+    expect(removed.error).toBeNull();
+
+    // Sent bare, nothing says no row was there (how the form once closed on a link that had gone).
+    const blind = await a.client
+      .from('song_links')
+      .update({ provider: 'spotify', url: SPOTIFY })
+      .eq('id', id)
+      .eq('user_id', a.id);
+    expect(blind.error).toBeNull();
+    // As `updateSongLink` sends it, asking for the row: the empty answer is what it reports as gone.
+    const asked = await a.client
+      .from('song_links')
+      .update({ provider: 'spotify', url: SPOTIFY })
+      .eq('id', id)
+      .eq('user_id', a.id)
+      .select('id')
+      .maybeSingle();
+    expect(asked.error).toBeNull();
+    expect(asked.data).toBeNull();
+    const { data, error } = await admin.from('song_links').select('id').eq('song_id', song);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+
+  it('a removal of a link already gone is no error, so a removal sent twice is safe', async () => {
+    const id = await insertLink(a, songA);
+    for (const attempt of [1, 2]) {
+      const { error } = await a.client
+        .from('song_links')
+        .delete()
+        .in('id', [id])
+        .eq('user_id', a.id);
+      expect(error, `attempt ${attempt}`).toBeNull();
+    }
+    expect(await linkAsAdmin(id)).toBeNull();
+  });
+
+  it('a second Original under a new id is a duplicate key with no row of that id, which the app reports as a refusal', async () => {
+    const song = await insertSong(a);
+    const theirs = await insertLink(a, song, {
+      kind: 'original',
+      provider: 'spotify',
+      url: SPOTIFY,
+    });
+    const mine = linkRow(a, song, { kind: 'original', provider: 'youtube', url: WATCH });
+    const inserted = await a.client.from('song_links').insert(mine);
+    expect(inserted.error?.code).toBe(PG.UNIQUE_VIOLATION);
+    // The app's next step: is it my own row, saved by a press whose answer was lost? No.
+    const mineThere = await a.client
+      .from('song_links')
+      .update({ provider: mine.provider, url: mine.url })
+      .eq('id', mine.id)
+      .eq('user_id', a.id)
+      .select('id')
+      .maybeSingle();
+    expect(mineThere.error).toBeNull();
+    expect(mineThere.data).toBeNull();
+    expect(await linkAsAdmin(theirs)).toMatchObject({ provider: 'spotify', url: SPOTIFY });
+  });
+
+  it('the same time played sent twice, and an older one after it, leave one time: the write needs no order', async () => {
+    const song = await insertSong(a);
+    const times = [
+      '2026-11-20T10:00:05.000Z',
+      '2026-11-20T10:00:05.000Z',
+      '2026-11-20T10:00:00.000Z',
+    ];
+    for (const time of times) {
+      const { error } = await a.client
+        .from('songs')
+        .update({ last_played_at: time })
+        .eq('id', song)
+        .eq('user_id', a.id);
+      expect(error).toBeNull();
+    }
+    expect(Date.parse((await songAsAdmin(song)).last_played_at!)).toBe(Date.parse(times[0]!));
+  });
+});
