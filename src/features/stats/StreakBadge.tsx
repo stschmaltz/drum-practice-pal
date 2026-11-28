@@ -2,6 +2,7 @@ import { Icon } from '@/components/icons';
 import { useAllSessions } from '@/features/practice/useSessions';
 import { countLabel, daysLabel } from './statLabels';
 import { currentStreak } from './streak';
+import { useToday } from './useToday';
 
 /**
  * The practice streak in the Songs header (Unit 16): a flame and the number
@@ -9,8 +10,10 @@ import { currentStreak } from './streak';
  */
 export function StreakBadge() {
   const sessions = useAllSessions();
+  // Drawn again when the day changes: left open over two midnights, a streak that has ended goes.
+  const now = useToday();
   if (!sessions.data) return null;
-  const days = currentStreak(sessions.data, new Date());
+  const days = currentStreak(sessions.data, now);
   if (days === 0) return null;
   return (
     <p

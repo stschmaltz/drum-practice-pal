@@ -9,7 +9,9 @@ import { inBrowserLocale } from '@/test/browserLocale';
 import { renderRoutes, settle, testQueryClient } from '@/test/render';
 import { BADGES, badgeProgress } from './badges';
 import { BadgeSection } from './BadgeSection';
+import { forgetDateFormats } from './dateLabels';
 import { StatsPage } from './StatsPage';
+import { StreakBadge } from './StreakBadge';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -1306,6 +1308,9 @@ describe('StatsPage, copy and locale', () => {
   // 17 QA issue 4 and round 1: "…, the week of 8. Juni.." in an English sentence.
   describe('with the browser set to German', () => {
     inBrowserLocale('de');
+    // The tests before this one built `dateLabels.ts`'s formatters in English; built again
+    // here, one that names no locale comes out German and fails (20 batch 9, Test bug 2).
+    beforeEach(forgetDateFormats);
     const english = (date: Date, options: Intl.DateTimeFormatOptions) =>
       new Intl.DateTimeFormat('en', options).format(date);
     const yearIfNotThis = (date: Date): Intl.DateTimeFormatOptions =>
@@ -1602,6 +1607,24 @@ describe('StatsPage, copy and locale', () => {
       expect(queryResult.mock.calls).toHaveLength(reads);
     });
 
+    // 20 batch 9 Review: the Songs header's flame read the clock once, at its last render.
+    it('takes the Songs header’s streak away once it has ended, two midnights on', async () => {
+      vi.setSystemTime(at(26, 23, 50));
+      serve({ sessions: [session(at(26, 20).toISOString(), 600, 0.7)], loops: [activeGroove] });
+      renderRoutes(<Route path="/" element={<StreakBadge />} />, { path: '/' });
+      expect(await screen.findByTestId('streak')).toHaveTextContent('Practice streak: 1 day');
+      const reads = queryResult.mock.calls.length;
+
+      // Yesterday's practice still holds the streak.
+      vi.setSystemTime(at(27, 0, 5));
+      lookAgain();
+      expect(screen.getByTestId('streak')).toHaveTextContent('Practice streak: 1 day');
+      vi.setSystemTime(at(28, 0, 5));
+      lookAgain();
+      expect(screen.queryByTestId('streak')).not.toBeInTheDocument();
+      expect(queryResult.mock.calls).toHaveLength(reads);
+    });
+
     it('keeps the period chosen and a chart left open when the day changes', async () => {
       vi.setSystemTime(at(26, 23, 50));
       serve({
@@ -1843,8 +1866,12 @@ describe('StatsPage, copy and locale', () => {
     it('opens scrolled to its newest week, and is left where the reader put it afterwards', async () => {
       serve();
       const { readAgain } = await openStats();
-      expect(screen.getByTestId('practice-heatmap').parentElement).toHaveClass('overflow-x-auto');
+      const box = screen.getByTestId('practice-heatmap').parentElement;
+      expect(box).toHaveClass('overflow-x-auto');
       expect(scrolledTo).toEqual([351]);
+      // A tab stop with a name, so the arrow keys scroll it where the browser makes it none (Safari).
+      expect(screen.getByRole('group', { name: 'Practice days map' })).toBe(box);
+      expect(box).toHaveAttribute('tabindex', '0');
 
       // Another device's session arrives: the page is drawn again, the box not moved.
       serve({ sessions: [...sessions, session(daysAgo(2), 300, 0.7)], loops });

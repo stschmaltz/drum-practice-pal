@@ -1,9 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { inBrowserLocale } from '@/test/browserLocale';
 import {
   axisDates,
   dateSpan,
   dayOfMonth,
+  forgetDateFormats,
   narrowWeekday,
   shortDate,
   shortMonth,
@@ -91,6 +92,8 @@ describe('axisDates', () => {
 // sentence's.
 describe('with the browser set to German', () => {
   inBrowserLocale('de');
+  // Every formatter is built again in German's browser, whatever ran before.
+  beforeEach(forgetDateFormats);
   const june = new Date(2026, 5, 8);
 
   it('still writes every date in English, left to itself', () => {

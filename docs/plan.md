@@ -698,14 +698,9 @@ Shane after using Unit 16's Stats page (2026-11-27): the idea is good, but the c
 
 **Carried forward**
 
-- [FIX 17.3a, batch 9] From 17 Build (QA fix round 1): dates are written in the browser's locale inside English sentences ("the week of 8. Juni"; counts now follow the locale in a total and its change line alike, issue 4), where QA suggested `'en'` throughout. (docs/units/17-stats.md, Build (QA fix round 1))
-- [FIX 17.3b, batch 9] "Other" is still its own row for a single sixth song. (docs/units/17-stats.md, Build (QA fix round 1))
-- [FIX 17.4a, batch 9] From 17 Review: the Stats page's "Couldn't load your stats" takes its reason from the sessions read's error when there is one, also when it is the loops read that failed to load (`sessions.error ?? loops.error`, from Unit 16). (docs/units/17-stats.md, Review)
-- [FIX 17.4b, batch 9] From 17 Review: the page works its dates out when it renders, so one left open past midnight shows yesterday's "today" until something redraws it. (docs/units/17-stats.md, Review)
-- [FIX 17.5a, 17.5b, batch 9] From 17 QA (after QA fix round 1): counts that are never grouped ("1100 h", "1100-day streak") sit beside one that is ("1,100" days), and a locale's date ending in a full stop doubles the sentence's. (docs/units/17-stats.md, QA (after QA fix round 1), issues 1 to 6)
-- [FIX 17.5e, batch 9] From 17 QA (after QA fix round 1): under 358 px of page a 26-week map opens scrolled to its oldest week.
+None left: 17.3a, 17.3b, 17.4a, 17.4b, 17.5a, 17.5b and 17.5e were closed by Unit 20, batch 9 (docs/units/20-loose-ends.md, Batch 9).
 
-Each line carries its class, its id from the Unit 20 triage (`docs/loose-ends.md`) and the batch that closes it. Accepted: 17.3c, 17.5c and 17.5d, in the Accepted section.
+Accepted: 17.3c, 17.5c and 17.5d, in the Accepted section, with 20.9a and 20.9b from the batch that closed the rest.
 
 ### 20 Loose ends
 
@@ -723,7 +718,7 @@ The triage is `docs/loose-ends.md` (2026-11-28): every Carried forward line chec
 6. Sign-in and sign-out: a refused token on a read recovers or goes to the login page (13.01), and unsent practice survives a forced sign-out (D2's default); "Sign out anyway", the other half of that default, discards unsent practice, so Shane is asked before it is built
 7. Recordings: a loaded video survives a dropped connection (D8's default), and `sandbox` on the frame once the Human check has tried it (14.2)
 8. Focus and small jumps: a refused status change, C to Off, the Songs list's cold start (13.21, 13.35c, 13.37a, 13.37b)
-9. Stats copy and locale: English dates and grouped counts, the right error, the right "today", six songs named (17.3a, 17.3b, 17.4a, 17.4b, 17.5a, 17.5b, 17.5e)
+9. Stats copy and locale: English dates and grouped counts, the right error, the right "today", six songs named (17.3a, 17.3b, 17.4a, 17.4b, 17.5a, 17.5b, 17.5e). Done (docs/units/20-loose-ends.md, Batch 9); its Review took the same English dates to the three places outside Stats that say when a loop was practised
 10. Scripts and seed: a sweep for files in Storage with no song, which only lists them unless run with `--delete` (Shane is asked before it is ever run that way on the hosted project), and recordings in the seed (13.10, 14.5)
 11. Docs only: the triage itself, with the **Accepted** section of this plan written in the same pass (no ACCEPT line is left in a Carried forward list). At the end of the unit it only confirms that every Carried forward list is empty
 
@@ -852,7 +847,9 @@ Real, known, and not worth fixing now, written down so nobody raises them again 
 
 - **17.3c** The chart's label boxes are estimated from a width per character (`approxTextWidth`), not measured (17 Build, QA fix round 1). `stats.spec.ts` measures the real boxes with the app's font. Revisit if the font changes.
 - **17.5c** A capped "Other" bar looks equal to the top song's (17 QA after fix round 1). `barShare` caps it at the scale on purpose (17 QA issue 9), and its minutes are written beside it. Revisit if "Other" is often the biggest row.
-- **17.5d** Under 358 px of page the charts' text is 9.3 px (17 QA after fix round 1). That is narrower than any phone the app is laid out for. Revisit if a phone that narrow is ever used.
+- **17.5d** On a 320 px phone the bar and line charts' text is 9.3 px; it is 10.5 px on a 360 px phone and 11 px on a 375 px one (measured in 20 batch 9 Review: the charts scale with the page's column, the window less its two 16 px gutters). The practice-days map's text never goes under 10 px: the map keeps its size and scrolls in its own box instead, at every window under 384 px and at 1024 px, opening on its newest week since batch 9 (17.5e). 320 px is narrower than any phone the app is laid out for. Revisit if a phone that narrow is ever used, or if 10.5 px turns out too small on a 360 px one.
+- **20.9a** A practice-days map that only starts to overflow after it was drawn stays on its oldest week: a 320 px phone turned from landscape (where the map fits) to portrait on the Stats page, today's ring 63 px off the box's right edge until the reader scrolls it or the page is opened again (20 batch 9 Test bug 1; `stats.spec.ts`, "a 320 px phone turned from landscape to portrait…" pins it). The box is scrolled to its end on mount and when the map gains a week, never on a resize: on a 360 or 375 px phone the same turn leaves today on show. A fix follows the box's size (a `ResizeObserver` that keeps a box at its end there, and leaves one the reader has scrolled back alone), which is more than the case is worth. Revisit if a phone that narrow is ever used, or if the map gets wide enough to scroll on a 390 px phone.
+- **20.9b** "Last practised today" beside a loop (the Tab page's loop panel, the song overview) and "Today" in a loop's History are worked out when the screen is drawn, so one left open past midnight says them a day late until something draws it again (20 batch 9 Review). The Stats page and the Songs header's streak follow the day (`useToday`); these don't, since each is redrawn by nearly everything done on its screen (a tap, a player event, a refetch on coming back to the tab) and none shows a number that would be wrong. Revisit if one of them is found stale at the kit: `useToday()` in the component is the fix.
 
 ## Risks and mitigations
 

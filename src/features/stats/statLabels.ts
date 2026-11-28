@@ -2,7 +2,7 @@
  * How the Stats page writes a play time and a count: one writer each, so a
  * total, its bar, its caption and its table row always agree. Pure.
  */
-import { STATS_LOCALE } from './statsLocale';
+import { COPY_LOCALE } from '@/lib/copyLocale';
 
 /**
  * A count as the page writes it: grouped from a thousand up, the English way
@@ -12,7 +12,7 @@ import { STATS_LOCALE } from './statsLocale';
  * a "1100-day streak"): a total and the line under it, days, hours, a bar's
  * minutes. `locale` is for tests.
  */
-export function countLabel(value: number, locale = STATS_LOCALE): string {
+export function countLabel(value: number, locale = COPY_LOCALE): string {
   return value.toLocaleString(locale);
 }
 

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
+import { focusRing } from '@/components/styles';
 import { narrowWeekday, shortDate, shortMonth } from './dateLabels';
 import {
   heatmapLine,
@@ -51,8 +52,16 @@ export function PracticeHeatmap({ weeks, now }: { weeks: HeatmapWeeks; now: Date
 
   return (
     <figure className="flex flex-col gap-2">
-      {/* On the narrowest phones the map keeps a readable size and scrolls, from its newest week. */}
-      <div ref={scrollBox} className="overflow-x-auto">
+      {/* On the narrowest phones the map keeps a readable size and scrolls, from its newest week.
+          A tab stop by name, so the arrow keys scroll it in every browser: Chromium and Firefox
+          make a scroll box one by themselves, Safari doesn't (20 batch 9 Review). */}
+      <div
+        ref={scrollBox}
+        role="group"
+        aria-label="Practice days map"
+        tabIndex={0}
+        className={`overflow-x-auto ${focusRing}`}
+      >
         <svg
           // Room for today's ring round a cell on the edge.
           viewBox={`${-HEATMAP_LEFT} ${-HEATMAP_TOP} ${units} ${height + HEATMAP_TOP + edge}`}
