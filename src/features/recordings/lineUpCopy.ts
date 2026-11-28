@@ -1,10 +1,10 @@
 /**
- * The words of the line-up under a video (Unit 19). In a module of its own,
- * with no component, so tests and the component share them.
+ * The words of the line-up under a video (Unit 19): what it shows and what
+ * its live region says. In a module of its own, with no component, so the
+ * components, the API's error and tests share them.
  */
-import { videoClockLabel } from './videoSync';
+import { videoClockLabel } from './videoClock';
 
-/** The words of the line under the video, in one place. */
 export const LINE_UP_COPY = {
   prompt: 'Line the tab up: when bar 1 starts, press',
   now: 'Bar 1 starts now',
@@ -29,3 +29,9 @@ export const LINE_UP_COPY = {
 
 /** Where bar 1 is, for the line and for the live region. */
 export const barOneLabel = (barOneSeconds: number) => `Bar 1 at ${videoClockLabel(barOneSeconds)}`;
+
+/** Said when "Bar 1 starts now" or a typed time has lined the tab up. */
+export const linedUpSaying = (barOneSeconds: number) => `Lined up. ${barOneLabel(barOneSeconds)}.`;
+
+/** Said at each nudge: where bar 1 is now. */
+export const nudgedSaying = (barOneSeconds: number) => `${barOneLabel(barOneSeconds)}.`;

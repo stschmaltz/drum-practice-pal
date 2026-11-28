@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useState } from 'react';
 import {
   RECORDING_NOT_READY,
   sameButForClock,
   type RecordingPlayer,
   type RecordingState,
 } from './recordingPlayer';
+import { useRecordingValue } from './useRecordingValue';
 import { createYouTubePlayer } from './youTubePlayer';
 
 /**
@@ -33,6 +34,8 @@ export function useRecordingPlayer() {
   return { frameRef, player };
 }
 
+const wholeState = (state: RecordingState) => state;
+
 /**
  * The player's state without its clock, for what is drawn from it (which
  * controls are on): it re-renders when the player becomes ready, starts,
@@ -41,24 +44,5 @@ export function useRecordingPlayer() {
  * itself (`player.getState()`).
  */
 export function useRecordingStatus(player: RecordingPlayer | null): RecordingState {
-  const store = useMemo(() => {
-    let current = player ? player.getState() : RECORDING_NOT_READY;
-    return {
-      subscribe: (onChange: () => void) => {
-        if (!player) return () => {};
-        const hear = (next: RecordingState) => {
-          if (sameButForClock(current, next)) return;
-          current = next;
-          onChange();
-        };
-        // What changed between the render and this subscription: React reads `get` again
-        // once it has subscribed, and re-renders if it differs.
-        const now = player.getState();
-        if (!sameButForClock(current, now)) current = now;
-        return player.subscribe(hear);
-      },
-      get: () => current,
-    };
-  }, [player]);
-  return useSyncExternalStore(store.subscribe, store.get);
+  return useRecordingValue(player, wholeState, RECORDING_NOT_READY, sameButForClock);
 }

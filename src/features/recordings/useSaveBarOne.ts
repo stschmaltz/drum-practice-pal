@@ -1,16 +1,14 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useSignedInUser } from '@/lib/auth';
-import type { SongLinkRow } from './songLinkForm';
+import {
+  cachedLineUp,
+  withBarOne,
+  type BarOneSave,
+  type LinkAtPress,
+  type SongLinkRow,
+} from './songLinkForm';
 import { songLinkKeys } from './songLinkKeys';
 import { saveBarOne } from './songLinksApi';
-
-export interface BarOneSave {
-  linkId: string;
-  /** The link's address as the page knew it at the press: the video the line-up is for. */
-  url: string;
-  /** The second of the video at which the tab's bar 1 starts; null takes the line-up away. */
-  barOneSeconds: number | null;
-}
 
 /**
  * What the server is known to hold for each link, per query client: the value
@@ -28,42 +26,12 @@ function confirmedOf(queryClient: QueryClient): Map<string, number | null> {
   return confirmed;
 }
 
-/** A cached link's line-up, or undefined when the list or the link isn't cached. */
-export function cachedBarOne(
-  rows: readonly SongLinkRow[] | undefined,
-  linkId: string,
-): number | null | undefined {
-  return cachedLineUp(rows, linkId)?.barOneSeconds;
-}
-
-/** A link as a press finds it in the cache: its line-up, and the address it is a line-up of. */
-export interface LinkAtPress {
-  barOneSeconds: number | null;
-  url: string;
-}
-
-function cachedLineUp(
-  rows: readonly SongLinkRow[] | undefined,
-  linkId: string,
-): LinkAtPress | undefined {
-  const row = rows?.find((link) => link.id === linkId);
-  // A row cached by a build from before Unit 19 has no `bar_one_seconds`.
-  return row && { barOneSeconds: row.bar_one_seconds ?? null, url: row.url };
-}
-
-function withBarOne(
-  rows: readonly SongLinkRow[] | undefined,
-  linkId: string,
-  barOneSeconds: number | null,
-): SongLinkRow[] | undefined {
-  return rows?.map((row) => (row.id === linkId ? { ...row, bar_one_seconds: barOneSeconds } : row));
-}
-
 /**
- * Saves where bar 1 falls in a link's video: "Bar 1 starts now" and each
- * nudge (Unit 19). Optimistic, so the tab follows the new line-up at once,
- * and online only like every edit of a link (a video needs a connection
- * anyway): the controls are off offline and their handlers ask `isOnline()`.
+ * Saves where bar 1 falls in a link's video: "Bar 1 starts now", a typed
+ * time and each nudge (Unit 19). Optimistic, so the tab follows the new
+ * line-up at once, and online only like every edit of a link (a video needs
+ * a connection anyway): the controls are off offline and their handlers ask
+ * `isOnline()`.
  *
  * Two can be in flight (two nudges, a nudge after a line-up):
  * - They are sent one at a time, in the order pressed (`scope`), so the
@@ -86,8 +54,9 @@ export function useSaveBarOne(songId: string) {
     queryClient.setQueryData<SongLinkRow[]>(queryKey, (rows) =>
       withBarOne(rows, linkId, barOneSeconds),
     );
+  /** The link's line-up as the cache shows it; undefined when the list or the link isn't cached. */
   const shown = (linkId: string) =>
-    cachedBarOne(queryClient.getQueryData<SongLinkRow[]>(queryKey), linkId);
+    cachedLineUp(queryClient.getQueryData<SongLinkRow[]>(queryKey), linkId)?.barOneSeconds;
 
   return useMutation({
     mutationKey,

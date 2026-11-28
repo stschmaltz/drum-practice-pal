@@ -5,6 +5,7 @@
  * tablet the box itself may be part-way below the window, so the window has
  * to follow too. Pure: the hook measures, this decides.
  */
+import { isOnShow, nextLineIsCutOff, type Span } from '@/features/player/barScroll';
 
 /** A vertical span in the window's coordinates. */
 export interface VerticalSpan {
@@ -26,9 +27,6 @@ export interface ReadableView extends VerticalSpan {
 /** Room left between the sticky bar and the line brought under it. */
 export const GAP_UNDER_BAR_PX = 12;
 
-/** Layout comes in fractions of a pixel: a bar that close to an edge is on show. */
-const EDGE_TOLERANCE_PX = 1;
-
 /**
  * The distance to scroll the window by (down is positive) so `bar` can be
  * read in `view`, with what comes after it. Null when nothing should move:
@@ -44,16 +42,20 @@ const EDGE_TOLERANCE_PX = 1;
  *   and with the marked line at its top already nothing moves.
  * - A bar played next that is above (a repeat going back) turns nothing:
  *   it is brought on show when it is reached.
+ *
+ * "On show" and the early turn are the score box's own rules (`isOnShow`,
+ * `nextLineIsCutOff` in barScroll.ts), so the box and the window agree.
  */
 export function windowScrollToShow(
   bar: VerticalSpan,
   view: ReadableView,
   next: VerticalSpan | null = null,
 ): number | null {
-  const endsInView = (span: VerticalSpan) => span.bottom <= view.bottom + EDGE_TOLERANCE_PX;
-  const onShow = bar.top >= view.top - EDGE_TOLERANCE_PX && endsInView(bar);
-  const nextCutOff = next !== null && next.top > bar.top + EDGE_TOLERANCE_PX && !endsInView(next);
-  if (onShow && !nextCutOff) return null;
+  const down = (span: VerticalSpan): Span => ({ start: span.top, end: span.bottom });
+  const shown = down(view);
+  if (isOnShow(down(bar), shown) && !nextLineIsCutOff(down(bar), next && down(next), shown)) {
+    return null;
+  }
   const top = Math.min(view.top, view.stuckTop ?? view.top);
   const distance = Math.round(bar.top - (top + GAP_UNDER_BAR_PX));
   return distance === 0 ? null : distance;

@@ -10,6 +10,7 @@ import { throwIfError, unwrap } from '@/lib/supabaseResult';
 import { LINE_UP_COPY } from './lineUpCopy';
 import {
   SONG_LINK_SELECT,
+  type BarOneSave,
   type LinkInsert,
   type LinkSavePlan,
   type LinkUpdate,
@@ -117,7 +118,7 @@ export class LinkChangedError extends UserFacingError {
  */
 export async function saveBarOne(
   userId: string,
-  { linkId, url, barOneSeconds }: { linkId: string; url: string; barOneSeconds: number | null },
+  { linkId, url, barOneSeconds }: BarOneSave,
 ): Promise<number | null> {
   const updated = await supabase
     .from('song_links')

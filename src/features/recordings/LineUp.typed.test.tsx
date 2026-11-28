@@ -63,6 +63,17 @@ async function renderLineUp(barOneSeconds: number | null = null) {
     /** Space or a tap on a bar asked for the video's first tap, `asks` times so far. */
     askForFirstTap: (asks: number) =>
       view.rerender(<Harness player={player} firstTapAsks={asks} />),
+    /** Opens the field as the user does: "Type a time", by way of "Line up again" once lined up. */
+    openField: async () => {
+      const again = screen.queryByRole('button', { name: 'Line up again' });
+      if (again) await user.click(again);
+      await user.click(button('Type a time'));
+    },
+    /** Types `text` over what the field holds; `{Enter}` at its end saves. */
+    retype: async (text: string) => {
+      await user.clear(field());
+      await user.type(field(), text);
+    },
   };
 }
 
@@ -81,10 +92,10 @@ const savedFor = () =>
 
 describe('typing where bar 1 starts', () => {
   it('needs no playing video: a typed time is saved and the tab is lined up', async () => {
-    const { user } = await renderLineUp();
+    const { user, openField } = await renderLineUp();
     // The video has never been played: the press-as-it-plays button is off, typing is not.
     expectLocked(button('Bar 1 starts now'));
-    await user.click(button('Type a time'));
+    await openField();
     await waitFor(() => expect(field()).toHaveFocus());
     expect(field()).toHaveValue('');
 
@@ -102,30 +113,27 @@ describe('typing where bar 1 starts', () => {
   });
 
   it('Enter saves; seconds alone and a comma are read too', async () => {
-    const { user } = await renderLineUp();
-    await user.click(button('Type a time'));
+    const { user, openField } = await renderLineUp();
+    await openField();
     await user.type(field(), '83,5{Enter}');
     await waitFor(() => expect(barOneSent()).toEqual([83.5]));
     expect(message()).toHaveTextContent('Bar 1 at 1:23.50.');
   });
 
   it('a lined-up link opens the field on its time, by way of "Line up again"', async () => {
-    const { user } = await renderLineUp(12.5);
-    await user.click(button('Line up again'));
-    await user.click(button('Type a time'));
+    const { user, openField, retype } = await renderLineUp(12.5);
+    await openField();
     expect(field()).toHaveValue('0:12.50');
 
-    await user.clear(field());
-    await user.type(field(), '0:13');
+    await retype('0:13');
     await user.click(button('Save'));
     await waitFor(() => expect(barOneSent()).toEqual([13]));
     expect(message()).toHaveTextContent('Bar 1 at 0:13.00.');
   });
 
   it('the saved time typed back unchanged sends nothing', async () => {
-    const { user } = await renderLineUp(12.5);
-    await user.click(button('Line up again'));
-    await user.click(button('Type a time'));
+    const { user, openField } = await renderLineUp(12.5);
+    await openField();
     await user.click(button('Save'));
     expect(message()).toHaveTextContent('Bar 1 at 0:12.50.');
     await settle();
@@ -133,8 +141,8 @@ describe('typing where bar 1 starts', () => {
   });
 
   it('refuses what isn’t a time, says so in fixed copy, keeps what was typed and saves nothing', async () => {
-    const { user } = await renderLineUp();
-    await user.click(button('Type a time'));
+    const { user, openField } = await renderLineUp();
+    await openField();
     await user.type(field(), 'soon');
     await user.click(button('Save'));
 
@@ -150,15 +158,15 @@ describe('typing where bar 1 starts', () => {
   });
 
   it('Cancel and Escape leave things as they were, with focus back on the way in', async () => {
-    const { user } = await renderLineUp();
-    await user.click(button('Type a time'));
+    const { user, openField } = await renderLineUp();
+    await openField();
     await user.type(field(), '0:07');
     await user.click(button('Cancel'));
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(message()).toHaveTextContent('Line the tab up: when bar 1 starts, press');
     await waitFor(() => expect(button('Bar 1 starts now')).toHaveFocus());
 
-    await user.click(button('Type a time'));
+    await openField();
     // Not what was typed before the cancel.
     expect(field()).toHaveValue('');
     await user.type(field(), '9{Escape}');
@@ -168,9 +176,9 @@ describe('typing where bar 1 starts', () => {
   });
 
   it('a save the server refuses puts the prompt back and says so', async () => {
-    const { user } = await renderLineUp();
+    const { user, openField } = await renderLineUp();
     links.failNext('update');
-    await user.click(button('Type a time'));
+    await openField();
     await user.type(field(), '0:07{Enter}');
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t save the line-up.');
@@ -179,8 +187,8 @@ describe('typing where bar 1 starts', () => {
   });
 
   it('offline, "Type a time" is off and a press opens nothing; an open field’s Save sends nothing', async () => {
-    const { user } = await renderLineUp();
-    await user.click(button('Type a time'));
+    const { user, openField } = await renderLineUp();
+    await openField();
     await user.type(field(), '0:07');
     act(() => onlineManager.setOnline(false));
     expectLocked(button('Save'));
@@ -198,8 +206,8 @@ describe('typing where bar 1 starts', () => {
 
 describe('typing where bar 1 starts, after QA (19 QA fix round 1)', () => {
   it('asks a phone for the keyboard that has a colon and letters, and for none of its help', async () => {
-    const { user } = await renderLineUp();
-    await user.click(button('Type a time'));
+    const { openField } = await renderLineUp();
+    await openField();
     // The decimal keypad can't type "0:07.25" or "1m30s", the forms the field suggests.
     expect(field()).toHaveAttribute('inputmode', 'text');
     expect(field()).toHaveAttribute('autocapitalize', 'off');
@@ -209,9 +217,8 @@ describe('typing where bar 1 starts, after QA (19 QA fix round 1)', () => {
   });
 
   it('a time saved by a press, to the millisecond, sends nothing when the field is saved as it opened', async () => {
-    const { user } = await renderLineUp(2.018);
-    await user.click(button('Line up again'));
-    await user.click(button('Type a time'));
+    const { user, openField } = await renderLineUp(2.018);
+    await openField();
     // Shown to the hundredth: saving it back would move the line-up by 2 ms.
     expect(field()).toHaveValue('0:02.02');
     await user.type(field(), '{Enter}');
@@ -226,11 +233,9 @@ describe('typing where bar 1 starts, after QA (19 QA fix round 1)', () => {
   it.each([['2.02'], ['0:02.020'], [' 0:02.02 '], ['2,02s']])(
     'the same time written another way (%j) is still the time it opened on: nothing is sent',
     async (text) => {
-      const { user } = await renderLineUp(2.018);
-      await user.click(button('Line up again'));
-      await user.click(button('Type a time'));
-      await user.clear(field());
-      await user.type(field(), `${text}{Enter}`);
+      const { openField, retype } = await renderLineUp(2.018);
+      await openField();
+      await retype(`${text}{Enter}`);
       await waitFor(() => expect(button('Line up again')).toHaveFocus());
       await settle();
       expect(links.sent('update')).toEqual([]);
@@ -238,11 +243,9 @@ describe('typing where bar 1 starts, after QA (19 QA fix round 1)', () => {
   );
 
   it('a time a hundredth away from the one it opened on is saved', async () => {
-    const { user } = await renderLineUp(2.018);
-    await user.click(button('Line up again'));
-    await user.click(button('Type a time'));
-    await user.clear(field());
-    await user.type(field(), '0:02.03{Enter}');
+    const { openField, retype } = await renderLineUp(2.018);
+    await openField();
+    await retype('0:02.03{Enter}');
     await waitFor(() => expect(barOneSent()).toEqual([2.03]));
   });
 });
@@ -340,15 +343,13 @@ describe('a line-up is saved for the video it was made on (19 QA issue 6)', () =
   const OTHER_VIDEO = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
 
   it('every save carries the address the page knows, and the server matches on it', async () => {
-    const { user, player, link } = await renderLineUp(4);
+    const { user, player, link, openField, retype } = await renderLineUp(4);
     await user.click(button('Tab later'));
     act(() => player.playAt(9));
     await user.click(button('Line up again'));
     await user.click(button('Bar 1 starts now'));
-    await user.click(button('Line up again'));
-    await user.click(button('Type a time'));
-    await user.clear(field());
-    await user.type(field(), '12{Enter}');
+    await openField();
+    await retype('12{Enter}');
     await waitFor(() => expect(barOneSent()).toEqual([4.25, 9, 12]));
     expect(savedFor()).toEqual([link.url, link.url, link.url]);
   });
@@ -405,11 +406,28 @@ describe('a line-up is saved for the video it was made on (19 QA issue 6)', () =
   });
 
   it('the form’s Enter is the same save: nothing is sent for a press the form refuses', async () => {
-    const { user } = await renderLineUp();
-    await user.click(button('Type a time'));
+    const { openField } = await renderLineUp();
+    await openField();
     fireEvent.submit(field().closest('form')!);
     await settle();
     expect(links.sent('update')).toEqual([]);
     expect(savedFor()).toEqual([]);
+  });
+});
+
+describe('the buttons that stand in for one another (19 Readability)', () => {
+  it('“Line up again” and “Bar 1 starts now” are one element, so focus on the pressed one is never dropped', async () => {
+    const { user, player } = await renderLineUp(4);
+    act(() => player.playAt(9));
+    const again = button('Line up again');
+    await user.click(again);
+    // The same button, renamed: nothing was taken off the page under the press.
+    expect(button('Bar 1 starts now')).toBe(again);
+    expect(again).toHaveFocus();
+
+    await user.click(again);
+    await waitFor(() => expect(barOneSent()).toEqual([9]));
+    expect(button('Line up again')).toBe(again);
+    expect(again).toHaveFocus();
   });
 });

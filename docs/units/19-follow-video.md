@@ -614,3 +614,46 @@ Every run was a fresh load from the top, Play on the video, and one reading in t
 
 - `npm run check`: green (6044 tests).
 - `E2E_PORT=4283 npx playwright test tests/e2e/recordings.spec.ts tests/e2e/design.spec.ts -g "recording|line-up|Unit 19|follows|video|phone on its side|page turns|Bar 1"` on a fresh build, after the cosmetic fix: 69 passed, 6 skipped.
+
+## Readability
+
+No behaviour changed. Checks before and after are at the end.
+
+### What changed
+
+- **The line-up, split by what is drawn** (`LineUp.tsx`, 397 lines, is now 262 with `LineUpParts.tsx` beside it). `LineUp` keeps the state and the presses. What is drawn is small components in `LineUpParts.tsx`: `LineUpRows` (the grid), `LineUpMessage` (drawn from a `LineUpNotice`, in place of a seven-way `if` chain inside the component), `LineUpControls` (the buttons of either state: `promptButtons` for "Bar 1 starts now", "Type a time" and Cancel while lining up again, `linedUpButtons` for the nudges, "Line up again" and Follow), `TypedTimeForm` (the field) and `LineUpLiveRegion`. The two sets of buttons are one component, not two, so that "Bar 1 starts now" and "Line up again" stay the same element across a press, as they were: my first cut had a component per state, which React mounts afresh at each change, and the pressed button would have left the page under the focus it held. Caught on reading the tree again, before any check; `LineUp.typed.test.tsx` now asserts the element is the same. `LineUpSpace` and the grid's class strings moved there too, so `LineUp.tsx` has no class string in it. The markup, classes, test ids and order of every state are as they were.
+- **Its focus hand-over is `lineUpFocus.ts`** (`handOverAttributes`, `findHandOver`), as `loopFocus.ts` is for the loop panel; **its sayings are in `lineUpCopy.ts`** (`linedUpSaying`, `nudgedSaying`), where the press and the typed save each built "Lined up. Bar 1 at …." by hand. What the line-up says without a press (the first-tap note, a player that gives up) is `useSayings` in `LineUp.tsx`, the same set-state-while-rendering as before.
+- **What saving a typed time comes to is a pure function**, `typedBarOne(text, openedOn, saved)` in `videoSync.ts` (the second, and whether it is a change to save; "unchanged" judged by what the field shows). It was three branches inside the submit handler. It has its own table in `videoSync.test.ts`.
+- **A video's time as text is `videoClock.ts`** (pure): `parseVideoClock`, split into `unitParts` / `secondsOfUnits` / `secondsOfColons`, `videoClockLabel`, `clockLabel` and `toMilliseconds`, out of `videoSync.ts`, which is now only where a second of the video is in the tab and the line-up's rules. `videoClockLabel` is `clockLabel` plus the hundredths, and `songLinks.ts`'s `startTimeLabel` is the same `clockLabel`: the hours, minutes and seconds were formatted twice. Their tables moved to `videoClock.test.ts` unchanged.
+- **One rule for "on show" and for the early turn.** `isOnShow(span, view)` and `nextLineIsCutOff(bar, next, view)` in `barScroll.ts` are what both `scrollToShow` (the score's box) and `windowScrollToShow` (`followScroll.ts`, the window) ask; each had its own copy of the comparison and its own 1 px tolerance.
+- **One store for what is read from a recording player.** `useRecordingValue(player, read, idle, same)` (`useRecordingValue.ts`) is the `useSyncExternalStore` store that `useRecordingStatus` and `useVideoPlace` each built by hand.
+- **The play screen** (`SongPage.tsx`, 558 to 433 lines). The recording's page state (the player, Follow, the asks for the video's first tap, the session) is `useRecordingSession` (`useRecordingSession.ts`, which now also has the `RecordingSession` type, out of `useVideoFollow.ts`); `RecordingBar` is its own file and takes that state as one prop (four props where it had nine); `useRecordingSpace(recording)` and `canTapToSeek(recording)` (`useVideoFollow.ts`) name what `SongPlayer` worked out inline for Space and for the score's `tappable`.
+- **The save, on the data hook pattern.** `BarOneSave`, `LinkAtPress`, `cachedLineUp` and `withBarOne` are in `songLinkForm.ts` with the link's other pure code; `useSaveBarOne.ts` keeps what needs the query client. `cachedBarOne` (exported, used once in its own file) is gone, and `saveBarOne` takes a `BarOneSave` where it spelled the same shape out.
+- **`announcementText` is imported from `src/lib/announcement.ts`** by the three files that use it; `useSongShortcuts.ts` no longer re-exports it.
+- **Small things.** `RecordingBox`: a `sideways:min-w-0` beside a plain `min-w-0` (the same value at every width) is gone, and the comment over the note said it sits beside the video "where there is room", which the fix round made untrue for a phone on its side. `useSaveBarOne`'s comment now names the typed time among what it saves. `lineUpCopy.ts` had its header twice.
+
+### Tests
+
+No assertion was changed, weakened or deleted. What moved:
+
+- `videoSync.test.ts`: the tables for `videoClockLabel` and `parseVideoClock` are in `videoClock.test.ts`, as they were. Added, twelve tests: three rows for `clockLabel`, one test for `toMilliseconds`, and eight for `typedBarOne`.
+- `LineUp.typed.test.tsx`: its view has `openField()` (by way of "Line up again" once the link is lined up) and `retype(text)`, for steps fifteen places wrote out. Added: one test, that "Line up again" and "Bar 1 starts now" are one element which keeps focus through both presses (true before this stage too; it guards the split above). The offline test's press on a locked "Type a time" is still a plain click, since it is the press that must open nothing.
+- `SongPage.test.tsx`, "the tab follows the video": `openVideo`'s view has `tapBar(barNumber)` and `placeBar(barNumber, top, bottom)`, both 1-based like `marked` and the comments beside them (they were `engine.fire('barTapped', { barIndex })` and `engine.barRects.set(barIndex, rect)`, ten and fourteen times); `watchWindowScroll()` is the `scrollBy` stub two describes set up, and `addTabBar(box)` the tab bar two tests built. One test that makes its own engine keeps `engine.fire`.
+- e2e: the five steps `recordings.spec.ts` defined inside its describe (`openVideo`, `openLinedVideo`, `followThrough`, `readableView`, `markedBox`) are exported from `recordingsPage.ts` with the other steps. There, `videoStub`'s six casts of the frame's window are one `call(method, ...args)`, and the three shapes `window.__drumPalPlayer` was cast to are one `FollowWindow`.
+
+### Left alone
+
+- `youTubePlayer.ts`, the engine and `PlayerService` changes, the migration, `tests/db/song-links.test.ts` and `youTubePlayer.test.ts`: read, nothing to move.
+- `songLinks.ts` reads a link's `t=1h2m3s` (`startSecondsOf`) and `videoClock.ts` reads a typed "1h2m3s". They look alike and differ on purpose (whole seconds with capped digits and no sixties rule in an address; fractions and the sixties rule in the field), so they are still two.
+- `SongPlayer` still builds the one-bar `mark` it hands `useLoopPractice` from `followed.bar`: two lines, and `useVideoFollow`'s tests read `bar`.
+- `PlayerService.scrollToBarWhenRendered` calls `engine.scrollToBar` with one argument or two rather than passing `undefined`: the service tests assert the one-argument call.
+- QA's open issues after fix round 1 (the first turn to sideways, a seek while paused, the 667 px phone on its side, focus after "changed somewhere else") are behaviour, not readability.
+
+### AGENTS.md
+
+The Unit 19 section now names `useRecordingValue`, `videoClock.ts`, `typedBarOne`, `LineUpParts.tsx`, `lineUpFocus.ts`, the sayings in `lineUpCopy.ts`, `useRecordingSession` and `RecordingBar.tsx` (and that `SongPage.tsx` holds nothing else for a recording), `useRecordingSpace` / `canTapToSeek`, `isOnShow` / `nextLineIsCutOff`, where the save's pure helpers are, the test views' new helpers and the e2e steps now in `recordingsPage.ts`. It said `useVideoBar` for a hook that is `useVideoPlace`, and that `parseVideoClock` is in `videoSync.ts`; both are put right. Unit 13's line on `announcementText` says where it is imported from.
+
+### Verify
+
+- Before: `npm run check` green (6044 tests); `npm run test:db` 292 passed; `E2E_PORT=4283 npx playwright test tests/e2e/recordings.spec.ts tests/e2e/journey.spec.ts tests/e2e/shortcuts.spec.ts --project=phone --project=desktop` 73 passed, 3 skipped; `tests/e2e/design.spec.ts -g recordings` at the same two sizes 2 passed.
+- After: `npm run check` green (6066 tests: the thirteen added above, and nine from the per-file source checks, which count the seven new files); `npm run test:db` 292 passed; the same e2e run on a fresh build 73 passed, 3 skipped; the design test 2 passed. The dev server on port 5283 was left running and serves the refactored modules.

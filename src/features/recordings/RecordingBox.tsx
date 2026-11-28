@@ -29,7 +29,7 @@ const frameShapeClass = 'block aspect-video min-h-[200px] w-full min-w-[200px]';
 
 /** The way out and the line-up (and from 1024 px the note): under the video, or beside it where there is room. */
 const besideVideoClass =
-  'flex min-w-0 flex-col items-center lg:items-start sideways:min-w-0 sideways:flex-1 sideways:items-start';
+  'flex min-w-0 flex-col items-center lg:items-start sideways:flex-1 sideways:items-start';
 
 /**
  * A song's recording on its play screen: YouTube's own player in a frame,
@@ -95,7 +95,7 @@ export function RecordingBox({
         )}
       </div>
       <div className={besideVideoClass}>
-        {/* Beside the video where there is room; under the bar, off it, on a narrower window. */}
+        {/* Here from 1024 px; on a narrower window the page draws it under the bar (RecordingBar). */}
         <p className="hidden text-sm text-ink-muted lg:block">{RECORDING_NOTE}</p>
         <LinkOut
           link={video.link}

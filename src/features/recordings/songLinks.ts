@@ -23,6 +23,7 @@
  * never part of the link (`withoutWrapping`).
  */
 import { SONG_LINK_URL_MAX_LENGTH, type SongLinkKind, type SongLinkProvider } from '@/lib/schema';
+import { clockLabel } from './videoClock';
 
 export interface ParsedLink {
   provider: SongLinkProvider;
@@ -286,12 +287,7 @@ export function youTubeEmbedUrl(
 const PAGE_ORIGIN = /^https?:\/\/[a-z0-9.-]+(:\d{1,5})?$/i;
 
 /** "1:30", "1:02:03": a start time as a player shows it. */
-export function startTimeLabel(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = String(seconds % 60).padStart(2, '0');
-  return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${secs}` : `${minutes}:${secs}`;
-}
+export const startTimeLabel = clockLabel;
 
 /**
  * What the form says a link was recognised as, under its field. `kind` is the

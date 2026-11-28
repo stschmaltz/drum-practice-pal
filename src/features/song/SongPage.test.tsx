@@ -3538,12 +3538,47 @@ describe('SongPage recordings (Unit 14)', () => {
     async function openVideo(options: Parameters<typeof openSong>[0] = {}) {
       const opened = await openSong({ links: [lined], query: '?source=original', ...options });
       await frameShown();
-      return { ...opened, video: currentRecordingPlayer() };
+      const { engine } = opened;
+      return {
+        ...opened,
+        video: currentRecordingPlayer(),
+        /** A tap on a bar of the score, 1-based. */
+        tapBar: (barNumber: number) =>
+          act(() => engine.fire('barTapped', { barIndex: barNumber - 1 })),
+        /** Where a bar (1-based) is drawn in the window, top to bottom: jsdom lays nothing out. */
+        placeBar: (barNumber: number, top: number, bottom: number) =>
+          engine.barRects.set(barNumber - 1, { top, bottom, left: 0, right: 200 }),
+      };
+    }
+
+    /**
+     * The window's `scrollBy` for a describe (jsdom has none): what the follow asked the
+     * window to scroll by. Takes away any tab bar a test added with `addTabBar`.
+     */
+    function watchWindowScroll() {
+      const scrollBy = vi.fn();
+      beforeEach(() => {
+        scrollBy.mockReset();
+        vi.stubGlobal('scrollBy', scrollBy);
+      });
+      afterEach(() => {
+        vi.unstubAllGlobals();
+        document.querySelector('[data-bottom-tabs]')?.remove();
+      });
+      return scrollBy;
+    }
+
+    /** A phone's tab bar as AppShell marks it, with the box the browser would give it. */
+    function addTabBar(box: { top: number; bottom: number; height: number }) {
+      const tabs = document.createElement('nav');
+      tabs.setAttribute('data-bottom-tabs', '');
+      tabs.getBoundingClientRect = () => box as DOMRect;
+      document.body.append(tabs);
     }
 
     describe('a link that isn’t lined up', () => {
       it('offers the line-up under the video, off until the video has been played, and marks and moves nothing', async () => {
-        const { engine, video } = await openVideo({ links: [original] });
+        const { engine, video, tapBar } = await openVideo({ links: [original] });
         expect(message()).toHaveTextContent('Line the tab up: when bar 1 starts, press');
         expectLocked(lineUpButton('Bar 1 starts now'));
         noLineUpButton('Tab later');
@@ -3559,7 +3594,7 @@ describe('SongPage recordings (Unit 14)', () => {
         expectUnlocked(lineUpButton('Bar 1 starts now'));
 
         // Exactly Unit 14: no bar marked, nothing scrolled, a tap does nothing, nothing saved.
-        act(() => engine.fire('barTapped', { barIndex: 5 }));
+        tapBar(6);
         await settle();
         expect(marked(engine)).toBeNull();
         expect(shown(engine)).toEqual([]);
@@ -3961,20 +3996,15 @@ describe('SongPage recordings (Unit 14)', () => {
       });
 
       describe('the window', () => {
-        const scrollBy = vi.fn();
-        beforeEach(() => {
-          scrollBy.mockReset();
-          vi.stubGlobal('scrollBy', scrollBy);
-        });
-        afterEach(() => vi.unstubAllGlobals());
+        const scrollBy = watchWindowScroll();
 
         it('is scrolled to a bar the score box’s own scroll left out of sight, a line early, and never for one comfortably on show', async () => {
-          const { user, engine, video } = await openVideo();
+          const { user, video, placeBar } = await openVideo();
           // jsdom lays nothing out: the sticky bar ends at 0 and the window is 768 px tall.
-          engine.barRects.set(0, { top: 300, bottom: 420, left: 0, right: 200 });
-          engine.barRects.set(1, { top: 430, bottom: 550, left: 0, right: 200 });
-          engine.barRects.set(2, { top: 900, bottom: 1020, left: 0, right: 200 });
-          engine.barRects.set(3, { top: -500, bottom: -380, left: 0, right: 200 });
+          placeBar(1, 300, 420);
+          placeBar(2, 430, 550);
+          placeBar(3, 900, 1020);
+          placeBar(4, -500, -380);
 
           // Bar 1, with bar 2 on show under it: nothing moves.
           act(() => video.playAt(4.5));
@@ -3998,9 +4028,9 @@ describe('SongPage recordings (Unit 14)', () => {
 
     describe('a tap on a bar', () => {
       it('moves the video to that bar’s start, and never the tab’s own player', async () => {
-        const { engine, video } = await openVideo();
+        const { engine, video, tapBar } = await openVideo();
         act(() => video.playAt(4.5));
-        act(() => engine.fire('barTapped', { barIndex: 8 }));
+        tapBar(9);
         // Bar 9 starts 16 s into the tab, 20 s into the video.
         expect(video.seekTo).toHaveBeenLastCalledWith(20);
         expect(marked(engine)).toEqual([9, 9]);
@@ -4008,31 +4038,31 @@ describe('SongPage recordings (Unit 14)', () => {
 
         // Paused, it stays paused where it was sent.
         act(() => video.pauseAt(21));
-        act(() => engine.fire('barTapped', { barIndex: 0 }));
+        tapBar(1);
         expect(video.seekTo).toHaveBeenLastCalledWith(BAR_ONE);
         expect(video.play).not.toHaveBeenCalled();
         expect(marked(engine)).toEqual([1, 1]);
       });
 
       it('goes to the playthrough of a repeated bar nearest where the video is', async () => {
-        const { engine, video } = await openVideo({ ready: false });
+        const { engine, video, tapBar } = await openVideo({ ready: false });
         act(() =>
           engine.finishLoading({ barCount: 6, bars: barsInPlayOrder([1, 2, 3, 4, 3, 4, 5, 6]) }),
         );
         // In the second pass of bars 3 and 4 (12 to 16 s of the video): bar 3 there starts at 12 s.
         act(() => video.playAt(14.5));
-        act(() => engine.fire('barTapped', { barIndex: 2 }));
+        tapBar(3);
         expect(video.seekTo).toHaveBeenLastCalledWith(12);
         // From the song's start, its first playthrough at 8 s.
         act(() => video.playAt(4.5));
-        act(() => engine.fire('barTapped', { barIndex: 2 }));
+        tapBar(3);
         expect(video.seekTo).toHaveBeenLastCalledWith(8);
       });
 
       it('before the video has been tapped once does nothing but say what to do', async () => {
-        const { engine, video } = await openVideo();
+        const { video, tapBar } = await openVideo();
         act(() => video.becomeReady());
-        act(() => engine.fire('barTapped', { barIndex: 8 }));
+        tapBar(9);
         expect(video.seekTo).not.toHaveBeenCalled();
         expect(message()).toHaveTextContent(
           'Press Play on the video once. After that, Space and a tap on a bar work it.',
@@ -4040,7 +4070,7 @@ describe('SongPage recordings (Unit 14)', () => {
         // Once it plays, the note has done its job and the tap works.
         act(() => video.playAt(4.5));
         expect(message()).toHaveTextContent('Bar 1 at 0:04.00');
-        act(() => engine.fire('barTapped', { barIndex: 8 }));
+        tapBar(9);
         expect(video.seekTo).toHaveBeenLastCalledWith(20);
       });
 
@@ -4459,26 +4489,17 @@ describe('SongPage recordings (Unit 14)', () => {
     });
 
     describe('the reader’s own scrolling (19 Test)', () => {
-      const scrollBy = vi.fn();
-      const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 200 });
-      beforeEach(() => {
-        scrollBy.mockReset();
-        vi.stubGlobal('scrollBy', scrollBy);
-      });
-      afterEach(() => {
-        vi.unstubAllGlobals();
-        document.querySelector('[data-bottom-tabs]')?.remove();
-      });
+      const scrollBy = watchWindowScroll();
 
       it('isn’t undone inside the bar being played; the page follows again when the next bar is out of sight', async () => {
-        const { engine, video } = await openVideo();
-        engine.barRects.set(0, rect(300, 420));
+        const { engine, video, placeBar } = await openVideo();
+        placeBar(1, 300, 420);
         act(() => video.playAt(4.5));
         expect(scrollBy).not.toHaveBeenCalled();
         expect(shown(engine)).toEqual([1]);
 
         // The reader flicks ahead: bar 1 is now far above the window.
-        engine.barRects.set(0, rect(-900, -780));
+        placeBar(1, -900, -780);
         fireEvent.scroll(window);
         act(() => video.tick(5));
         act(() => video.tick(5.9));
@@ -4486,30 +4507,27 @@ describe('SongPage recordings (Unit 14)', () => {
         expect(shown(engine)).toEqual([1]);
 
         // Bar 2 is on show where they scrolled to: still nothing moves.
-        engine.barRects.set(1, rect(200, 320));
+        placeBar(2, 200, 320);
         act(() => video.tick(6.5));
         expect(scrollBy).not.toHaveBeenCalled();
         // Bar 3 isn't: the page goes to it.
-        engine.barRects.set(2, rect(1500, 1620));
+        placeBar(3, 1500, 1620);
         act(() => video.tick(8.5));
         expect(scrollBy).toHaveBeenCalledTimes(1);
         expect(scrollBy).toHaveBeenLastCalledWith({ top: 1488, behavior: 'instant' });
       });
 
       it('a bar under the sticky video or behind a phone’s tab bar isn’t on show; one between them is', async () => {
-        const { engine, video } = await openVideo();
+        const { video, placeBar } = await openVideo();
         // The video's bar ends 300 px down; a phone's tab bar starts at 712 px.
         const sticky = screen.getByTestId('recording-bar');
         sticky.getBoundingClientRect = () => ({ top: 0, bottom: 300, height: 300 }) as DOMRect;
-        const tabs = document.createElement('nav');
-        tabs.setAttribute('data-bottom-tabs', '');
-        tabs.getBoundingClientRect = () => ({ top: 712, bottom: 768, height: 56 }) as DOMRect;
-        document.body.append(tabs);
+        addTabBar({ top: 712, bottom: 768, height: 56 });
 
-        engine.barRects.set(0, rect(320, 440));
-        engine.barRects.set(1, rect(250, 370));
-        engine.barRects.set(2, rect(620, 740));
-        engine.barRects.set(3, rect(592, 712));
+        placeBar(1, 320, 440);
+        placeBar(2, 250, 370);
+        placeBar(3, 620, 740);
+        placeBar(4, 592, 712);
 
         act(() => video.playAt(4.5));
         expect(scrollBy).not.toHaveBeenCalled();
@@ -4526,15 +4544,12 @@ describe('SongPage recordings (Unit 14)', () => {
       });
 
       it('a tab bar that isn’t drawn (a tablet, a laptop) hides nothing: the window’s own foot is the edge', async () => {
-        const { engine, video } = await openVideo();
-        const tabs = document.createElement('nav');
-        tabs.setAttribute('data-bottom-tabs', '');
+        const { engine, video, placeBar } = await openVideo();
         // `display: none` from 768 px: no box.
-        tabs.getBoundingClientRect = () => ({ top: 0, bottom: 0, height: 0 }) as DOMRect;
-        document.body.append(tabs);
+        addTabBar({ top: 0, bottom: 0, height: 0 });
         // The tab's last bar, so no line after it has to be on show too.
-        engine.barRects.set(15, rect(window.innerHeight - 120, window.innerHeight));
-        engine.barRects.set(14, rect(window.innerHeight - 100, window.innerHeight + 20));
+        placeBar(16, window.innerHeight - 120, window.innerHeight);
+        placeBar(15, window.innerHeight - 100, window.innerHeight + 20);
         // Bar 16 is the video from 34 to 36 s.
         act(() => video.playAt(35));
         expect(marked(engine)).toEqual([16, 16]);
@@ -4547,29 +4562,29 @@ describe('SongPage recordings (Unit 14)', () => {
 
     describe('a tap and Space, at the edges (19 Test)', () => {
       it('a tap after a nudge still on its way goes by the nudged line-up', async () => {
-        const { user, engine, video } = await openVideo();
+        const { user, engine, video, tapBar } = await openVideo();
         act(() => video.playAt(4.5));
         act(() => video.pauseAt(4.5));
         links.holdNext('update');
         await user.click(lineUpButton('Tab later'));
-        act(() => engine.fire('barTapped', { barIndex: 8 }));
+        tapBar(9);
         // Bar 9 is 16 s into the tab: 20.25 s of the video with bar 1 at 4.25 s.
         expect(video.seekTo).toHaveBeenLastCalledWith(20.25);
         expect(marked(engine)).toEqual([9, 9]);
       });
 
       it('a tap once the video has run past the tab’s end brings it back into the tab', async () => {
-        const { engine, video } = await openVideo();
+        const { engine, video, tapBar } = await openVideo();
         act(() => video.playAt(120));
         expect(marked(engine)).toBeNull();
-        act(() => engine.fire('barTapped', { barIndex: 15 }));
+        tapBar(16);
         expect(video.seekTo).toHaveBeenLastCalledWith(34);
         expect(marked(engine)).toEqual([16, 16]);
       });
 
       it('a tap while the video’s player hasn’t answered does nothing and says nothing', async () => {
-        const { engine, video } = await openVideo();
-        act(() => engine.fire('barTapped', { barIndex: 8 }));
+        const { engine, video, tapBar } = await openVideo();
+        tapBar(9);
         expect(video.seekTo).not.toHaveBeenCalled();
         expect(message()).toHaveTextContent('Bar 1 at 0:04.00');
         expect(engine.seek).not.toHaveBeenCalled();

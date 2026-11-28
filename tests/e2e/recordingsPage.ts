@@ -8,7 +8,8 @@
 import type { BrowserContext, Page } from '@playwright/test';
 import { createAdminClient } from '../../scripts/supabase-admin.ts';
 import { expect, signIn, type E2eUser } from './auth';
-import { openSongOverview, uploadFixture } from './playerPage';
+import { highlightBoxes } from './loopsPage';
+import { boxOf, openSongOverview, uploadFixture, viewport } from './playerPage';
 
 const admin = createAdminClient();
 
@@ -190,21 +191,46 @@ export function videoStub(page: Page) {
     if (!found) throw new Error('No video frame on the page');
     return found;
   };
+  /** Calls one of the stub's methods inside the frame. */
+  const call = <Method extends keyof VideoStub>(
+    method: Method,
+    ...given: Parameters<VideoStub[Method]>
+  ) =>
+    frame().evaluate(
+      ([name, args]) => {
+        const stub = (
+          window as unknown as { stub: Record<string, (...args: unknown[]) => unknown> }
+        ).stub;
+        return stub[name]!(...args);
+      },
+      [method, given] as const,
+    ) as Promise<ReturnType<VideoStub[Method]>>;
   return {
     tapPlay: () =>
       page
         .frameLocator('[data-testid="recording-frame"]')
         .getByRole('button', { name: 'Play' })
         .click(),
-    pause: () => frame().evaluate(() => (window as never as { stub: VideoStub }).stub.pause()),
-    play: () => frame().evaluate(() => (window as never as { stub: VideoStub }).stub.play()),
-    seek: (seconds: number) =>
-      frame().evaluate((to) => (window as never as { stub: VideoStub }).stub.seek(to), seconds),
-    setRate: (rate: number) =>
-      frame().evaluate((to) => (window as never as { stub: VideoStub }).stub.setRate(to), rate),
-    time: () => frame().evaluate(() => (window as never as { stub: VideoStub }).stub.time()),
-    playing: () => frame().evaluate(() => (window as never as { stub: VideoStub }).stub.playing()),
+    pause: () => call('pause'),
+    play: () => call('play'),
+    seek: (seconds: number) => call('seek', seconds),
+    setRate: (rate: number) => call('setRate', rate),
+    time: () => call('time'),
+    playing: () => call('playing'),
   };
+}
+
+/** What these helpers read of the mounted player and keep in the page (debugPlayer.ts). */
+interface FollowWindow {
+  __drumPalPlayer?: {
+    getSnapshot(): {
+      highlight: { startBar: number; endBar: number } | null;
+      barCount: number | null;
+    };
+    barRectInWindow(barNumber: number): { top: number; bottom: number } | null;
+  };
+  __followSamples?: FollowSample[];
+  __followTimer?: number;
 }
 
 /** The line-up under the video (Unit 19) and its controls. */
@@ -256,11 +282,7 @@ export async function scoreLaidOut(page: Page): Promise<void> {
     .poll(
       () =>
         page.evaluate(() => {
-          const player = (
-            window as never as {
-              __drumPalPlayer?: { barRectInWindow(barNumber: number): unknown };
-            }
-          ).__drumPalPlayer;
+          const player = (window as unknown as FollowWindow).__drumPalPlayer;
           return !!player && player.barRectInWindow(1) !== null;
         }),
       { timeout: 20_000 },
@@ -292,25 +314,15 @@ export interface FollowSample {
  */
 export async function recordFollow(page: Page): Promise<void> {
   await page.evaluate(() => {
-    interface Rect {
-      top: number;
-      bottom: number;
-    }
-    const scope = window as never as {
-      __drumPalPlayer?: {
-        getSnapshot(): { highlight: { startBar: number } | null; barCount: number | null };
-        barRectInWindow(barNumber: number): Rect | null;
-      };
-      __followSamples?: unknown[];
-      __followTimer?: number;
-    };
+    const scope = window as unknown as FollowWindow;
     const player = scope.__drumPalPlayer;
     if (!player) throw new Error('No player on window.__drumPalPlayer');
     window.clearInterval(scope.__followTimer);
-    const samples: unknown[] = [];
+    const samples: FollowSample[] = [];
     scope.__followSamples = samples;
     let last: number | null = null;
-    const span = (rect: Rect | null) => rect && { top: rect.top, bottom: rect.bottom };
+    const span = (rect: { top: number; bottom: number } | null) =>
+      rect && { top: rect.top, bottom: rect.bottom };
     scope.__followTimer = window.setInterval(() => {
       const snapshot = player.getSnapshot();
       const bar = snapshot.highlight?.startBar ?? null;
@@ -337,9 +349,7 @@ export async function recordFollow(page: Page): Promise<void> {
 }
 
 export const followSamples = (page: Page): Promise<FollowSample[]> =>
-  page.evaluate(
-    () => (window as never as { __followSamples?: FollowSample[] }).__followSamples ?? [],
-  );
+  page.evaluate(() => (window as unknown as FollowWindow).__followSamples ?? []);
 
 /** Whether a span lies wholly in the part of the window the score is read in. */
 export const onShowIn = (
@@ -350,13 +360,7 @@ export const onShowIn = (
 /** The bars marked on the score, 1-based, as the mounted player has them (debugPlayer.ts); null for none. */
 export function markedBars(page: Page): Promise<[number, number] | null> {
   return page.evaluate(() => {
-    const player = (
-      window as never as {
-        __drumPalPlayer?: {
-          getSnapshot(): { highlight: { startBar: number; endBar: number } | null };
-        };
-      }
-    ).__drumPalPlayer;
+    const player = (window as unknown as FollowWindow).__drumPalPlayer;
     if (!player) throw new Error('No player on window.__drumPalPlayer');
     const { highlight } = player.getSnapshot();
     return highlight ? [highlight.startBar, highlight.endBar] : null;
@@ -460,4 +464,57 @@ export async function lastPlayedOf(user: E2eUser): Promise<Record<string, string
     .eq('user_id', user.id);
   if (error) throw error;
   return Object.fromEntries(data.map((song) => [song.title, song.last_played_at]));
+}
+
+// The tab follows the video (Unit 19): the steps its tests share.
+
+/** A new user's Groove 120 on its play screen, on its Original video, the score drawn. */
+export async function openVideo(page: Page, user: E2eUser) {
+  await openNewSongOverview(page, user);
+  await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
+  await recordingLink(page, 'Original').click();
+  await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+  await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
+}
+
+/** The part of the window the score is read in: under the sticky video, above a phone's tab bar. */
+export async function readableView(page: Page) {
+  const bar = await boxOf(recordingBar(page), 'recording bar');
+  const tabs = await page.locator('[data-bottom-tabs]').boundingBox();
+  const height = page.viewportSize()!.height;
+  return { top: bar.y + bar.height, bottom: tabs && tabs.height > 0 ? tabs.y : height };
+}
+
+/** The marked bar's box, once exactly one bar is marked. */
+export async function markedBox(page: Page) {
+  await expect.poll(async () => (await highlightBoxes(page)).length).toBe(1);
+  return (await highlightBoxes(page))[0]!;
+}
+
+/** `openVideo`, on a link lined up already (as from another device), bar 1 at `barOne` seconds. */
+export async function openLinedVideo(page: Page, user: E2eUser, barOne: number) {
+  await openVideo(page, user);
+  await setBarOne(user, 'original', barOne);
+  await page.reload();
+  await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
+  await scoreLaidOut(page);
+  await expect(lineUpMessage(page)).toContainText('Bar 1 at');
+  // A reload keeps the window's scroll; a fresh load starts at the top.
+  await page.evaluate(() => window.scrollTo(0, 0));
+}
+
+/** Plays the stub video through the tab at twice the speed, and gives what the follow did at each bar. */
+export async function followThrough(page: Page, lastBar = 16) {
+  const video = videoStub(page);
+  await recordFollow(page);
+  await video.tapPlay();
+  await video.setRate(2);
+  await expect.poll(() => markedBars(page), { timeout: 40_000 }).toEqual([lastBar, lastBar]);
+  await video.pause();
+  const samples = await followSamples(page);
+  // Every bar was seen, in order: an empty or thin record must not pass what follows.
+  expect(samples.map((sample) => sample.bar)).toEqual(
+    Array.from({ length: lastBar }, (_, index) => index + 1),
+  );
+  return samples;
 }

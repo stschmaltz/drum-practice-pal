@@ -1,13 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-  type Ref,
-} from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { PageHeader } from '@/components/PageHeader';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -33,12 +24,8 @@ import { bpmAtSpeed } from '@/features/player/tempo';
 import { usePlayer } from '@/features/player/usePlayer';
 import { usePracticeTracker } from '@/features/practice/usePracticeTracker';
 import { useSittingRecorder } from '@/features/practice/useVisitSittings';
-import { LineUp, LineUpSpace } from '@/features/recordings/LineUp';
-import { RecordingBox } from '@/features/recordings/RecordingBox';
-import type { RecordingPlayer } from '@/features/recordings/recordingPlayer';
-import { RECORDING_NOTE, type VideoSource } from '@/features/recordings/songLinks';
-import { useRecordingPlayer } from '@/features/recordings/useRecordingPlayer';
 import { ShortcutOverlay } from '@/features/shortcuts/ShortcutOverlay';
+import { announcementText } from '@/lib/announcement';
 import { songPath } from '@/lib/routes';
 import { useFocusWhenReady } from '@/lib/useFocusWhenReady';
 import {
@@ -54,15 +41,17 @@ import { SongFileGate } from './SongFileGate';
 import { BackLink, SongGate } from './SongGate';
 import { useControlsFold } from './useControlsFold';
 import { useJamMode } from './useJamMode';
-import { announcementText, useSongShortcuts } from './useSongShortcuts';
+import { RecordingBar } from './RecordingBar';
+import { useRecordingSession, type RecordingSession } from './useRecordingSession';
+import { useSongShortcuts } from './useSongShortcuts';
 import { useSongSources } from './useSongSources';
 import { useStaysOnScreen } from './useStaysOnScreen';
 import { useTabSetAside } from './useTabSetAside';
 import {
-  toggleRecording,
+  canTapToSeek,
+  useRecordingSpace,
   useTapSeeksVideo,
   useVideoFollow,
-  type RecordingSession,
 } from './useVideoFollow';
 
 /**
@@ -103,41 +92,8 @@ export function SongPage() {
 function SongScreen({ song }: { song: Song }) {
   const sources = useSongSources(song.id);
   const video = sources.choice.state === 'recording' ? sources.choice.video : null;
-  const recordingBarRef = useRef<HTMLDivElement>(null);
-  const { frameRef, player: recordingPlayer } = useRecordingPlayer();
-  // Page state, not saved: following is on whenever a lined-up video is opened.
-  const [follow, setFollow] = useState(true);
-  // Space or a tap on a bar tried to work a video nobody has tapped yet; said under the video,
-  // and again at each try. Kept per player, so another video doesn't open with the note about
-  // the last one.
-  const [asked, setAsked] = useState<{ of: RecordingPlayer | null; times: number }>({
-    of: null,
-    times: 0,
-  });
-  const onNeedsFirstTap = useCallback(
-    () =>
-      setAsked((last) => ({
-        of: recordingPlayer,
-        times: last.of === recordingPlayer ? last.times + 1 : 1,
-      })),
-    [recordingPlayer],
-  );
-  const firstTapAsks = asked.of !== null && asked.of === recordingPlayer ? asked.times : 0;
-  const barOneSeconds = video?.link.barOneSeconds ?? null;
   const onRecording = sources.choice.state !== 'tab';
-  const recording = useMemo(
-    (): RecordingSession | null =>
-      onRecording
-        ? {
-            player: recordingPlayer,
-            barOneSeconds,
-            follow,
-            barRef: recordingBarRef,
-            onNeedsFirstTap,
-          }
-        : null,
-    [onRecording, recordingPlayer, barOneSeconds, follow, onNeedsFirstTap],
-  );
+  const recording = useRecordingSession(onRecording, video?.link.barOneSeconds ?? null);
   return (
     <div className="flex flex-col gap-4">
       <BackLink to={songPath(song.id)}>{song.title}</BackLink>
@@ -152,17 +108,7 @@ function SongScreen({ song }: { song: Song }) {
         />
       )}
       {onRecording && (
-        <RecordingBar
-          barRef={recordingBarRef}
-          frameRef={frameRef}
-          songId={song.id}
-          songTitle={song.title}
-          video={video}
-          player={recordingPlayer}
-          follow={follow}
-          onFollowChange={setFollow}
-          firstTapAsks={firstTapAsks}
-        />
+        <RecordingBar songId={song.id} songTitle={song.title} video={video} recording={recording} />
       )}
       <SongFileGate song={song}>
         {({ fileBytes, initialOptions }) => (
@@ -174,77 +120,11 @@ function SongScreen({ song }: { song: Song }) {
             fileBytes={fileBytes}
             drumTrackIndex={song.drum_track_index}
             initialOptions={initialOptions}
-            recording={recording}
+            recording={recording.session}
           />
         )}
       </SongFileGate>
     </div>
-  );
-}
-
-/**
- * One row from 1024 px, and in a phone on its side, where the video's 200 px
- * are already half the window: the way out and the line-up go beside the
- * video, not under it. From 1024 px the note is there too; in a phone on its
- * side the room beside the video is the line-up's, and the note stays under
- * the bar (19 QA issue 2).
- */
-const recordingBarClass = `sticky top-0 ${fullBleedBarClass} flex flex-col gap-1 pb-1 pt-[max(0.5rem,env(safe-area-inset-top))] lg:flex-row-reverse lg:items-start lg:justify-between lg:gap-6 lg:pb-3 sideways:flex-row-reverse sideways:items-start sideways:justify-between sideways:gap-4 sideways:pt-[max(0.25rem,env(safe-area-inset-top))]`;
-
-/**
- * The recording the screen is on: its video in a bar that sticks like the jam
- * bar it stands in for, so it stays on screen over the score, and the note
- * that says why the tab's controls aren't there. `video` null while the links
- * are still read for the source the screen was opened on. Under the video (or
- * beside it), the line-up: how the tab is told where bar 1 falls in it.
- */
-function RecordingBar({
-  barRef,
-  frameRef,
-  songId,
-  songTitle,
-  video,
-  player,
-  follow,
-  onFollowChange,
-  firstTapAsks,
-}: {
-  barRef: Ref<HTMLDivElement>;
-  frameRef: Ref<HTMLIFrameElement>;
-  songId: string;
-  songTitle: string;
-  video: VideoSource | null;
-  player: RecordingPlayer | null;
-  follow: boolean;
-  onFollowChange: (follow: boolean) => void;
-  firstTapAsks: number;
-}) {
-  return (
-    <>
-      <div ref={barRef} data-testid="recording-bar" className={recordingBarClass}>
-        <RecordingBox songTitle={songTitle} video={video} frameRef={frameRef}>
-          {video ? (
-            <LineUp
-              // Another link is another line-up: "Line up again" half-way doesn't carry over.
-              key={video.link.id}
-              songId={songId}
-              link={video.link}
-              player={player}
-              follow={follow}
-              onFollowChange={onFollowChange}
-              firstTapAsks={firstTapAsks}
-            />
-          ) : (
-            // The same room while the links are read, so the score doesn't move when they arrive.
-            <LineUpSpace />
-          )}
-        </RecordingBox>
-      </div>
-      {/* From 1024 px the same words sit in the bar, beside the video (RecordingBox). */}
-      <p className="text-sm text-ink-muted lg:hidden" data-testid="recording-note">
-        {RECORDING_NOTE}
-      </p>
-    </>
   );
 }
 
@@ -351,16 +231,13 @@ function SongPlayer({
   // Every change of the playing loop's speed is saved as it is made (no "Save speed").
   useSaveLoopSpeed(songId, practice.activeLoop, snapshot.speedRatio);
   const linkedForm = useLinkedLoopForm(songId, snapshot, practice, loops.data);
-  const recordingSpace = useCallback(
-    () => recording !== null && toggleRecording(recording),
-    [recording],
-  );
+  const recordingSpace = useRecordingSpace(recording);
   const shortcuts = useSongShortcuts({
     player,
     practice,
     loops: loops.data,
     off: onRecording,
-    recordingSpace: onRecording ? recordingSpace : null,
+    recordingSpace,
   });
   const loopPanel = useLoopPanelOpen();
   const { setOpen: setLoopPanelOpen } = loopPanel;
@@ -464,9 +341,7 @@ function SongPlayer({
         // Under a video the tab's cursor would stand still and read as a playhead.
         readOnly={onRecording}
         // A lined-up video goes to the bar that is tapped.
-        tappable={
-          recording !== null && recording.player !== null && recording.barOneSeconds !== null
-        }
+        tappable={canTapToSeek(recording)}
       />
       {/* Hidden on a recording, not unmounted: a loop save still on its way keeps its form. */}
       <div hidden={onRecording} className="contents">

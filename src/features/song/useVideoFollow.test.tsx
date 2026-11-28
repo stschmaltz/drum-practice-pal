@@ -3,12 +3,8 @@ import { createRef } from 'react';
 import { barsInPlayOrder } from '@/test/fakePlayerEngine';
 import { FakeRecordingPlayer } from '@/test/fakeRecordingPlayer';
 import { loopPlayer, usePlayerSnapshot } from '@/test/loopPlayer';
-import {
-  toggleRecording,
-  useTapSeeksVideo,
-  useVideoFollow,
-  type RecordingSession,
-} from './useVideoFollow';
+import type { RecordingSession } from './useRecordingSession';
+import { toggleRecording, useTapSeeksVideo, useVideoFollow } from './useVideoFollow';
 
 /**
  * The follow hooks over a real PlayerService on a fake engine (16 bars: 120

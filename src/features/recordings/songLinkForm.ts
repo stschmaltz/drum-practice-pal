@@ -240,3 +240,37 @@ export function applyLinkSave(
     }));
   return [...kept, ...added];
 }
+
+/** A save of where bar 1 falls in a link's video (Unit 19). */
+export interface BarOneSave {
+  linkId: string;
+  /** The link's address as the page knew it at the press: the video the line-up is for. */
+  url: string;
+  /** The second of the video at which the tab's bar 1 starts; null takes the line-up away. */
+  barOneSeconds: number | null;
+}
+
+/** A link as a press finds it in the cached list: its line-up, and the address it is a line-up of. */
+export interface LinkAtPress {
+  barOneSeconds: number | null;
+  url: string;
+}
+
+/** A cached link's line-up and address, or undefined when the list or the link isn't cached. */
+export function cachedLineUp(
+  rows: readonly SongLinkRow[] | undefined,
+  linkId: string,
+): LinkAtPress | undefined {
+  const row = rows?.find((link) => link.id === linkId);
+  // A row cached by a build from before Unit 19 has no `bar_one_seconds`.
+  return row && { barOneSeconds: row.bar_one_seconds ?? null, url: row.url };
+}
+
+/** The cached list with one link's line-up set; undefined stays undefined (nothing cached). */
+export function withBarOne(
+  rows: readonly SongLinkRow[] | undefined,
+  linkId: string,
+  barOneSeconds: number | null,
+): SongLinkRow[] | undefined {
+  return rows?.map((row) => (row.id === linkId ? { ...row, bar_one_seconds: barOneSeconds } : row));
+}

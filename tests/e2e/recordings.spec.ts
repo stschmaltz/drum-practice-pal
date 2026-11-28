@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import type { Page } from '@playwright/test';
-import { expect, signIn, test, type E2eUser } from './auth';
+import { expect, signIn, test } from './auth';
 import { textSpillingOutOf } from './designPage';
 import { boxOf, openSongOverview, playButton, uploadFixture, viewport } from './playerPage';
 import { highlightBoxes } from './loopsPage';
@@ -10,6 +10,7 @@ import {
   barOneOf,
   EMBED_URL,
   followSamples,
+  followThrough,
   gotoSource,
   lastPlayedOf,
   lineUp,
@@ -17,15 +18,19 @@ import {
   lineUpField,
   lineUpMessage,
   onShowIn,
+  readableView,
   recordFollow,
   scoreLaidOut,
   setBarOne,
   markedBars,
+  markedBox,
   linkField,
   linksOf,
   openInYouTube,
+  openLinedVideo,
   openNewSongOverview,
   openRecordingsForm,
+  openVideo,
   PLAYER_API_URL,
   playAlong,
   recordingBar,
@@ -790,29 +795,6 @@ test.describe('the tab follows the video (Unit 19)', () => {
   /** Groove 120: sixteen 4/4 bars of two seconds. */
   const BAR_SECONDS = 2;
 
-  /** A new user's Groove 120 on its play screen, on its Original video, the score drawn. */
-  async function openVideo(page: Page, user: E2eUser) {
-    await openNewSongOverview(page, user);
-    await saveRecordings(page, 'Groove 120', { Original: WATCH_URL });
-    await recordingLink(page, 'Original').click();
-    await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
-    await expect(viewport(page).locator('svg').first()).toBeVisible({ timeout: 20_000 });
-  }
-
-  /** The part of the window the score is read in: under the sticky video, above a phone's tab bar. */
-  async function readableView(page: Page) {
-    const bar = await boxOf(recordingBar(page), 'recording bar');
-    const tabs = await page.locator('[data-bottom-tabs]').boundingBox();
-    const height = page.viewportSize()!.height;
-    return { top: bar.y + bar.height, bottom: tabs && tabs.height > 0 ? tabs.y : height };
-  }
-
-  /** The marked bar's box, once exactly one bar is marked. */
-  async function markedBox(page: Page) {
-    await expect.poll(async () => (await highlightBoxes(page)).length).toBe(1);
-    return (await highlightBoxes(page))[0]!;
-  }
-
   test('lining up once marks the bar the video is on and keeps it on show, through pause, seek and speed', async ({
     user,
     page,
@@ -1130,34 +1112,6 @@ test.describe('the tab follows the video (Unit 19)', () => {
   });
 
   // 19 QA fix round 1 from here to the end of the block.
-
-  /** `openVideo`, on a link lined up already (as from another device), bar 1 at `barOne` seconds. */
-  async function openLinedVideo(page: Page, user: E2eUser, barOne: number) {
-    await openVideo(page, user);
-    await setBarOne(user, 'original', barOne);
-    await page.reload();
-    await expect(recordingFrame(page)).toHaveAttribute('src', EMBED_URL);
-    await scoreLaidOut(page);
-    await expect(lineUpMessage(page)).toContainText('Bar 1 at');
-    // A reload keeps the window's scroll; a fresh load starts at the top.
-    await page.evaluate(() => window.scrollTo(0, 0));
-  }
-
-  /** Plays the stub video through the tab at twice the speed, and gives what the follow did at each bar. */
-  async function followThrough(page: Page, lastBar = 16) {
-    const video = videoStub(page);
-    await recordFollow(page);
-    await video.tapPlay();
-    await video.setRate(2);
-    await expect.poll(() => markedBars(page), { timeout: 40_000 }).toEqual([lastBar, lastBar]);
-    await video.pause();
-    const samples = await followSamples(page);
-    // Every bar was seen, in order: an empty or thin record must not pass what follows.
-    expect(samples.map((sample) => sample.bar)).toEqual(
-      Array.from({ length: lastBar }, (_, index) => index + 1),
-    );
-    return samples;
-  }
 
   test('the page turns a line early: whenever the mark changes, the bar played next is on show under it too', async ({
     user,

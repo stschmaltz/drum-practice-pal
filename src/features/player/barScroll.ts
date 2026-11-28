@@ -23,6 +23,29 @@ export interface ScrollTarget {
 /** Layout and scroll positions come in fractions of a pixel; a bar that close to the edge is in view. */
 const EDGE_TOLERANCE_PX = 1;
 
+/** A stretch along one axis, in whatever coordinates its view is in. */
+export interface Span {
+  start: number;
+  end: number;
+}
+
+/** Whether all of `span` is on show in `view`. */
+export function isOnShow(span: Span, view: Span): boolean {
+  return span.start >= view.start - EDGE_TOLERANCE_PX && span.end <= view.end + EDGE_TOLERANCE_PX;
+}
+
+/**
+ * Whether a view that has `bar` on show should turn to it now, a line early:
+ * the bar played after it (`next`, null at the tab's end) is on a line below
+ * and not all on show, so in this bar there would be nothing ahead to read.
+ * A next bar beside it, or above it (a repeat going back), turns nothing. One
+ * rule for the score's own box (`scrollToShow`) and for the window under a
+ * recording (`windowScrollToShow` in followScroll.ts), down the page in both.
+ */
+export function nextLineIsCutOff(bar: Span, next: Span | null, view: Span): boolean {
+  return next !== null && next.start > bar.start + EDGE_TOLERANCE_PX && !isOnShow(next, view);
+}
+
 /** A bar's rendered bounds by 0-based index, or null while it has none (not laid out yet, or no such bar). */
 export function barBounds(systems: readonly SystemBoundsLike[], barIndex: number): Rect | null {
   for (const system of systems) {
@@ -54,21 +77,18 @@ export function scrollToShow(
 ): ScrollTarget | null {
   const left = axisScroll(rect.x, rect.w, view.left, view.width);
   let top = axisScroll(rect.y, rect.h, view.top, view.height);
-  const nextCutOff =
-    next !== null &&
-    next.y > rect.y + EDGE_TOLERANCE_PX &&
-    !isInView(next.y, next.h, view.top, view.height);
-  if (top === view.top && nextCutOff) top = Math.max(0, rect.y);
+  const down = (span: Rect): Span => ({ start: span.y, end: span.y + span.h });
+  const shown: Span = { start: view.top, end: view.top + view.height };
+  if (top === view.top && nextLineIsCutOff(down(rect), next && down(next), shown)) {
+    top = Math.max(0, rect.y);
+  }
   if (left === view.left && Math.abs(top - view.top) <= EDGE_TOLERANCE_PX) top = view.top;
   if (left === view.left && top === view.top) return null;
   return { left, top };
 }
 
-const isInView = (start: number, length: number, scroll: number, size: number) =>
-  start >= scroll - EDGE_TOLERANCE_PX && start + length <= scroll + size + EDGE_TOLERANCE_PX;
-
 function axisScroll(start: number, length: number, scroll: number, size: number): number {
-  const inView = isInView(start, length, scroll, size);
+  const inView = isOnShow({ start, end: start + length }, { start: scroll, end: scroll + size });
   // A rect longer than the box can't all show: its start is what gets read first.
   const startsInView = length > size && Math.abs(start - scroll) <= EDGE_TOLERANCE_PX;
   if (inView || startsInView) return scroll;

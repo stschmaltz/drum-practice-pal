@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { announcementText, type Announcement } from '@/lib/announcement';
+import type { Announcement } from '@/lib/announcement';
 import { loopsInPanelOrder, type Loop } from '@/features/loops/loopForm';
 import type { LoopPractice } from '@/features/loops/useLoopPractice';
 import { readCharacterKeysOn } from '@/features/shortcuts/characterKeysPreference';
@@ -146,9 +146,6 @@ export function useSongShortcuts({
 
   return { helpOpen, openHelp, closeHelp, announcement };
 }
-
-// The live region's rules live in src/lib/announcement.ts; the page imports them from here.
-export { announcementText, type Announcement };
 
 /** Runs the action; returns where a loop key moved to, for the announcement. */
 function runShortcut(

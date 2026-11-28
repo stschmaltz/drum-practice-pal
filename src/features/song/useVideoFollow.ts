@@ -1,10 +1,7 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import type { PlayerService, PlayerSnapshot } from '@/features/player/PlayerService';
-import {
-  canDriveRecording,
-  type RecordingPlayer,
-  type RecordingState,
-} from '@/features/recordings/recordingPlayer';
+import { canDriveRecording, type RecordingState } from '@/features/recordings/recordingPlayer';
+import { useRecordingValue } from '@/features/recordings/useRecordingValue';
 import {
   barAtVideoSeconds,
   barTimesInPlayOrder,
@@ -12,20 +9,7 @@ import {
   type BarTime,
 } from '@/features/recordings/videoSync';
 import { windowScrollToShow, type ReadableView } from './followScroll';
-
-/** What the play screen hands its player while it is on a recording (Unit 19). */
-export interface RecordingSession {
-  /** The video's player; null while there is no frame (the links still read, offline). */
-  player: RecordingPlayer | null;
-  /** The second of the video at which bar 1 starts, or null while the link isn't lined up. */
-  barOneSeconds: number | null;
-  /** Whether the page is kept on the bar the video is on. The mark is drawn either way. */
-  follow: boolean;
-  /** The sticky bar the video sits in: the score is on show below it. */
-  barRef: RefObject<HTMLElement | null>;
-  /** A press that can't act until the video has been started by a tap on it. */
-  onNeedsFirstTap: () => void;
-}
+import type { RecordingSession } from './useRecordingSession';
 
 /**
  * The tab's bars timed in play order, for a recording's clock to be placed
@@ -72,29 +56,14 @@ function useVideoPlace(
 ): number | null {
   const video = recording?.player ?? null;
   const barOneSeconds = recording?.barOneSeconds ?? null;
-  const store = useMemo(() => {
-    const following = video !== null && barOneSeconds !== null && barTimes.length > 0;
-    const place = (state: RecordingState) =>
-      following ? barOf(state, barTimes, barOneSeconds) : null;
-    let current = video ? place(video.getState()) : null;
-    return {
-      subscribe: (onChange: () => void) => {
-        if (!video || !following) return () => {};
-        // Where the video got to between the render and this subscription.
-        current = place(video.getState());
-        // The cleanup is the unsubscribe: nothing is heard from a player once
-        // the screen has let go of it, late or not.
-        return video.subscribe((state) => {
-          const bar = place(state);
-          if (bar === current) return;
-          current = bar;
-          onChange();
-        });
-      },
-      get: () => current,
-    };
-  }, [video, barOneSeconds, barTimes]);
-  return useSyncExternalStore(store.subscribe, store.get);
+  const following = video !== null && barOneSeconds !== null && barTimes.length > 0;
+  const placeOf = useCallback(
+    (state: RecordingState) =>
+      barOneSeconds === null ? null : barOf(state, barTimes, barOneSeconds),
+    [barTimes, barOneSeconds],
+  );
+  // Nothing to follow, nothing listened to.
+  return useRecordingValue(following ? video : null, placeOf, null);
 }
 
 /**
@@ -242,4 +211,17 @@ export function toggleRecording(recording: RecordingSession): boolean {
   if (state.playing) recording.player.pause();
   else recording.player.play();
   return true;
+}
+
+/**
+ * Space for `useSongShortcuts`' `recordingSpace`: `toggleRecording` on the
+ * recording the screen is on, null on the tab, where Space is the tab's own.
+ */
+export function useRecordingSpace(recording: RecordingSession | null): (() => boolean) | null {
+  return useMemo(() => recording && (() => toggleRecording(recording)), [recording]);
+}
+
+/** Whether a tap on a bar does something under this recording: its video is there and lined up. */
+export function canTapToSeek(recording: RecordingSession | null): boolean {
+  return recording !== null && recording.player !== null && recording.barOneSeconds !== null;
 }
