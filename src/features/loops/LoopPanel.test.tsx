@@ -824,6 +824,32 @@ describe('LoopPanel focus after Play loop closes the sheet (13.28a)', () => {
     expect(view.header()).toHaveTextContent('Loops (2)');
   });
 
+  // Copilot on #38: the handler re-derived only one of playLoop's refusals (canPlay). A
+  // saved loop past the end of the score as loaded is another; the sheet now goes by
+  // what `practice.playLoop` answers.
+  it('a Play loop refused for bars the loaded score lacks starts nothing, closes nothing and moves no focus', async () => {
+    // The fake score has 16 bars; the row says the loop ends on bar 17.
+    const past = loopRow('past', { name: 'Past', start_bar: 13, end_bar: 17 });
+    const view = renderPanel({ loops: [intro, past] });
+    const play = await view.panel.findByRole('button', { name: 'Play loop Past' });
+    await waitFor(() => expect(play).toBeEnabled());
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'ready', barCount: 16 });
+
+    await view.user.click(play);
+    await settle();
+
+    expect(view.engine.play).not.toHaveBeenCalled();
+    expect(view.player.getSnapshot()).toMatchObject({ status: 'ready', range: null });
+    expect(view.panel.queryByTestId('active-loop')).not.toBeInTheDocument();
+    expect(view.header()).toHaveAttribute('aria-expanded', 'true');
+    expect(play).toHaveFocus();
+
+    // The press is heard: a loop the score has plays, and closes the sheet.
+    await view.press('Play loop Intro');
+    expect(view.engine.play).toHaveBeenCalledTimes(1);
+    expect(view.header()).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('Restart loop while playing closes nothing and keeps its focus', async () => {
     const view = renderPanel();
     await view.playLoop('Late');

@@ -692,7 +692,7 @@ None beyond the lines above (20.4a for batch 3; 20.4b to 20.4e accepted; D9 for 
 
 ### Copilot review
 
-Two comments on PR #38, both confirmed, each with tests that failed first.
+Three comments on PR #38, all confirmed, each with tests that failed first.
 
 **A. A scroll request kept for the render outlived the bars it was for** (comment 4726364000, `LoopEditorForm.tsx`; checklist 1, "Asked before it can be done, then forgotten", extended). Review's finding 3 covered bars typed before the sounds are in. With the sounds in and the notation not yet drawn (`engine.scrollToBar` false: a re-layout), `player.showBar` still kept the bar for `rendered`, and a field cleared, other bars picked on the score, or Cancel left it to move the score.
 
@@ -713,4 +713,15 @@ Two comments on PR #38, both confirmed, each with tests that failed first.
 
 **Files:** `src/features/player/PlayerService.ts` (additions only, for Unit 19's branch: one snapshot field and type, one counter, `showBar`'s wrapper, a default parameter, two lines in `beginCountIn`, three in `update`), `src/features/loops/useLoopPanelOpen.ts`, `LoopPanel.tsx` (one argument), `LoopEditorForm.tsx`, the five test files above, `AGENTS.md` (Count-in, Loops), `docs/review-checklist.md`. `playerEngine.ts` and `fakePlayerEngine.ts` are untouched.
 
-**Checks:** `npm run check` green (146 test files: 145 passed, 1 skipped; 5,749 tests: 5,747 passed, 2 skipped). e2e on this worktree's build at port 4383 (free when checked with `netstat` before the run, the server gone after it), phone and desktop: `loop-scroll`, `shortcuts`, `loops` and `count-in` specs, 122 passed, 16 skipped by their own width conditions. Tablet and the full suite not run. No screenshot was rewritten.
+**Checks (A and B):** `npm run check` green (146 test files: 145 passed, 1 skipped; 5,749 tests: 5,747 passed, 2 skipped). e2e on this worktree's build at port 4383 (free when checked with `netstat` before the run, the server gone after it), phone and desktop: `loop-scroll`, `shortcuts`, `loops` and `count-in` specs, 122 passed, 16 skipped by their own width conditions. Tablet and the full suite not run. No screenshot was rewritten.
+
+**C. "Play loop" closed the sheet for a loop the hook refused** (comment 4726400988, `LoopPanel.tsx`; checklist 2, "Side effects of a refused action", extended). Review's fix for Test's bug 2 had the handler ask `canPlay` at the press, a copy of one of `practice.playLoop`'s refusals. `playLoop` has three: no player or no bar count yet, `canPlay` false at the press, and `isValidBarRange` false for the loop against the loaded score. A saved loop ending past the loaded score's last bar took the third: nothing played, and the sheet closed with focus moved to its header. The database's trigger holds `end_bar` to `songs.bar_count`, which upload read from the same file, so it needs the stored count and the loaded score to disagree (a file alphaTab counts differently after an upgrade, a row cached from before an edit); rare, but the handler was wrong for any refusal it didn't copy.
+
+- Hook: `playLoop` returns whether it acted (`false` at each of the three refusals, `true` after `player.play()`). Four lines changed and two added in `useLoopPractice.ts`, nothing moved, for Unit 19's branch. The loop keys (`useSongShortcuts`) ignore the answer, as they do nothing after it.
+- Panel: the handler reads the status before the press (the press changes it), calls `playLoop`, and closes only if it answered true and `playLoopClosesPanel(statusAtPress)`. It no longer asks `canPlay` itself.
+- Test: `LoopPanel.test.tsx`, "a Play loop refused for bars the loaded score lacks starts nothing, closes nothing and moves no focus" (16 bars ready, a loop of bars 13 to 17; then "Play loop Intro" plays and closes, so the press is heard). It failed on `aria-expanded="false"` before the fix. The earlier test of a press after the sounds failed still passes.
+- Known gap, not changed: such a loop's "Play loop" is drawn enabled (`canPlay` alone) and a press says nothing. Disabling it needs words for why, which is a design choice; the case needs the mismatch above.
+
+**Async windows and inputs (C):** none added. `playLoop` is synchronous inside the tap; the status is read before it and its answer after, in one handler.
+
+**Checks (C):** `npm run check` green (146 test files: 145 passed, 1 skipped; 5,750 tests: 5,748 passed, 2 skipped). e2e at port 4383 (free before, no listener after), phone and desktop, `loop-scroll`, `loops` and `shortcuts` specs: 101 passed, 16 skipped, 1 failed on the phone (`loop-scroll.spec.ts`, "bars typed while the song counts in or plays…", 13.27a, which presses no "Play loop"); run again three times alone it passed three times. Tablet and the full suite not run.

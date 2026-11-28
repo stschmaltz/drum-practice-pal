@@ -122,13 +122,14 @@ export function LoopPanel({
   };
 
   const playLoop = (loop: Loop) => {
-    // Asked of the player at the press, as `practice.playLoop` asks: a press it refuses
-    // (the sounds failed since the last render) closes nothing and moves no focus.
-    const now = player?.getSnapshot() ?? snapshot;
-    const closes = canPlay(player, now) && playLoopClosesPanel(now.status);
+    // Read before the press changes it: only a press that starts a run closes the sheet.
+    const statusAtPress = (player?.getSnapshot() ?? snapshot).status;
     // First, with nothing awaited before it: iOS only starts audio inside the tap.
-    practice.playLoop(loop);
-    if (closes) closeForPlayback();
+    // It says whether it acted. A press it refuses (the sounds failed since the last
+    // render, bars the loaded score lacks) closes nothing and moves no focus; its
+    // reasons aren't worked out again here, where they would fall behind.
+    const accepted = practice.playLoop(loop);
+    if (accepted && playLoopClosesPanel(statusAtPress)) closeForPlayback();
   };
 
   // A count-in started from outside the sheet (Play in the page's bar, Space, a
