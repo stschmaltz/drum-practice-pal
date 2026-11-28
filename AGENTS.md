@@ -369,3 +369,10 @@ Each unit runs Build, Test, QA, Readability, Review (see `docs/plan.md`). Each s
 4. Appends its section to `docs/units/NN-name.md`.
 5. Updates this file when it sets a pattern later units should copy.
 6. Adds a line to the owning unit's **Carried forward** list in `docs/plan.md` for each open issue it hands to a later unit, and deletes the lines its own unit dealt with.
+
+**Carried forward lists are kept short** (Shane, 2026-11-28, after the lists had grown to about 60 items across 17 units, a third of them about screens that no longer existed):
+
+- **A question is asked, not parked.** An item that turns on Shane's choice ("decide whether…", a product call, a default he may not want) is not a Carried forward line. The stage that raises it writes the options and its recommendation into its note, and the unit's final report puts it to Shane; the orchestrator builds the recommendation as the default and says so. Only his answer, or "asked on <date>, default built", goes in the plan.
+- **Every line carries the unit it was raised in**, and **nothing is carried a third time.** A line that two later units have passed over is settled by the next unit's Review, whatever that unit is about: fixed, moved to the plan's Accepted list with one sentence on why and what would change that, moved to Open human checks if only a real device can settle it, or deleted because it is no longer true. "Still open" is not an outcome.
+- **A unit that changes a screen walks the lists for that screen.** Build greps every Carried forward list for the screens, controls and files it replaces and deletes or rewrites the lines they made untrue, in the same commit.
+- **An edge case is logged only with what the user sees and how to reach it.** A stage that can't say both leaves it out of the plan and in its own note.
