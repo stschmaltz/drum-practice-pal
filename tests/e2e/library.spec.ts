@@ -310,3 +310,36 @@ test('once there are songs, a song opens from anywhere on its card, and a file d
   await page.mouse.click(box.x + box.width - 12, box.y + box.height - 6);
   await expect(page.getByRole('heading', { level: 1, name: 'Groove 120' })).toBeVisible();
 });
+
+// Unit 20, 13.14 and 13.16a: postgrest-js sent every failed read again three times under each
+// of TanStack Query's three tries, so a list with no server to reach said "Loading…" for about
+// 24 seconds before it said why.
+test('a library that can’t reach the server says so within about 5 seconds, and "Try again" reads it', async ({
+  user,
+  page,
+}) => {
+  const dropped: number[] = [];
+  const songsRead = /\/rest\/v1\/songs\?/;
+  await page.route(songsRead, (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    dropped.push(Date.now());
+    return route.abort('connectionfailed');
+  });
+  await signIn(page, user, '/library');
+
+  const alert = page.getByRole('alert').filter({ hasText: "Couldn't load your songs." });
+  await expect(alert).toBeVisible({ timeout: 10_000 });
+  const first = dropped[0];
+  if (first === undefined) throw new Error('No read of the songs was sent');
+  expect(Date.now() - first).toBeLessThan(5000);
+  await expect(alert).toContainText("The server couldn't be reached.");
+  // One layer retries: the query's three tries, each one request.
+  expect(dropped).toHaveLength(3);
+  // And nothing is still on its way to be sent again later.
+  await page.waitForTimeout(5000);
+  expect(dropped).toHaveLength(3);
+
+  await page.unroute(songsRead);
+  await alert.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText('No songs yet.')).toBeVisible();
+});

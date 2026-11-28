@@ -14,10 +14,12 @@ import { readVisitSittings } from '@/features/practice/visitSittings';
 import type { Settings } from '@/features/settings/settingsForm';
 import { songFilePath } from '@/lib/schema';
 import {
+  opArgs,
   queryResult,
   resetFakeSupabase,
   storageResult,
   type FakeResult,
+  type QueryCall,
   type StorageCall,
 } from '@/test/fakeSupabase';
 import { FakePlayerEngine, startOfBar, TEMPO_CHANGE_BAR_TEMPOS } from '@/test/fakePlayerEngine';
@@ -25,6 +27,7 @@ import { loopRow, loopTable, type LoopTable } from '@/test/loopTable';
 import { historyBack, renderRoutes, RouteMarker, settle, testQueryClient } from '@/test/render';
 import { LoopPracticePage } from './LoopPracticePage';
 import { SongOverviewPage } from './SongOverviewPage';
+import { FRESH_READ_WAIT_MS } from './useGaveUpWaiting';
 
 vi.mock('@/lib/supabase', async () => (await import('@/test/fakeSupabase')).fakeSupabaseModule);
 
@@ -1014,6 +1017,289 @@ describe('LoopPracticePage', () => {
         startTick: startOfBar(9),
         endTick: startOfBar(13),
       });
+    });
+  });
+
+  describe('a loops read that hangs (Unit 20, 13.06)', () => {
+    const loopsKey = loopKeys.forSong(USER, SONG);
+    // Only the timers are faked, and they still run in real time, so Testing Library's
+    // waits and TanStack Query work as ever; `later` jumps the wait for the fresh read.
+    beforeEach(() =>
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true }),
+    );
+    afterEach(() => vi.useRealTimers());
+    const later = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+
+    /** The screen on a list cached at 100%, the sounds in, the fresh read (71%) held. */
+    async function openOnAHungRead(cached: Loop[] = [{ ...chorus, speed_ratio: 1 }, verse]) {
+      serve();
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(loopsKey, cached);
+      const release = loops.holdNext('select');
+      const user = renderPractice(CHORUS_ID, queryClient);
+      const engine = await loadPlayer({ beforeTheLoop: true });
+      return { user, engine, release, queryClient };
+    }
+
+    it('opens the loop from the cached list once the wait is over, and Play plays it', async () => {
+      const { user, engine } = await openOnAHungRead();
+      later(FRESH_READ_WAIT_MS - 500);
+      await settle();
+      expect(playButton()).toBeDisabled();
+      expect(engine.setLooping).not.toHaveBeenCalledWith(true);
+
+      later(500);
+
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(9),
+        endTick: startOfBar(13),
+      });
+      expect(engine.setLooping).toHaveBeenLastCalledWith(true);
+      expect(engine.setSpeed).toHaveBeenLastCalledWith(1);
+      await user.click(playButton());
+      expect(engine.play).toHaveBeenCalledTimes(1);
+    });
+
+    it('the answer that comes after all neither opens the loop again nor restarts it, and writes nothing', async () => {
+      const { user, engine, release, queryClient } = await openOnAHungRead();
+      later(FRESH_READ_WAIT_MS);
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.click(playButton());
+      act(() => engine.fire('stateChanged', { playing: true }));
+      const before = {
+        ranges: engine.setPlaybackRange.mock.calls.length,
+        speeds: engine.setSpeed.mock.calls.length,
+        seeks: engine.seek.mock.calls.length,
+      };
+
+      release();
+
+      // The answer did land: the list holds the speed the other device saved.
+      await waitFor(() =>
+        expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.708333),
+      );
+      await settle();
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      expect(engine.pause).not.toHaveBeenCalled();
+      expect(engine.stop).not.toHaveBeenCalled();
+      expect(engine.setPlaybackRange).toHaveBeenCalledTimes(before.ranges);
+      expect(engine.setSpeed).toHaveBeenCalledTimes(before.speeds);
+      expect(engine.seek).toHaveBeenCalledTimes(before.seeks);
+      expect(playButton()).toHaveTextContent('Pause');
+      // Still the speed it was opened at; the other device's isn't written over.
+      expect(speed()).toHaveTextContent('100%');
+      expect(loops.sent('update')).toEqual([]);
+    });
+
+    it('an answer inside the wait still opens the loop at the speed it brings', async () => {
+      const { engine, release } = await openOnAHungRead();
+      later(FRESH_READ_WAIT_MS - 500);
+      release();
+      await waitFor(() => expect(speed()).toHaveTextContent('71%'));
+      await waitFor(() => expect(playButton()).toBeEnabled());
+
+      later(FRESH_READ_WAIT_MS);
+      await settle();
+      expect(engine.setSpeed).toHaveBeenLastCalledWith(0.708333);
+      // Opened once, on the answer: the wait ending afterwards opens nothing.
+      expect(engine.setSpeed.mock.calls.filter(([ratio]) => ratio === 0.708333)).toHaveLength(1);
+    });
+
+    it('still waits for a loop the cached list lacks: there is nothing to open', async () => {
+      serve();
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(loopsKey, [verse]);
+      const release = loops.holdNext('select');
+      renderPractice(CHORUS_ID, queryClient);
+      expect(await screen.findByText('Loading the loop…')).toBeInTheDocument();
+
+      later(FRESH_READ_WAIT_MS * 2);
+      await settle();
+      expect(screen.getByText('Loading the loop…')).toBeInTheDocument();
+
+      release();
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Chorus fill' })).toBeVisible(),
+      );
+    });
+
+    it('counts the wait from the screen opening, so sounds that come in late open the loop at once', async () => {
+      serve();
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(loopsKey, [chorus, verse]);
+      loops.holdNext('select');
+      renderPractice(CHORUS_ID, queryClient);
+      await waitFor(() => expect(engines[0]?.loadScore).toHaveBeenCalled());
+      later(FRESH_READ_WAIT_MS);
+
+      act(() =>
+        engines[0]!.finishLoading({
+          barCount: 16,
+          trackCount: 3,
+          barTempos: TEMPO_CHANGE_BAR_TEMPOS,
+        }),
+      );
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      expect(speed()).toHaveTextContent('71%');
+    });
+
+    // Unit 20 Test: the inputs the Build's list reasoned about but didn't test.
+
+    it('a late answer carrying another device’s speed leaves the player alone; the next nudge saves the speed played here', async () => {
+      const { user, engine, release, queryClient } = await openOnAHungRead();
+      later(FRESH_READ_WAIT_MS);
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      release();
+      // The other device's 71% is in the list; the player still plays the cached 100%.
+      await waitFor(() =>
+        expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.708333),
+      );
+      await settle();
+      expect(speed()).toHaveTextContent('100%');
+      expect(loops.sent('update')).toEqual([]);
+
+      await user.click(screen.getByRole('button', { name: 'Slower by 5%' }));
+
+      // 5% under what is playing here, not under the speed the answer brought.
+      expect(speed()).toHaveTextContent('95%');
+      await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.95 }]));
+      await waitFor(() => expect(loops.rows()[0]?.speed_ratio).toBe(0.95));
+      await settle();
+      expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.95);
+      expect(engine.setSpeed).toHaveBeenLastCalledWith(0.95);
+      expect(loops.sent('update')).toHaveLength(1);
+    });
+
+    it('a nudge while the read still hangs is saved, and the read answering with the rows from before it puts nothing back', async () => {
+      serve();
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(loopsKey, [{ ...chorus, speed_ratio: 1 }, verse]);
+      // The read sent as the screen opens answers only when told to, with the rows the
+      // server had when it was sent (71%): an answer older than anything done since.
+      const asServed = queryResult.getMockImplementation()!;
+      const isLoopsRead = (call: QueryCall) =>
+        call.table === 'loops' &&
+        !['insert', 'update', 'delete'].some((write) => opArgs(call, write));
+      let answerTheHungRead: (() => void) | null = null;
+      queryResult.mockImplementation((call) => {
+        if (!isLoopsRead(call) || answerTheHungRead) return asServed(call);
+        const rowsThen = loops.rows();
+        return new Promise((resolve) => {
+          answerTheHungRead = () => resolve(ok(rowsThen));
+        });
+      });
+      const user = renderPractice(CHORUS_ID, queryClient);
+      const engine = await loadPlayer({ beforeTheLoop: true });
+      later(FRESH_READ_WAIT_MS);
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      expect(answerTheHungRead).not.toBeNull();
+
+      const releaseWrite = loops.holdNext('update');
+      await user.click(screen.getByRole('button', { name: 'Slower by 5%' }));
+      expect(speed()).toHaveTextContent('95%');
+      await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.95 }]));
+
+      // The hung read answers now, while the save is on its way.
+      answerTheHungRead!();
+      await settle();
+      expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.95);
+      expect(speed()).toHaveTextContent('95%');
+
+      releaseWrite();
+      await waitFor(() => expect(loops.rows()[0]?.speed_ratio).toBe(0.95));
+      await settle();
+      expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.95);
+      expect(speed()).toHaveTextContent('95%');
+      expect(engine.setSpeed).toHaveBeenLastCalledWith(0.95);
+      // One save, of the nudge: nothing wrote the old speed, or the cached one, back.
+      expect(loops.sent('update')).toEqual([{ speed_ratio: 0.95 }]);
+    });
+
+    // Unit 20 Review: a nudge made before the loop was open was played and then dropped
+    // (nothing saved it, and the loop opened at its saved speed over it). The stepper and
+    // the speed keys wait for the loop, as Play does.
+    it('the speed stepper and the speed keys are off until the loop is open, so no nudge is played and then dropped', async () => {
+      const { user, engine } = await openOnAHungRead();
+      const stepper = within(screen.getByRole('group', { name: 'Loop speed' }));
+      for (const control of stepper.getAllByRole('button')) expect(control).toBeDisabled();
+      const speedsSet = engine.setSpeed.mock.calls.length;
+      await user.keyboard('{ArrowDown}');
+      await settle();
+      expect(speed()).toHaveTextContent('100%');
+      expect(engine.setSpeed).toHaveBeenCalledTimes(speedsSet);
+
+      later(FRESH_READ_WAIT_MS);
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      for (const control of stepper.getAllByRole('button')) expect(control).toBeEnabled();
+      expect(speed()).toHaveTextContent('100%');
+      expect(loops.sent('update')).toEqual([]);
+
+      // The same key is heard once the loop is open, and what it sets is saved.
+      await user.keyboard('{ArrowDown}');
+      expect(speed()).toHaveTextContent('95%');
+      await waitFor(() => expect(loops.sent('update')).toEqual([{ speed_ratio: 0.95 }]));
+    });
+
+    it('Space plays nothing inside the wait, and plays the loop once the wait is over', async () => {
+      const { user, engine } = await openOnAHungRead();
+      expect(document.activeElement).toBe(document.body);
+      later(FRESH_READ_WAIT_MS - 500);
+      await user.keyboard(' ');
+      await settle();
+      expect(engine.play).not.toHaveBeenCalled();
+
+      later(500);
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      await user.keyboard(' ');
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith({
+        startTick: startOfBar(9),
+        endTick: startOfBar(13),
+      });
+    });
+
+    it('a loop key inside the wait opens the loop it moves to; neither the wait ending nor the answer opens the requested one over it', async () => {
+      const { user, engine, release, queryClient } = await openOnAHungRead();
+      expect(playButton()).toBeDisabled();
+
+      // From no loop, "next" is the first in the panel's order: Verse, not the one the URL names.
+      await user.keyboard('{ArrowRight}');
+      expect(await screen.findByRole('heading', { level: 1, name: 'Verse' })).toBeInTheDocument();
+      await waitFor(() => expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${VERSE_ID}`));
+      await waitFor(() => expect(playButton()).toBeEnabled());
+      const verseRange = { startTick: startOfBar(1), endTick: startOfBar(3) };
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith(verseRange);
+      await settle();
+      const before = {
+        ranges: engine.setPlaybackRange.mock.calls.length,
+        speeds: engine.setSpeed.mock.calls.length,
+        seeks: engine.seek.mock.calls.length,
+      };
+      const unchanged = () => {
+        expect(screen.getByRole('heading', { level: 1, name: 'Verse' })).toBeInTheDocument();
+        expect(engine.setPlaybackRange).toHaveBeenCalledTimes(before.ranges);
+        expect(engine.setSpeed).toHaveBeenCalledTimes(before.speeds);
+        expect(engine.seek).toHaveBeenCalledTimes(before.seeks);
+        expect(location()).toHaveTextContent(`/songs/${SONG}/loops/${VERSE_ID}`);
+      };
+
+      // The wait ends, for the loop the URL named first and for the one it names now.
+      later(FRESH_READ_WAIT_MS * 2);
+      await settle();
+      unchanged();
+
+      release();
+      await waitFor(() =>
+        expect(queryClient.getQueryData<Loop[]>(loopsKey)?.[0]?.speed_ratio).toBe(0.708333),
+      );
+      await settle();
+      unchanged();
+      expect(loops.sent('update')).toEqual([]);
+
+      await user.click(playButton());
+      expect(engine.play).toHaveBeenCalledTimes(1);
+      expect(engine.setPlaybackRange).toHaveBeenLastCalledWith(verseRange);
     });
   });
 

@@ -51,6 +51,23 @@ export function canChangeOptions(
   return player !== null && snapshot.status !== 'error';
 }
 
+/** How a screen decides whether the speed can be changed: `canChangeOptions`, or a stricter one. */
+export type SpeedGate = (player: PlayerService | null, snapshot: PlayerSnapshot) => boolean;
+
+/**
+ * The speed on a loop's practice screen (its stepper and the speed keys).
+ * Until the loop is open a change would be played and then dropped: nothing
+ * saves it (no loop is active yet) and the loop opens at its saved speed over
+ * it (Unit 20 Review). So the speed waits for the loop, as Play does.
+ */
+export function canSetLoopPracticeSpeed(
+  player: PlayerService | null,
+  snapshot: PlayerSnapshot,
+  loopOpen: boolean,
+): boolean {
+  return canChangeOptions(player, snapshot) && loopOpen;
+}
+
 /** Mute drums and Drums only, which need a drum track to act on. */
 export function canUseDrumToggles(player: PlayerService | null, snapshot: PlayerSnapshot): boolean {
   return canChangeOptions(player, snapshot) && snapshot.hasDrumTrack;

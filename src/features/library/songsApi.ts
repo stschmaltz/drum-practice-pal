@@ -203,6 +203,11 @@ async function findSavedSong(userId: string, songId: string, cause: unknown): Pr
     .select(SONG_SELECT)
     .eq('id', songId)
     .eq('user_id', userId)
+    // The client's reads don't retry themselves (src/lib/supabase.ts); this one does. It
+    // runs inside the upload's mutation, where nothing else would send it again, right
+    // after the connection dropped an answer, and each time it gives up without the row
+    // the user is told the song "may have been added" when it often was.
+    .retry(true)
     .maybeSingle();
   if (landed.error) throw mayHaveBeenAdded(cause);
   return landed.data;
