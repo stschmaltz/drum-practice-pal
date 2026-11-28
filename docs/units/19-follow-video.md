@@ -507,3 +507,110 @@ Not built, and what is there instead:
 - `npm run check`: green.
 - `npm run test:db`: green (292).
 - `E2E_PORT=4283 npx playwright test tests/e2e/recordings.spec.ts tests/e2e/journey.spec.ts tests/e2e/shortcuts.spec.ts` at phone, tablet and desktop: 108 passed, 6 skipped (the three phone-only tests on the other two sizes). `tests/e2e/design.spec.ts -g recordings`: 3 passed.
+
+## QA (after QA fix round 1)
+
+Verdict: **PASS.** No blocker and no major issue. Eleven of the thirteen fixed items hold everywhere they were tried; two hold in part (the rotation, issue 1 below; the labels at 320 px, fixed here). Two minor issues are clauses of the acceptance met only in part (1 and 2 below), so a short Build round on them before Readability would be reasonable; neither stops anyone playing along.
+
+### How it was run
+
+- The dev server on port 5283 (left running; it serves the current `LineUp.tsx`) against the 54421 stack, headless Chromium driven by Playwright scripts, at 320x700, 390x844, 820x1180, 1440x900 and 844x390. All but the laptop as touch viewports, every press a tap at the control's middle by coordinates (so a covered control fails).
+- Real YouTube videos, reachable throughout: `aqz-KE-bpKQ` and, as the video a link was repointed at, `M7lc1UVf-VE`. The video's clock was read from the `<video>` element inside YouTube's frame, the marked bar from `window.__drumPalPlayer`.
+- Tabs: Groove 120 (16 bars), Repeats, Tempo Change, and a 72-bar tab at 160 BPM made for this run from alphaTex (not committed), which is the long tab the first QA lacked.
+- Two throwaway users made by "Dev: sign in" (`qa2-19-…@drumpal.test`), both deleted at the end by the ids recorded, files first. `demo@drumpal.test` was never used; nothing was reset or seeded.
+- Not possible here: hearing anything, a real phone keyboard, Safari or Firefox, an advert.
+- Screenshots: `docs/units/19-shots/qa2-<size>-NN-….png` (`small` is 320x700, `sideways` 844x390, `side667` 667x375).
+
+### The fix round, item by item
+
+| #   | Item                                          | Result                                                                                                                                                                                                                                                                                                                                                                                         |
+| --- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | A phone on its side from a fresh load         | **Pass.** 844x390, the score box starting at 497 px of a 390 px window: bar 1 at 223 to 360 in a view of 223 to 390, and every mark of all four tabs on show (16, 10, 16 and 72 marks). At 320x700 bar 1 is at 367 to 504, above the tab bar at 643                                                                                                                                            |
+| 2   | Every line-up state, sideways and at 320 px   | **Pass** after the cosmetic fix below. Unlined, the off button's message, the first-tap note, lined up, "Line up again", typing and a refused time: every control 44 px tall, on screen once the bar has stuck, what a tap at its middle lands on, clear of the video, nothing wider than the page, at all five sizes. Tab order is the drawn order except the known one (sideways, lined up)  |
+| 3   | A video playing when YouTube's script arrives | **Pass** (390x844 and 844x390). The script held until the video was at 7.09 s: nothing marked, Space did nothing and said nothing. Released: bar 4 marked 470 ms later with the video at 8.00 s, nothing pressed; Space then paused and played it, with no "press Play once" note                                                                                                              |
+| 4   | The typed-time field                          | **Pass.** `type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" autocomplete="off"`, no `pattern`. Entered a key at a time on the touch viewports and saved: `0:07.25`, `1m30s` (Enter), `1h2m3s`, `1:23.5`, `2h30m`, `1h5s`, `1h`. Read from the attributes: the keyboard itself is still for the phone                                 |
+| 5   | The saved time typed back after a press       | **Pass** at all five sizes. A press saved 2.571; the field opened on "0:02.57"; Enter sent nothing and the row still held 2.571. "2.57" typed and saved: nothing sent                                                                                                                                                                                                                          |
+| 6   | A link repointed elsewhere, then a nudge here | **Pass.** One request (`{"bar_one_seconds":5.25}`) that matched nothing: "Couldn't save the line-up. This recording was changed somewhere else.", the new video's row still `bar_one_seconds` null, and within 2.5 s this page shows the new video with the prompt. See issue 4 for where focus goes                                                                                           |
+| 7   | Rotation, playing and paused                  | **Pass in part.** Fails on the first turn of a page that was loaded upright (issue 1). Every other turn tried holds: upright again, the second and later turns to sideways, a page loaded sideways (both ways), a tablet (820x1180 and 1180x820, playing and paused, at most one 25 ms reading off show). The same frame and a playing video throughout, no sideways scroll                    |
+| 8   | "Bar 1 starts now" paused, and before Play    | **Pass.** Before Play: `aria-disabled`, a tap shows "Press Play on the video first." and the live region says it, again at a second tap; nothing sent. Paused at 2.5715 s: saved 2.571, bar 1 marked at once and brought on show, "Lined up. Bar 1 at 0:02.57." said, focus on "Line up again"                                                                                                 |
+| 9   | A failed save, text at 125%                   | **Pass.** At 320 and 390 px (and the other three) the score's place, the line-up's height and the bar's height were the same before the failure, with it showing and after the next save landed. At 320 px the words grow 18 px upward and their first line touches "Open in YouTube"; still readable (`qa2-small-08-…`)                                                                       |
+| 10  | The announcements                             | **Pass.** Said: "Press Play on the video first." (each tap), "Press Play on the video once…" (each Space), "Lined up. Bar 1 at …", "Bar 1 at …" per nudge, "The tab can't follow this video: its player isn't answering here." (the script blocked; the video still plays). A repeat alternates a trailing no-break space, so it is read again                                                 |
+| 11  | `1h2m3s`, `1m90s`, `1h60m`                    | **Pass.** `1h2m3s` saves 3723 ("Bar 1 at 1:02:03.00"). `1m90s`, `1h60m`, `1m60s`, `1h90s`, `1:90`, `abc`: refused with the fixed copy and `aria-invalid`, nothing sent                                                                                                                                                                                                                         |
+| 12  | The gap between the rows                      | **Pass** (a 92 px block; the field 4 px from Save)                                                                                                                                                                                                                                                                                                                                             |
+| 13  | The page turn                                 | **Pass.** See below                                                                                                                                                                                                                                                                                                                                                                            |
+| —   | `lineUpSeconds` rounding down: a bar late?    | **No.** Pressed while playing between clock readings of 2.563 and 2.592: saved 2.586. For 62 s after (1356 readings, 41 bars of 1.5 s): the mark never ahead of the clock, behind by at most 0.146 s, never a whole bar; each bar first seen marked 0.155 to 0.195 s after its start. Paused at 65.656437 and pressed: saved 65.656, bar 1 marked                                              |
+| —   | Nothing asked of YouTube before a recording   | **Pass.** No request to a YouTube or Google host on the Songs list, an overview with a link saved, the Tab player, a Spotify-only song's play screen (Space plays its tab), a song with no links (with `?source=original` too), Stats or Settings. On opening a recording: `www.youtube-nocookie.com`, `www.youtube.com` and, from inside the frame, the same Google hosts the first QA listed |
+
+### The page turn
+
+Every run was a fresh load from the top, Play on the video, and one reading in the page at each change of the mark: the marked bar, the bar played after it, and the part of the window the score is read in (under the video's bar, above a phone's tab bar, inside the score's own box from 768 px).
+
+| Size     | Groove 120 (16) | Repeats (10 marks) | Tempo Change (16) | 72 bars | Turns                                                                                           |
+| -------- | --------------- | ------------------ | ----------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| 320x700  | pass            | pass               | pass              | pass    | The window, a line at every bar (two lines fit)                                                 |
+| 390x844  | pass            | pass               | pass              | pass    | The window, every three bars: 390, 634, 925, 1216 … 7036                                        |
+| 820x1180 | pass            | pass               | pass              | pass    | The window at bar 5 (and 75 px back at bar 11), then the box every twelve bars: 639, 1221, 1803 |
+| 1440x900 | pass            | pass               | pass              | pass    | The window once (205 px), then the box every sixteen bars: 542, 930, 1318, 1380                 |
+| 844x390  | pass            | pass               | pass              | pass    | One line of two bars fits: at half the marks the bar played next is on the line below           |
+
+- "Pass" is: at every mark the marked bar was all on show, and so was the bar played next whenever it is on a line below, except at the tab's last bar and except at 844x390, where the view holds one line (Build's known gap). 114 marks a size, none failing.
+- A repeat going back: at bar 4's first pass (bar 3 next, above) neither the window nor the box moved at 320, 390, 820 and 1440; bar 3 was on show when reached. At 844x390 each of the two is brought to the top as it is marked, which is the bar itself, not a turn for the next.
+- The reader's own scroll: in bar 3 the window was moved up 120 px (and the box 60 px where it has one). It stayed there for the rest of the bar at every size (14 to 16 readings); at bar 4 the page moved only where bar 4 or the bar after it was no longer on show.
+- No scroll between two marks in any run, and nothing marked after the tab's last bar.
+- At 844x390 the window goes 274, 371, 274, 371 … as the box and the window take turns moving a line. On screen the marked line is at 223 px every time; noted, not an issue.
+
+### Still as the first QA recorded
+
+- Following at 0.5x and 1.5x (7 s each, 150 readings): never ahead; behind by at most 0.06 s and 0.32 s of video time. A seek while playing on YouTube's own bar: the right bar at the next reading.
+- A tap on a bar: paused, the video went to 25.00 for bar 11; playing, to bar 11 and on. Space: pauses and plays, the window where it was.
+- Follow off: the mark went from bar 1 to 8 and neither scroll moved; on again, the bar on show at once.
+- The nudges: two "Tab later" from 5.00 sent two writes and ended on 5.50; "Tab earlier" to 5.25; focus kept.
+- An unlined link: nothing marked after 5 s of video, a tap on a bar (heard as a tap) seeks nothing, Space pauses and plays the video, nothing written. Tab source: no frame, no line-up.
+
+### Issues
+
+**Minor**
+
+1. **The first turn from upright to sideways shows bar 1, not the bar being played.** 390x844, a lined-up video, a fresh load, playing or paused on any bar after the first; turn to 844x390. The marked bar is on show for about 100 ms (box scroll 542 for bar 8), then the box slides to 104 over the next 300 ms and stays: bar 8 at 661 to 781 in a view of 223 to 390 (`qa2-phone-51-first-turn-paused-turned.png`). Playing, it is put right when the next bar starts (off show for 1.6 s of a 2 s bar); paused, it stays wrong until Play. Turning back upright, and every later turn to sideways on the same page, is right; so is a page that was loaded sideways, and a tablet. The slide starts just after the first `rendered` at the new width and ends on bar 1, where the tab's own cursor is, so it reads as alphaTab scrolling its box to its cursor the first time the box has a scroll of its own, after the follow has placed the bar (a reading of the timings, not of alphaTab's code). The e2e for this loads the page at 844x390 before turning, which is the order that works.
+2. **A seek on YouTube's own bar while paused leaves the mark on the old bar.** 1440x900: paused in bar 2 (Space), a click on YouTube's progress bar at 0:24.86 (bar 10): the mark stays on bar 2, 3 s later too. Play: bar 11 at once. A seek while playing is followed, and so is a tap on a bar while paused. Not from the fix round (the first QA only seeked while playing), but it is the acceptance's "through pause, seek", and scrubbing a paused video to find a part is job 2.
+3. **A phone on its side that is narrower than 768 px has no room for a line.** 667x375 and 740x360 (an iPhone SE, small Androids; 844x390 gets the sidebar and is fine): the tab bar stays along the foot, so 107 px and 92 px are left between the video's bar and the tab bar. A 97 px line is cut 2 px short at 667 px and 17 px at 740; bar 1's 137 px line loses its kick drum behind the tab bar (`qa2-side667-92-following.png`). The line-up's controls are all on screen and tappable there. Not one of the five sizes; see Questions.
+4. **After "This recording was changed somewhere else." focus falls to `<body>`.** The nudge that was pressed leaves with the old line-up (the prompt takes its place) and nothing takes focus. The failure is an alert, so it is read.
+
+**Cosmetic**
+
+5. **Fixed here:** at 320 px, after "Line up again", "Bar 1 starts now" was three lines in a 44 px button and ran out of it top and bottom. `cellButton`'s `px-2 py-0` lost to the button classes' own `px-4 py-2` (both are plain utilities; the wider one comes later in the stylesheet), so the words had 61 px, not 77. The two are now `px-2! py-0!` (`LineUp.tsx`): two lines, inside the button (`qa2-small-05-line-up-again.png`). The audit of every state was run again at all five sizes afterwards, with no change but this one.
+6. In a phone on its side with the text at 125% the failed save's words are five lines in a 136 px column and lie over "Open in YouTube", and "Line up again" and "Follow" spill their buttons (`qa2-sideways-08-save-failed-text-125.png`). Nothing moves.
+
+**Known, unchanged** (in Build's Known gaps or the plan's Carried forward): in a phone on its side Tab reaches "Line up again" before the nudges; at the very top of the page there the line-up's lower rows are below the fold until the bar sticks; "changed somewhere else" stays beside the prompt until the next save; the one line of score at 844x390.
+
+### Judged as the product (docs/product.md)
+
+- **Can a drummer read along on a phone in portrait with the earlier page turn? Yes.** At 390x844 the marked bar always has the bars after it under it, the turn comes every three bars with one bar of the old page kept at the top, and a 72-bar song went by with no hand on the phone and no mark off show. At 320 px it is a line a bar, which reads as a steady scroll.
+- **Is the phone on its side usable now? Yes at 844x390,** with two limits: one line of music (two bars) under the video, so no reading ahead across a line, and the first turn from upright shows bar 1 until the next bar (issue 1). Every line-up control is beside the video and takes a thumb. A narrower phone on its side is not there yet (issue 3).
+- **Does anything read as unfinished?** The jump to bar 1 on the first turn, and the tab not moving when a paused video is scrubbed. Nothing else: the line-up says why it is off, takes the times a person would type, and never moves the score.
+- Taps to sound are as before: four from the app open, none for the following; lining up is one optional tap, playing or paused. No link, a Spotify link, an unlined link and no drum track are each what they were. No chore and no forced order was added.
+
+### Questions for Shane
+
+1. **A phone on its side narrower than 768 px** (issue 3). Now: the tab bar stays, and a line of music doesn't fit between it and the video. Options: hide the tab bar under a recording there, make the video smaller there, or leave it. Recommendation: leave it unless you use such a phone; if you do, hide the tab bar while a video is on the page.
+2. **One line of music at 844x390.** Now: the video's bar is 211 px of a 390 px window and one line (two bars) fits under it, so the next line can't be shown before it is played. Option: give the score more of the window there (YouTube needs 200 px each way, so the room would have to come from the bar's padding, or from the video sitting beside the score). Recommendation: play along with it sideways first.
+3. Still open from before, unchanged by this round: taking a line-up away, keeping a playing frame through a dropped connection, how early a turn should be, and whether the note about the video's controls belongs beside the video in a phone on its side.
+
+### Human checks (from the plan, for Shane)
+
+- At the kit: line a song up and play along on the tablet and on a phone in portrait.
+- Whether per-bar marking is enough to read from, and whether a turn a line early is early enough.
+- How far a real recording drifts from its tab over a song, and whether the nudges are enough.
+- The phone's keyboard on "Type a time": that it has a colon and letters, and no autocorrect bar getting in the way.
+- iPhone and iPad Safari (everything here ran on Chromium): the player API in an iOS frame, a turn of the phone mid-song, Space from a Bluetooth keyboard. A video with an advert, if one turns up.
+
+### Not covered
+
+- Sound, Safari, Firefox, a real touch screen and keyboard, an advert, a video that refuses embedding.
+- Offline mid-follow and the second device picking a line-up up (the first QA's passes; the fix round didn't touch them).
+- Text at 125% was the root font size set to 125%, not the browser's own zoom or a phone's text-size setting.
+
+### Verify
+
+- `npm run check`: green (6044 tests).
+- `E2E_PORT=4283 npx playwright test tests/e2e/recordings.spec.ts tests/e2e/design.spec.ts -g "recording|line-up|Unit 19|follows|video|phone on its side|page turns|Bar 1"` on a fresh build, after the cosmetic fix: 69 passed, 6 skipped.

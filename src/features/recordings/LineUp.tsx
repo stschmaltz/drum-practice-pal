@@ -45,9 +45,12 @@ const ownRowBeside = 'sideways:col-span-2';
 /**
  * A control in a cell: as tall as the row and no taller, its words on two
  * lines where one doesn't fit (a 320 px phone, the 100 px cells beside a
- * video), never out of the button.
+ * video), never out of the button. The padding is marked important: the
+ * button classes carry a wider one of their own, which otherwise wins and
+ * leaves "Bar 1 starts now" three lines in a 320 px phone's third of a row
+ * (19 QA after fix round 1).
  */
-const cellButton = 'h-11 w-full min-w-0 px-2 py-0 text-center text-sm leading-tight';
+const cellButton = 'h-11 w-full min-w-0 px-2! py-0! text-center text-sm leading-tight';
 /**
  * The words' cell. A message is at most three lines here; a failure can be
  * more on a narrow phone, and then it grows upward out of its row (into the
