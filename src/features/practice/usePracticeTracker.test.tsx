@@ -314,6 +314,77 @@ describe('leaving the loop', () => {
   });
 });
 
+// Unit 20, batch 5 (17.1): the speed is the tracker's, whichever way the session is sent.
+describe('a session with a last try at full speed', () => {
+  /** Ten minutes at 80%, then a minute at 100%, still playing. */
+  const tenMinutesThenATry = (view: ReturnType<typeof renderTracker>) => {
+    act(() => view.player.setSpeed(0.8));
+    view.playOn(600);
+    act(() => view.player.setSpeed(1));
+    view.seconds(60);
+  };
+  const mostlyAt80 = { loop_id: 'loop-a', duration_seconds: 660, speed_ratio: 0.8 };
+
+  it('is logged at the speed most of it was played at when it is paused', async () => {
+    const view = renderTracker();
+    tenMinutesThenATry(view);
+    view.pause();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject(mostlyAt80);
+    expect(view.tracker().lastLogged).toMatchObject({ speedRatio: 0.8 });
+  });
+
+  it('is logged the same as the screen goes', async () => {
+    const view = renderTracker();
+    view.cacheEmptyHistory();
+    tenMinutesThenATry(view);
+
+    view.hook.unmount();
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject(mostlyAt80);
+    expect(view.cachedHistory()).toEqual([expect.objectContaining({ speed_ratio: 0.8 })]);
+  });
+
+  it('is logged the same with keepalive from a hidden page, and on pagehide', () => {
+    const hidden = renderTracker();
+    tenMinutesThenATry(hidden);
+    setVisibility('hidden');
+    expect(keptAlive()).toEqual([expect.objectContaining(mostlyAt80)]);
+    hidden.hook.unmount();
+    Reflect.deleteProperty(document, 'visibilityState');
+    fetchMock.mockClear();
+
+    vi.setSystemTime(T0);
+    const left = renderTracker();
+    tenMinutesThenATry(left);
+    firePageEvent('pagehide');
+    expect(keptAlive()).toEqual([expect.objectContaining(mostlyAt80)]);
+  });
+
+  it('is logged at that speed when another loop is chosen, at a third speed, in the same render', async () => {
+    const view = renderTracker('loop-a');
+    tenMinutesThenATry(view);
+
+    act(() => {
+      view.player.setSpeed(0.5);
+      view.hook.rerender({ loopId: 'loop-b' });
+    });
+
+    await waitFor(() => expect(logged()).toHaveLength(1));
+    expect(logged()[0]).toMatchObject(mostlyAt80);
+  });
+
+  it('the sitting still ends on the speed it was left at', () => {
+    const view = renderTracker();
+    tenMinutesThenATry(view);
+    view.pause();
+
+    expect(view.tracker().sitting()).toMatchObject({ playedSeconds: 660, endSpeedRatio: 1 });
+  });
+});
+
 describe('a page that is hidden or going away', () => {
   it('logs with keepalive when the page is hidden mid-practice, and starts again when it is back', async () => {
     const view = renderTracker();

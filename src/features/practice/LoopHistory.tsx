@@ -6,23 +6,22 @@ import { speedLabel } from '@/features/loops/loopLabels';
 import { waitsForNetwork } from '@/lib/network';
 import {
   durationLabel,
-  practiceDateLabel,
-  practiceTimeLabel,
+  historyDays,
   repeatsLabel,
-  sortSessions,
   totalPracticeSeconds,
-  type PracticeSession,
+  type HistoryDay,
 } from './sessions';
 import { SESSION_MIN_PLAY_SECONDS } from './sessionTracker';
 import { useLoopSessions } from './useSessions';
 
-/** Sessions on show before "Show all": a few weeks of regular practice. */
+/** Days on show before "Show all": a few weeks of regular practice. */
 export const HISTORY_PREVIEW_COUNT = 10;
 
 /**
- * One loop's practice history, newest first: when, for how long, at what
- * speed. Fetched when shown, so a list of loops costs nothing until a history
- * is opened.
+ * One loop's practice history, a row per day practised, newest first: the
+ * day, its play time, the speed most of it was played at and its passes
+ * (historyDays in sessions.ts). Fetched when shown, so a list of loops costs
+ * nothing until a history is opened.
  */
 export function LoopHistory({
   loopId,
@@ -62,9 +61,8 @@ export function LoopHistory({
     );
   }
 
-  const sorted = sortSessions(sessions.data);
-  const shown = showAll ? sorted : sorted.slice(0, HISTORY_PREVIEW_COUNT);
-  const now = new Date();
+  const days = historyDays(sessions.data, new Date());
+  const shown = showAll ? days : days.slice(0, HISTORY_PREVIEW_COUNT);
 
   return (
     <section
@@ -72,39 +70,28 @@ export function LoopHistory({
       className="flex flex-col gap-2 rounded-control border border-line bg-surface p-3"
     >
       <p className="text-sm font-semibold text-ink-soft" data-testid="loop-history-summary">
-        {sorted.length === 1 ? '1 session' : `${sorted.length} sessions`} ·{' '}
-        {durationLabel(totalPracticeSeconds(sorted))} in all
+        {days.length === 1 ? '1 day' : `${days.length} days`} ·{' '}
+        {durationLabel(totalPracticeSeconds(sessions.data))} in all
       </p>
       <ol className="flex flex-col divide-y divide-line">
-        {shown.map((session) => (
-          <HistoryItem key={session.id} session={session} tempo={tempo} now={now} />
+        {shown.map((day) => (
+          <HistoryItem key={day.key} day={day} tempo={tempo} />
         ))}
       </ol>
-      {sorted.length > shown.length && (
+      {days.length > shown.length && (
         <button type="button" className={buttonClass} onClick={() => setShowAll(true)}>
-          Show all {sorted.length} sessions
+          Show all {days.length} days
         </button>
       )}
     </section>
   );
 }
 
-function HistoryItem({
-  session,
-  tempo,
-  now,
-}: {
-  session: PracticeSession;
-  tempo: number | null;
-  now: Date;
-}) {
+function HistoryItem({ day, tempo }: { day: HistoryDay; tempo: number | null }) {
   return (
     <li className="py-1.5 text-sm text-ink-muted tabular-nums">
-      <time dateTime={session.started_at}>
-        {practiceDateLabel(session.started_at, now)}, {practiceTimeLabel(session.started_at)}
-      </time>{' '}
-      · {durationLabel(session.duration_seconds)} · {speedLabel(session.speed_ratio, tempo)} ·{' '}
-      {repeatsLabel(session.repeats)}
+      <time dateTime={day.key}>{day.label}</time> · {durationLabel(day.seconds)} ·{' '}
+      {speedLabel(day.speedRatio, tempo)} · {repeatsLabel(day.repeats)}
     </li>
   );
 }

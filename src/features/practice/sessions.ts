@@ -3,6 +3,8 @@
  * a loop's history. No client import, so sessionsApi.ts, the components and
  * node tests share it. Working out a session is sessionTracker.ts.
  */
+import { ratioToPercent } from '@/features/player/speed';
+import { dateOfDayKey, dayKeyOf, dayKeyOfIso, type DayKey } from '@/features/stats/days';
 import type { Database } from '@/lib/database.types';
 import type { SessionRecord } from './sessionTracker';
 
@@ -124,14 +126,76 @@ export function practiceDayInSentence(iso: string, now: Date, locale?: string): 
   return day === 'Today' || day === 'Yesterday' ? day.toLowerCase() : day;
 }
 
-/** The clock time a session started, "19:42" or "7:42 PM" as the device has it. */
-export function practiceTimeLabel(iso: string, locale?: string): string {
-  return new Date(iso).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
-}
-
 /** All play time in a history, in seconds. */
 export function totalPracticeSeconds(
   sessions: readonly Pick<PracticeSession, 'duration_seconds'>[],
 ): number {
   return sessions.reduce((total, session) => total + session.duration_seconds, 0);
+}
+
+/** One day of a loop's history: every session begun that day, added up. */
+export interface HistoryDay {
+  /** The device's calendar day, "2026-11-23". */
+  key: DayKey;
+  /** "Today", "Yesterday", "3 days ago", then the date. */
+  label: string;
+  /** The day's play time on the loop, at any speed. */
+  seconds: number;
+  repeats: number;
+  /** The speed with the most play time that day. */
+  speedRatio: number;
+}
+
+/**
+ * A loop's sessions as its history shows them: one row per day practised,
+ * newest first (D4 of docs/loose-ends.md). Every stop of 30 seconds is a
+ * session, so one sitting with pauses is several of them; the question the
+ * history answers is whether the loop is getting faster over days.
+ *
+ * A day's speed is the one with the most play time, the slower on a tie: the
+ * Stats chart's rule (dailySpeeds in stats/loopProgress.ts; a test keeps the
+ * two equal). Speeds are told apart as the percent shown, and the day keeps
+ * the exact ratio played last of that percent, so a typed BPM reads back as
+ * typed. A session dated ahead of the clock counts for today, as
+ * practiceDateLabel reads it.
+ */
+export function historyDays(
+  sessions: readonly PracticeSession[],
+  now: Date,
+  locale?: string,
+): HistoryDay[] {
+  const today = dayKeyOf(now);
+  const days = new Map<
+    DayKey,
+    { seconds: number; repeats: number; speeds: Map<number, { seconds: number; ratio: number }> }
+  >();
+  // Oldest first, so the ratio left on each speed is the one played last.
+  for (const session of sortSessions(sessions).reverse()) {
+    const sessionDay = dayKeyOfIso(session.started_at);
+    const key = sessionDay > today ? today : sessionDay;
+    const day = days.get(key) ?? { seconds: 0, repeats: 0, speeds: new Map() };
+    const percent = ratioToPercent(session.speed_ratio);
+    day.seconds += session.duration_seconds;
+    day.repeats += session.repeats;
+    day.speeds.set(percent, {
+      seconds: (day.speeds.get(percent)?.seconds ?? 0) + session.duration_seconds,
+      ratio: session.speed_ratio,
+    });
+    days.set(key, day);
+  }
+  return [...days]
+    .sort(([keyA], [keyB]) => keyB.localeCompare(keyA))
+    .map(([key, day]) => {
+      const [main] = [...day.speeds].sort(
+        ([percentA, a], [percentB, b]) => b.seconds - a.seconds || percentA - percentB,
+      );
+      return {
+        key,
+        label: practiceDateLabel(dateOfDayKey(key).toISOString(), now, locale),
+        seconds: day.seconds,
+        repeats: day.repeats,
+        // A day only exists for a session in it, so it always has a speed.
+        speedRatio: main?.[1].ratio ?? 1,
+      };
+    });
 }

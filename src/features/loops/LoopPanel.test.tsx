@@ -1171,11 +1171,25 @@ describe('LoopPanel history', () => {
   const history = (view: ReturnType<typeof renderPanel>, name: string) =>
     within(view.panel.getByRole('region', { name: `History of ${name}` }));
 
-  it('is fetched only when opened, and lists each session newest first with a total', async () => {
+  it('is fetched only when opened, and lists each day practised newest first with a total', async () => {
     const view = renderPanel({
       prepare: withSessions([
         session('older', { started_at: '2026-11-18T10:00:00.000Z', duration_seconds: 300 }),
         session('newer', { speed_ratio: 0.708333, repeats: 1 }),
+        // After a pause in the same sitting: the same day's row, not a row of its own.
+        session('newer-after-a-pause', {
+          started_at: '2026-11-20T19:50:00.000Z',
+          duration_seconds: 120,
+          speed_ratio: 0.708333,
+          repeats: 3,
+        }),
+        // A minute's try at full speed doesn't make it a day at 100%.
+        session('a-try', {
+          started_at: '2026-11-20T19:53:00.000Z',
+          duration_seconds: 40,
+          speed_ratio: 1,
+          repeats: 2,
+        }),
         session('other-loop', { loop_id: 'intro' }),
       ]),
     });
@@ -1188,13 +1202,19 @@ describe('LoopPanel history', () => {
 
     const list = history(view, 'Late');
     expect(await list.findByTestId('loop-history-summary')).toHaveTextContent(
-      '2 sessions · 6 min 5 s in all',
+      '2 days · 8 min 45 s in all',
     );
     const rows = list.getAllByRole('listitem').map((li) => li.textContent ?? '');
     expect(rows).toHaveLength(2);
     // BPM from the tempo at the loop's first bar (90 from bar 9).
-    expect(rows[0]).toMatch(/· 1 min 5 s · 71% \(64 BPM\) · 1 pass$/);
+    expect(rows[0]).toMatch(/· 3 min 45 s · 71% \(64 BPM\) · 6 passes$/);
     expect(rows[1]).toMatch(/· 5 min · 50% \(45 BPM\) · 9 passes$/);
+    // Each row is a day, said as a day: no clock time.
+    for (const row of list.getAllByRole('listitem')) {
+      const day = within(row).getByRole('time');
+      expect(day).toHaveAttribute('datetime', expect.stringMatching(/^\d{4}-\d\d-\d\d$/));
+      expect(row.textContent).not.toMatch(/\d:\d\d/);
+    }
     // The menu says what choosing it again does, and focus went back to its button.
     expect(view.more('Late')).toHaveFocus();
     await view.user.click(view.more('Late'));
@@ -1217,7 +1237,7 @@ describe('LoopPanel history', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows ten sessions and the rest on request', async () => {
+  it('shows ten days and the rest on request', async () => {
     const sessions = Array.from({ length: 12 }, (_, i) =>
       session(`s${i}`, { started_at: new Date(Date.UTC(2026, 10, 1 + i)).toISOString() }),
     );
@@ -1227,7 +1247,7 @@ describe('LoopPanel history', () => {
     const list = history(view, 'Late');
     await waitFor(() => expect(list.getAllByRole('listitem')).toHaveLength(10));
 
-    await view.user.click(list.getByRole('button', { name: 'Show all 12 sessions' }));
+    await view.user.click(list.getByRole('button', { name: 'Show all 12 days' }));
 
     expect(list.getAllByRole('listitem')).toHaveLength(12);
   });

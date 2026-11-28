@@ -264,14 +264,57 @@ describe('what counts as play time', () => {
 });
 
 describe('the speed of a session', () => {
-  it('is the speed at the stop, after changes along the way', () => {
+  it('is the speed most of it was played at, not the one it ended on (Unit 17)', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.8 });
+    // Ten minutes at 80%, then a minute's try at full speed.
+    t.at(600, { speedRatio: 1 });
+
+    expect(t.at(660, { phase: 'stopped' })).toMatchObject({
+      durationSeconds: 660,
+      speedRatio: 0.8,
+    });
+    expect(t.ended).toHaveLength(1);
+  });
+
+  it('adds up a speed gone back to, across pauses and count-ins', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    t.at(10, { speedRatio: 0.9 });
+    t.at(25, { phase: 'stopped' });
+    t.at(30, { speedRatio: 0.7 });
+    t.at(31, { phase: 'countingIn' });
+    t.at(33, { phase: 'sounding' });
+
+    // 70% for 10 + 10 seconds, 90% for 15, though 90% had the longest single stretch.
+    expect(t.at(43, { phase: 'stopped' })).toMatchObject({ durationSeconds: 35, speedRatio: 0.7 });
+  });
+
+  it('on a tie is the speed played later', () => {
     const t = tracking();
     t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
     t.at(20, { speedRatio: 0.75 });
-    t.at(40, { speedRatio: 0.708333 });
 
-    expect(t.at(50, { phase: 'stopped' })?.speedRatio).toBe(0.708333);
-    expect(t.ended).toHaveLength(1);
+    expect(t.at(40, { phase: 'stopped' })?.speedRatio).toBe(0.75);
+  });
+
+  it('on a tie with a speed gone back to is that speed, the one played last', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    t.at(10, { speedRatio: 0.75 });
+    t.at(30, { speedRatio: 0.7 });
+
+    expect(t.at(40, { phase: 'stopped' })?.speedRatio).toBe(0.7);
+  });
+
+  it('counts two ratios that show as one percent as one speed, logged as the later ratio', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.708333 });
+    t.at(20, { speedRatio: 0.9 });
+    t.at(50, { speedRatio: 0.71 });
+
+    // "71%" for 20 + 20 seconds against 30 at 90%.
+    expect(t.at(70, { phase: 'stopped' })?.speedRatio).toBe(0.71);
   });
 
   it('a change of speed neither ends the session nor starts its stretch again', () => {
@@ -279,6 +322,7 @@ describe('the speed of a session', () => {
     t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
     t.wrap();
     expect(t.at(35, { speedRatio: 0.75 })).toBeNull();
+    expect(playedMsAt(t.state()!, T0 + 40 * SECOND)).toBe(40 * SECOND);
 
     expect(t.at(50, { phase: 'stopped' })).toMatchObject({
       startedAt: '2026-11-23T18:00:00.000Z',
@@ -294,7 +338,7 @@ describe('the speed of a session', () => {
     expect(t.at(31, { loopId: 'loop-b', speedRatio: 0.5 })?.speedRatio).toBe(0.855556);
   });
 
-  it('follows a change made while paused in a session still too short', () => {
+  it('a speed set while paused counts from the next stretch, for the time played at it', () => {
     const t = tracking();
     t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
     t.at(10, { phase: 'stopped' });
@@ -302,6 +346,43 @@ describe('the speed of a session', () => {
     t.at(12, { phase: 'sounding' });
 
     expect(t.at(40, { phase: 'stopped' })).toMatchObject({ durationSeconds: 38, speedRatio: 0.9 });
+  });
+
+  it('a speed set in the same step as the stop was never played, so it is not the speed', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+
+    expect(t.at(40, { phase: 'stopped', speedRatio: 1 })?.speedRatio).toBe(0.7);
+  });
+
+  it('a speed only passed through while paused or counting in is never the speed', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    t.at(20, { phase: 'stopped' });
+    t.at(21, { speedRatio: 1.5 });
+    t.at(22, { speedRatio: 0.8 });
+    t.at(23, { phase: 'countingIn' });
+    t.at(24, { speedRatio: 0.7 });
+    t.at(25, { phase: 'sounding' });
+
+    expect(t.at(40, { phase: 'stopped' })).toMatchObject({ durationSeconds: 35, speedRatio: 0.7 });
+  });
+
+  it('leaving the loop mid-stretch counts the stretch at the speed it was played at', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.6 });
+    t.at(10, { speedRatio: 0.8 });
+
+    expect(t.at(50, { loopId: null })).toMatchObject({ durationSeconds: 50, speedRatio: 0.8 });
+  });
+
+  it('a clock set back mid-stretch takes no time from the speed played before it', () => {
+    const t = tracking();
+    t.at(0, { loopId: 'loop-a', phase: 'sounding', speedRatio: 0.7 });
+    t.at(40, { speedRatio: 0.9 });
+    t.at(20, { speedRatio: 1 });
+
+    expect(t.at(30, { phase: 'stopped' })).toMatchObject({ durationSeconds: 50, speedRatio: 0.7 });
   });
 });
 

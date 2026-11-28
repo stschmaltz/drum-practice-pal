@@ -80,11 +80,9 @@ test('a minute of loop practice is logged as one session with its speed and dura
 
   // The loop's history shows it, and the home page says it was practiced today.
   const history = await openLoopHistory(page, 'Bars five to six');
-  await expect(history.getByTestId('loop-history-summary')).toContainText('1 session');
+  await expect(history.getByTestId('loop-history-summary')).toContainText('1 day');
   await expect(history.getByRole('listitem')).toHaveCount(1);
-  await expect(history.getByRole('listitem')).toContainText(
-    /Today, .* · 1 min.* · 85% \(102 BPM\)/,
-  );
+  await expect(history.getByRole('listitem')).toContainText(/^Today · 1 min.* · 85% \(102 BPM\)/);
 
   // A second stop logs nothing more.
   await page.waitForTimeout(1_000);
@@ -439,7 +437,7 @@ test('a session whose answer is lost is sent again by itself and logged once', a
 
   // And the loop's history lists it once.
   const history = await openLoopHistory(page, 'Flaky');
-  await expect(history.getByTestId('loop-history-summary')).toContainText('1 session');
+  await expect(history.getByTestId('loop-history-summary')).toContainText('1 day');
   await expect(history.getByRole('listitem')).toHaveCount(1);
 });
 

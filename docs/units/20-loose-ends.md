@@ -381,3 +381,70 @@ Not done: preventing overlapping sends in the tracker. The Test stage's 14.6 cas
 
 - `npm run check`: green (5690 tests passed, 2 skipped).
 - `E2E_PORT=4383 npx playwright test tests/e2e/offline.spec.ts --project=phone --project=desktop`: 13 passed, 1 skipped (the token case on phone, as before). Not run: any other spec, a real device, Safari or Firefox.
+
+## Batch 5: Practice history says what happened
+
+### Build
+
+Items 17.1 and D4 (13.18b), D4 built as its recommendation, option B. No migration: sessions are stored as before.
+
+**Walk-through (docs/product.md)**
+
+- _Day one, one song:_ a loop never practised still says "No practice logged yet…". After the first sitting with two pauses its History is one row, "Today", with the sitting's whole time, instead of three rows that look like three practices.
+- _A missing piece:_ a song with no tab has no loops and no History; a loop whose tempo isn't known shows the percent alone, as before. Neither change assumes anything new.
+- _Offline:_ History opened offline with nothing cached still says it shows once online; a cached history is grouped on the device. A session logged offline carries the tracker's speed through the outbox like every other field.
+- No order is forced and no chore added: nothing asks the user anything.
+
+**17.1: a session's speed is the speed most of it was played at**
+
+- `sessionTracker.ts`: `OpenSession` gains `speedTimes`, the banked play time per speed. A stretch is banked (`withStretchBanked`) at every stop, count-in, departure and, new, at every change of speed while sounding, always under the speed the tracker had (the speed it was played at), never the speed that arrives in the same step. The record's speed is `mainSpeedRatio`: most play time, the later-played on a tie.
+- Speeds are told apart as the whole percent the app shows (review checklist: compare what is shown), and the entry keeps the exact ratio played last of that percent, so a typed BPM (0.708333) is still what is logged.
+- `usePracticeTracker.ts` needed no change: all three ways out (the mutation, `logSessionUnobserved`, `logSessionOnExit`) already send `step.ended`, the tracker's record. The triage's risk note was checked and holds; tests now pin it for each path.
+- The sitting (`sittings.ts`, the overview's "80% → 100%") still reads the speed the loop was opened and left at. Unchanged, as the triage says.
+
+**D4: History is one row per day**
+
+- `sessions.ts`: `historyDays(sessions, now, locale?)`, pure: device-local days, newest first; each day's time and passes added up; its speed the one with the most play time, the slower on a tie, which is Unit 17's chart rule (`dailySpeeds`). A test compares the two functions over a table so they can't drift.
+- `LoopHistory.tsx` draws it: "Today · 8 min · 80% (96 BPM) · 53 passes". The summary line is "3 days · 25 min in all"; "Show all N days" after ten days. No clock time on a row (a day has none).
+- `practiceTimeLabel` had no other user and is removed with its test.
+
+**Files touched**
+
+- `src/features/practice/sessionTracker.ts`, `sessionTracker.test.ts`
+- `src/features/practice/sessions.ts`, `sessions.test.ts`
+- `src/features/practice/LoopHistory.tsx`
+- `src/features/practice/usePracticeTracker.test.tsx` (tests only), `sittings.test.ts` (a fixture field)
+- `src/features/loops/LoopPanel.test.tsx` (the History describe)
+- `tests/e2e/practice.spec.ts` (the two History assertions: "1 day", a row starting "Today ·")
+- `AGENTS.md` (Practice sessions: the speed rule, `historyDays`)
+
+**Decisions**
+
+- A session's tie goes to the later speed (the triage); a day's tie goes to the slower (Unit 17's rule). They are different questions: within one session the later speed is where the drummer settled; across a day the chart already reads a tie as the slower, and History must agree with the chart.
+- The day rule is written again in `historyDays` rather than shared with `dailySpeeds`, to stay out of `src/features/stats/` in this batch; the equality test is what holds them together. History also needs the exact ratio (for the BPM), which `dailySpeeds` doesn't keep. Readability may want one shared function.
+- A change of speed mid-play now banks the stretch. One visible side effect: after a device clock set back mid-stretch, time played before a speed change is kept (it was lost before, with the whole stretch). Total play time is otherwise identical: `playedMsAt` is unchanged and a test asserts it across a speed change.
+- A session dated ahead of the device's clock (the server allows up to a day) joins today's row, since `practiceDateLabel` reads it as "Today" and two "Today" rows would be the thing D4 removes. The Stats chart puts such a session on its own later day; the equality test leaves that case out.
+- A speed set while paused, or arriving in the same step as the stop, has no play time and so is never the logged speed unless something is then played at it.
+- `docs/plan.md` not edited (rule of this batch). **For the reviewer:** the Data model row for `practice_sessions.speed_ratio` says "Speed at the end of the session"; it should read "The speed most of the session was played at (the later on a tie)". Unit 09's line "Loop history: date, duration, speed" is now per day.
+
+**Async windows and inputs**
+
+No async window was added. The ones the change passes through:
+
+- _A session on its way (mutation pending, keepalive unanswered, waiting offline):_ the record is built once by the tracker before any send; a speed change, Play, a loop switch or a hide during the send belongs to the next session and can't alter the row in flight. Retries and the outbox replay send the same record.
+- _Loop and speed changing in one render ("Play loop" on another loop):_ the old loop's stretch is banked under its own speed; the new loop's speed only opens the new session. Tested in the tracker and the hook (a third speed arriving with the switch).
+- _Stop and speed in one step:_ banked under the old speed (tracker test).
+- _History open while a session is logged:_ `sessionLogged` adds the row to the cached list as before; the list regroups on render, so today's row grows rather than a row being added. A background refetch that fails keeps the days on show (`isLoadingError`, existing test).
+- _History open past midnight:_ "Today" is worked out at render, as before; nothing redraws it at midnight (the class of 17.4b, batch 9). Not made worse.
+
+**Known gaps**
+
+- Sessions logged before this change keep the end speed they were stored with; nothing rewrites them.
+- A day row doesn't say how many sessions it holds; if Shane wants "3 sessions" back it is one more field on `HistoryDay`.
+- `tests/e2e/design.spec.ts` ("song, loop history") and `stats.spec.ts` were not run here; neither's assertions read the changed text, and no stats code changed.
+
+**Verify**
+
+- `npm run check`.
+- `E2E_PORT=4383 npx playwright test tests/e2e/practice.spec.ts --project=phone --project=desktop`.
+- By hand: practise a loop at 80% for a while, nudge to 100% for a few seconds, pause: the row in `practice_sessions` has 0.8. Pause and play a few times past the minimum: the loop's History (More, Show history) shows one "Today" row whose time is the sum, and the summary says "1 day".
